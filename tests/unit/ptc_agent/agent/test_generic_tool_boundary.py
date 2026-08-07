@@ -61,8 +61,14 @@ FINANCE_SKILLS = {
 }
 
 RETAINED_GENERIC_SKILLS = {
+    "automation",
     "html-report",
     "inline-widget",
+    "run-workflow",
+    "secretary",
+    "self-improve",
+    "x-api",
+    "xlsx",
 }
 
 

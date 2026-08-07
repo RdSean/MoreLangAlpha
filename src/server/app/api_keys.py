@@ -257,10 +257,6 @@ async def update_api_keys(body: UpdateApiKeysRequest, user_id: CurrentUserId):
     # Invalidate cached BYOK status so the next chat picks up key changes
     await invalidate_byok_cache(user_id)
 
-    # Auto-complete personalization if keys were added
-    from src.server.services.onboarding import maybe_complete_personalization
-    await maybe_complete_personalization(user_id)
-
     # Return updated state
     data = await get_user_api_keys(user_id)
     return _format_response(

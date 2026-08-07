@@ -7,8 +7,8 @@ adapter instead of rippling through replay.
 
 Artifact derivation mirrors the live emitters: ``file_operation``/``todo_update``
 payloads are rebuilt from tool-call args (the same source the middleware reads),
-``html_widget``/``preview_url``/``chart_annotation`` from the checkpointed
-ToolMessage artifact, and ``task`` from ``additional_kwargs.task_artifact``.
+``html_widget``/``preview_url`` from the checkpointed ToolMessage artifact, and
+``task`` from ``additional_kwargs.task_artifact``.
 Non-derivable payloads (image URL rewrites, widget ``data``) are merged by the
 replay endpoint from persisted sources, not synthesized here.
 """
@@ -51,17 +51,10 @@ _STEERING_MARKERS = (
     "[Follow-up Instructions from Orchestrator]\n",
 )
 
-# Written by src/ptc_agent/agent/middleware/market_watch.py — the lc_source tag
-# and the content stamp prefix that mark a live-price injection.
-_MARKET_WATCH_SOURCE = "market_watch"
-_MARKET_WATCH_STAMP_OPEN = "<market-watch>"
-
 _FILE_OPERATION_TOOLS = {"Write", "Edit"}
 _ARTIFACT_FROM_TOOL_MESSAGE = {
     "ShowWidget": "html_widget",
     "GetPreviewUrl": "preview_url",
-    "draw_chart_annotation": "chart_annotation",
-    "manage_chart_annotations": "chart_annotation",
 }
 
 
@@ -222,15 +215,10 @@ def _sse(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _human_message_kind(message: HumanMessage) -> str:
-    """Classify a HumanMessage by its injection stamp: ``market-watch``,
-    ``steering``, ``summarization``, or ``plain`` (real user input)."""
+    """Classify a HumanMessage as steering, summarization, or user input."""
     kwargs = message.additional_kwargs or {}
     source = kwargs.get("lc_source")
     content = message.content if isinstance(message.content, str) else ""
-    if source == _MARKET_WATCH_SOURCE or content.startswith(_MARKET_WATCH_STAMP_OPEN):
-        # Both guards stay: the content-prefix check is the safety net for
-        # any ephemeral stamp that reaches a message unstamped.
-        return "market-watch"
     if source == "steering" or content.startswith(_STEERING_MARKERS):
         return "steering"
     if source == "summarization":
@@ -240,7 +228,7 @@ def _human_message_kind(message: HumanMessage) -> str:
 
 def is_run_boundary_message(message: AnyMessage) -> bool:
     """A plain HumanMessage opens a run in a task namespace (the spawn or
-    resume input); stamped injections (steering, market-watch, summaries)
+    resume input); stamped injections (steering and summaries)
     land mid-run and never open one."""
     return isinstance(message, HumanMessage) and _human_message_kind(message) == "plain"
 
@@ -257,11 +245,6 @@ def _project_human_message(message: HumanMessage, agent: str) -> list[HistoryEve
     kwargs = message.additional_kwargs or {}
     content = message.content if isinstance(message.content, str) else ""
     kind = _human_message_kind(message)
-
-    if kind == "market-watch":
-        # Live-price stamps are model-facing only — skipping them here keeps
-        # them out of history.
-        return []
 
     if kind == "steering":
         payload = kwargs.get("steering_delivered")

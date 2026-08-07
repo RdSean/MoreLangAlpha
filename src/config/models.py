@@ -130,9 +130,6 @@ class RedisTTLConfig(BaseModel):
     workflow_events: int = Field(
         default=86400, description="Workflow event buffer TTL (24 hours)"
     )
-    ohlcv: Dict[str, int] = Field(
-        default_factory=dict, description="Per-interval OHLCV cache TTLs"
-    )
     workflow_status: int = Field(
         default=3600, description="TTL for completed/cancelled workflow status keys (1 hour)"
     )
@@ -142,7 +139,6 @@ class RedisTTLConfig(BaseModel):
     steering: int = Field(
         default=3600, description="TTL for steering message Redis keys (1 hour)"
     )
-    market_watch: int = Field(default=21600, description="Market watch list TTL in seconds")
     memo_metadata_inflight: int = Field(
         default=300,
         description=(
@@ -210,55 +206,6 @@ class RedisConfig(BaseModel):
     swr: RedisSWRConfig = Field(default_factory=RedisSWRConfig)
 
 
-class MarketDataProviderConfig(BaseModel):
-    """Configuration for a single market data provider.
-
-    Per-capability market lists override ``markets`` for that capability
-    only (None = no override). Market tokens: region codes plus ``all``
-    and ``non-us``.
-    """
-
-    name: str
-    markets: List[str] = Field(default_factory=lambda: ["all"])
-    intraday_markets: Optional[List[str]] = None
-    daily_markets: Optional[List[str]] = None
-    snapshot_markets: Optional[List[str]] = None
-
-
-class MarketDataConfig(BaseModel):
-    """Market data provider chain configuration."""
-
-    providers: List[MarketDataProviderConfig] = Field(default_factory=list)
-
-
-class NewsDataConfig(BaseModel):
-    """News data provider chain configuration."""
-
-    providers: List[MarketDataProviderConfig] = Field(default_factory=list)
-
-
-class NewsPollFeedConfig(BaseModel):
-    """One global feed kept warm by the news refresh poller.
-
-    ``provider`` None targets the provider chain (Market general feed); a name
-    (e.g. ``tickertick``) targets that source directly. Always polled with no
-    tickers, so it maps to a global cache key — ``news:tickertick:general:50``
-    with a provider, ``news:general:50`` without one.
-    """
-
-    provider: str | None = Field(default=None)
-    limit: int = Field(default=50, ge=1, le=100)
-
-
-class NewsPollConfig(BaseModel):
-    """News refresh poller — delta-merges the latest page into a rolling buffer."""
-
-    enabled: bool = Field(default=True)
-    interval_seconds: int = Field(default=60, ge=10)
-    max_items: int = Field(default=100, ge=1, le=500)
-    feeds: List[NewsPollFeedConfig] = Field(default_factory=list)
-
-
 class FeatureFlagOverride(BaseModel):
     """Deployment override for a code-declared feature (src/config/features.py).
 
@@ -278,22 +225,6 @@ class FeatureFlagOverride(BaseModel):
     )
     min_tier: Optional[int] = Field(
         default=None, description="Plan gate only: minimum platform access tier"
-    )
-
-
-class MarketWatchConfig(BaseModel):
-    """Market watch tuning (the on/off flag lives in the features registry)."""
-
-    min_interval_seconds: int = Field(
-        default=25, ge=5, description="Throttle between injections per thread"
-    )
-    max_symbols: int = Field(default=10, ge=1, le=50, description="Watch list cap")
-    cache_breakpoint_pin: bool = Field(
-        default=True,
-        description=(
-            "Pin a provider cache breakpoint on the last durable message so the "
-            "ephemeral stamp doesn't break incremental caching"
-        ),
     )
 
 
@@ -432,8 +363,6 @@ class InfrastructureConfig(BaseModel):
         default=True, description="Enable Redis cache warming on startup"
     )
     langsmith_tracing: bool = Field(default=False, description="Enable LangSmith tracing")
-    market_watch: MarketWatchConfig = Field(default_factory=MarketWatchConfig)
-
     # User-facing product features (deployment overrides of the code catalog
     # in src/config/features.py). Distinct from the infra toggles above, which
     # are operator-only and never exposed to users.
@@ -465,11 +394,6 @@ class InfrastructureConfig(BaseModel):
 
     # Redis Cache
     redis: RedisConfig = Field(default_factory=RedisConfig)
-
-    # Market Data
-    market_data: MarketDataConfig = Field(default_factory=MarketDataConfig)
-    news_data: NewsDataConfig = Field(default_factory=NewsDataConfig)
-    news_poll: NewsPollConfig = Field(default_factory=NewsPollConfig)
 
     # RunWorkflow orchestration caps
     workflow: WorkflowOrchestrationConfig = Field(

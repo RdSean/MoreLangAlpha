@@ -12,7 +12,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from src.config.core import get_infrastructure_config
-from src.config.models import NewsPollConfig, WorkflowOrchestrationConfig
+from src.config.models import WorkflowOrchestrationConfig
 
 # Re-export env-var constants for backward compatibility
 from src.config.env import (  # noqa: F401
@@ -75,24 +75,6 @@ def get_sse_keepalive_interval() -> float:
 # =============================================================================
 # Feature Flags
 # =============================================================================
-
-
-def get_market_data_providers() -> list[dict]:
-    """Return the ordered provider list from ``market_data.providers`` in config.yaml."""
-    cfg = get_infrastructure_config()
-    providers = cfg.market_data.providers
-    if not providers:
-        return [{"name": "fmp", "markets": ["all"]}]
-    return [p.model_dump() for p in providers]
-
-
-def get_news_data_providers() -> list[dict]:
-    """Return the ordered provider list from ``news_data.providers`` in config.yaml."""
-    cfg = get_infrastructure_config()
-    providers = cfg.news_data.providers
-    if not providers:
-        return [{"name": "fmp"}]
-    return [p.model_dump() for p in providers]
 
 
 def is_result_log_db_enabled() -> bool:
@@ -186,11 +168,6 @@ def get_locale_config(locale: str, prompt_language: str) -> Dict[str, str]:
 
 def is_redis_cache_enabled() -> bool:
     return get_infrastructure_config().redis.cache_enabled
-
-
-def get_news_poll_config() -> NewsPollConfig:
-    """News refresh poller config (enabled / interval / max_items / feeds)."""
-    return get_infrastructure_config().news_poll
 
 
 def get_redis_max_connections() -> int:
@@ -362,22 +339,6 @@ def get_redis_ttl_steering() -> int:
     return get_infrastructure_config().redis.ttl.steering
 
 
-def get_market_watch_min_interval() -> int:
-    return get_infrastructure_config().market_watch.min_interval_seconds
-
-
-def get_market_watch_max_symbols() -> int:
-    return get_infrastructure_config().market_watch.max_symbols
-
-
-def get_market_watch_cache_pin() -> bool:
-    return get_infrastructure_config().market_watch.cache_breakpoint_pin
-
-
-def get_redis_ttl_market_watch() -> int:
-    return get_infrastructure_config().redis.ttl.market_watch
-
-
 def get_redis_ttl_memo_metadata_inflight() -> int:
     """Cross-worker visibility key TTL for in-flight memo metadata tasks (seconds)."""
     return get_infrastructure_config().redis.ttl.memo_metadata_inflight
@@ -390,26 +351,6 @@ def get_redis_ttl_memo_metadata_cancel() -> int:
 
 def is_cache_invalidate_on_write_enabled() -> bool:
     return get_infrastructure_config().redis.cache_invalidate_on_write
-
-
-# Fallback TTLs matching config.yaml defaults (interval_seconds × 1.5)
-_DEFAULT_OHLCV_TTLS: Dict[str, int] = {
-    "1min": 90,
-    "5min": 360,
-    "15min": 1080,
-    "30min": 2100,
-    "1hour": 4200,
-    "4hour": 16200,
-    "1day": 86400,
-}
-
-
-def get_ohlcv_ttl(interval: str) -> int:
-    """Get the Redis TTL for a given OHLCV interval."""
-    cfg = get_infrastructure_config()
-    if interval in cfg.redis.ttl.ohlcv:
-        return cfg.redis.ttl.ohlcv[interval]
-    return _DEFAULT_OHLCV_TTLS.get(interval, 90)
 
 
 # =============================================================================

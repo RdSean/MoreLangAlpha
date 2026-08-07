@@ -60,24 +60,6 @@ class FeatureSpec:
 
 
 FEATURES: dict[str, FeatureSpec] = {
-    "market_watch": FeatureSpec(
-        key="market_watch",
-        label="Market watch",
-        description=(
-            "Adds a Watch toggle to chat: keep a per-thread list of symbols "
-            "whose live quotes stream into the conversation while you work, "
-            "so the agent reasons from current intraday prices instead of "
-            "stale lookups."
-        ),
-        enabled=True,
-        gate=FeatureGate.OPT_IN,
-        tradeoffs=(
-            "Quotes are re-injected into the model's context as they update, "
-            "which can occasionally distract the agent from its main task and "
-            "invalidate the prompt cache — expect slightly slower, costlier "
-            "turns while a watch list is active."
-        ),
-    ),
     "site_crawl": FeatureSpec(
         key="site_crawl",
         label="Site crawling (experimental)",

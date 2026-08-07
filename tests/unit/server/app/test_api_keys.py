@@ -144,11 +144,6 @@ async def test_update_api_keys_set_key(client):
             new_callable=AsyncMock,
             return_value=updated,
         ),
-        patch(
-            "src.server.services.onboarding.maybe_complete_personalization",
-            new_callable=AsyncMock,
-            return_value=False,
-        ),
     ):
         resp = await client.put(
             "/api/v1/users/me/api-keys",
@@ -182,11 +177,6 @@ async def test_update_api_keys_delete_key(client):
             f"{DB}.get_user_api_keys",
             new_callable=AsyncMock,
             return_value=updated,
-        ),
-        patch(
-            "src.server.services.onboarding.maybe_complete_personalization",
-            new_callable=AsyncMock,
-            return_value=False,
         ),
     ):
         resp = await client.put(

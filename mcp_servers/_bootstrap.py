@@ -1,9 +1,8 @@
 """Put the repo root on ``sys.path`` for MCP server subprocesses.
 
-Shared code imports as both ``src.*`` (the backend's spelling) and bare
-``data_client.*``, but a launched server only gets ``/app/src`` on the path
-(uv editable install). Importing this module first — its launcher directory is
-``sys.path[0]`` — inserts the repo root so both spellings resolve.
+MCP servers import shared backend modules through ``src.*``. A launched server
+only gets ``/app/src`` on its path, so importing this module first inserts the
+repository root for packages that need the project-level module spelling.
 """
 
 import sys

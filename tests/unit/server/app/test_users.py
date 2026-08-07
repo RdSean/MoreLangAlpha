@@ -308,10 +308,6 @@ async def test_update_preferences(client):
             new_callable=AsyncMock,
             return_value=prefs,
         ),
-        patch(
-            f"{DB}.maybe_complete_onboarding",
-            new_callable=AsyncMock,
-        ),
     ):
         resp = await client.put(
             "/api/v1/users/me/preferences",
@@ -375,10 +371,6 @@ async def test_update_preferences_search_provider_valid_or_none_accepted(client,
             f"{DB}.upsert_user_preferences",
             new_callable=AsyncMock,
             return_value=prefs,
-        ),
-        patch(
-            f"{DB}.maybe_complete_onboarding",
-            new_callable=AsyncMock,
         ),
     ):
         resp = await client.put(
@@ -453,10 +445,6 @@ async def test_update_preferences_valid_search_depth_accepted(client, payload):
             f"{DB}.upsert_user_preferences",
             new_callable=AsyncMock,
             return_value=prefs,
-        ),
-        patch(
-            f"{DB}.maybe_complete_onboarding",
-            new_callable=AsyncMock,
         ),
     ):
         resp = await client.put(

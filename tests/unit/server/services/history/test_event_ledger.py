@@ -70,8 +70,6 @@ LIVE_ONLY = {
     "replay_done",  # replay sentinel
     "snapshot",  # read-time cursors for the runs replay could not project;
     # recomputed from ledger+Redis on every load, never replayed from a store
-    "market_watch_update",  # transient stamp notice, accumulate=False; the
-    # durable watchlist re-seeds the chip via GET /{thread}/market-watch on replay
     "thread_created",  # legacy creation SSE branch (POST /threads with
     # Accept: text/event-stream), never on the run wire; the row itself is the
     # durable truth (GET /threads/{id}). ⚠️ Deletes together with that branch.

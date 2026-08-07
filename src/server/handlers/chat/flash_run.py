@@ -5,8 +5,8 @@ the monolithic ``chat_handler.py``.  Request preparation, persistence, error
 handling, and streaming logic is delegated to ``request_prep`` and
 ``services.runs.admission``.
 
-Flash mode is optimised for speed: no sandbox, no MCP, no workspace, and only
-external tools (web search, market data, SEC filings).
+Flash mode is optimised for speed: no sandbox or MCP, and only external web
+tools.
 """
 
 from __future__ import annotations
@@ -39,11 +39,6 @@ from src.server.utils.widget_context import (
     build_widget_context_reminder,
     parse_widget_contexts,
     serialize_widget_contexts_for_metadata,
-)
-from src.server.utils.chart_selection_context import (
-    build_chart_selection_reminder,
-    parse_chart_selection_contexts,
-    serialize_chart_selections_for_metadata,
 )
 from src.llms.llm import get_input_modalities
 from src.server.utils.multimodal_context import (
@@ -229,7 +224,6 @@ async def astream_flash_workflow(
             # user follow-ups, which carry no origin).
             query_metadata["origin"] = request.origin.model_dump(exclude_none=True)
         widget_ctxs = parse_widget_contexts(request.additional_context)
-        chart_selections = parse_chart_selection_contexts(request.additional_context)
         if request.additional_context:
             multimodal_ctxs = parse_multimodal_contexts(request.additional_context)
             if multimodal_ctxs:
@@ -239,10 +233,6 @@ async def astream_flash_workflow(
             if widget_ctxs:
                 query_metadata["widget_contexts"] = serialize_widget_contexts_for_metadata(
                     widget_ctxs
-                )
-            if chart_selections:
-                query_metadata["chart_selections"] = serialize_chart_selections_for_metadata(
-                    chart_selections
                 )
 
         # Persist lightweight additional_context + slash command fallback
@@ -399,7 +389,7 @@ async def astream_flash_workflow(
             else None
         )
 
-        # Inline context injection (directive + widget + chart selection) --
+        # Inline context injection (directive + widget) --
         # Flash-specific. Skip on HITL resumes and checkpoint replay because
         # `input_state` below replaces `messages` with `Command(resume=...)` /
         # `None`, so anything appended here would be silently discarded.
@@ -410,7 +400,6 @@ async def astream_flash_workflow(
             [
                 build_directive_reminder(directives),
                 build_widget_context_reminder(widget_ctxs),
-                build_chart_selection_reminder(chart_selections),
             ],
         )
 

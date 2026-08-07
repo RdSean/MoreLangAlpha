@@ -42,11 +42,6 @@ from src.server.utils.widget_context import (
     parse_widget_contexts,
     serialize_widget_contexts_for_metadata,
 )
-from src.server.utils.chart_selection_context import (
-    build_chart_selection_reminder,
-    parse_chart_selection_contexts,
-    serialize_chart_selections_for_metadata,
-)
 from src.llms.llm import get_input_modalities
 from src.server.utils.multimodal_context import (
     build_attachment_metadata,
@@ -267,7 +262,6 @@ async def astream_ptc_workflow(
         # Extract attachment and context metadata for display in history
         # (PTC skips this block for HITL resumes — contrast with Flash)
         widget_ctxs = parse_widget_contexts(request.additional_context)
-        chart_selections = parse_chart_selection_contexts(request.additional_context)
         if request.additional_context and not request.hitl_response:
             multimodal_ctxs = parse_multimodal_contexts(request.additional_context)
             if multimodal_ctxs:
@@ -277,10 +271,6 @@ async def astream_ptc_workflow(
             if widget_ctxs:
                 query_metadata["widget_contexts"] = serialize_widget_contexts_for_metadata(
                     widget_ctxs
-                )
-            if chart_selections:
-                query_metadata["chart_selections"] = serialize_chart_selections_for_metadata(
-                    chart_selections
                 )
 
         # Persist lightweight additional_context + slash command fallback
@@ -657,13 +647,11 @@ async def astream_ptc_workflow(
             logger.info(f"[PTC_CHAT] Plan mode enabled for thread_id={thread_id}")
 
         # =====================================================================
-        # Inline Context Injection (directive + widget + chart selection)
+        # Inline Context Injection (directive + widget)
         # =====================================================================
         # Each appends a <system-reminder> to the last user message, in order.
-        # Widget image bytes ride MultimodalContext(type='image') above; chart
-        # selections carry structured bounds + OHLCV bars (no screenshot). The
-        # target is None on HITL-resume / checkpoint-replay (input_state is a
-        # Command / None there), so injection is skipped on those turns.
+        # The target is None on HITL-resume / checkpoint-replay (input_state is
+        # a Command / None there), so injection is skipped on those turns.
         directives = parse_directive_contexts(request.additional_context)
         inline_target = (
             input_state["messages"]
@@ -675,7 +663,6 @@ async def astream_ptc_workflow(
             [
                 build_directive_reminder(directives),
                 build_widget_context_reminder(widget_ctxs),
-                build_chart_selection_reminder(chart_selections),
             ],
         )
 

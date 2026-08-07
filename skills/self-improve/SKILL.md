@@ -110,9 +110,9 @@ Use this to identify the right module when filing issues or proposing fixes.
 
 | Directory | What lives here | Example issues |
 |-----------|----------------|----------------|
-| `skills/` | Skill SKILL.md instructions and assets | Wrong examples in `skills/dcf-model/SKILL.md`, bug in a provided script snippet, outdated API usage, missing steps in a workflow, new best practice to add |
-| `mcp_servers/` | MCP server implementations (yfinance, fundamentals, macro, price_data) | `yfinance_mcp_server.py` returns malformed data, a fundamentals endpoint is missing a field, macro data has wrong units |
-| `src/tools/` | External tool implementations (web fetch, crawl, search, SEC, market data) | `fetch.py` times out on certain URLs, SEC filing parser fails on 10-K amendments, search returns stale results |
+| `skills/` | Skill SKILL.md instructions and assets | Wrong examples in a Skill, a bug in a provided script snippet, outdated API usage, missing workflow steps, or a useful practice to add |
+| `mcp_servers/` | MCP server implementations | A server returns malformed data, an endpoint misses a field, or a result has incorrect units |
+| `src/tools/` | External tool implementations (web fetch, crawl, search) | `fetch.py` times out on certain URLs or search returns stale results |
 | `src/ptc_agent/agent/tools/` | Core sandbox tools (ExecuteCode, Bash, file ops, grep, glob, think, todo) | `code_execution.py` mishandles large stdout, `bash.py` doesn't escape special chars, `file_ops.py` fails on binary files |
 | `src/ptc_agent/agent/middleware/` | Middleware stack (skills, subagents, plan mode, compaction, memory, caching) | Skill loading fails silently, subagent doesn't inherit context, compaction truncates important content |
 | `src/ptc_agent/agent/prompts/` | System prompt templates (Jinja2) and config | Redundant or wrongful instructions in `system.md.j2`, useful tips and experience worth persisting into prompts |
@@ -138,7 +138,7 @@ Go through EVERY item before running `gh issue create` or `gh pr create`:
 
 - [ ] **User consent obtained** — user explicitly approved filing this issue/PR
 - [ ] **No secrets or tokens** — title, body, and diff contain zero credentials, API keys, or env values
-- [ ] **No private data** — no user names, portfolio holdings, conversation content, or internal business context
+- [ ] **No private data** — no user names, workspace files, conversation content, or internal business context
 - [ ] **No raw API responses** — sanitize or omit any data returned from MCP tools or external APIs
 - [ ] **Technical description only** — the issue/PR describes the bug or fix, not what the user was working on
 - [ ] **Correct repo** — targeting `ginlix-ai/LangAlpha`

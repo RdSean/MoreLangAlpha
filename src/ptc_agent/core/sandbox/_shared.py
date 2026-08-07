@@ -16,15 +16,11 @@ logger = structlog.get_logger(__name__)
 # change on every computation and would force needless re-uploads.
 _LOCK_VOLATILE_KEYS: frozenset[str] = frozenset({"installedAt", "updatedAt"})
 
-# Shared runtime modules the builtin MCP server files import as siblings
-# (``import _bootstrap`` / ``from mcp_servers._envelope import ...``). They are
-# not server entry points, so the per-server upload loop never sees them —
-# ship and hash them explicitly whenever any builtin server file ships, or the
-# servers crash on import in synced sandboxes (and prune would delete them).
+# Shared runtime modules used by bundled MCP servers. They are not server entry
+# points, so the per-server upload loop never sees them; ship and hash them
+# explicitly whenever a bundled server file ships.
 _MCP_SHARED_RUNTIME_FILES: tuple[str, ...] = (
     "_bootstrap.py",
-    "_envelope.py",
-    "_yf_common.py",
 )
 
 # Internal ``src.<pkg>`` packages mirrored into the sandbox's ``_internal/src/``.

@@ -291,30 +291,6 @@ class TestManifestRegression:
         assert "user_mcp_config" in source_versions
 
     @pytest.mark.asyncio
-    async def test_manifest_ships_shared_runtime_siblings_with_server_files(self):
-        """When a builtin ``uv run python`` server file ships, the shared
-        runtime siblings (_bootstrap.py, _envelope.py) are hashed with it —
-        the servers import them, so an unsynced sibling crashes the server."""
-        config = _make_config(
-            servers=[
-                _builtin(
-                    "price",
-                    transport="stdio",
-                    command="uv",
-                    args=["run", "python", "mcp_servers/price_data_mcp_server.py"],
-                )
-            ]
-        )
-        sandbox = _make_sandbox(config)
-        sandbox.mcp_registry = MagicMock()
-        sandbox.mcp_registry.get_all_tools = MagicMock(return_value={})
-        manifest = await sandbox._compute_sandbox_manifest()
-        mcp_files = manifest["modules"]["mcp_servers"]["files"]
-        assert "price_data_mcp_server.py" in mcp_files
-        assert "_bootstrap.py" in mcp_files
-        assert "_envelope.py" in mcp_files
-
-    @pytest.mark.asyncio
     async def test_manifest_omits_shared_siblings_without_server_files(self):
         """No builtin uv-run server file → no shared siblings either; the
         mcp_servers hash stays byte-identical for such workspaces."""

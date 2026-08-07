@@ -26,7 +26,6 @@ from src.server.database.user import (
     upsert_user_preferences,
 )
 from ptc_agent.agent.graph import invalidate_user_profile_cache
-from src.server.services.onboarding import maybe_complete_onboarding
 from src.server.models.user import (
     UserBase,
     UserPreferencesResponse,
@@ -494,7 +493,6 @@ async def update_preferences(
     await invalidate_user_prefs_cache(user_id)
     await invalidate_user_profile_cache(user_id)
 
-    await maybe_complete_onboarding(user_id)
 
     logger.info(f"Updated preferences for user {user_id}")
     return UserPreferencesResponse.model_validate(preferences)
@@ -502,7 +500,7 @@ async def update_preferences(
 @router.delete("/users/me/preferences", status_code=200)
 @handle_api_exceptions("delete preferences", logger)
 async def delete_preferences(user_id: CurrentUserId):
-    """Delete all user preferences and reset onboarding_completed to false."""
+    """Delete all user preferences."""
     user = await db_get_user(user_id)
     if not user:
         raise_not_found("User")
@@ -510,9 +508,7 @@ async def delete_preferences(user_id: CurrentUserId):
     await db_delete_user_preferences(user_id)
     await invalidate_user_prefs_cache(user_id)
     await invalidate_user_profile_cache(user_id)
-    await db_update_user(user_id=user_id, onboarding_completed=False)
-
-    logger.info(f"Cleared preferences and reset onboarding for user {user_id}")
+    logger.info(f"Cleared preferences for user {user_id}")
     return {"success": True, "message": "Preferences cleared"}
 
 
