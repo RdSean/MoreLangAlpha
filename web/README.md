@@ -66,7 +66,6 @@ src/
 │   ├── Login/              # OAuth login with animated background
 │   ├── Dashboard/          # Configurable widget gallery (watchlist, portfolio, news, TradingView widgets) with drag-and-drop layout
 │   ├── ChatAgent/          # Streaming chat with workspaces, threads, file panel
-│   ├── MarketView/         # Candlestick charts with AI chat sidebar
 │   ├── Automations/        # Scheduled agent task management
 │   ├── Settings/           # User preferences and API key management
 │   ├── SharedChat/         # Public shared chat view (no auth required)

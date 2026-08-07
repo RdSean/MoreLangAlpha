@@ -3,7 +3,7 @@ import type { ResolvedTheme } from '@/contexts/ThemeContext';
 
 /**
  * Design-token access for painters that cannot resolve CSS custom properties
- * themselves — lightweight-charts and raw 2D canvas take color *strings*.
+ * themselves — raw 2D canvas painters take color *strings*.
  *
  * ⚠️ Resolution must happen after the DOM theme stamp. ThemeProvider stamps
  * `data-theme` in a layout effect, so every passive effect sees the current
@@ -105,9 +105,9 @@ export function resolveTokenMap<K extends string>(
 }
 
 /**
- * Build a per-theme resolver with a STABLE object identity per theme — chart
+ * Build a per-theme resolver with a STABLE object identity per theme — canvas
  * effects key off that identity, so a fresh object every call would tear down
- * and rebuild the chart on every render. Until a live read succeeds the
+ * and rebuild the visual on every render. Until a live read succeeds the
  * fallback object itself is handed back (same identity, correct colors).
  */
 export function createThemeResolver<K extends string>(
