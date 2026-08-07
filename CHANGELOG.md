@@ -2,6 +2,14 @@
 
 ## 2026-08-07
 
+### 金融运行时与自动化移除
+
+- 服务端不再注册市场数据、K 线、SEC、财经新闻、经济日历、投资组合、观察列表、财经洞察、图表标注和行情 WebSocket 路由。
+- 启动与关闭生命周期移除市场数据订阅、价格监控、财经洞察和财经新闻刷新服务，保留通用自动化调度、Vault、MCP、SSE 与工作区服务。
+- 初始 PostgreSQL schema 删除 watchlist、portfolio、market insights、图表标注相关表和投资偏好字段；相关历史 migration 改为保持 revision 连续性的空迁移。
+- 自动化仅支持 `cron` 与 `once`，移除价格触发的请求模型、Agent 工具参数、执行分支、数据库查询与监控服务。
+- 使用隔离 PostgreSQL 实际验证 migration `upgrade head`、约束内容和 `downgrade base`，随后已清理该临时容器与卷。
+
 ### 通用 Agent 工具边界
 
 - PTC 与 Flash 默认工具集移除 SEC、行情、期权、股票筛选和价格监控能力，保留代码执行、文件系统、搜索抓取、Skills、MCP、工作区与子 Agent 机制。

@@ -4,15 +4,15 @@ Revision ID: 001
 Revises:
 Create Date: 2026-03-15
 
-All langalpha tables: 17 application tables + LangGraph infrastructure
+All langalpha tables: 13 application tables + LangGraph infrastructure
 (checkpoint tables via library API, store table via inline DDL).
 
 Application tables:
-  users, workspaces, workspace_files, user_preferences, watchlists,
-  watchlist_items, user_portfolios, user_api_keys, user_oauth_tokens,
+  users, workspaces, workspace_files, user_preferences, user_api_keys,
+  user_oauth_tokens,
   conversation_threads, conversation_queries, conversation_responses,
   conversation_usages, conversation_feedback, automations,
-  automation_executions, market_insights
+  automation_executions
 
 LangGraph tables:
   checkpoint_migrations, checkpoints, checkpoint_blobs, checkpoint_writes
@@ -151,8 +151,6 @@ def upgrade() -> None:
             user_preference_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id VARCHAR(255) UNIQUE NOT NULL
                 REFERENCES users(user_id) ON DELETE CASCADE,
-            risk_preference JSONB DEFAULT '{}'::jsonb,
-            investment_preference JSONB DEFAULT '{}'::jsonb,
             agent_preference JSONB DEFAULT '{}'::jsonb,
             other_preference JSONB DEFAULT '{}'::jsonb,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -160,80 +158,7 @@ def upgrade() -> None:
         )
     """)
 
-    # -- 5. watchlists --
-    op.execute("""
-        CREATE TABLE IF NOT EXISTS watchlists (
-            watchlist_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id VARCHAR(255) NOT NULL
-                REFERENCES users(user_id) ON DELETE CASCADE,
-            name VARCHAR(100) NOT NULL,
-            description TEXT,
-            is_default BOOLEAN NOT NULL DEFAULT FALSE,
-            display_order INTEGER DEFAULT 0,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CONSTRAINT unique_user_watchlist_name UNIQUE (user_id, name)
-        )
-    """)
-    op.execute("CREATE INDEX IF NOT EXISTS idx_watchlists_user_id ON watchlists(user_id)")
-
-    # -- 6. watchlist_items --
-    op.execute("""
-        CREATE TABLE IF NOT EXISTS watchlist_items (
-            watchlist_item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            watchlist_id UUID NOT NULL
-                REFERENCES watchlists(watchlist_id) ON DELETE CASCADE,
-            user_id VARCHAR(255) NOT NULL
-                REFERENCES users(user_id) ON DELETE CASCADE,
-            symbol VARCHAR(50) NOT NULL,
-            instrument_type VARCHAR(30) NOT NULL,
-            exchange VARCHAR(50),
-            name VARCHAR(255),
-            notes TEXT,
-            alert_settings JSONB DEFAULT '{}'::jsonb,
-            metadata JSONB DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CONSTRAINT unique_watchlist_item
-                UNIQUE (watchlist_id, symbol, instrument_type)
-        )
-    """)
-    op.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_items_watchlist_id ON watchlist_items(watchlist_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_items_user_id ON watchlist_items(user_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_items_symbol ON watchlist_items(symbol)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_items_user_symbol ON watchlist_items(user_id, symbol, instrument_type)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_items_created_at ON watchlist_items(created_at DESC)")
-
-    # -- 7. user_portfolios --
-    op.execute("""
-        CREATE TABLE IF NOT EXISTS user_portfolios (
-            user_portfolio_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id VARCHAR(255) NOT NULL
-                REFERENCES users(user_id) ON DELETE CASCADE,
-            symbol VARCHAR(50) NOT NULL,
-            instrument_type VARCHAR(30) NOT NULL,
-            exchange VARCHAR(50),
-            name VARCHAR(255),
-            quantity DECIMAL(18, 8) NOT NULL,
-            average_cost DECIMAL(18, 4),
-            currency VARCHAR(10) DEFAULT 'USD',
-            account_name VARCHAR(100),
-            notes TEXT,
-            metadata JSONB DEFAULT '{}'::jsonb,
-            first_purchased_at TIMESTAMPTZ,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CONSTRAINT unique_user_holding
-                UNIQUE (user_id, symbol, instrument_type, account_name)
-        )
-    """)
-    op.execute("CREATE INDEX IF NOT EXISTS idx_portfolios_user_id ON user_portfolios(user_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_portfolios_symbol ON user_portfolios(symbol)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_portfolios_instrument_type ON user_portfolios(instrument_type)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_portfolios_user_instrument ON user_portfolios(user_id, symbol, instrument_type)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_portfolios_account ON user_portfolios(account_name)")
-
-    # -- 8. user_api_keys --
+    # -- 5. user_api_keys --
     op.execute("""
         CREATE TABLE IF NOT EXISTS user_api_keys (
             user_id VARCHAR(255) NOT NULL
@@ -248,7 +173,7 @@ def upgrade() -> None:
         )
     """)
 
-    # -- 9. user_oauth_tokens --
+    # -- 6. user_oauth_tokens --
     op.execute("""
         CREATE TABLE IF NOT EXISTS user_oauth_tokens (
             user_id TEXT NOT NULL,
@@ -265,7 +190,7 @@ def upgrade() -> None:
         )
     """)
 
-    # -- 10. conversation_threads --
+    # -- 7. conversation_threads --
     op.execute("""
         CREATE TABLE IF NOT EXISTS conversation_threads (
             conversation_thread_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -304,7 +229,7 @@ def upgrade() -> None:
         WHERE external_id IS NOT NULL
     """)
 
-    # -- 11. conversation_queries --
+    # -- 8. conversation_queries --
     op.execute("""
         CREATE TABLE IF NOT EXISTS conversation_queries (
             conversation_query_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -328,7 +253,7 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS idx_queries_created_at ON conversation_queries(created_at DESC)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_queries_type ON conversation_queries(type)")
 
-    # -- 12. conversation_responses --
+    # -- 9. conversation_responses --
     op.execute("""
         CREATE TABLE IF NOT EXISTS conversation_responses (
             conversation_response_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -355,7 +280,7 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS idx_responses_status ON conversation_responses(status)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_responses_created_at ON conversation_responses(created_at DESC)")
 
-    # -- 13. conversation_usages --
+    # -- 10. conversation_usages --
     op.execute("""
         CREATE TABLE IF NOT EXISTS conversation_usages (
             conversation_usage_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -384,7 +309,7 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS idx_usages_thread_id ON conversation_usages(conversation_thread_id)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_usages_workspace_id ON conversation_usages(workspace_id)")
 
-    # -- 14. conversation_feedback --
+    # -- 11. conversation_feedback --
     op.execute("""
         CREATE TABLE IF NOT EXISTS conversation_feedback (
             conversation_feedback_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -411,7 +336,7 @@ def upgrade() -> None:
         WHERE review_status IS NOT NULL
     """)
 
-    # -- 15. automations --
+    # -- 12. automations --
     op.execute("""
         CREATE TABLE IF NOT EXISTS automations (
             automation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -453,7 +378,7 @@ def upgrade() -> None:
     """)
     op.execute("CREATE INDEX IF NOT EXISTS idx_automations_user_id ON automations(user_id)")
 
-    # -- 16. automation_executions --
+    # -- 13. automation_executions --
     op.execute("""
         CREATE TABLE IF NOT EXISTS automation_executions (
             automation_execution_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -475,41 +400,9 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS idx_automation_executions_status ON automation_executions(status)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_automation_executions_created_at ON automation_executions(created_at DESC)")
 
-    # -- 17. market_insights --
-    op.execute("""
-        CREATE TABLE IF NOT EXISTS market_insights (
-            market_insight_id UUID PRIMARY KEY,
-            user_id UUID,
-            type VARCHAR(30) NOT NULL DEFAULT 'daily_brief',
-            status VARCHAR(20) NOT NULL DEFAULT 'pending',
-            headline TEXT,
-            summary TEXT,
-            content JSONB,
-            topics JSONB,
-            sources JSONB,
-            model VARCHAR(10),
-            error_message TEXT,
-            generation_time_ms INTEGER,
-            metadata JSONB,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            completed_at TIMESTAMPTZ
-        )
-    """)
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS idx_market_insights_latest
-        ON market_insights (type, created_at DESC)
-        WHERE status = 'completed' AND user_id IS NULL
-    """)
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS idx_market_insights_user
-        ON market_insights (user_id, type, created_at DESC)
-        WHERE status = 'completed' AND user_id IS NOT NULL
-    """)
-
     # -- Attach updated_at triggers --
     _tables_with_trigger = [
         "users", "workspaces", "workspace_files", "user_preferences",
-        "watchlists", "watchlist_items", "user_portfolios",
         "conversation_threads", "automations", "conversation_feedback",
     ]
     for table in _tables_with_trigger:
@@ -576,7 +469,6 @@ def downgrade() -> None:
 
     # Application tables (reverse FK order)
     for table in [
-        "market_insights",
         "automation_executions",
         "automations",
         "conversation_feedback",
@@ -586,9 +478,6 @@ def downgrade() -> None:
         "conversation_threads",
         "user_oauth_tokens",
         "user_api_keys",
-        "user_portfolios",
-        "watchlist_items",
-        "watchlists",
         "user_preferences",
         "workspace_files",
         "workspaces",

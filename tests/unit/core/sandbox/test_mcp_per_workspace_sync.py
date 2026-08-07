@@ -326,23 +326,19 @@ class TestManifestRegression:
         assert manifest["modules"]["mcp_servers"]["files"] == {}
 
     @pytest.mark.asyncio
-    async def test_manifest_ships_internal_packages_with_data_seed(self):
-        """The builtin MCP servers import ``src.data_client``/``src.market_protocol``
-        at the sandbox boundary, so both are mirrored into ``_internal/src`` and
-        hashed as one all-or-nothing manifest module — every file, data seeds
-        included. An unsynced package crashes every server on import."""
+    async def test_manifest_keeps_the_generic_internal_module_minimal(self):
+        """The generic runtime has no built-in source packages to mirror.
+
+        ``src/__init__.py`` remains in the module so its manifest shape stays
+        stable and future generic packages can opt in explicitly.
+        """
         config = _make_config(servers=[_builtin("yfinance")])
         sandbox = _make_sandbox(config)
         sandbox.mcp_registry = MagicMock()
         sandbox.mcp_registry.get_all_tools = MagicMock(return_value={})
         manifest = await sandbox._compute_sandbox_manifest()
         files = manifest["modules"]["internal_packages"]["files"]
-        assert "__init__.py" in files
-        # Both packages present (any module file — names may be refactored)…
-        assert any(f.startswith("data_client/") and f.endswith(".py") for f in files)
-        assert any(f.startswith("market_protocol/") and f.endswith(".py") for f in files)
-        # …and the load-bearing non-.py seed is hashed, so it can't drop silently.
-        assert "market_protocol/instruments.yaml" in files
+        assert set(files) == {"__init__.py"}
         assert manifest["modules"]["internal_packages"]["version"]
 
 
