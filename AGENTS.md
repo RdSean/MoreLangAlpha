@@ -27,6 +27,16 @@ uv run pytest -m regression           # locks live market-data behavior — need
 cd web && pnpm test                   # Vitest;  pnpm test:e2e = Playwright;  pnpm typecheck = tsc --noEmit
 ```
 
+## Development Environment Requirements
+
+These rules are persistent for all development on this machine.
+
+- **Docker isolation:** Other stopped LangAlpha images, containers, networks, and volumes may exist on this host. Inspect names, ports, and Compose projects before starting services. Use explicit project names and non-conflicting ports for this checkout. Never restart, remove, prune, or run `docker compose down -v` against resources not created for the current checkout.
+- **MinIO protection:** When education attachments require MinIO, use the existing instance at `http://192.168.3.164:9001`. Read its credentials from the local `密码.md` only when required; never print, commit, or copy those credentials into configuration, logs, tests, or documentation. Never delete buckets, change bucket-wide settings, or delete objects outside the current feature's validated object prefix. Do not use broad cleanup commands against MinIO.
+- **Local infrastructure:** PostgreSQL, Redis, and other development-only dependencies may be started with Docker when their project names, ports, volumes, and lifecycle are isolated from existing LangAlpha deployments.
+- **LAN frontend handoff:** After verification passes, run the frontend with LAN access on port `5177` (for example, `pnpm dev --host 0.0.0.0 --port 5177`). Check that the selected port is free before starting it and report the reachable LAN URL.
+- **Change history and commits:** After every substantial, verified change, update `CHANGELOG.md` in Chinese and create an atomic commit containing only the files for that change. Never stage unrelated work, generated credentials, or local secret files.
+
 ## Architecture
 
 ### Backend (`src/`)
