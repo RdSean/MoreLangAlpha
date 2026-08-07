@@ -12,16 +12,12 @@ import { ContextOverflowPill } from '@/components/ui/ContextOverflowPill';
 const routeChunks = {
   dashboard: () => import('../../pages/Dashboard/DashboardRouter'),
   chat: () => import('../../pages/ChatAgent/ChatAgent'),
-  market: () => import('../../pages/MarketView/MarketView'),
-  news: () => import('../../pages/Detail/NewsDetailPage'),
   automations: () => import('../../pages/Automations/Automations'),
   settings: () => import('../../pages/Settings/Settings'),
 };
 
 const Dashboard = React.lazy(routeChunks.dashboard);
 const ChatAgent = React.lazy(routeChunks.chat);
-const MarketView = React.lazy(routeChunks.market);
-const NewsDetailPage = React.lazy(routeChunks.news);
 const Automations = React.lazy(routeChunks.automations);
 const Settings = React.lazy(routeChunks.settings);
 
@@ -50,10 +46,8 @@ function Main() {
         <Route path="/chat/t/:threadId/:taskId" element={<ChatAgent />} />
         <Route path="/chat/t/:threadId" element={<ChatAgent />} />
         <Route path="/chat/:workspaceId" element={<ChatAgent />} />
-        <Route path="/market" element={<MarketView />} />
         <Route path="/automations" element={<Automations />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="/news/:id" element={<NewsDetailPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Suspense>
