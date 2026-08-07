@@ -27,12 +27,10 @@ _MCP_SHARED_RUNTIME_FILES: tuple[str, ...] = (
     "_yf_common.py",
 )
 
-# Internal ``src.<pkg>`` packages mirrored into the sandbox's ``_internal/src/``
-# so sandbox code and the builtin MCP servers can ``import src.<pkg>`` without
-# the full repo. Shipped and hashed as ONE manifest module (``internal_packages``)
-# because the upload is all-or-nothing; every regular file ships so data seeds
-# (e.g. ``market_protocol/instruments.yaml``) can never silently drop.
-_SANDBOX_INTERNAL_PACKAGES: tuple[str, ...] = ("data_client", "market_protocol")
+# Internal ``src.<pkg>`` packages mirrored into the sandbox's ``_internal/src/``.
+# The generic runtime has no built-in application packages; custom MCP servers
+# remain independently configurable and do not require source-tree mirroring.
+_SANDBOX_INTERNAL_PACKAGES: tuple[str, ...] = ()
 
 
 @dataclass
@@ -142,4 +140,3 @@ def _get_sandbox_eligible_skills() -> tuple[set[str], set[str]]:
     from ptc_agent.agent.middleware.skills import SKILL_REGISTRY, get_sandbox_skill_names
 
     return get_sandbox_skill_names(), set(SKILL_REGISTRY.keys())
-

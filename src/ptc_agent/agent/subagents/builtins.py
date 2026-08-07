@@ -39,7 +39,7 @@ BUILTIN_SUBAGENTS: dict[str, SubagentDefinition] = {
         ),
         mode="ptc",
         role_prompt_template="roles/general.md.j2",
-        tools=["execute_code", "filesystem", "bash", "finance", "web_search"],
+        tools=["execute_code", "filesystem", "bash", "web_search"],
         max_iterations=10,
         stateful=True,
         sections={
@@ -53,15 +53,14 @@ BUILTIN_SUBAGENTS: dict[str, SubagentDefinition] = {
         name="data-prep",
         description=(
             "Delegate data fetching and preparation to the data prep sub-agent. "
-            "This agent pulls data from MCP financial data servers (price, "
-            "fundamentals, macro, options), cleans and transforms it, and saves "
-            "structured datasets to files. Use for bulk data collection, "
-            "multi-ticker data gathering, or preparing datasets for analysis. "
+            "This agent gathers data from available MCP servers or approved web "
+            "sources, cleans and transforms it, and saves structured datasets to "
+            "files. Use for bulk data collection or preparing datasets for analysis. "
             "Can run multiple instances in parallel for different data needs."
         ),
         mode="ptc",
         role_prompt_template="roles/data_prep.md.j2",
-        tools=["execute_code", "filesystem", "bash", "finance"],
+        tools=["execute_code", "filesystem", "bash", "web_search"],
         max_iterations=10,
         stateful=True,
         sections={
@@ -71,18 +70,17 @@ BUILTIN_SUBAGENTS: dict[str, SubagentDefinition] = {
             "visualizations": False,
         },
     ),
-    "equity-analyst": SubagentDefinition(
-        name="equity-analyst",
+    "analyst": SubagentDefinition(
+        name="analyst",
         description=(
-            "Delegate financial analysis tasks to the equity analyst sub-agent. "
-            "This agent can search the web, execute Python code with MCP financial "
-            "data tools, and build models/charts. Use for company analysis, "
-            "valuation, earnings analysis, sector research, or any task requiring "
-            "both web research and financial data processing."
+            "Delegate evidence-based analysis to the analyst sub-agent. This agent "
+            "can search the web, execute Python code with MCP tools, and build "
+            "models or charts. Use for structured research, comparison, synthesis, "
+            "or other tasks requiring web research and programmatic analysis."
         ),
         mode="ptc",
-        role_prompt_template="roles/equity_analyst.md.j2",
-        tools=["execute_code", "filesystem", "bash", "finance", "web_search"],
+        role_prompt_template="roles/analyst.md.j2",
+        tools=["execute_code", "filesystem", "bash", "web_search"],
         max_iterations=15,
         stateful=True,
         sections={

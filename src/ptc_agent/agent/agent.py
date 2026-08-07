@@ -51,7 +51,6 @@ from ptc_agent.agent.middleware import (
     CompactionMiddleware,
     resolve_compaction_client,
     LargeResultEvictionMiddleware,
-    MarketWatchMiddleware,
     SteeringMiddleware,
     SubagentSteeringMiddleware,
     WorkspaceContextMiddleware,
@@ -107,16 +106,6 @@ from ptc_agent.agent.tools import (
 from src.tools.web.search import get_web_search_tool
 from src.tools.web.fetch import web_fetch_tool
 from src.tools.web.crawl import create_crawl_tools
-from src.tools.sec.tool import get_sec_filing
-from src.tools.market_data.tool import (
-    get_daily_prices,
-    get_company_overview,
-    get_market_overview,
-    get_options_chain,
-    get_quote,
-    screen_stocks,
-)
-from src.tools.market_watch import watch_market
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.mcp_registry import MCPRegistry
 from ptc_agent.core.sandbox import PTCSandbox
@@ -235,7 +224,6 @@ class PTCAgent:
             working_directory=self.config.filesystem.working_directory,
             memory_enabled=memory_enabled,
             memo_enabled=memo_enabled,
-            market_watch_enabled=self.config.feature_enabled("market_watch"),
             crawl_enabled=crawl_enabled,
         )
 
@@ -573,19 +561,6 @@ class PTCAgent:
             crawl_tools = create_crawl_tools(filesystem_backend)
             tools.extend(crawl_tools)
 
-        finance_tools = [
-            get_sec_filing,  # SEC filing extraction (10-K, 10-Q, 8-K)
-            get_quote,  # Real-time quotes (cheap — price freshness)
-            get_daily_prices,  # Stock OHLCV price data
-            get_company_overview,  # Company investment analysis (includes real-time quote)
-            get_market_overview,  # Single-day market snapshot (indices + US sectors)
-            get_options_chain,  # Options contracts chain with snapshot pricing
-            screen_stocks,  # Stock screener with filters
-        ]
-        if self.config.feature_enabled("market_watch"):
-            finance_tools.append(watch_market)  # Market watch start/stop (live price injection)
-        tools.extend(finance_tools)
-
         if subagent_names is None:
             subagent_names = self.config.subagents.enabled
 
@@ -706,7 +681,6 @@ class PTCAgent:
             "bash": [bash_tool],
             "filesystem": list(filesystem_tools) if filesystem_tools else [],
             "web_search": [web_search_tool, web_fetch_tool],
-            "finance": finance_tools,
             "think": [think_tool],
             "todo": [TodoWrite],
         }
@@ -909,16 +883,6 @@ class PTCAgent:
                 multimodal,
                 AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
                 OpenAIPromptCachingMiddleware(),
-                # Market watch (main agent only): appends the ephemeral
-                # <market-watch> price stamp. Inside model_resilience so it
-                # sees the post-fallback model — its provider-specific cache
-                # breakpoints (Anthropic cache_control / OpenAI
-                # prompt_cache_breakpoint) must never reach another provider.
-                *(
-                    [MarketWatchMiddleware()]
-                    if self.config.feature_enabled("market_watch")
-                    else []
-                ),
                 EmptyToolCallRetryMiddleware(),
                 PatchToolCallsMiddleware(),
                 *workspace_context_middleware,

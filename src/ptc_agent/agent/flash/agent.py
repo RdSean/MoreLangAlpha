@@ -1,7 +1,7 @@
 """Flash Agent - Minimal agent without sandbox dependencies.
 
-Optimized for fast responses using external tools only (web search, market data,
-SEC filings). No code execution, no sandbox, no MCP tools.
+Optimized for fast responses using general web and workspace tools. No code
+execution, no sandbox, and no MCP tools.
 """
 
 from datetime import UTC, datetime
@@ -40,15 +40,6 @@ from ptc_agent.agent.middleware.model_resilience import (
 # External tools only (no sandbox, no MCP)
 from src.tools.web.search import get_web_search_tool
 from src.tools.web.fetch import web_fetch_tool
-from src.tools.sec.tool import get_sec_filing
-from src.tools.market_data.tool import (
-    get_daily_prices,
-    get_company_overview,
-    get_market_overview,
-    get_options_chain,
-    get_quote,
-    screen_stocks,
-)
 
 logger = structlog.get_logger(__name__)
 
@@ -59,14 +50,13 @@ class FlashAgent:
     Features:
     - No sandbox startup latency (~0.5s vs ~8-10s)
     - Minimal system prompt (~300 tokens vs ~2000 tokens)
-    - External tools only (web search, market data, SEC filings)
+    - External tools only (web search and workspace coordination)
     - No code execution capabilities
     - No MCP tool access
 
     Use cases:
-    - Quick market data lookups
-    - News and web searches
-    - SEC filing queries
+    - Quick questions and web lookups
+    - Workspace coordination
     - Simple Q&A that doesn't require code execution
     """
 
@@ -132,19 +122,6 @@ class FlashAgent:
         tools.append(web_search_tool)
         tools.append(web_fetch_tool)
 
-        # Finance tools
-        tools.extend(
-            [
-                get_sec_filing,
-                get_quote,
-                get_daily_prices,
-                get_company_overview,
-                get_market_overview,
-                get_options_chain,
-                screen_stocks,
-            ]
-        )
-
         # Secretary tools (workspace management, PTC dispatch, output monitoring)
         from src.tools.secretary import SECRETARY_TOOLS
 
@@ -205,8 +182,8 @@ class FlashAgent:
         # Build system prompt (time + profile injected by RuntimeContextMiddleware)
         system_prompt = self._build_system_prompt(tools)
 
-        # Leak detector wired into provenance so web/market/SEC snippets are
-        # scrubbed before they're emitted/persisted, mirroring the main agent.
+        # Leak detector is wired into provenance so web snippets are scrubbed
+        # before they're emitted or persisted, mirroring the main agent.
         # Flash has no MCP/vault secret surface today, so this is effectively a
         # no-op now; wiring it keeps the two modes consistent and active the
         # moment Flash ever gains a secret source.
@@ -221,7 +198,7 @@ class FlashAgent:
             ToolErrorHandlingMiddleware(),
             leak_detection,
             ToolResultNormalizationMiddleware(),
-            # Traces web/market/SEC reads (filesystem/MCP extractors no-op here).
+            # Traces web reads (filesystem/MCP extractors no-op here).
             ProvenanceMiddleware(redactor=leak_detection.redact),
         ]
 

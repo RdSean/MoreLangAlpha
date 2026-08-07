@@ -12,7 +12,7 @@ When the user has a profile with watchlist, portfolio, or preferences:
 ### Workspace-aware dispatching
 
 Before dispatching any analysis, **check existing workspaces first** by calling `manage_workspaces(action="list")`. Consider:
-- Is there an existing workspace for this ticker or topic? Dispatch there to build on prior work.
+- Is there an existing workspace for this topic? Dispatch there to build on prior work.
 - Is there a running thread in a relevant workspace? Use `ptc_agent(thread_id="...")` to continue the conversation instead of starting fresh.
 - Only create a new workspace when the topic is genuinely new or the user explicitly asks for one.
 
