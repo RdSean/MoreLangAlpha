@@ -1,4 +1,4 @@
-import type { WidgetContextSnapshot } from '@/pages/Dashboard/widgets/framework/contextSnapshot';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
 import type { ChartSelection } from '@/pages/MarketView/stores/chartSelectionStore';
 
 export const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '@/components/ui/use-toast';
 import { useUser } from '@/hooks/useUser';
-import { getFlashWorkspace } from '../../ChatAgent/utils/api';
+import { getFlashWorkspace } from '../ChatAgent/utils/api';
 
 interface PersonalizationResult {
   showPersonalizationBanner: boolean;
@@ -40,7 +40,7 @@ export function snoozePersonalization(): void {
     try {
         localStorage.setItem(PERSONALIZATION_SNOOZE_KEY, String(Date.now()));
     } catch (e) {
-        console.warn('[Dashboard] Could not persist personalization snooze', e);
+        console.warn('[Onboarding] Could not persist personalization snooze', e);
     }
     // Same-tab listeners (the onboarding provider) re-read the snooze state —
     // a localStorage write alone doesn't re-render other components.

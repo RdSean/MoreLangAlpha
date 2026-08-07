@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../lib/queryKeys';
-import { updatePreferences } from '../pages/Dashboard/utils/api';
+import { updatePreferences } from '@/api/user';
 import type { UserPreferences } from '../types/api';
 
 /**

@@ -1,5 +1,5 @@
 /** ChatView's local type contracts, carved out of ChatView.tsx (5.9b). */
-import type { WidgetContextSnapshot } from '@/pages/Dashboard/widgets/framework/contextSnapshot';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
 import type { SubagentTokenUsage } from '../../utils/tokenUsage';
 
 export type MessageRecord = Record<string, unknown>;

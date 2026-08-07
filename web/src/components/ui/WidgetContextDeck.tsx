@@ -1,15 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Newspaper, LayoutGrid, ListOrdered, FileText } from 'lucide-react';
+import { FileText, ListOrdered } from 'lucide-react';
 import { WidgetContextPreview, type WidgetContextPreviewShape } from './WidgetContextPreview';
 
 /** Pick a thumb icon for a widget snapshot based on its type slug. Shared by
  *  the chat-input live deck and the chat-view inline deck so a given widget
  *  always gets the same glyph in both surfaces. */
 export function pickWidgetIcon(widgetType: string): React.ComponentType<{ className?: string }> {
-  if (widgetType.startsWith('markets.chart') || widgetType.startsWith('markets.miniChart')) return BarChart3;
-  if (widgetType.startsWith('news.')) return Newspaper;
-  if (widgetType.startsWith('tv.')) return LayoutGrid;
-  if (widgetType.startsWith('watchlist.') || widgetType.startsWith('portfolio') || widgetType.startsWith('personal.')) return ListOrdered;
   if (widgetType.includes('list') || widgetType.includes('feed')) return ListOrdered;
   return FileText;
 }

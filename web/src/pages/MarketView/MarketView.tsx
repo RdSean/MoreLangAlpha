@@ -348,9 +348,9 @@ function MarketViewInner() {
   useEffect(() => {
     let cancelled = false;
     getWorkspaces(50, 0)
-      .then((data: Record<string, unknown>) => {
+      .then((data) => {
         if (cancelled) return;
-        const list = ((data.workspaces || []) as Workspace[]).filter((ws) => ws.status !== 'flash');
+        const list = data.workspaces.filter((ws) => ws.status !== 'flash');
         setWorkspaces(list);
         // Reconcile selectedWorkspaceId against the fresh list. If the stored
         // id is gone (workspace deleted between visits), drop back to a clean

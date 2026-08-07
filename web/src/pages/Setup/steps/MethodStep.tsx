@@ -12,7 +12,9 @@ import { useConfiguredProviders, type ConfiguredProvider } from '@/hooks/useConf
 import { useUser } from '@/hooks/useUser';
 import { usePreferences } from '@/hooks/usePreferences';
 import { useUpdatePreferences } from '@/hooks/useUpdatePreferences';
-import { deleteUserApiKey, disconnectCodexOAuth, disconnectClaudeOAuth, getCurrentUser } from '@/pages/Dashboard/utils/api';
+import { deleteUserApiKey } from '@/api/model';
+import { getCurrentUser } from '@/api/user';
+import { disconnectCodexOAuth, disconnectClaudeOAuth } from '@/api/oauth';
 import type { AccessType } from '@/components/model/types';
 import { isPlatformMode } from '@/config/hostMode';
 import { useAllModels } from '@/hooks/useAllModels';

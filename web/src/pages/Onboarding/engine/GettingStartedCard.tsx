@@ -11,7 +11,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { useOnboarding as usePersonalizationNav } from '@/pages/Dashboard/hooks/useOnboarding';
+import { useOnboarding as usePersonalizationNav } from '@/pages/Onboarding/usePersonalization';
 import { useOnboarding } from '../OnboardingProvider';
 
 /**

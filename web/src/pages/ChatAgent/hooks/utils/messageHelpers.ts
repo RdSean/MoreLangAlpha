@@ -10,7 +10,7 @@ import type {
   NotificationMessage,
   NotificationVariant,
 } from '@/types/chat';
-import type { WidgetContextSnapshot } from '@/pages/Dashboard/widgets/framework/contextSnapshot';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
 import type { ChartSelectionSnapshot } from '@/pages/MarketView/stores/chartSelectionStore';
 
 // Re-export types for consumers

@@ -9,7 +9,7 @@
  * for cross-tree state without dragging in zustand.
  */
 
-import type { WidgetContextSnapshot } from '@/pages/Dashboard/widgets/framework/contextSnapshot';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
 
 export type ContextBusEvent =
   | { type: 'attach'; snapshot: WidgetContextSnapshot }

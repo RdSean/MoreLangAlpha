@@ -18,7 +18,7 @@ import type { ModelMetadataEntry } from '@/hooks/useFilteredModels';
 import { supportsXhighEffort } from '@/lib/modelCapabilities';
 import { getModelMetadata } from '../../pages/ChatAgent/utils/api';
 import { ChatInputRegistry, ContextBus } from '@/lib/contextBus';
-import type { WidgetContextSnapshot } from '@/pages/Dashboard/widgets/framework/contextSnapshot';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
 import './chat-input.css';
 import type { ModelOptions, ReadyAttachment, SlashCommand, Workspace } from './chat-input.types';
 import { getSlashCommandIcon, isLargePaste } from './chat-input.helpers';

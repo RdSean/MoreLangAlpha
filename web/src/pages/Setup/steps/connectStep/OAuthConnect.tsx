@@ -11,7 +11,7 @@ import {
   pollCodexDevice,
   initiateClaudeOAuth,
   submitClaudeCallback,
-} from '@/pages/Dashboard/utils/api';
+} from '@/api/oauth';
 import { useTranslation } from 'react-i18next';
 import { ProcessStep, DisclaimerBox, CopyButton, type LocationState } from './shared';
 

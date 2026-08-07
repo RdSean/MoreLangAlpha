@@ -352,7 +352,7 @@ export interface UserMessage {
    * chip cards below the user bubble (like attachments) and forwarded to the
    * backend via `additional_context`.
    */
-  widgetSnapshots?: import('@/pages/Dashboard/widgets/framework/contextSnapshot').WidgetContextSnapshot[];
+  widgetSnapshots?: import('@/types/widgetContext').WidgetContextSnapshot[];
   /**
    * Chart selections (region / price level) the user attached to this message.
    * Rendered as read-only pills below the user bubble (like widget snapshots)

@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 import { useApiKeys } from './useApiKeys';
-import { getCodexOAuthStatus, getClaudeOAuthStatus } from '@/pages/Dashboard/utils/api';
+import { getCodexOAuthStatus, getClaudeOAuthStatus } from '@/api/oauth';
 
 export interface ConfiguredProvider {
   provider: string;

@@ -318,6 +318,37 @@
     }
   },
   "dashboard": {
+    "overview": {
+      "eyebrow": "Agent workspace",
+      "heading": "Workspace",
+      "description": "Start a conversation, return to recent work, or open the files that support it.",
+      "workspaceCount_one": "{{count}} workspace",
+      "workspaceCount_other": "{{count}} workspaces",
+      "actionsLabel": "Workspace actions",
+      "actions": {
+        "chat": {
+          "title": "Start a chat",
+          "description": "Open the agent workspace"
+        },
+        "automations": {
+          "title": "Manage automations",
+          "description": "Review scheduled work"
+        },
+        "files": {
+          "title": "Open workspace files",
+          "description": "Browse files in the active workspace",
+          "unavailable": "Create a workspace to manage files"
+        }
+      },
+      "recentWork": "Recent work",
+      "recentEmpty": "Your recent conversations will appear here.",
+      "workspaces": "Workspaces",
+      "workspacesEmpty": "Create a workspace to begin organizing work.",
+      "viewAll": "View all",
+      "loading": "Loading workspace activity",
+      "untitledThread": "Untitled conversation",
+      "untitledWorkspace": "Untitled workspace"
+    },
     "title": "LangAlpha",
     "searchPlaceholder": "Search by symbol or company name...",
     "searching": "Searching...",

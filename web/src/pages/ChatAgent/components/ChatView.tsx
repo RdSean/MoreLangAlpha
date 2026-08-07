@@ -12,7 +12,7 @@ import { useUpdatePreferences } from '@/hooks/useUpdatePreferences';
 import { useFeatureEnabled } from '@/hooks/useFeatures';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
-import { updateCurrentUser } from '../../Dashboard/utils/api';
+import { updateCurrentUser } from '@/api/user';
 import { getWorkspace, summarizeThread, offloadThread, getThreadShareStatus, updateThreadSharing, cancelSubagentTask } from '../utils/api';
 import { buildSharedServeUrl, buildWsfilesUrl } from './viewers/html/wsfilesUrl';
 import ShareReportLinkModal from './ShareReportLinkModal';

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '../lib/queryKeys';
-import { getPreferences } from '../pages/Dashboard/utils/api';
+import { getPreferences } from '@/api/user';
 import type { UserPreferences } from '../types/api';
 
 // staleTime split by capability: browsers with BroadcastChannel get cross-tab

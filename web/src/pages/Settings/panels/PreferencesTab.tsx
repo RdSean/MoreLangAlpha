@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Trash2, MessageSquareText, FileText, Code2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { clearPreferences } from '@/pages/Dashboard/utils/api';
+import { clearPreferences } from '@/api/user';
 import { useUser } from '@/hooks/useUser';
 import { usePreferences } from '@/hooks/usePreferences';
 import { useUpdatePreferences } from '@/hooks/useUpdatePreferences';
@@ -10,7 +10,7 @@ import { queryKeys } from '@/lib/queryKeys';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '@/components/ui/use-toast';
 import { getFlashWorkspace } from '@/pages/ChatAgent/utils/api';
-import ConfirmDialog from '@/pages/Dashboard/components/ConfirmDialog';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useOnboarding } from '@/pages/Onboarding';
 import type { Preferences } from './types';
 

@@ -318,6 +318,37 @@
     }
   },
   "dashboard": {
+    "overview": {
+      "eyebrow": "Agent 工作区",
+      "heading": "工作区",
+      "description": "开始对话、返回近期工作，或打开支持当前任务的文件。",
+      "workspaceCount_one": "{{count}} 个工作区",
+      "workspaceCount_other": "{{count}} 个工作区",
+      "actionsLabel": "工作区操作",
+      "actions": {
+        "chat": {
+          "title": "开始对话",
+          "description": "进入 Agent 工作区"
+        },
+        "automations": {
+          "title": "管理自动化",
+          "description": "查看已计划的工作"
+        },
+        "files": {
+          "title": "打开工作区文件",
+          "description": "浏览当前工作区的文件",
+          "unavailable": "创建工作区后即可管理文件"
+        }
+      },
+      "recentWork": "近期工作",
+      "recentEmpty": "近期对话会显示在这里。",
+      "workspaces": "工作区",
+      "workspacesEmpty": "创建工作区后即可开始组织工作。",
+      "viewAll": "查看全部",
+      "loading": "正在加载工作区活动",
+      "untitledThread": "未命名对话",
+      "untitledWorkspace": "未命名工作区"
+    },
     "title": "LangAlpha",
     "searchPlaceholder": "搜索股票代码或公司名称...",
     "searching": "搜索中...",

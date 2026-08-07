@@ -7,7 +7,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import Markdown from '@/pages/ChatAgent/components/Markdown';
-import type { WidgetContextSnapshot } from './contextSnapshot';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
 
 /**
  * Subset of `WidgetContextSnapshot` the preview actually needs. Live

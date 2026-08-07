@@ -1,4 +1,4 @@
-import type { WidgetContextSnapshot } from '@/pages/Dashboard/widgets/framework/contextSnapshot';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
 
 export interface FileAttachment {
   id: string;

@@ -18,7 +18,7 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import {
   isPersonalizationSnoozed,
   subscribePersonalizationSnooze,
-} from '@/pages/Dashboard/hooks/useOnboarding';
+} from '@/pages/Onboarding/usePersonalization';
 import { listWatchlists, listWatchlistItems, listPortfolio } from '@/pages/Dashboard/utils/api';
 import { isPlatformMode } from '@/config/hostMode';
 import { useOnboardingPrefs } from './useOnboardingPrefs';

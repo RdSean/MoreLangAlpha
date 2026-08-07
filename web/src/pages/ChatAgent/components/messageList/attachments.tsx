@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileText, ImageIcon, Ruler, SquareDashedMousePointer } from 'lucide-react';
-import { type WidgetContextPreviewShape } from '@/pages/Dashboard/widgets/framework/WidgetContextPreview';
-import { WidgetContextDeck } from '@/pages/Dashboard/widgets/framework/WidgetContextDeck';
+import { type WidgetContextPreviewShape } from '@/components/ui/WidgetContextPreview';
+import { WidgetContextDeck } from '@/components/ui/WidgetContextDeck';
 import { SelectionContextPreview, type SelectionPreviewShape } from '../SelectionContextPreview';
 
 /** Selection price with 2 decimals (matching StockHeader); `—` when absent. */
