@@ -2,6 +2,14 @@
 
 ## 2026-08-08
 
+### 金融运行时残留与开发环境收口
+
+- 删除孤立的市场洞察数据库/模型、市场交易时间工具、用户模型中的价格提醒、观察列表与持仓合约，以及旧 Ginlix sandbox 凭证通道；通用用户偏好、Vault、workspace、PTC、Flash 与 MCP 机制继续保留。
+- sandbox 默认依赖、Daytona/Docker 镜像和锁文件不再安装或提及 `yfinance`、Polymarket、`mplfinance`、`peewee` 等金融专属组件；相应的 SEC、行情回归测试与数据夹具一并退役。
+- 将 README、配置向导、默认提示词、来源溯源说明及中日文公开说明改为通用 Agent 平台表述；溯源哈希稳定性测试改用 WebFetch/WebSearch 与教育研究示例，继续覆盖去重、超大正文和密钥脱敏。
+- 删除 E2E 会话回放中遗留的大型证券研究夹具，替换为最小化的中性教育研究 SSE 序列，保留主 Agent 与子 Agent 转向事件不会产生空消息的回归覆盖。
+- 前端默认开发服务器统一为 `0.0.0.0:5177` 且启用严格端口，Docker Compose 同步映射 `5177`；移除 Vite 中已删除的 `lightweight-charts` 分包引用，避免与其它 LangAlpha 实例冲突并支持局域网访问。
+
 ### 金融数据服务与协议移除
 
 - 删除 `data_client`、`market_protocol`、金融 MCP Server、SEC 与行情工具，以及其单元和集成测试；默认安装、sandbox 同步和 MCP 配置不再包含 FMP、Yahoo Finance、期权或实时行情依赖。

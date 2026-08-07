@@ -93,7 +93,7 @@ services:
     command: sh -c "npm install -g pnpm@10 && pnpm install --frozen-lockfile && pnpm dev --host 0.0.0.0"
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-5173}:5173"
+      - "${FRONTEND_PORT:-5177}:5177"
     environment:
       VITE_PROXY_BACKEND: http://backend:8000
       # macOS bind mounts don't forward fsevents, so enable Vite/chokidar

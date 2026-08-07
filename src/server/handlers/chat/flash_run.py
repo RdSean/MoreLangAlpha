@@ -118,8 +118,8 @@ async def astream_flash_workflow(
 ):
     """Async generator that streams Flash agent workflow events.
 
-    Flash mode: no sandbox, no MCP, external tools only (web search, market
-    data, SEC filings). State keyed by ``(thread_id, run_id)``; same
+    Flash mode: no sandbox, no MCP, external tools only (web search and fetch).
+    State keyed by ``(thread_id, run_id)``; same
     contract as PTC.
     """
     start_time = time.time()

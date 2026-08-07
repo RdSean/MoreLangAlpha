@@ -1063,7 +1063,6 @@ class TestSandboxRecovery:
         mock_session_mgr.get_session.return_value = session
         mock_session_mgr.cleanup_session = AsyncMock()
 
-        manager._mint_sandbox_tokens = AsyncMock(return_value={})
         manager._apply_session_mcp = AsyncMock(return_value=None)
         manager._sync_sandbox_assets = AsyncMock()
         # Sandbox is created (initialize ok) but a later step fails.
@@ -2778,7 +2777,6 @@ class TestRecoverSandboxEntitledTier:
         mock_session_mgr.get_session.return_value = session
 
         manager._entitled_tier = AsyncMock(return_value="standard")
-        manager._mint_sandbox_tokens = AsyncMock(return_value={})
         manager._apply_session_mcp = AsyncMock(return_value=None)
         manager._sync_sandbox_assets = AsyncMock()
         manager._restore_files = AsyncMock()
@@ -2988,7 +2986,6 @@ class TestDuplicateWorkspace:
 
     def _install_create_path(self, manager, session):
         """Stub the eager-create collaborators so the lock body runs clean."""
-        manager._mint_sandbox_tokens = AsyncMock(return_value={})
         manager._apply_session_mcp = AsyncMock()
         manager._sync_sandbox_assets = AsyncMock()
         manager._restore_files = AsyncMock()
@@ -3256,7 +3253,6 @@ class TestPlatformSecretWiring:
         certify = AsyncMock(return_value=None)
         status = AsyncMock(return_value=workspace)
         with (
-            patch.object(manager, "_mint_sandbox_tokens", AsyncMock(return_value={})),
             patch(
                 "src.server.services.workspace_manager.SessionManager"
             ) as session_mgr,

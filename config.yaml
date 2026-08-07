@@ -133,7 +133,7 @@ redis:
   ttl:
     results_list: 300  # Results list cache TTL (5 minutes)
     result_detail: 900  # Result detail cache TTL (15 minutes)
-    metadata: 900  # Metadata tags/tickers cache TTL (15 minutes)
+    metadata: 900  # Metadata cache TTL (15 minutes)
     metadata_summary: 600  # Metadata summary cache TTL (10 minutes)
     workflow_events: 86400  # Workflow event buffer TTL (24 hours)
     workflow_status: 3600   # Completed/cancelled workflow status key TTL (1 hour)

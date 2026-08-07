@@ -549,7 +549,6 @@ class DaytonaProvider(SandboxProvider):
                 "qpdf",
                 "fonts-noto-cjk",
                 "gh",
-                "polymarket",
                 "playwright",
                 "docker-ce",
                 "docker-ce-cli",
@@ -602,14 +601,6 @@ class DaytonaProvider(SandboxProvider):
                 " && tar -xzf /tmp/gh.tar.gz -C /tmp"
                 " && mv /tmp/gh_2.87.3_linux_${GH_ARCH}/bin/gh /usr/local/bin/gh"
                 " && rm -rf /tmp/gh.tar.gz /tmp/gh_2.87.3_linux_${GH_ARCH}",
-                "POLY_ARCH=$(uname -m)"
-                " && curl -fsSL https://github.com/Polymarket/polymarket-cli/"
-                "releases/download/v0.1.4/"
-                "polymarket-v0.1.4-${POLY_ARCH}-unknown-linux-gnu.tar.gz"
-                " -o /tmp/polymarket.tar.gz"
-                " && tar -xzf /tmp/polymarket.tar.gz -C /tmp"
-                " && mv /tmp/polymarket /usr/local/bin/polymarket"
-                " && rm -rf /tmp/polymarket.tar.gz",
                 "npm install -g playwright"
                 " && PLAYWRIGHT_BROWSERS_PATH=/usr/local/ms-playwright"
                 " npx playwright install --with-deps chromium",
@@ -638,8 +629,7 @@ class DaytonaProvider(SandboxProvider):
                 {"PLAYWRIGHT_BROWSERS_PATH": "/usr/local/ms-playwright"}
             )
             .run_commands(
-                # yfinance pins curl_cffi<0.14 but scrapling[all] requires >=0.14.
-                # Override resolves the conflict (tested, yfinance works with 0.14+).
+                # Scrapling requires a recent curl_cffi release.
                 "echo 'curl_cffi>=0.14' > /tmp/overrides.txt",
                 "uv pip install --system --override /tmp/overrides.txt "
                 + " ".join(dependencies),

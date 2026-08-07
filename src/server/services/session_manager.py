@@ -150,7 +150,7 @@ class SessionService:
                             session.sandbox, "sandbox_id", None
                         )
 
-            # Unified asset sync (skills + tools + data_client + tokens)
+            # Unified asset sync (Skills, MCP wrappers, and internal packages).
             if session.sandbox:
                 skill_dirs = (
                     self.config.skills.local_skill_dirs_with_sandbox()

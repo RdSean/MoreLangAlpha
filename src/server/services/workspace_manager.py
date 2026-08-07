@@ -4,14 +4,12 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-import httpx
 
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.mcp_sanitize import is_user_server
@@ -335,38 +333,6 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             extra={"workspace_id": workspace_id},
         )
 
-    @staticmethod
-    async def _mint_sandbox_tokens(user_id: str, workspace_id: str) -> dict:
-        """Mint scoped OAuth2 tokens for sandbox ginlix-data access.
-
-        Returns token dict on success, empty dict on failure (graceful degradation).
-        When empty, the sandbox runs in FMP-only mode.
-        """
-        auth_url = os.getenv("AUTH_SERVICE_URL", "")
-        service_token = os.getenv("INTERNAL_SERVICE_TOKEN", "")
-        ginlix_data_url = os.getenv("GINLIX_DATA_URL", "")
-
-        # Skip entire token chain if ginlix-data is not configured
-        if not ginlix_data_url or not auth_url or not service_token:
-            return {}
-
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{auth_url}/api/auth/data-tokens",
-                    json={"user_id": user_id, "workspace_id": workspace_id},
-                    headers={"X-Service-Token": service_token},
-                    timeout=10,
-                )
-                resp.raise_for_status()
-                return resp.json()
-        except Exception as e:
-            logger.warning(
-                f"Failed to mint sandbox tokens — ginlix-data features disabled: {e}",
-                extra={"workspace_id": workspace_id},
-            )
-            return {}
-
     # ── Per-workspace MCP resolution + composite caching ────────────────
     #
     # Resolved once per session (under the slow path, never in the cooldown
@@ -627,16 +593,15 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         if not sandbox:
             return
 
-        # Unified asset sync (skills + tools + data_client + tokens)
+        # Unified asset sync (Skills, MCP wrappers, and internal packages).
         skill_dirs = (
             self.config.skills.local_skill_dirs_with_sandbox()
             if self.config.skills.enabled
             else None
         )
 
-        # All sync tasks run in parallel. Token minting and user data fetching
-        # are bundled with the manifest sync so their results feed into the
-        # unified hash comparison — only upload if content actually changed.
+        # All sync tasks run in parallel. The manifest keeps uploads content-based,
+        # so unchanged assets are not sent to a running sandbox.
         _sync_t0 = time.time()
         _sync_times: dict[str, float] = {}
 
@@ -647,20 +612,13 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             finally:
                 _sync_times[name] = (time.time() - t0) * 1000
 
-        async def _mint_and_sync_assets() -> Any:
-            tokens = {}
-            if reusing_sandbox and user_id:
-                tokens = await self._mint_sandbox_tokens(user_id, workspace_id)
-
+        async def _sync_assets() -> Any:
             return await sandbox.sync_sandbox_assets(
                 skill_dirs=skill_dirs,
                 reusing_sandbox=reusing_sandbox,
-                tokens=tokens or None,
-                user_id=user_id,
-                workspace_id=workspace_id,
             )
 
-        tasks: list[Any] = [_timed("mint+manifest", _mint_and_sync_assets())]
+        tasks: list[Any] = [_timed("manifest", _sync_assets())]
 
         # Vault secrets — piggyback on existing parallel gather so
         # secrets are available after stop/start and sandbox recovery.
@@ -767,13 +725,9 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         if core_config is None:
             core_config = self.config.to_core_config()
 
-        sandbox_tokens = await self._mint_sandbox_tokens(user_id or "", workspace_id)
         session = SessionManager.get_session(workspace_id, core_config)
         try:
             await session.initialize(
-                sandbox_tokens=sandbox_tokens,
-                user_id=user_id,
-                workspace_id=workspace_id,
                 tier=tier,
                 auto_stop_minutes=auto_stop_minutes,
             )

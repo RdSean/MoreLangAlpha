@@ -75,8 +75,8 @@ class TestDataclasses:
         assert result.charts[0].title == "Test"
 
     def test_sync_result(self):
-        result = SyncResult(refreshed_modules=["yfinance", "fmp"], forced=True)
-        assert result.refreshed_modules == ["yfinance", "fmp"]
+        result = SyncResult(refreshed_modules=["skills", "tool_modules"], forced=True)
+        assert result.refreshed_modules == ["skills", "tool_modules"]
         assert result.forced is True
 
 

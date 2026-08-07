@@ -73,17 +73,17 @@ class TestPrepareEnvSafety:
     def test_declared_env_vars_are_expanded(self):
         """Declared env vars with ${VAR} placeholders are resolved."""
         connector = self._make_connector(
-            env={"FMP_API_KEY": "${FMP_API_KEY}"}
+            env={"RESEARCH_API_KEY": "${RESEARCH_API_KEY}"}
         )
         fake_environ = {
             "PATH": "/usr/bin",
-            "FMP_API_KEY": "fmp_real_key_value",
+            "RESEARCH_API_KEY": "research_real_key_value",
         }
         with patch.dict("os.environ", fake_environ, clear=True):
             result = connector._prepare_env()
 
         assert result["PATH"] == "/usr/bin"
-        assert result["FMP_API_KEY"] == "fmp_real_key_value"
+        assert result["RESEARCH_API_KEY"] == "research_real_key_value"
 
     def test_literal_env_values_pass_through(self):
         """Literal (non-placeholder) env values are included as-is."""

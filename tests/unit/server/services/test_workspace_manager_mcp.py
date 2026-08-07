@@ -543,7 +543,6 @@ class TestDiscoveryKickSeesCachedSession:
         session.sandbox.sandbox_id = "sb-new"
         mock_session_mgr.get_session.return_value = session
 
-        wm._mint_sandbox_tokens = AsyncMock(return_value={})
         wm._apply_session_mcp = AsyncMock(return_value=_resolved(1, user_names=["alpha"]))
         wm._servers_needing_discovery = MagicMock(return_value=[MagicMock(name="alpha")])
         wm._sync_sandbox_assets = AsyncMock()
@@ -617,7 +616,6 @@ class TestDiscoveryKickSeesCachedSession:
         session.sandbox.sandbox_id = "sb-new"
         mock_session_mgr.get_session.return_value = session
 
-        wm._mint_sandbox_tokens = AsyncMock(return_value={})
         wm._apply_session_mcp = AsyncMock(return_value=_resolved(1, user_names=["alpha"]))
         wm._servers_needing_discovery = MagicMock(return_value=[MagicMock(name="alpha")])
         wm._sync_sandbox_assets = AsyncMock()

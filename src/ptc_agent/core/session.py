@@ -96,9 +96,6 @@ class Session:
     async def initialize(
         self,
         sandbox_id: str | None = None,
-        sandbox_tokens: dict | None = None,
-        user_id: str | None = None,
-        workspace_id: str | None = None,
         on_state_observed: Callable[[str], None] | None = None,
         tier: str | None = None,
         auto_stop_minutes: int | None = None,
@@ -107,9 +104,6 @@ class Session:
 
         Args:
             sandbox_id: Optional existing sandbox ID to reconnect to instead of creating new
-            sandbox_tokens: Optional scoped OAuth2 tokens for sandbox ginlix-data access
-            user_id: User ID for token tracking in manifest.
-            workspace_id: Workspace ID for token tracking in manifest.
             on_state_observed: Optional sync callback invoked with the initial
                 sandbox state string when reconnecting (ignored on new-sandbox
                 path since state doesn't exist yet). See PTCSandbox.reconnect.
@@ -195,9 +189,6 @@ class Session:
 
             await self.sandbox.setup_tools_and_mcp(
                 snapshot_name,
-                tokens=sandbox_tokens,
-                user_id=user_id,
-                workspace_id=workspace_id,
             )
 
         self._initialized = True

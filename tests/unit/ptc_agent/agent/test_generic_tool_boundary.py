@@ -11,6 +11,7 @@ from ptc_agent.agent import agent as ptc_agent_module
 from ptc_agent.agent.flash.agent import FlashAgent
 from ptc_agent.agent.middleware.skills.registry import get_skill_registry
 from ptc_agent.agent.subagents.builtins import BUILTIN_SUBAGENTS
+from ptc_agent.core.sandbox._defaults import DEFAULT_DEPENDENCIES
 
 
 FINANCE_NATIVE_TOOL_SYMBOLS = {
@@ -70,6 +71,12 @@ RETAINED_GENERIC_SKILLS = {
     "x-api",
     "xlsx",
 }
+
+RETIRED_FINANCE_RUNTIME_PATHS = (
+    "src/server/database/market_insight.py",
+    "src/server/models/market_insight.py",
+    "src/utils/market_hours.py",
+)
 
 
 def _tool_name(tool: object) -> str:
@@ -221,3 +228,73 @@ def test_prompt_defaults_have_no_market_watch_toggle():
     config = yaml.safe_load(config_path.read_text())
 
     assert "market_watch_enabled" not in config["defaults"]
+
+
+def test_generic_runtime_has_no_finance_only_modules_or_user_contracts():
+    """Removed finance surfaces cannot remain as orphaned importable modules."""
+    project_root = Path(__file__).parents[4]
+
+    assert not [
+        relative_path
+        for relative_path in RETIRED_FINANCE_RUNTIME_PATHS
+        if (project_root / relative_path).exists()
+    ]
+
+    user_models = (project_root / "src/server/models/user.py").read_text()
+    for retired_contract in (
+        "AlertSettings",
+        "Watchlist",
+        "PortfolioHolding",
+        "PortfolioResponse",
+        "normalize_symbol",
+        "KNOWN_INSTRUMENT_TYPES",
+    ):
+        assert retired_contract not in user_models
+
+
+def test_default_sandbox_has_no_financial_dependencies_or_token_channel():
+    """Generic sandboxes must not install or provision finance-only integrations."""
+    project_root = Path(__file__).parents[4]
+
+    assert "yfinance" not in DEFAULT_DEPENDENCIES
+    for relative_path in (
+        "src/config/env.py",
+        "src/config/settings.py",
+        "src/ptc_agent/core/sandbox/ptc_sandbox.py",
+        "src/ptc_agent/core/sandbox/assets.py",
+        "src/server/services/workspace_manager.py",
+        "src/ptc_agent/core/sandbox/providers/daytona.py",
+        "Dockerfile.sandbox",
+    ):
+        source = (project_root / relative_path).read_text().lower()
+        assert "ginlix_data" not in source
+        assert "yfinance" not in source
+        assert "polymarket" not in source
+
+
+def test_default_prompts_and_public_docs_describe_a_generic_agent_platform():
+    """Public entry points cannot advertise capabilities removed from runtime."""
+    project_root = Path(__file__).parents[4]
+    source = "\n".join(
+        (project_root / relative_path).read_text().lower()
+        for relative_path in (
+            "README.md",
+            "AGENTS.md",
+            "web/README.md",
+            "src/ptc_agent/agent/prompts/templates/components/workspace_context.md.j2",
+            "src/ptc_agent/agent/middleware/compaction/utils.py",
+        )
+    )
+
+    for retired_term in (
+        "financial research",
+        "market data",
+        "tradingview",
+        "price-triggered",
+        "sec filing",
+        "yfinance",
+        "fmp",
+        "portfolio",
+        "watchlist",
+    ):
+        assert retired_term not in source

@@ -194,9 +194,6 @@ async def _compute_sandbox_manifest(
     sandbox: "PTCSandbox",
     *,
     skill_roots: list[str] | None = None,
-    tokens: dict | None = None,
-    user_id: str | None = None,
-    workspace_id: str | None = None,
 ) -> dict[str, Any]:
     """Compute the unified local manifest for all sandbox asset modules."""
     modules: dict[str, Any] = {}
@@ -272,21 +269,6 @@ async def _compute_sandbox_manifest(
     # ── Module: skills ──
     if skill_roots:
         modules["skills"] = await sandbox._compute_skills_module(skill_roots)
-
-    # ── Module: tokens ──
-    if tokens:
-        # Version captures the config identity; freshness is checked via minted_at.
-        token_config_parts = {
-            "user_id": user_id or "",
-            "workspace_id": workspace_id or "",
-            "client_id": tokens.get("client_id", ""),
-        }
-        modules["tokens"] = {
-            "version": _hash_dict(token_config_parts),
-            "minted_at": time.time(),
-            "user_id": user_id or "",
-            "workspace_id": workspace_id or "",
-        }
 
     return {
         "schema_version": 1,
@@ -460,24 +442,18 @@ async def sync_sandbox_assets(
     skill_dirs: list[tuple[str, str]] | None = None,
     reusing_sandbox: bool = False,
     force_refresh: bool = False,
-    tokens: dict | None = None,
-    user_id: str | None = None,
-    workspace_id: str | None = None,
     on_progress: Callable[[str], None] | None = None,
 ) -> SyncResult:
     """Sync all sandbox assets using a single unified manifest.
 
         Replaces the previous ``sync_tools()`` and ``sync_skills()`` methods
-        with a single entry point that tracks MCP servers, data client, tool
-        modules, skills, and tokens in one manifest file.
+        with a single entry point that tracks MCP servers, internal packages,
+        tool modules, and Skills in one manifest file.
 
         Args:
             skill_dirs: Ordered list of (local_path, sandbox_path) for skills.
             reusing_sandbox: Whether reconnecting to an existing sandbox.
             force_refresh: Force re-upload of all modules regardless of manifest.
-            tokens: Pre-minted OAuth tokens (from workspace_manager).
-            user_id: User ID for token tracking.
-            workspace_id: Workspace ID for token tracking.
             on_progress: Optional callback for reporting progress.
 
         Returns:
@@ -505,12 +481,7 @@ async def sync_sandbox_assets(
 
         _, local_manifest, remote_manifest = await asyncio.gather(
             sandbox._prune_disabled_tool_modules(),
-            sandbox._compute_sandbox_manifest(
-                skill_roots=skill_roots,
-                tokens=tokens,
-                user_id=user_id,
-                workspace_id=workspace_id,
-            ),
+            sandbox._compute_sandbox_manifest(skill_roots=skill_roots),
             sandbox._read_unified_manifest(),
         )
         _mark_sync("manifest")
@@ -528,12 +499,7 @@ async def sync_sandbox_assets(
             changed_modules: set[str] = set()
             for mod_name, mod_data in local_manifest["modules"].items():
                 remote_mod = remote_manifest.get("modules", {}).get(mod_name)
-                if mod_name == "tokens":
-                    if sandbox._token_needs_refresh(
-                        remote_mod, tokens, user_id, workspace_id
-                    ):
-                        changed_modules.add("tokens")
-                elif (
+                if (
                     remote_mod is None
                     or remote_mod.get("version") != mod_data["version"]
                 ):
@@ -595,11 +561,6 @@ async def sync_sandbox_assets(
             if on_progress:
                 on_progress("Syncing skills...")
             parallel_uploads.append(("skills", _do_skills_upload()))
-        if "tokens" in changed_modules and tokens:
-            if on_progress:
-                on_progress("Uploading tokens...")
-            parallel_uploads.append(("tokens", sandbox.upload_token_file(tokens)))
-
         if parallel_uploads:
             await asyncio.gather(*[coro for _, coro in parallel_uploads])
             refreshed.extend(name for name, _ in parallel_uploads)

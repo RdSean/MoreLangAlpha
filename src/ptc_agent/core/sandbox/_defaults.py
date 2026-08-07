@@ -25,8 +25,6 @@ DEFAULT_DEPENDENCIES = [
     "scipy",
     "scikit-learn",
     "statsmodels",
-    # Financial data
-    "yfinance",
     # Visualization
     "matplotlib",
     "seaborn",

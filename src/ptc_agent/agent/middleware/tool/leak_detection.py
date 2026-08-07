@@ -29,7 +29,7 @@ class LeakDetectionMiddleware(AgentMiddleware):
 
     Discovers secrets from MCP server config env declarations. Matches
     exact values of secrets actually accessible to the agent (sandbox
-    env vars like FMP_API_KEY, GITHUB_TOKEN, etc.).
+    env vars like GITHUB_TOKEN and configured MCP credentials.
     """
 
     # Matches sandbox access tokens (gxsa_...) and refresh tokens (gxsr_...)

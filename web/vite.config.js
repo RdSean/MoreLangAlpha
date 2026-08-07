@@ -8,7 +8,7 @@ const MARKDOWN = new Set([
   'react-markdown', 'remark-gfm', 'remark-math', 'remark-cjk-friendly',
   'rehype-katex', 'rehype-raw', 'katex',
 ])
-const CHARTS = new Set(['recharts', 'lightweight-charts'])
+const CHARTS = new Set(['recharts'])
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -68,7 +68,9 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      host: '127.0.0.1',
+      host: '0.0.0.0',
+      port: 5177,
+      strictPort: true,
       // Unset leaves Vite's default host checking in place.
       allowedHosts: allowedHosts.length ? allowedHosts : undefined,
       // In Docker on macOS the bind mount doesn't forward fsevents, so Vite's

@@ -705,8 +705,8 @@ test.describe('Chat View -- SSE Streaming', () => {
       method: 'GET',
       path: '/api/v1/threads/b0000001-0000-4000-8000-000000000001/messages/replay',
       events: [
-        sseEvents.userMessage('Analyze the portfolio'),
-        sseEvents.messageChunk('Starting portfolio analysis...'),
+        sseEvents.userMessage('Summarize the uploaded notes'),
+        sseEvents.messageChunk('Starting note summary...'),
         sseEvents.replayDone(),
       ],
       delay: 10,
@@ -717,7 +717,7 @@ test.describe('Chat View -- SSE Streaming', () => {
       method: 'GET',
       path: '/api/v1/threads/b0000001-0000-4000-8000-000000000001/messages/stream',
       events: [
-        sseEvents.messageChunk(' Your portfolio returned 12% YTD.'),
+        sseEvents.messageChunk(' The notes identify three next steps.'),
         sseEvents.finishStop(),
         sseEvents.creditUsage(),
       ],
@@ -727,7 +727,7 @@ test.describe('Chat View -- SSE Streaming', () => {
     await page.goto('/chat/t/b0000001-0000-4000-8000-000000000001');
 
     // The reconnected stream content should appear
-    await expect(page.getByText('Your portfolio returned 12% YTD.')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('The notes identify three next steps.')).toBeVisible({ timeout: 15000 });
   });
 });
 
@@ -764,14 +764,14 @@ test.describe('Steering -- History Replay', () => {
     await mockAPI(page, steeringChatOverrides(1));
 
     // Fixture: single turn where the user steers the agent mid-stream with
-    // "focus on speaker list". The agent produces content before and after.
+    // "focus on session schedule". The agent produces content before and after.
     const turn0Events = loadFixture('steering-single-turn.json', 0);
 
     await configureSSE({
       method: 'GET',
       path: '/api/v1/threads/b0000001-0000-4000-8000-000000000001/messages/replay',
       events: [
-        sseEvents.userMessage('any investment opportunity?', 0),
+        sseEvents.userMessage('summarize the education conference', 0),
         ...turn0Events,
         sseEvents.replayDone(),
       ],
@@ -781,13 +781,13 @@ test.describe('Steering -- History Replay', () => {
     await page.goto('/chat/t/b0000001-0000-4000-8000-000000000001');
 
     // User query should appear
-    await expect(page.getByText('any investment opportunity?')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('summarize the education conference')).toBeVisible({ timeout: 15000 });
 
     // Steering user message should appear as a delivered bubble
-    await expect(page.getByText('focus on speaker list')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('focus on session schedule')).toBeVisible({ timeout: 15000 });
 
     // Post-steering assistant content should appear (the agent continued after steering)
-    await expect(page.getByText('NVIDIA GTC 2026').first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('Teaching and Learning Summit').first()).toBeVisible({ timeout: 15000 });
 
     // The turn has 1 steering_delivered → 2 assistant messages (pre + post steering).
     // Each assistant message renders exactly one img[alt="Assistant"] avatar.
@@ -812,9 +812,9 @@ test.describe('Steering -- History Replay', () => {
       method: 'GET',
       path: '/api/v1/threads/b0000001-0000-4000-8000-000000000001/messages/replay',
       events: [
-        sseEvents.userMessage('any investment opportunity?', 0),
+        sseEvents.userMessage('summarize the education conference', 0),
         ...turn0Events,
-        sseEvents.userMessage('find investment ideas from GTC 2026', 1),
+        sseEvents.userMessage('organize the conference research', 1),
         ...turn1Events,
         sseEvents.replayDone(),
       ],
@@ -824,10 +824,10 @@ test.describe('Steering -- History Replay', () => {
     await page.goto('/chat/t/b0000001-0000-4000-8000-000000000001');
 
     // Wait for post-steering content to confirm replay completed
-    await expect(page.getByText('All three subagents updated')).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText('All three subagents updated to group materials by learning topic.')).toBeVisible({ timeout: 30000 });
 
     // Main steering user message should be visible (from the steering_delivered event)
-    await expect(page.getByText('let subagent group its finding by sector')).toBeVisible();
+    await expect(page.getByText('group the materials by learning topic')).toBeVisible();
 
     // Regression gate: count assistant avatars. Each assistant message renders
     // exactly one img[alt="Assistant"]. Expected layout:

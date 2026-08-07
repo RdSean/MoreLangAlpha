@@ -123,7 +123,7 @@ class RedisTTLConfig(BaseModel):
 
     results_list: int = Field(default=300, description="Results list cache TTL (5 minutes)")
     result_detail: int = Field(default=900, description="Result detail cache TTL (15 minutes)")
-    metadata: int = Field(default=900, description="Metadata tags/tickers cache TTL (15 minutes)")
+    metadata: int = Field(default=900, description="Metadata cache TTL (15 minutes)")
     metadata_summary: int = Field(
         default=600, description="Metadata summary cache TTL (10 minutes)"
     )

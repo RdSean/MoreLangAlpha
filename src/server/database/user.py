@@ -125,7 +125,7 @@ async def migrate_user_id(old_user_id: str, new_user_id: str) -> Optional[Dict[s
     """Update a user's PK from old_user_id to new_user_id.
 
     Requires ON UPDATE CASCADE on all FK constraints so child tables
-    (workspaces, watchlists, etc.) update automatically.
+    (workspaces and related user-owned resources) update automatically.
     """
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:

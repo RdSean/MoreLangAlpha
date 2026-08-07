@@ -201,7 +201,7 @@ def raise_not_found(resource: str, resource_id: Optional[str] = None) -> None:
     Raise a 404 Not Found HTTPException.
 
     Args:
-        resource: Name of the resource (e.g., "User", "Portfolio holding")
+        resource: Name of the resource (e.g., "User", "Workspace file")
         resource_id: Optional ID to include in the message
 
     Raises:
