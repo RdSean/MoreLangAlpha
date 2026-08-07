@@ -13,9 +13,6 @@ export interface LocationState {
   attachmentMeta?: Record<string, unknown>[] | null;
   model?: string;
   reasoningEffort?: string;
-  isOnboarding?: boolean;
-  isPersonalizing?: boolean;
-  isModifyingPreferences?: boolean;
   workspaceId?: string;
   workspaceName?: string;
   fromThreadId?: string;
@@ -28,17 +25,6 @@ export interface LocationState {
    * the bus state powers the visual chips and any follow-up the user types.
    */
   widgetSnapshots?: WidgetContextSnapshot[];
-  /**
-   * Chart selection snapshots forwarded from MarketView's PTC send so the
-   * auto-fired user message renders the selection cards live (they also persist
-   * to metadata, so replay re-renders them regardless).
-   */
-  chartSelections?: import('@/pages/MarketView/stores/chartSelectionStore').ChartSelectionSnapshot[];
-  /**
-   * Skill names to preload as hidden skills (chart-annotation forwarding from
-   * MarketView). Merged into `additionalContext` as `{type:'skills',name}` on
-   * the auto-fire send so hidden skills stay active on the PTC side.
-   */
   skills?: string[];
   [key: string]: unknown;
 }
@@ -122,11 +108,6 @@ export interface SlashCommand {
 export interface ModelOptions {
   model?: string | null;
   reasoningEffort?: string | null;
-  /**
-   * Per-message Watch-toggle state. When on, `handleSendWithAttachments`
-   * appends a `market-watch` skills item to `additional_context`.
-   */
-  marketWatch?: boolean | null;
   /**
    * Widget context snapshots from the chat input's deck rail. Serialized into
    * `additional_context` items (one widget directive + optional sibling image

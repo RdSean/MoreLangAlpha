@@ -31,8 +31,6 @@ export interface ModelOptions {
   model: string | null;
   reasoningEffort: string | null;
   fastMode: boolean;
-  /** Per-message market-watch toggle — stamps live prices for tracked tickers. */
-  marketWatch?: boolean;
   /**
    * Widget context snapshots attached via the deck rail. Forwarded to the
    * backend as `additional_context` items of `type: "widget"`. Image-bearing

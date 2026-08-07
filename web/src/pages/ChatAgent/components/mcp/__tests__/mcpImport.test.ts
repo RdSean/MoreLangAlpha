@@ -8,7 +8,7 @@ import {
 
 describe('coerceMcpName', () => {
   it('underscores illegal characters and flags the rename', () => {
-    expect(coerceMcpName('my-stock-mcp.v2')).toEqual({ name: 'my_stock_mcp_v2', renamed: true });
+    expect(coerceMcpName('my-records-mcp.v2')).toEqual({ name: 'my_records_mcp_v2', renamed: true });
   });
   it('prefixes a leading digit', () => {
     expect(coerceMcpName('3rd-party')).toEqual({ name: '_3rd_party', renamed: true });
@@ -42,9 +42,9 @@ describe('parseMcpServersJson', () => {
   it('unwraps mcpServers and maps a remote server', () => {
     const text = JSON.stringify({
       mcpServers: {
-        'my-stock-mcp': {
+        'my-records-mcp': {
           type: 'streamablehttp',
-          url: 'https://api.example.com/ds/stock',
+          url: 'https://api.example.com/ds/records',
           headers: { Authorization: 'EXAMPLE-OPAQUE-TOKEN' },
         },
       },
@@ -53,11 +53,11 @@ describe('parseMcpServersJson', () => {
     expect(error).toBeUndefined();
     expect(servers).toHaveLength(1);
     const s = servers[0];
-    expect(s.originalName).toBe('my-stock-mcp');
-    expect(s.name).toBe('my_stock_mcp');
+    expect(s.originalName).toBe('my-records-mcp');
+    expect(s.name).toBe('my_records_mcp');
     expect(s.renamed).toBe(true);
     expect(s.transport).toBe('http');
-    expect(s.url).toBe('https://api.example.com/ds/stock');
+    expect(s.url).toBe('https://api.example.com/ds/records');
     // Literal secret is filled inline for the user to vault via the picker.
     expect(s.headers).toEqual({ Authorization: 'EXAMPLE-OPAQUE-TOKEN' });
   });

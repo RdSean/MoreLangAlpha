@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Check, ChevronDown, FileStack, FolderOpen, Radar, ScrollText, Zap,
+  Check, ChevronDown, FileStack, FolderOpen, ScrollText, Zap,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -24,9 +24,6 @@ export function useToolbarItems({
   ptcDisabledReason,
   planMode,
   setPlanMode,
-  watchMode,
-  setWatchMode,
-  marketWatchEnabled,
   workspaces,
   selectedWorkspaceId,
   onWorkspaceChange,
@@ -36,9 +33,6 @@ export function useToolbarItems({
   ptcDisabledReason?: string | null;
   planMode: boolean;
   setPlanMode: (v: boolean) => void;
-  watchMode: boolean;
-  setWatchMode: (v: boolean) => void;
-  marketWatchEnabled: boolean;
   workspaces?: Workspace[] | null;
   selectedWorkspaceId?: string | null;
   onWorkspaceChange?: ((wsId: string) => void) | null;
@@ -62,7 +56,7 @@ export function useToolbarItems({
   }, [showWorkspaceMenu]);
 
   const hasModeToggle = mode !== undefined && onModeChange !== undefined;
-  const showPlanWatchSlot = !hasModeToggle || mode === 'ptc';
+  const showPlanSlot = !hasModeToggle || mode === 'ptc';
   const showWorkspaceSelector = !!(hasModeToggle && mode === 'ptc' && workspaces && workspaces.length > 0);
   const ptcBlocked = mode === 'fast' && !!ptcDisabledReason;
   const selectedWorkspaceName = useMemo(() => {
@@ -111,7 +105,7 @@ export function useToolbarItems({
       id: 'plan',
       group: 'toggle',
       // Shown when the host enforces PTC (no mode toggle) or PTC is selected.
-      visible: showPlanWatchSlot,
+      visible: showPlanSlot,
       active: planMode,
       inline: ({ measureOnly }) => (
         <PillToggle
@@ -131,32 +125,6 @@ export function useToolbarItems({
           <ScrollText className="h-4 w-4" style={planMode ? { color: 'var(--color-accent-light)' } : undefined} />
           <span>{t('chat.pills.plan')}</span>
           {planMode && <Check className="ml-auto h-4 w-4" style={{ color: 'var(--color-accent-light)' }} />}
-        </DropdownMenuItem>
-      ),
-    },
-    {
-      id: 'watch',
-      group: 'toggle',
-      visible: showPlanWatchSlot && marketWatchEnabled,
-      active: watchMode,
-      inline: ({ measureOnly }) => (
-        <PillToggle
-          active={watchMode}
-          onToggle={() => setWatchMode(!watchMode)}
-          icon={Radar}
-          label={t('chat.pills.watch')}
-          title={t('chat.pills.watchTitle')}
-          measureOnly={measureOnly}
-        />
-      ),
-      menu: () => (
-        <DropdownMenuItem
-          title={t('chat.pills.watchTitle')}
-          onSelect={(e) => { e.preventDefault(); setWatchMode(!watchMode); }}
-        >
-          <Radar className="h-4 w-4" style={watchMode ? { color: 'var(--color-accent-light)' } : undefined} />
-          <span>{t('chat.pills.watch')}</span>
-          {watchMode && <Check className="ml-auto h-4 w-4" style={{ color: 'var(--color-accent-light)' }} />}
         </DropdownMenuItem>
       ),
     },
@@ -229,7 +197,7 @@ export function useToolbarItems({
     },
   ], [
     hasModeToggle, mode, onModeChange, ptcBlocked, ptcDisabledReason,
-    showPlanWatchSlot, planMode, setPlanMode, watchMode, setWatchMode, marketWatchEnabled,
+    showPlanSlot, planMode, setPlanMode,
     showWorkspaceSelector, showWorkspaceMenu, selectedWorkspaceName,
     workspaces, selectedWorkspaceId, onWorkspaceChange, t,
   ]);

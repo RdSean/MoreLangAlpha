@@ -14,12 +14,10 @@ import { useIsMobile } from './hooks/useIsMobile';
 import { useSetupGate } from './hooks/useSetupGate';
 import { isPlatformMode, APP_ENTRY_PATH } from './config/hostMode';
 import { AUTH_BROADCAST_CHANNEL, type AuthBroadcastMessage } from './lib/oauthPopup';
-import { OnboardingProvider, OnboardingHostGate } from './pages/Onboarding';
 import { ThreadLifecycleFeed } from './lib/threadLifecycle/ThreadLifecycleFeed';
 import './App.css';
 
-// Login carries the market-tape canvas subsystem (~2k lines that only a
-// logged-out visitor ever renders) — split it out of the main bundle.
+// Login is split from the main bundle because logged-in users never render it.
 const LoginPage = React.lazy(() => import('./pages/Login/LoginPage'));
 // The public share route reuses the chat transcript renderer, so a static import
 // pulled the whole ChatAgent tree — plus the markdown and chart vendors it reaches
@@ -200,7 +198,7 @@ function AuthenticatedShell() {
   }
 
   return (
-    <OnboardingProvider>
+    <>
       <ThreadLifecycleFeed />
       <div className="app-layout">
         {!isMobile && (
@@ -216,8 +214,7 @@ function AuthenticatedShell() {
           <Main />
         </main>
       </div>
-      <OnboardingHostGate />
-    </OnboardingProvider>
+    </>
   );
 }
 

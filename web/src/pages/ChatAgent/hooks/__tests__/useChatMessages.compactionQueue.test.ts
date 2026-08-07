@@ -410,7 +410,7 @@ describe('useChatMessages – queued send during compaction', () => {
     });
     await waitFor(() => expect(result.current.isLoading).toBe(true));
 
-    const snapshot = { id: 'w1', title: 'Watchlist' } as unknown as never;
+    const snapshot = { id: 'w1', title: 'Task notes' } as unknown as never;
     act(() => {
       result.current.setIsCompacting('summarize');
     });

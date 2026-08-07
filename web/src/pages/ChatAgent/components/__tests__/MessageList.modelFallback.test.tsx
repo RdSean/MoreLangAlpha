@@ -65,17 +65,9 @@ vi.mock('../Markdown', () => ({
 }));
 
 vi.mock('../charts/InlineArtifactCards', async () => {
-  const React = await vi.importActual<typeof import('react')>('react');
   return {
-    INLINE_ARTIFACT_TOOLS: new Set<string>(['fetch_sample_chart']),
-    InlineStockPriceCard: () => React.createElement('div', { 'data-testid': 'inline-chart' }),
-    InlineCompanyOverviewCard: () => null,
-    InlineMarketIndicesCard: () => null,
-    InlineSectorPerformanceCard: () => null,
-    InlineMarketOverviewCard: () => null,
-    InlineSecFilingCard: () => null,
-    InlineStockScreenerCard: () => null,
-    InlineWebSearchCard: () => null,
+    INLINE_ARTIFACT_TOOLS: new Set<string>(),
+    INLINE_ARTIFACT_MAP: {},
   };
 });
 

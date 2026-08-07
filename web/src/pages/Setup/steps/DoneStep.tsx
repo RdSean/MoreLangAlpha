@@ -92,19 +92,6 @@ export default function DoneStep() {
         >
           {t('setup.goToDashboard')}
         </Button>
-        <button
-          type="button"
-          className="text-sm font-medium transition-colors"
-          style={{ color: 'var(--color-accent-primary)' }}
-          onClick={() =>
-            navigate('/chat/t/__default__', {
-              replace: true,
-              state: { isPersonalizing: true },
-            })
-          }
-        >
-          {t('setup.personalizeLink')}
-        </button>
       </div>
     </div>
   );

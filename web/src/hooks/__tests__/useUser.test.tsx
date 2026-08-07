@@ -4,11 +4,11 @@ import { renderHookWithProviders } from '../../test/utils';
 import { useUser } from '../useUser';
 import { waitFor } from '@testing-library/react';
 
-vi.mock('../../pages/Dashboard/utils/api', () => ({
+vi.mock('@/api/user', () => ({
   getCurrentUser: vi.fn(),
 }));
 
-import { getCurrentUser } from '../../pages/Dashboard/utils/api';
+import { getCurrentUser } from '@/api/user';
 
 const mockGetCurrentUser = getCurrentUser as Mock;
 

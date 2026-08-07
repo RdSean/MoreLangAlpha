@@ -1,14 +1,7 @@
 import React, { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { FileText, ImageIcon, Ruler, SquareDashedMousePointer } from 'lucide-react';
+import { FileText, ImageIcon } from 'lucide-react';
 import { type WidgetContextPreviewShape } from '@/components/ui/WidgetContextPreview';
 import { WidgetContextDeck } from '@/components/ui/WidgetContextDeck';
-import { SelectionContextPreview, type SelectionPreviewShape } from '../SelectionContextPreview';
-
-/** Selection price with 2 decimals (matching StockHeader); `—` when absent. */
-function fmtSelectionPrice(n: number | null | undefined): string {
-  return n == null || !Number.isFinite(n) ? '—' : n.toFixed(2);
-}
 
 /* --- Attachment helpers --- */
 const formatFileSize = (bytes: number | null | undefined): string => {
@@ -61,82 +54,6 @@ export function InlineWidgetDeck({ snapshots }: { snapshots: WidgetChipShape[] }
         paddingBottom: 0,
       }}
     />
-  );
-}
-
-/**
- * Read-only cards below the user bubble summarizing the chart selections
- * (region / price level + note) attached to this send. Styled like the
- * widget-context cards: an icon thumb plus a title and a note/bounds snippet.
- * Clicking a card opens a "how the agent sees it" preview of its context.
- */
-export function InlineSelectionCards({ selections }: { selections: SelectionPreviewShape[] }) {
-  const { t } = useTranslation();
-  const [previewed, setPreviewed] = useState<SelectionPreviewShape | null>(null);
-  return (
-    <div className="flex flex-col items-end gap-1.5">
-      {selections.map((s) => {
-        const Icon = s.selectionType === 'region' ? SquareDashedMousePointer : Ruler;
-        const title = s.selectionType === 'region'
-          ? t('marketView.selection.cardRegionTitle')
-          : t('marketView.selection.cardPriceTitle');
-        const bounds = s.selectionType === 'region'
-          ? `$${fmtSelectionPrice(s.priceLow)} – $${fmtSelectionPrice(s.priceHigh)}`
-          : `$${fmtSelectionPrice(s.priceLow)}`;
-        // Prefer the user's note as the snippet; fall back to the bounds.
-        const snippet = s.comment ? `“${s.comment}”` : bounds;
-        return (
-          <button
-            key={`${s.selectionType}-${s.symbol}-${s.timeframe}-${s.priceLow}-${s.priceHigh}-${s.timeStart ?? ''}`}
-            type="button"
-            onClick={() => setPreviewed(s)}
-            title={t('marketView.selection.cardOpenPreview')}
-            className="flex items-center gap-2.5 text-left transition-colors hover:brightness-105"
-            style={{
-              width: 280,
-              maxWidth: '100%',
-              padding: '8px 12px',
-              borderRadius: 10,
-              background: 'var(--color-bg-elevated)',
-              border: '1px solid var(--color-border-muted)',
-              boxShadow: 'var(--shadow-card)',
-              cursor: 'pointer',
-            }}
-          >
-            <div
-              className="flex items-center justify-center flex-shrink-0"
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 8,
-                background: 'var(--color-accent-soft)',
-                color: 'var(--color-accent-light)',
-              }}
-            >
-              <Icon className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex flex-col">
-              <div
-                className="truncate"
-                style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-primary)' }}
-              >
-                {title}
-                <span style={{ fontWeight: 400, color: 'var(--color-text-tertiary)' }}>
-                  {' · '}{s.symbol} {s.timeframe}
-                </span>
-              </div>
-              <div
-                className="truncate"
-                style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}
-              >
-                {snippet}
-              </div>
-            </div>
-          </button>
-        );
-      })}
-      <SelectionContextPreview selection={previewed} onClose={() => setPreviewed(null)} />
-    </div>
   );
 }
 

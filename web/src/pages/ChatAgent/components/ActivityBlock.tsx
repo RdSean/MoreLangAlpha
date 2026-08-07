@@ -12,7 +12,6 @@ import {
   categorizeTool,
   type ToolCategory,
 } from './toolDisplayConfig';
-import { classifyAgentPath, isUserProfileReadmePath } from '../utils/agentPaths';
 import { TextShimmer } from '@/components/ui/text-shimmer';
 import { DotLoader } from '@/components/ui/dot-loader';
 import { useAnimatedText } from '@/components/ui/animated-text';
@@ -30,21 +29,6 @@ const FILE_NAV_TOOLS = new Set(['Read', 'Write']);
 function getFilePathFromArgs(args: Record<string, unknown> | undefined): string | null {
   if (!args) return null;
   return (args.file_path || args.filePath || args.path || args.filename || null) as string | null;
-}
-
-/**
- * The agent occasionally reads `.agents/user/profile/README.md` to recall the
- * JSON schema for portfolio/watchlist/preference. That's plumbing chatter — it
- * doesn't represent meaningful work to a human reader and the README itself
- * has no user-facing surface to open. Hide these rows from the timeline (and
- * from the accordion summary fingerprint/counts) so the chat stays focused
- * on actual data operations.
- */
-function shouldHideTimelineItem(item: ActivityItem): boolean {
-  if (item.type !== 'tool_call') return false;
-  if (item.toolName !== 'Read') return false;
-  const fp = getFilePathFromArgs(item.toolCall?.args);
-  return fp ? isUserProfileReadmePath(fp) : false;
 }
 
 /** Spring config matching radix-accordion feel */
@@ -81,9 +65,6 @@ interface ActivityItem {
   isFailed?: boolean;
   _recentlyCompleted?: boolean;
   _liveState?: LiveState;
-  /** Intermediate chart-annotation draw — render as an ordinary row, never a
-   *  card (the latest draw per chart owns the card; set in MessageList). */
-  _annotationStep?: boolean;
   content?: string;
   reasoningTitle?: string;
   [key: string]: unknown;
@@ -128,16 +109,11 @@ const ActivityBlock = memo(function ActivityBlock({ items, preparingToolCall, is
     const inlineCharts: ActivityItem[] = [];
 
     for (const item of items) {
-      // Drop README schema-doc reads at the partition layer so they're invisible
-      // to every downstream consumer (live row, accordion summary, category
-      // counts, new-item animation tracker) — no need for per-site guards.
-      if (shouldHideTimelineItem(item)) continue;
       if (item._liveState === 'completed') {
         if (
           item.type === 'tool_call' &&
           INLINE_ARTIFACT_TOOLS.has(item.toolName || '') &&
-          item.toolCallResult?.artifact &&
-          !item._annotationStep
+          item.toolCallResult?.artifact
         ) {
           inlineCharts.push(item);
         } else {
@@ -185,14 +161,13 @@ const ActivityBlock = memo(function ActivityBlock({ items, preparingToolCall, is
       return `${i.id || i.toolCallId || ''}:${i.type}:${i.toolName || ''}:${fp}`;
     })
     .join('|'), [completedItems]);
-  // Slot = what we emit in the header. `memory` and `profile` each collapse
-  // read+write into a single fragment whose verb flips on any write (each is
-  // conceptually one surface — the user's memory, the user's profile data).
+  // Slot = what we emit in the header. Memory collapses read+write into a
+  // single fragment whose verb flips on any write.
   // `fileRead`/`fileEdit` and `memo`/`memoWrite` stay separate — distinct
   // file/memo paths shouldn't collide under one label, and any memo
   // modification is surfaced distinctly so a future regression letting the
   // agent mutate a memo is visible.
-  type SummarySlot = 'skill' | 'memory' | 'memo' | 'memoWrite' | 'profile' | 'code' | 'web' | 'search' | 'fileRead' | 'fileEdit' | 'reasoning' | 'generic';
+  type SummarySlot = 'skill' | 'memory' | 'memo' | 'memoWrite' | 'code' | 'web' | 'search' | 'fileRead' | 'fileEdit' | 'reasoning' | 'generic';
   const summaryFragments = useMemo<{ slot: SummarySlot; count: number; modified?: boolean }[]>(() => {
     const counts = new Map<ToolCategory | 'reasoning', number>();
     for (const item of completedItems) {
@@ -204,16 +179,11 @@ const ActivityBlock = memo(function ActivityBlock({ items, preparingToolCall, is
     const memReads = counts.get('memoryRead') ?? 0;
     const memWrites = counts.get('memoryWrite') ?? 0;
     const memTotal = memReads + memWrites;
-    const profileReads = counts.get('profileRead') ?? 0;
-    const profileWrites = counts.get('profileWrite') ?? 0;
-    const profileTotal = profileReads + profileWrites;
-    const order: SummarySlot[] = ['skill', 'memory', 'memo', 'memoWrite', 'profile', 'code', 'web', 'search', 'fileRead', 'fileEdit', 'reasoning', 'generic'];
+    const order: SummarySlot[] = ['skill', 'memory', 'memo', 'memoWrite', 'code', 'web', 'search', 'fileRead', 'fileEdit', 'reasoning', 'generic'];
     const out: { slot: SummarySlot; count: number; modified?: boolean }[] = [];
     for (const slot of order) {
       if (slot === 'memory') {
         if (memTotal > 0) out.push({ slot, count: memTotal, modified: memWrites > 0 });
-      } else if (slot === 'profile') {
-        if (profileTotal > 0) out.push({ slot, count: profileTotal, modified: profileWrites > 0 });
       } else if (counts.has(slot as ToolCategory | 'reasoning')) {
         out.push({ slot, count: counts.get(slot as ToolCategory | 'reasoning')! });
       }
@@ -242,8 +212,7 @@ const ActivityBlock = memo(function ActivityBlock({ items, preparingToolCall, is
     const FOLDED_MAX = 3;
     const isPriority = (f: { slot: SummarySlot; modified?: boolean }) =>
       f.slot === 'memoWrite'
-      || (f.slot === 'memory' && f.modified === true)
-      || (f.slot === 'profile' && f.modified === true);
+      || (f.slot === 'memory' && f.modified === true);
     const priority = summaryFragments.filter(isPriority);
     const rest = summaryFragments.filter((f) => !isPriority(f));
     const ordered = [...priority, ...rest];
@@ -256,10 +225,6 @@ const ActivityBlock = memo(function ActivityBlock({ items, preparingToolCall, is
         if (f.slot === 'memory') {
           // No count for memory — any write/edit overrules pure-read framing.
           return t(f.modified ? 'toolArtifact.categoryCount.memoryUpdated' : 'toolArtifact.categoryCount.memoryRead');
-        }
-        if (f.slot === 'profile') {
-          // Same single-surface framing as memory — verb flips on any write.
-          return t(f.modified ? 'toolArtifact.categoryCount.profileUpdated' : 'toolArtifact.categoryCount.profileRead');
         }
         if (f.slot === 'fileRead') return t('toolArtifact.categoryCount.fileRead', { count: f.count });
         if (f.slot === 'fileEdit') return t('toolArtifact.categoryCount.fileEdit', { count: f.count });
@@ -852,13 +817,7 @@ const EditToolRow = memo(function EditToolRow({ item, onOpenFile }: EditToolRowP
   const oldStr = (args.old_string || args.oldString || '') as string;
   const newStr = (args.new_string || args.newString || '') as string;
   const hasDiff = !!(oldStr || newStr);
-  // For user-profile paths the row title already names the entity
-  // ("Updated portfolio") — appending `portfolio.json` as a pill is redundant
-  // noise. Skip the filename fallback in that case; the title-as-button
-  // branch below preserves click-to-open.
-  const info = filePath ? classifyAgentPath(filePath) : null;
-  const fallbackName = info?.kind === 'user-profile' ? '' : fileName;
-  const summary = getCompletedSummary(item.toolName || 'Edit', item.toolCall, t) || fallbackName;
+  const summary = getCompletedSummary(item.toolName || 'Edit', item.toolCall, t) || fileName;
 
   // Match the destination tab label to the actual classification of the
   // path so the tooltip doesn't lie when the click routes to Memory.

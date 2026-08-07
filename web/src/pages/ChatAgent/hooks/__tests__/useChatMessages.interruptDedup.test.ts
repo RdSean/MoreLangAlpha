@@ -54,7 +54,7 @@ const ptcAction = (toolCallId: string) => ({
   type: 'ptc_agent',
   workspace_id: 'ws-x',
   workspace_name: 'Analysis',
-  question: 'analyze the stock',
+  question: 'analyze the document',
   report_back: true,
   tool_call_id: toolCallId,
 });

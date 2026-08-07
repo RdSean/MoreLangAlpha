@@ -165,7 +165,7 @@ export function mapOutsideCode(
  * A code span may cross line endings (CommonMark folds them to spaces), so a
  * line-oriented pass can walk into one and rewrite lines that were never
  * markdown. Single-line spans stay in the text the transform sees, because
- * they sit inside the very lines it exists to repair: hiding `` `AAPL` ``
+ * they sit inside the very lines it exists to repair: hiding `` `example` ``
  * would take its table row with it.
  */
 export function mapOutsideMultilineCode(

@@ -174,8 +174,8 @@ export interface ProvenanceRecord {
   source_type: ProvenanceSourceType;
   identifier: string;
   title?: string;
-  /** Data-kind slug within this source type (e.g. "company_overview"); the
-   *  Sources panel i18n-maps it to label each access in the hover breakdown. */
+  /** Data-kind slug within this source type; the Sources panel i18n-maps it
+   *  to label each access in the hover breakdown. */
   detail?: string;
   provider?: string;
   tool_call_id?: string;
@@ -191,20 +191,15 @@ export interface ProvenanceRecord {
 /**
  * Per-access discriminator appended to a provenance dedup key — `mcp_tool` only.
  *
- * Web/SEC/file sources have a per-access-unique `identifier` (a URL or path), so
- * the identifier alone separates two accesses. `market_data` repeats its ticker
- * identifier across calls, but each native tool call carries its own
- * `tool_call_id`, so the storage key stays distinct and the panel deck splits the
- * row by `result_sha256` on expand. An `mcp_tool` source has neither safeguard:
+ * Web and file sources have a per-access-unique `identifier` (a URL or path), so
+ * the identifier alone separates two accesses. An `mcp_tool` source has neither safeguard:
  * its identifier is `"server:tool"` (shared by every call to that tool) AND all
  * in-sandbox calls in one execute_code/bash block share that block's outer
  * `tool_call_id` — so two parts are added here to discriminate:
- *  1. `args_fingerprint` — separates calls with different inputs: get_stock_data
- *     for AAPL vs NVDA, or the same ticker over a different date range/interval.
+ *  1. `args_fingerprint` — separates calls with different inputs to the same tool.
  *  2. `result_sha256` — separates calls with IDENTICAL inputs that returned
- *     DIFFERENT data. Market data is time-varying, so the same query seconds
- *     apart is a distinct snapshot the agent reasoned over and earns its own
- *     card; collapsing on args alone would silently drop the earlier snapshot.
+ *     DIFFERENT data. Time-varying tool results remain distinct snapshots the
+ *     agent reasoned over, so collapsing on args alone would drop history.
  *
  * This mirrors the backend persist dedup, which already keys on `result_sha256`.
  * Returns '' for non-mcp_tool (web sources keep their collapse-by-URL behavior).
@@ -226,8 +221,8 @@ export function provenanceMcpKey(
  *
  * NOTE: web sources intentionally omit `result_sha256` here — the same URL
  * collapses to one row even when the DB keeps distinct shas. `mcp_tool` does
- * NOT omit it, because identical args can still return different data (live
- * market data). This per-source-type divergence is intentional.
+ * NOT omit it, because identical args can still return different data. This
+ * per-source-type divergence is intentional.
  */
 export function provenanceDisplayKey(
   record: Pick<
@@ -353,14 +348,6 @@ export interface UserMessage {
    * backend via `additional_context`.
    */
   widgetSnapshots?: import('@/types/widgetContext').WidgetContextSnapshot[];
-  /**
-   * Chart selections (region / price level) the user attached to this message.
-   * Rendered as read-only pills below the user bubble (like widget snapshots)
-   * and forwarded to the backend via `additional_context`. A compact camelCase
-   * summary is persisted to the turn's query metadata, so history replay
-   * re-renders these cards (see serialize_chart_selections_for_metadata).
-   */
-  chartSelections?: import('@/pages/MarketView/stores/chartSelectionStore').ChartSelectionSnapshot[];
   steeringDelivered?: boolean;
   steering?: boolean;
   /**

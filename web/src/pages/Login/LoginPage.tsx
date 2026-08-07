@@ -11,8 +11,7 @@ import { validatePasswordPair, MIN_PASSWORD_LENGTH } from './passwordRequirement
 import CheckInbox, { type CheckInboxKind } from './CheckInbox';
 import AccountRecoveryHint from './AccountRecoveryHint';
 import EmailOnlyView from './EmailOnlyView';
-import MarketScanlines from './MarketScanlines';
-import EdgeGrain from './EdgeGrain';
+import WavesBackground from './WavesBackground';
 import './LoginPage.css';
 
 interface LogoIconProps {
@@ -73,9 +72,8 @@ function SwitchPrompt({ i18nKey, onSwitch }: SwitchPromptProps) {
 
 /**
  * LoginPage - Split-screen login: auth pane on the left (method picker first,
- * then email/password, magic-link, and password-reset views), market-tape
- * visual on the right. Shown at the app entry URL when the user is not
- * logged in.
+ * then email/password, magic-link, and password-reset views), a quiet visual
+ * pane on the right. Shown at the app entry URL when the user is not logged in.
  */
 function LoginPage() {
   const {
@@ -249,10 +247,6 @@ function LoginPage() {
   return (
     <div className="login-page login-page--split">
       <div className="login-page__frame">
-      {/* Not gated on visualHidden: the grain is a frame-level texture (visible
-          on mobile too) and only animates on ember seeds, which never spawn
-          while the tape pane is unmounted. */}
-      <EdgeGrain />
       <div className="login-page__auth-pane">
         <div className="login-page__auth-inner">
         <div className="login-page__card-header">
@@ -534,7 +528,7 @@ function LoginPage() {
         </div>
       </div>
       <div className="login-page__visual-pane" aria-hidden="true">
-        {!visualHidden && <MarketScanlines />}
+        {!visualHidden && <WavesBackground />}
         <div className="login-page__visual-copy">
           <h2 className="login-page__visual-title">{t('auth.visualTitle')}</h2>
           <p className="login-page__visual-subtitle">{t('auth.visualSubtitle')}</p>

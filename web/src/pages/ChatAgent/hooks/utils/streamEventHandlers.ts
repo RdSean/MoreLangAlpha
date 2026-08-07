@@ -28,4 +28,3 @@ export {
   handleTaskSteeringAccepted,
 } from '../../session/subagents/liveEventHandlers';
 export { getOrCreateTaskRefs } from '../../session/streamRefs';
-export { coerceSymbols, handleMarketWatchUpdate, type MarketWatchState } from '../../session/marketWatchEvents';

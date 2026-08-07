@@ -29,18 +29,18 @@ export interface LoaderProps {
 // phase-synced); the interval exists only while a loader is mounted.
 // ---------------------------------------------------------------------------
 
-interface Ticker {
+interface FrameClock {
   frame: number;
   listeners: Set<() => void>;
   id: ReturnType<typeof setInterval>;
 }
 
-const tickers = new Map<number, Ticker>();
+const frameClocks = new Map<number, FrameClock>();
 
 function subscribeFrame(stepMs: number, cb: () => void): () => void {
-  let t = tickers.get(stepMs);
+  let t = frameClocks.get(stepMs);
   if (!t) {
-    const created: Ticker = {
+    const created: FrameClock = {
       frame: 0,
       listeners: new Set(),
       id: setInterval(() => {
@@ -49,7 +49,7 @@ function subscribeFrame(stepMs: number, cb: () => void): () => void {
       }, stepMs),
     };
     t = created;
-    tickers.set(stepMs, created);
+    frameClocks.set(stepMs, created);
   }
   t.listeners.add(cb);
   return () => {
@@ -58,7 +58,7 @@ function subscribeFrame(stepMs: number, cb: () => void): () => void {
       clearInterval(t.id);
       // A later generation may already own this cadence slot (React runs all
       // destroys before creates in a commit) — only remove our own entry.
-      if (tickers.get(stepMs) === t) tickers.delete(stepMs);
+      if (frameClocks.get(stepMs) === t) frameClocks.delete(stepMs);
     }
   };
 }
@@ -116,7 +116,7 @@ export function Loader({
   );
   const frame = useSyncExternalStore(
     subscribe,
-    () => tickers.get(stepMs)?.frame ?? 0,
+    () => frameClocks.get(stepMs)?.frame ?? 0,
     () => 0,
   );
 

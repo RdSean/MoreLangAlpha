@@ -4,10 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import LoginPage from '@/pages/Login/LoginPage';
 
-// The canvas panes need a real 2d context and are irrelevant to the view
-// state machine under test.
-vi.mock('@/pages/Login/MarketScanlines', () => ({ default: () => null }));
-vi.mock('@/pages/Login/EdgeGrain', () => ({ default: () => null }));
+// The decorative pane is irrelevant to the view state machine under test.
+vi.mock('@/pages/Login/WavesBackground', () => ({ default: () => null }));
 
 const auth = {
   loginWithEmail: vi.fn(),

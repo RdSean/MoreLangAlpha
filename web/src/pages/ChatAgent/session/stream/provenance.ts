@@ -15,13 +15,8 @@ import { provenanceMcpKey } from '@/types/chat';
  * never dropping a sibling URL. For `mcp_tool` the identifier is `"server:tool"`
  * (shared across calls), so the per-access discriminator (args fingerprint +
  * result hash, see {@link provenanceMcpKey}) is appended too — otherwise two
- * calls to one tool with different args (get_stock_data for AAPL vs NVDA), or
- * even the same args returning different data (live market data), collide and
- * the last silently overwrites the first. Market-watch stamps have the same
- * problem with neither safeguard (`tool_call_id` is null by design and one
- * symbol refreshes many times per turn), so they discriminate on
- * `result_sha256` — each refresh is a distinct snapshot the agent reasoned
- * over, while byte-identical throttled replays still collapse.
+ * calls to one tool with different args, or the same args returning different
+ * data, collide and the last silently overwrites the first.
  */
 export function provenanceRecordKey(record: {
   tool_call_id?: string;
@@ -36,9 +31,6 @@ export function provenanceRecordKey(record: {
     record as Pick<ProvenanceRecord, 'source_type' | 'args_fingerprint' | 'result_sha256'>,
   );
   if (mcp) return `${base}:${mcp}`;
-  if (record.detail === 'market_watch' && record.result_sha256) {
-    return `${base}:${record.result_sha256}`;
-  }
   return base;
 }
 

@@ -20,8 +20,8 @@ import SubagentStatusBar from '../SubagentStatusBar';
 
 const baseAgent = {
   name: 'Task-k7Xm2p',
-  type: 'equity-analyst',
-  description: 'Research the semiconductor selloff',
+  type: 'research',
+  description: 'Research the requested topic',
   messages: [],
 };
 

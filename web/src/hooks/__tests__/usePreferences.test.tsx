@@ -3,11 +3,11 @@ import { waitFor } from '@testing-library/react';
 import { QueryClient } from '@tanstack/react-query';
 import { renderHookWithProviders } from '@/test/utils';
 
-vi.mock('@/pages/Dashboard/utils/api', () => ({
+vi.mock('@/api/user', () => ({
   getPreferences: vi.fn(),
 }));
 
-import { getPreferences } from '@/pages/Dashboard/utils/api';
+import { getPreferences } from '@/api/user';
 import { usePreferences } from '../usePreferences';
 
 const mockGetPreferences = getPreferences as unknown as ReturnType<typeof vi.fn>;
@@ -49,7 +49,7 @@ describe('usePreferences', () => {
     const original = globalThis.BroadcastChannel;
     delete (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel;
     try {
-      const apiMod = await import('@/pages/Dashboard/utils/api');
+      const apiMod = await import('@/api/user');
       const localGet = apiMod.getPreferences as unknown as ReturnType<typeof vi.fn>;
       vi.mocked(localGet).mockReset();
       const { usePreferences: freshUsePrefs } = await import('../usePreferences');

@@ -4,16 +4,7 @@ import type { TFunction } from 'i18next';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { ArrowRight, ChevronRight, ExternalLink, FileText } from 'lucide-react';
 import { stripLineNumbers, parseTruncatedResult } from './toolDisplayConfig';
-import {
-  StockPriceChart,
-  CompanyOverviewCard,
-  MarketIndicesChart,
-  SectorPerformanceChart,
-  StockScreenerTable,
-} from './charts/MarketDataCharts';
-import SecFilingViewer from './charts/SecFilingViewer';
 import { FaviconImg, googleFaviconUrl } from './charts/InlineArtifactCards';
-import { unwrapMarketOverview } from './charts/inlineCardsShared';
 import AutomationDetailPanel from './charts/AutomationDetailPanel';
 import Markdown, { CodeBlock } from './Markdown';
 import { TaskStatusChip, taskCardStatusKind } from './taskStatusUi';
@@ -104,8 +95,8 @@ export default function ToolCallDetailView({
 
       <div
         ref={scrollContainerRef}
-        className={`${isMobile && artifact?.type !== 'sec_filing' ? '' : 'flex-1'} px-4 py-4 overflow-x-hidden ${artifact?.type === 'sec_filing' ? 'flex flex-col overflow-hidden' : (isMobile ? '' : 'overflow-y-auto')}`}
-        style={isMobile && artifact?.type !== 'sec_filing' ? undefined : { minHeight: 0 }}
+        className={`${isMobile ? '' : 'flex-1'} px-4 py-4 overflow-x-hidden ${isMobile ? '' : 'overflow-y-auto'}`}
+        style={isMobile ? undefined : { minHeight: 0 }}
       >
         {isTaskTool ? (
           <TaskToolContent
@@ -122,7 +113,6 @@ export default function ToolCallDetailView({
             toolName={toolName}
             toolCallProcess={toolCallProcess}
             onOpenFile={onOpenFile}
-            scrollContainerRef={scrollContainerRef}
           />
         )}
       </div>
@@ -324,44 +314,12 @@ interface ArtifactOrMarkdownProps {
   toolName: string;
   toolCallProcess: ToolCallProcessRecord;
   onOpenFile?: (filePath: string, workspaceId?: string) => void;
-  scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
-function ArtifactOrMarkdown({ artifact, content, toolName, toolCallProcess, onOpenFile, scrollContainerRef }: ArtifactOrMarkdownProps): React.ReactElement {
+function ArtifactOrMarkdown({ artifact, content, toolName, toolCallProcess, onOpenFile }: ArtifactOrMarkdownProps): React.ReactElement {
   const { t } = useTranslation();
-  if (artifact?.type) {
-    switch (artifact.type) {
-      case 'stock_prices':
-        return <StockPriceChart data={artifact} />;
-      case 'company_overview':
-        return <CompanyOverviewCard data={artifact} scrollContainerRef={scrollContainerRef} />;
-      case 'market_indices':
-        return <MarketIndicesChart data={artifact} />;
-      case 'sector_performance':
-        return <SectorPerformanceChart data={artifact} />;
-      case 'market_overview': {
-        // Composite artifact: legacy market_indices / sector_performance
-        // artifacts nested verbatim under `indices` / `sectors`.
-        const { indicesArtifact, sectorsArtifact, hasIndices, hasSectors } = unwrapMarketOverview(artifact);
-        if (hasIndices || hasSectors) {
-          return (
-            <div className="flex flex-col gap-4">
-              {hasIndices && <MarketIndicesChart data={indicesArtifact!} />}
-              {hasSectors && <SectorPerformanceChart data={sectorsArtifact!} />}
-            </div>
-          );
-        }
-        // Error-path artifact ({type, region} only) — fall through to the
-        // raw content/markdown rendering below.
-        break;
-      }
-      case 'stock_screener':
-        return <StockScreenerTable data={artifact} />;
-      case 'sec_filing':
-        return <SecFilingViewer data={artifact} />;
-      case 'automations':
-        return <AutomationDetailPanel data={artifact} />;
-    }
+  if (artifact?.type === 'automations') {
+    return <AutomationDetailPanel data={artifact} />;
   }
 
   const rawContent = typeof content === 'string' ? content : content ? String(content) : '';

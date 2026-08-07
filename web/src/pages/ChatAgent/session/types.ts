@@ -123,11 +123,6 @@ interface ModelOptions {
    * below the user bubble (like attachments).
    */
   widgetSnapshots?: import('@/types/widgetContext').WidgetContextSnapshot[];
-  /**
-   * Chart selections attached to this send. Stored on the UserMessage so the
-   * chat renders read-only pills below the user bubble (like widgetSnapshots).
-   */
-  chartSelections?: import('@/pages/MarketView/stores/chartSelectionStore').ChartSelectionSnapshot[];
 }
 
 /** Offload batch ref state. */

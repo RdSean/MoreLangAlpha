@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown } from 'lucide-react';
@@ -14,17 +14,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { searchStocks } from '@/lib/marketUtils';
 import { toast } from '@/components/ui/use-toast';
 import CronScheduleBuilder from './CronScheduleBuilder';
 import { useWorkspaces } from '@/hooks/useWorkspaces';
 import {
   type FormState,
   COMMON_TIMEZONES,
-  PRICE_CONDITION_TYPES,
-  PRICE_REFERENCE_OPTIONS,
-  RETRIGGER_MODES,
-  isPctCondition,
   formStateToPayload,
 } from '../utils/templates';
 
@@ -36,136 +31,6 @@ const inputStyle = {
 };
 
 const labelClass = 'form-label';
-
-// ── TickerAutocomplete ─────────────────────────────────────
-
-const INDEX_SYMBOLS: Array<{ symbol: string; name: string }> = [
-  { symbol: 'SPX', name: 'S&P 500' },
-  { symbol: 'DJI', name: 'Dow Jones Industrial Average' },
-  { symbol: 'COMP', name: 'Nasdaq Composite' },
-  { symbol: 'NDX', name: 'Nasdaq 100' },
-  { symbol: 'RUT', name: 'Russell 2000' },
-  { symbol: 'VIX', name: 'CBOE Volatility Index' },
-];
-
-const INDEX_SYMBOL_SET = new Set(INDEX_SYMBOLS.map((i) => i.symbol));
-
-export function isIndexSymbol(symbol: string): boolean {
-  return INDEX_SYMBOL_SET.has(symbol.toUpperCase());
-}
-
-interface SearchResult { symbol: string; name?: string; exchangeShortName?: string; isIndex?: boolean }
-
-interface TickerAutocompleteProps {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-}
-
-function TickerAutocomplete({ value, onChange, placeholder = 'AAPL, SPX...' }: TickerAutocompleteProps) {
-  useTranslation();
-  const [query, setQuery] = useState(value);
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [showDropdown, setShowDropdown] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Sync external value changes (e.g., template switch)
-  useEffect(() => {
-    setQuery(value);
-  }, [value]);
-
-  // Debounced search — merge index matches + stock API results
-  useEffect(() => {
-    if (!query || query.length < 1) {
-      setResults([]);
-      return;
-    }
-    const q = query.toUpperCase();
-
-    // Instant: filter static index list
-    const indexMatches: SearchResult[] = INDEX_SYMBOLS
-      .filter((idx) => idx.symbol.includes(q) || idx.name.toUpperCase().includes(q))
-      .map((idx) => ({ symbol: idx.symbol, name: idx.name, exchangeShortName: 'INDEX', isIndex: true }));
-
-    // Show index matches immediately
-    if (indexMatches.length > 0) {
-      setResults(indexMatches);
-      setShowDropdown(true);
-    }
-
-    // Debounced: fetch stock results and merge
-    const timer = setTimeout(async () => {
-      const data = await searchStocks(query, 20);
-      const stockResults: SearchResult[] = (data.results as SearchResult[]).map((r) => ({ ...r, isIndex: false }));
-      // Deduplicate: index symbols already shown won't appear in stock results (different symbols)
-      setResults([...indexMatches, ...stockResults]);
-      if (indexMatches.length > 0 || stockResults.length > 0) setShowDropdown(true);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query]);
-
-  // Click outside to close
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setShowDropdown(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  return (
-    <div ref={containerRef} className="relative">
-      <Input
-        value={query}
-        onChange={(e) => {
-          const val = e.target.value.toUpperCase();
-          setQuery(val);
-          onChange(val);
-          if (val.length >= 1) setShowDropdown(true);
-        }}
-        onFocus={() => { if (results.length > 0) setShowDropdown(true); }}
-        placeholder={placeholder}
-        required
-        className="placeholder:text-gray-500 border font-mono uppercase"
-        style={inputStyle}
-      />
-      {showDropdown && results.length > 0 && (
-        <div
-          className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-md border shadow-lg"
-          style={{
-            backgroundColor: 'var(--color-bg-elevated)',
-            borderColor: 'var(--color-border-default)',
-          }}
-        >
-          {results.map((item) => (
-            <button
-              key={item.symbol}
-              type="button"
-              className="w-full text-left px-3 py-2 text-sm hover:bg-foreground/5 flex items-center gap-2"
-              onClick={() => {
-                setQuery(item.symbol);
-                onChange(item.symbol);
-                setShowDropdown(false);
-              }}
-            >
-              <span className="font-mono font-medium" style={{ color: 'var(--color-text-primary)' }}>
-                {item.symbol}
-              </span>
-              {item.name && (
-                <span className="truncate" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {item.name}
-                  {item.exchangeShortName ? ` (${item.exchangeShortName})` : ''}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Workspace type ─────────────────────────────────────────
 
@@ -265,76 +130,11 @@ export default function AutomationInlineForm({
             tabs={[
               { id: 'cron', label: t('automation.cronRecurring') },
               { id: 'once', label: t('automation.once') },
-              { id: 'price', label: t('automation.priceAlert') },
             ]}
             value={form.trigger_type}
             onChange={set('trigger_type')}
           />
         </div>
-
-        {/* Trigger-specific basic fields */}
-        {form.trigger_type === 'price' && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {/* Symbol with autocomplete (stocks + indices) */}
-            <div className="flex flex-col gap-1.5">
-              <label className={labelClass}>{t('automation.priceSymbol')}</label>
-              <TickerAutocomplete
-                value={form.price_symbol}
-                onChange={(val) => setForm((f) => ({ ...f, price_symbol: val }))}
-              />
-            </div>
-
-            {/* Condition Type */}
-            <div className="flex flex-col gap-1.5">
-              <label className={labelClass}>{t('automation.priceCondition')}</label>
-              <Select aria-label={t('automation.priceCondition')} selectedKey={form.price_condition_type} onSelectionChange={setSelection('price_condition_type')}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectPopover>
-                  <SelectListBox>
-                    {PRICE_CONDITION_TYPES.map((opt) => (
-                      <SelectItem key={opt.value} id={opt.value}>{t(opt.labelKey)}</SelectItem>
-                    ))}
-                  </SelectListBox>
-                </SelectPopover>
-              </Select>
-            </div>
-
-            {/* Price Value */}
-            <div className="flex flex-col gap-1.5">
-              <label className={labelClass}>
-                {t('automation.priceValue')} ({isPctCondition(form.price_condition_type) ? '%' : '$'})
-              </label>
-              <Input
-                type="number"
-                step="any"
-                min={0}
-                value={form.price_value}
-                onChange={set('price_value')}
-                placeholder={isPctCondition(form.price_condition_type) ? '5' : '150.00'}
-                required
-                className="placeholder:text-gray-500 border w-full"
-                style={inputStyle}
-              />
-            </div>
-
-            {/* Reference (only for pct conditions) */}
-            {isPctCondition(form.price_condition_type) && (
-              <div className="flex flex-col gap-1.5">
-                <label className={labelClass}>{t('automation.priceReference')}</label>
-                <Select aria-label={t('automation.priceReference')} selectedKey={form.price_reference} onSelectionChange={setSelection('price_reference')}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectPopover>
-                    <SelectListBox>
-                      {PRICE_REFERENCE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} id={opt.value}>{t(opt.labelKey)}</SelectItem>
-                      ))}
-                    </SelectListBox>
-                  </SelectPopover>
-                </Select>
-              </div>
-            )}
-          </div>
-        )}
 
         {form.trigger_type === 'cron' && (
           <div className="flex flex-col gap-1.5">
@@ -443,22 +243,19 @@ export default function AutomationInlineForm({
                 </div>
               )}
 
-              {/* Timezone (hidden for price triggers) */}
-              {form.trigger_type !== 'price' && (
-                <div className="flex flex-col gap-1.5">
-                  <label className={labelClass}>{t('settings.timezone')}</label>
-                  <Select aria-label={t('settings.timezone')} selectedKey={form.timezone} onSelectionChange={setSelection('timezone')}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectPopover>
-                      <SelectListBox>
-                        {COMMON_TIMEZONES.map((tz) => (
-                          <SelectItem key={tz} id={tz}>{tz}</SelectItem>
-                        ))}
-                      </SelectListBox>
-                    </SelectPopover>
-                  </Select>
-                </div>
-              )}
+              <div className="flex flex-col gap-1.5">
+                <label className={labelClass}>{t('settings.timezone')}</label>
+                <Select aria-label={t('settings.timezone')} selectedKey={form.timezone} onSelectionChange={setSelection('timezone')}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectPopover>
+                    <SelectListBox>
+                      {COMMON_TIMEZONES.map((tz) => (
+                        <SelectItem key={tz} id={tz}>{tz}</SelectItem>
+                      ))}
+                    </SelectListBox>
+                  </SelectPopover>
+                </Select>
+              </div>
 
               {/* Thread Strategy */}
               <div className="flex flex-col gap-1.5">
@@ -488,44 +285,6 @@ export default function AutomationInlineForm({
                   onChange={set('delivery_method')}
                 />
               </div>
-
-              {/* Retrigger Mode (price only) */}
-              {form.trigger_type === 'price' && (
-                <>
-                  <div className="flex flex-col gap-1.5">
-                    <label className={labelClass}>{t('automation.priceRetrigger')}</label>
-                    <AnimatedTabs
-                      layoutId="price_retrigger"
-                      tabs={RETRIGGER_MODES.map((opt) => ({ id: opt.value, label: t(opt.labelKey) }))}
-                      value={form.price_retrigger_mode}
-                      onChange={set('price_retrigger_mode')}
-                    />
-                  </div>
-
-                  {form.price_retrigger_mode === 'recurring' && (
-                    <div className="flex flex-col gap-1.5">
-                      <label className={labelClass}>{t('automation.priceCooldown')}</label>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          type="number"
-                          min={240}
-                          placeholder="Leave empty for daily"
-                          value={form.price_cooldown_minutes}
-                          onChange={set('price_cooldown_minutes')}
-                          className="border w-32"
-                          style={inputStyle}
-                        />
-                        <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                          {t('automation.minutes')}
-                        </span>
-                      </div>
-                      <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                        {t('automation.cooldownHint')}
-                      </p>
-                    </div>
-                  )}
-                </>
-              )}
 
               {/* Max Failures */}
               <div className="flex flex-col gap-1.5">

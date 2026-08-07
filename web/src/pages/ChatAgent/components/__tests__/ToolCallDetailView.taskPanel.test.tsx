@@ -44,7 +44,7 @@ function makeProcess(status: string) {
     toolCall: {
       id: 'call-1',
       name: 'Task',
-      args: { subagent_type: 'research', description: 'Summarize the filing' },
+      args: { subagent_type: 'research', description: 'Summarize the document' },
     },
     toolCallResult: { content: DISPATCH_REPLY },
     isComplete: true,
@@ -64,7 +64,7 @@ describe('ToolCallDetailView — task panel', () => {
     const rendered = screen
       .queryAllByTestId('markdown-content')
       .map((node) => node.textContent ?? '');
-    expect(rendered).toContain('Summarize the filing');
+    expect(rendered).toContain('Summarize the document');
     expect(rendered.some((text) => text.includes('TaskOutput'))).toBe(false);
     expect(rendered.some((text) => text.includes('deployed'))).toBe(false);
   });

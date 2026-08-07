@@ -1,11 +1,9 @@
 import React from 'react';
 import { relativeTime } from '@/lib/format';
 import { useNavigate } from 'react-router-dom';
-import { Clock, Timer, TrendingUp, ExternalLink } from 'lucide-react';
+import { Clock, Timer, ExternalLink } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cronToHuman } from '../../../Automations/utils/cron';
-import { isPriceTriggerConfig, formatPriceTrigger, formatRetriggerMode } from '../../../Automations/utils/price';
-import type { PriceTriggerConfig } from '@/types/automation';
 import { formatDateTime, formatDuration } from '../../../Automations/utils/time';
 
 // ─── Constants ───────────────────────────────────────────────────────
@@ -123,18 +121,8 @@ function ConfigRow({ label, value }: ConfigRowProps): React.ReactElement {
   );
 }
 
-function asPriceTrigger(v: unknown): PriceTriggerConfig | null {
-  return isPriceTriggerConfig(v) ? v : null;
-}
-
-function marketI18nKey(triggerConfig: PriceTriggerConfig | null | undefined): string | null {
-  if (!triggerConfig) return null;
-  return triggerConfig.market === 'index' ? 'automation.marketIndex' : null;
-}
-
 function scheduleLabel(auto: Record<string, unknown> | null | undefined): string {
   if (!auto) return '\u2014';
-  if (auto.trigger_type === 'price') return formatPriceTrigger(asPriceTrigger(auto.trigger_config)) || '\u2014';
   if (auto.trigger_type === 'cron' && auto.schedule) return cronToHuman(auto.schedule as string);
   if (auto.next_run_at) return relativeTime(auto.next_run_at as string);
   return (auto.schedule as string) || '\u2014';
@@ -207,8 +195,7 @@ function ListPanel({ automations, total }: ListPanelProps): React.ReactElement {
       </p>
       {automations.map((a, i) => {
         const isCron = a.trigger_type === 'cron';
-        const isPrice = a.trigger_type === 'price';
-        const Icon = isPrice ? TrendingUp : isCron ? Clock : Timer;
+        const Icon = isCron ? Clock : Timer;
         return (
           <div
             key={(a.automation_id as string) || i}
@@ -271,8 +258,7 @@ function DetailPanel({ automation, executions, totalExecutions }: DetailPanelPro
   if (!automation) return null;
 
   const isCron = automation.trigger_type === 'cron';
-  const isPrice = automation.trigger_type === 'price';
-  const Icon = isPrice ? TrendingUp : isCron ? Clock : Timer;
+  const Icon = isCron ? Clock : Timer;
 
   return (
     <div className="space-y-4">
@@ -286,43 +272,23 @@ function DetailPanel({ automation, executions, totalExecutions }: DetailPanelPro
       </div>
 
       {/* Stat grid */}
-      {isPrice ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-          <StatCard
-            label={t('toolArtifact.trigger')}
-            value={formatPriceTrigger(asPriceTrigger(automation.trigger_config)) || '\u2014'}
-            sub={asPriceTrigger(automation.trigger_config)?.symbol || null}
-            badge={(() => { const k = marketI18nKey(asPriceTrigger(automation.trigger_config)); return k ? t(k) : null; })()}
-          />
-          <StatCard
-            label={t('toolArtifact.retrigger')}
-            value={formatRetriggerMode(asPriceTrigger(automation.trigger_config))}
-          />
-          <StatCard
-            label={t('toolArtifact.lastRun')}
-            value={automation.last_run_at ? relativeTime(automation.last_run_at as string) : '\u2014'}
-            sub={automation.last_run_at ? formatDateTime(automation.last_run_at as string) : null}
-          />
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-          <StatCard
-            label={t('toolArtifact.schedule')}
-            value={isCron ? cronToHuman(automation.schedule as string) : t('toolArtifact.oneTime')}
-            sub={isCron ? (automation.schedule as string) : null}
-          />
-          <StatCard
-            label={t('toolArtifact.nextRun')}
-            value={automation.next_run_at ? relativeTime(automation.next_run_at as string) : '\u2014'}
-            sub={automation.next_run_at ? formatDateTime(automation.next_run_at as string) : null}
-          />
-          <StatCard
-            label={t('toolArtifact.lastRun')}
-            value={automation.last_run_at ? relativeTime(automation.last_run_at as string) : '\u2014'}
-            sub={automation.last_run_at ? formatDateTime(automation.last_run_at as string) : null}
-          />
-        </div>
-      )}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+        <StatCard
+          label={t('toolArtifact.schedule')}
+          value={isCron ? cronToHuman(automation.schedule as string) : t('toolArtifact.oneTime')}
+          sub={isCron ? (automation.schedule as string) : null}
+        />
+        <StatCard
+          label={t('toolArtifact.nextRun')}
+          value={automation.next_run_at ? relativeTime(automation.next_run_at as string) : '\u2014'}
+          sub={automation.next_run_at ? formatDateTime(automation.next_run_at as string) : null}
+        />
+        <StatCard
+          label={t('toolArtifact.lastRun')}
+          value={automation.last_run_at ? relativeTime(automation.last_run_at as string) : '\u2014'}
+          sub={automation.last_run_at ? formatDateTime(automation.last_run_at as string) : null}
+        />
+      </div>
 
       {/* Instruction */}
       {!!automation.instruction && (
@@ -355,7 +321,7 @@ function DetailPanel({ automation, executions, totalExecutions }: DetailPanelPro
           {!!automation.agent_mode && (
             <ConfigRow label={t('toolArtifact.agentMode')} value={(automation.agent_mode as string).toUpperCase()} />
           )}
-          <ConfigRow label={t('toolArtifact.triggerType')} value={isPrice ? t('toolArtifact.priceTrigger') : isCron ? t('toolArtifact.recurringCron') : t('toolArtifact.oneTime')} />
+          <ConfigRow label={t('toolArtifact.triggerType')} value={isCron ? t('toolArtifact.recurringCron') : t('toolArtifact.oneTime')} />
         </div>
       </div>
 
@@ -422,7 +388,6 @@ interface CreatedPanelProps {
 function CreatedPanel({ data }: CreatedPanelProps): React.ReactElement {
   const { t } = useTranslation();
   const isCron = data.trigger_type === 'cron';
-  const isPrice = data.trigger_type === 'price';
 
   return (
     <div className="space-y-4">
@@ -444,25 +409,18 @@ function CreatedPanel({ data }: CreatedPanelProps): React.ReactElement {
       </div>
 
       {/* Details */}
-      {isPrice ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <StatCard label={t('toolArtifact.trigger')} value={formatPriceTrigger(asPriceTrigger(data.trigger_config)) || '\u2014'} sub={asPriceTrigger(data.trigger_config)?.symbol || null} badge={(() => { const k = marketI18nKey(asPriceTrigger(data.trigger_config)); return k ? t(k) : null; })()} />
-          <StatCard label={t('toolArtifact.retrigger')} value={formatRetriggerMode(asPriceTrigger(data.trigger_config))} />
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <StatCard label={t('toolArtifact.schedule')} value={isCron ? cronToHuman(data.schedule as string) : t('toolArtifact.oneTime')} sub={isCron ? (data.schedule as string) : null} />
-          <StatCard
-            label={t('toolArtifact.nextRun')}
-            value={data.next_run_at ? relativeTime(data.next_run_at as string) : '\u2014'}
-            sub={data.next_run_at ? formatDateTime(data.next_run_at as string) : null}
-          />
-        </div>
-      )}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <StatCard label={t('toolArtifact.schedule')} value={isCron ? cronToHuman(data.schedule as string) : t('toolArtifact.oneTime')} sub={isCron ? (data.schedule as string) : null} />
+        <StatCard
+          label={t('toolArtifact.nextRun')}
+          value={data.next_run_at ? relativeTime(data.next_run_at as string) : '\u2014'}
+          sub={data.next_run_at ? formatDateTime(data.next_run_at as string) : null}
+        />
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
         <ConfigRow label={t('toolArtifact.status')} value={(data.status as string) || 'active'} />
-        <ConfigRow label={t('toolArtifact.triggerType')} value={isPrice ? t('toolArtifact.priceTrigger') : isCron ? t('toolArtifact.recurring') : t('toolArtifact.oneTime')} />
+        <ConfigRow label={t('toolArtifact.triggerType')} value={isCron ? t('toolArtifact.recurring') : t('toolArtifact.oneTime')} />
       </div>
 
       <AutomationsPageLink automationId={data.automation_id as string} />

@@ -69,11 +69,17 @@ vi.mock('@/components/model/ModelTierConfig', () => ({
   ModelTierConfig: () => <div data-testid="model-tier-config-stub" />,
 }));
 
-vi.mock('@/pages/Dashboard/utils/api', () => ({
+vi.mock('@/api/user', () => ({
   updateCurrentUser: vi.fn(async () => ({})),
   clearPreferences: vi.fn(async () => ({})),
   uploadAvatar: vi.fn(async () => ({ avatar_url: '' })),
+}));
+
+vi.mock('@/api/model', () => ({
   getUserApiKeys: vi.fn(async () => ({ providers: [] })),
+}));
+
+vi.mock('@/api/oauth', () => ({
   initiateCodexDevice: vi.fn(async () => ({})),
   pollCodexDevice: vi.fn(async () => ({})),
   getCodexOAuthStatus: vi.fn(async () => ({ connected: false })),
@@ -82,15 +88,6 @@ vi.mock('@/pages/Dashboard/utils/api', () => ({
   submitClaudeCallback: vi.fn(async () => ({})),
   getClaudeOAuthStatus: vi.fn(async () => ({ connected: false })),
   disconnectClaudeOAuth: vi.fn(async () => ({})),
-}));
-
-vi.mock('@/pages/ChatAgent/utils/api', () => ({
-  getFlashWorkspace: vi.fn(async () => ({ workspace_id: 'ws-flash' })),
-}));
-
-// Onboarding — Settings renders replay/reset buttons; no provider in this harness.
-vi.mock('@/pages/Onboarding', () => ({
-  useOnboarding: () => ({ replayGuides: vi.fn(), resetOnboarding: vi.fn() }),
 }));
 
 // Import after mocks are registered.

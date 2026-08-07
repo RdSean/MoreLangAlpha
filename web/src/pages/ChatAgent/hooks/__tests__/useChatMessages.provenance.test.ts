@@ -113,8 +113,8 @@ describe('useChatMessages — provenance dispatch (live + history)', () => {
           record_id: 'rec-sub',
           agent: 'task:abc123',
           source_type: 'mcp_tool',
-          identifier: 'financial-data:get_quote',
-          provider: 'mcp:financial-data',
+          identifier: 'documents:get_summary',
+          provider: 'mcp:documents',
           tool_call_id: 'tc-mcp-1',
           title: undefined,
         }));

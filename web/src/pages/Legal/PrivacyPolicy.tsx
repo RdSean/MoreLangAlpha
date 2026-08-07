@@ -27,10 +27,10 @@ function PrivacyPolicy() {
         <div className="space-y-8 text-base leading-relaxed">
           <Section title="1. Introduction">
             <p>
-              LangAlpha is an AI-powered financial research platform. This Privacy Policy
-              describes what information we collect when you use the hosted LangAlpha service,
-              how we use it, who we share it with, and the choices you have. By using the
-              hosted service, you agree to the practices described here.
+              LangAlpha is an AI-powered agent platform. This Privacy Policy describes what
+              information we collect when you use the hosted LangAlpha service, how we use it,
+              who we share it with, and the choices you have. By using the hosted service, you
+              agree to the practices described here.
             </p>
             <p>
               <strong>Scope:</strong> This policy applies only to the hosted LangAlpha service
@@ -116,8 +116,8 @@ function PrivacyPolicy() {
               Each provider processes your queries under its own terms and privacy policy.
               Commercial API terms at major providers generally prohibit using API inputs to
               train their foundation models, but you should review the privacy policy of any
-              provider you use for details. AI-generated output is not financial, legal, or
-              investment advice.
+              provider you use for details. AI-generated output may be incomplete or incorrect
+              and should be reviewed before use.
             </p>
           </Section>
 
@@ -140,18 +140,16 @@ function PrivacyPolicy() {
             </p>
           </Section>
 
-          <Section title="6. Financial Data">
+          <Section title="6. Connected Services">
             <p>
-              LangAlpha retrieves public market data (such as prices, fundamentals, news,
-              and filings) from third-party data providers on your behalf. The specific
-              providers may change over time. This data is displayed for informational and
-              research purposes only.
+              LangAlpha can connect to services and tools that you configure, such as language
+              model providers, web search providers, and Model Context Protocol servers. The
+              information sent to a connected service is governed by that provider&apos;s terms and
+              privacy policy.
             </p>
             <p>
-              <strong>
-                LangAlpha does not connect to your bank, brokerage, or personal financial
-                accounts, and we do not collect your personal financial records.
-              </strong>
+              You are responsible for reviewing the permissions and data handling practices of
+              services that you connect to your workspace.
             </p>
           </Section>
 
@@ -174,10 +172,6 @@ function PrivacyPolicy() {
                 <strong>Search and web data</strong> — when the agent browses the web on
                 your behalf, your query is sent to search or fetch providers such as Tavily
                 and Serper.
-              </li>
-              <li>
-                <strong>Market data providers</strong> — to retrieve public financial data
-                (see Section 6).
               </li>
               <li>
                 <strong>Legal authorities</strong> — when required by law, valid legal

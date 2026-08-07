@@ -2,7 +2,7 @@ import { useEffect, useState, type RefObject } from 'react';
 
 /**
  * Observed element BORDER-BOX width, quantized to `step` px so per-pixel
- * resize drags (e.g. the MarketView panel divider) don't re-render subscribers
+ * resize drags (e.g. a resizable panel divider) don't re-render subscribers
  * per frame. Returns 0 until measured, or when ResizeObserver is unavailable
  * (jsdom).
  *
@@ -44,8 +44,8 @@ export function useContainerWidth(
 
 /**
  * Returns true when the observed element's width is below `threshold`.
- * Element-based (not viewport) so embedded panels (e.g. MarketView's chat
- * column) can collapse avatars/tight layouts independent of window width.
+ * Element-based (not viewport) so embedded panels can collapse avatars and
+ * tight layouts independently of window width.
  */
 export function useNarrowContainer(
   ref: RefObject<HTMLElement | null>,

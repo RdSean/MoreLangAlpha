@@ -86,25 +86,14 @@ vi.mock('../Markdown', () => ({
 }));
 
 // Control the inline-artifact tool set so the no-flash test doesn't depend on
-// production tool names. `stock_prices` is a key of INLINE_ARTIFACT_MAP in
-// MessageList, so the mocked card below is what a ready artifact renders as.
+// production tool names. The mocked preview card below is what a ready
+// preview artifact renders as.
 vi.mock('../charts/InlineArtifactCards', async () => {
   const React = await vi.importActual<typeof import('react')>('react');
-  const InlineStockPriceCard = () => React.createElement('div', { 'data-testid': 'inline-chart' });
-  const NullCard = () => null;
+  const InlinePreviewCard = () => React.createElement('div', { 'data-testid': 'inline-preview' });
   return {
-    INLINE_ARTIFACT_TOOLS: new Set<string>(['fetch_sample_chart']),
-    InlineStockPriceCard,
-    InlineCompanyOverviewCard: NullCard,
-    InlineMarketIndicesCard: NullCard,
-    InlineSectorPerformanceCard: NullCard,
-    InlineMarketOverviewCard: NullCard,
-    InlineSecFilingCard: NullCard,
-    InlineStockScreenerCard: NullCard,
-    InlineWebSearchCard: NullCard,
-    // MessageList imports the dispatch map from this module — a ready
-    // `stock_prices` artifact must resolve to the inline-chart card above.
-    INLINE_ARTIFACT_MAP: { stock_prices: InlineStockPriceCard },
+    INLINE_ARTIFACT_TOOLS: new Set<string>(['GetPreviewUrl']),
+    INLINE_ARTIFACT_MAP: { preview_url: InlinePreviewCard },
   };
 });
 
@@ -288,7 +277,7 @@ describe('MessageContentSegments — live-zone cooldown while streaming', () => 
 // ---------------------------------------------------------------------------
 
 describe('MessageContentSegments — inline-artifact tools', () => {
-  it('renders a ready artifact as a compact chart block, never in the live zone or accordion — streaming and after stream end', () => {
+  it('renders a ready artifact preview outside the live zone and accordion — streaming and after stream end', () => {
     const now = Date.now();
     const props: SegmentsProps = {
       ...baseProps,
@@ -297,9 +286,9 @@ describe('MessageContentSegments — inline-artifact tools', () => {
         // Fresh completion (inside the cooldown window) with a ready artifact:
         // the artifact branch must win over the completing branch.
         'tc-art': completedToolProc(now, {
-          toolName: 'fetch_sample_chart',
+          toolName: 'GetPreviewUrl',
           toolCall: { args: {} },
-          toolCallResult: { artifact: { type: 'stock_prices', data: [] } },
+          toolCallResult: { artifact: { type: 'preview_url', url: 'https://example.com/preview' } },
         }),
       },
       isStreaming: true,
@@ -307,14 +296,14 @@ describe('MessageContentSegments — inline-artifact tools', () => {
 
     const view = render(<MessageContentSegments {...props} />);
 
-    expect(screen.getByTestId('inline-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('inline-preview')).toBeInTheDocument();
     expect(view.container.querySelector('.nrow')).toBeNull();
     expect(screen.queryByRole('button', { name: SUMMARY_BUTTON_RE })).toBeNull();
 
     // Same invariants after the stream ends.
     view.rerender(<MessageContentSegments {...props} isStreaming={false} />);
 
-    expect(screen.getByTestId('inline-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('inline-preview')).toBeInTheDocument();
     expect(view.container.querySelector('.nrow')).toBeNull();
     expect(screen.queryByRole('button', { name: SUMMARY_BUTTON_RE })).toBeNull();
   });

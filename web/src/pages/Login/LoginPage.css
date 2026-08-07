@@ -1,6 +1,6 @@
 /*
  * Login page. Two layouts share this file:
- *  - LoginPage: split screen (.login-page--split) — market chart visual left,
+ *  - LoginPage: split screen (.login-page--split) — quiet visual left,
  *    auth pane right.
  *  - AuthConfirm / ResetPassword: centered card over the waves background
  *    (the base .login-page + .login-page__card rules).
@@ -13,15 +13,8 @@
 .login-page {
   --login-waves-bg: var(--color-bg-page);
   --login-waves-stroke: var(--color-border-muted);
-  /* The only accent on the auth side: the ember the chart ball burns with.
-     Single source of truth — MarketScanlines and EdgeGrain read this variable
-     at runtime (via derivePalette in loginPaper), so the canvases and the CSS
-     never drift. */
-  --login-ember: rgb(233, 149, 74);
   /* Opaque composition: the muted/loss tokens are translucent, so compose each
-     over the page color — the dune's stray dots (see EdgeGrain) never print
-     through a field, button, or error box. Referenced by the input, buttons,
-     and error box below. */
+     over the page color. Referenced by the input, buttons, and error box below. */
   --login-opaque-muted:
     linear-gradient(var(--color-border-muted), var(--color-border-muted)),
     var(--color-bg-page);
@@ -39,10 +32,6 @@
   /* Pinned here so the login renders the same face in every host app —
      without it, text inherits whatever body font the app's tokens set. */
   font-family: 'Sora', 'Geist', 'Noto Sans SC', -apple-system, system-ui, sans-serif;
-}
-
-[data-theme='light'] .login-page {
-  --login-ember: rgb(208, 125, 51);
 }
 
 .login-page__card {
@@ -159,8 +148,8 @@
   color: var(--color-loss);
 }
 
-/* Ink on paper, like the chart: the button prints in the page's ink and only
-   takes color — the ember — when it's about to act. */
+/* The button prints in the page's ink and only takes the accent color when it
+   is about to act. */
 .login-page__submit {
   width: 100%;
   padding: 0.75rem 1.25rem;
@@ -501,7 +490,7 @@
   color: var(--color-text-secondary);
 }
 
-/* --- Split layout: market-tape visual left, auth pane right --- */
+/* --- Split layout: visual left, auth pane right --- */
 
 .login-page--split {
   /* Plate frame: the composition sits inset on the paper, ruled by four
@@ -541,16 +530,13 @@
 .login-page__frame {
   position: relative;
   display: grid;
-  /* 65/35 split: the chart pane runs wide enough to hand off into the grain
-     ramp along the frame's right edge (see MarketScanlines + EdgeGrain). */
+  /* The visual pane remains broad enough to balance the auth form. */
   grid-template-columns: 1fr minmax(420px, 35%);
   align-items: stretch;
   min-height: calc(100vh - 2 * var(--login-frame-gap));
   overflow: hidden;
   /* One vertical wash across the whole plate: the page's ink lifted into the
-     page color at the top, settling to plain page at the bottom. Both panes
-     share it (the canvas paints grain and art only, no field of its own), so
-     the background carries no left-to-right step. */
+     page color at the top, settling to plain page at the bottom. */
   background: linear-gradient(
     to bottom,
     color-mix(in srgb, var(--color-text-primary) 4%, var(--color-bg-page)),
@@ -558,25 +544,6 @@
   );
 }
 
-/* The page's only background texture: a static dot field condensing toward
-   the frame's right border, thinning right to left (see EdgeGrain). Sits
-   above the wash, below both panes - opaque form surfaces stop it. */
-.login-page__edge-grain {
-  position: absolute;
-  inset: 0;
-  /* Explicit size: a canvas is a replaced element, so opposing insets alone
-     leave it at its intrinsic 300x150. */
-  width: 100%;
-  height: 100%;
-  z-index: 0;
-  display: block;
-  pointer-events: none;
-}
-
-/* Paint order is DOM order (grain, auth, visual): the visual pane comes
-   last, so the market canvas - which spans the whole frame - plays the
-   ember ball's breakout and burst OVER the form. The canvas takes no
-   pointer events, and the chart art itself never prints past the seam. */
 .login-page--split .login-page__auth-pane {
   position: relative;
 }
@@ -594,31 +561,12 @@
 }
 
 .login-page__visual-pane {
-  /* Auth pane stays first in the DOM (tab/reading order); the visual only
-     moves left visually. No background: the canvas paints its own field,
-     derived from the page so the art prints on the page's paper in both
-     themes (see MarketScanlines). No overflow clip: the canvas runs on
-     past the seam and the frame does the clipping. */
+  /* Auth stays first in the DOM for tab and reading order; the visual only
+     moves left visually. */
   order: -1;
   position: relative;
+  overflow: hidden;
 }
-
-.login-page__scanlines {
-  position: absolute;
-  top: 0;
-  left: 0;
-  /* Runs from the pane to beyond the frame's far edge (the frame clips it)
-     so the breakout and its burst never cut off at a canvas boundary.
-     Pointer events live on the pane (see MarketScanlines), so the overlay
-     never blocks the form. */
-  width: 100vw;
-  height: 100%;
-  display: block;
-  pointer-events: none;
-}
-
-/* Edge melt (vignette + the dithered dissolve into the auth pane) is drawn
-   inside the canvas itself - see MarketScanlines. */
 
 .login-page__method-stack {
   display: flex;
