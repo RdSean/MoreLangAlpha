@@ -13,7 +13,6 @@ Working directory: `{{ working_directory | default('/home/workspace') }}`
 | `results/` | Finalized reports (`.md`) only — no loose data or chart files |
 | `data/` | Shared reusable datasets across threads |
 | `tools/` | MCP tool modules (auto-generated, read only) |
-| `.agents/user/` | User profile — preferences, watchlist, portfolio (read only) |
 
 Never put files directly in `work/` — always use `work/<task_name>/`.
 Always organize data and charts into their subdirectories — never scatter loose files.

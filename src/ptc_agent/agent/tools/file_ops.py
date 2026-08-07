@@ -11,7 +11,6 @@ from langchain_core.tools import tool
 
 from ptc_agent.agent.backends import FilesystemBackend, ReadOnlyStoreError
 from ptc_agent.core.paths import MEMO_USER_DIR
-from src.server.services.user_data_io import UserDataValidationError
 
 logger = structlog.get_logger(__name__)
 
@@ -239,9 +238,6 @@ def create_filesystem_tools(
                     "write rejected on read-only path",
                     file_path=file_path,
                 )
-                return f"ERROR: {exc}"
-            except UserDataValidationError as exc:
-                logger.info("user-data write rejected", file_path=file_path, error=str(exc))
                 return f"ERROR: {exc}"
             if not success:
                 return "ERROR: Write operation failed"

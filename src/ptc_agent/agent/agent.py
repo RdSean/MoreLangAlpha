@@ -66,13 +66,11 @@ from ptc_agent.core.paths import (
     MEMORY_INDEX_FILENAME,
     MEMORY_USER_DIR,
     MEMORY_WORKSPACE_DIR,
-    USER_PROFILE_DATA_DIR,
     WORKFLOW_DIR,
 )
 from ptc_agent.agent.middleware.background_subagent.workflow.prebuilt import (
     get_prebuilt_workflows,
 )
-from ptc_agent.agent.backends.user_data import UserDataBackend
 from ptc_agent.agent.middleware.image_capture import ImageCaptureMiddleware
 from ptc_agent.agent.middleware.openai_prompt_caching import OpenAIPromptCachingMiddleware
 from ptc_agent.agent.middleware.runtime_context import RuntimeContextMiddleware
@@ -145,7 +143,6 @@ class _IdentityGates:
     user_memory: bool
     workspace_memory: bool
     memo: bool
-    user_data: bool
     workflow: bool
     workflow_fs: bool
     workflow_tool: bool
@@ -170,10 +167,6 @@ def _resolve_identity_gates(
         user_memory=identified,
         workspace_memory=identified and bool(workspace_id),
         memo=identified,
-        # Independent of `store`: the user-profile data backend (portfolio +
-        # watchlist + preferences) talks to the application DB tables, not the
-        # LangGraph store.
-        user_data=bool(user_id),
         workflow=workflow,
         workflow_fs=workflow and identified,
         # RunWorkflow dispatches subagents, so it drops with the recursion
@@ -269,7 +262,7 @@ class PTCAgent:
         (memory.md, the memo count block) — one list because they share that
         position.
         """
-        if not (gates.memory or gates.memo or gates.user_data or gates.workflow):
+        if not (gates.memory or gates.memo or gates.workflow):
             return backend, []
 
         # One cache per agent (≈ per request). Shared by every memory/memo
@@ -378,15 +371,6 @@ class PTCAgent:
             else:
                 routes.append(prebuilt_route)
 
-        if gates.user_data:
-            routes.append(
-                UserDataBackend(
-                    user_id=user_id,
-                    sandbox_backend=backend,
-                    root_prefix=f"{sandbox_root}/{USER_PROFILE_DATA_DIR}/",
-                )
-            )
-
         if not routes:
             return backend, []
 
@@ -442,7 +426,6 @@ class PTCAgent:
         on_signed_url: Any | None = None,
         vault_secrets: dict[str, str] | None = None,
         user_id: str | None = None,
-        user_data_counts: dict[str, Any] | None = None,
         tool_summary: str | None = None,
         disable_subagents: bool = False,
     ) -> Any:
@@ -805,7 +788,6 @@ class PTCAgent:
             RuntimeContextMiddleware(
                 current_time=current_time,
                 user_profile=user_profile,
-                user_data_counts=user_data_counts,
                 sandbox_enabled=True,
             )
         ]

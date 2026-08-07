@@ -17,13 +17,8 @@ from ptc_agent.core.paths import (
     ALWAYS_HIDDEN_PATH_SEGMENTS,
     ALWAYS_HIDDEN_SUFFIXES,
     HIDDEN_DIR_NAMES,
-    USER_PROFILE_DATA_DIR,
-    USER_PROFILE_PORTFOLIO_FILE,
-    USER_PROFILE_PREFERENCE_FILE,
-    USER_PROFILE_WATCHLIST_FILE,
 )
 from src.server.services.workspace_manager import WorkspaceManager
-from src.server.services import user_data_io
 from src.observability import safe_record, workspace_fs_bytes
 
 logger = logging.getLogger(__name__)
@@ -45,41 +40,6 @@ _CACHEABLE_IMAGE_TYPES = frozenset(
         "image/webp",
     }
 )
-
-# User-profile virtual files (served by user_data_io, not the sandbox FS).
-# These three paths bypass the system-path filter and route to the DB layer.
-_USER_PROFILE_PREFIX = f"{USER_PROFILE_DATA_DIR.rstrip('/')}/"
-_USER_PROFILE_FILES: dict[str, str] = {
-    f"{_USER_PROFILE_PREFIX}{USER_PROFILE_PORTFOLIO_FILE}": USER_PROFILE_PORTFOLIO_FILE,
-    f"{_USER_PROFILE_PREFIX}{USER_PROFILE_WATCHLIST_FILE}": USER_PROFILE_WATCHLIST_FILE,
-    f"{_USER_PROFILE_PREFIX}{USER_PROFILE_PREFERENCE_FILE}": USER_PROFILE_PREFERENCE_FILE,
-}
-
-
-def _is_user_profile_dir(client_path: str) -> bool:
-    """True when the path refers to the .agents/user/profile/ directory itself."""
-    return client_path.rstrip("/") == _USER_PROFILE_PREFIX.rstrip("/")
-
-
-def _is_user_profile_file(client_path: str) -> bool:
-    return client_path in _USER_PROFILE_FILES
-
-
-async def _serialize_user_profile_file(client_path: str, user_id: str) -> str:
-    """Fetch + serialize one of the three virtual user-profile JSON files."""
-    filename = _USER_PROFILE_FILES[client_path]
-    if filename == USER_PROFILE_PORTFOLIO_FILE:
-        rows = await user_data_io.fetch_portfolio_for_user(user_id)
-        payload = user_data_io.serialize_portfolio(rows)
-    elif filename == USER_PROFILE_WATCHLIST_FILE:
-        watchlists, items = await user_data_io.fetch_watchlist_for_user(user_id)
-        payload = user_data_io.serialize_watchlist(watchlists, items)
-    else:  # preference.json
-        prefs = await user_data_io.fetch_preferences_for_user(user_id)
-        payload = user_data_io.serialize_preferences(prefs)
-    visible = {k: v for k, v in payload.items() if k != "__version__"}
-    return user_data_io.serialize_json(visible)
-
 
 # Derived from shared constants (source of truth: ptc_agent.core.paths)
 _SYSTEM_DIR_PREFIXES = tuple(f"{d}/" for d in sorted(AGENT_SYSTEM_DIRS))
@@ -216,10 +176,6 @@ def _to_client_path(sandbox: Any, absolute_path: str) -> str:
 
 
 def _is_system_path(client_path: str) -> bool:
-    # User-profile virtual files live under .agents/ but are first-class
-    # user data — never hide them from the file panel.
-    if _is_user_profile_file(client_path) or _is_user_profile_dir(client_path):
-        return False
     return any(client_path.startswith(prefix) for prefix in _SYSTEM_DIR_PREFIXES)
 
 
@@ -254,7 +210,6 @@ def _is_serve_blocked_path(client_path: str) -> bool:
     endpoints apply, so the unauthenticated wsfiles route and the share-token
     serve route never expose agent-infrastructure dirs (``.agents``, ``tools``,
     ``mcp_servers``, ``_internal``, ...) that those endpoints deliberately hide.
-    The user-profile carve-out lives inside ``_is_system_path``.
     """
     return (
         _is_always_hidden_path(client_path)

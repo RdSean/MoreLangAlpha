@@ -9,6 +9,7 @@ import yaml
 
 from ptc_agent.agent import agent as ptc_agent_module
 from ptc_agent.agent.flash.agent import FlashAgent
+from ptc_agent.agent.middleware.skills.registry import get_skill_registry
 from ptc_agent.agent.subagents.builtins import BUILTIN_SUBAGENTS
 
 
@@ -35,6 +36,35 @@ FINANCE_MCP_SERVERS = {
     "alphavantage",
 }
 
+FINANCE_SKILLS = {
+    "user-profile",
+    "onboarding",
+    "chart-annotation",
+    "market-watch",
+    "comps-analysis",
+    "dcf-model",
+    "earnings-preview",
+    "idea-generation",
+    "check-model",
+    "morning-note",
+    "catalyst-calendar",
+    "check-deck",
+    "thesis-tracker",
+    "model-update",
+    "3-statements",
+    "earnings-analysis",
+    "sector-overview",
+    "competitive-analysis",
+    "interactive-dashboard",
+    "initiating-coverage",
+    "ui-design",
+}
+
+RETAINED_GENERIC_SKILLS = {
+    "html-report",
+    "inline-widget",
+}
+
 
 def _tool_name(tool: object) -> str:
     return str(getattr(tool, "name", getattr(tool, "__name__", "")))
@@ -45,6 +75,22 @@ def test_ptc_runtime_module_has_no_finance_native_tool_dependencies():
     exposed_symbols = set(vars(ptc_agent_module))
 
     assert not (FINANCE_NATIVE_TOOL_SYMBOLS & exposed_symbols)
+
+
+def test_ptc_runtime_does_not_mount_financial_user_data_files():
+    """Portfolio and watchlist virtual files must not reach generic sandboxes."""
+    source = Path(ptc_agent_module.__file__).read_text()
+
+    assert "UserDataBackend" not in source
+    assert "USER_PROFILE_DATA_DIR" not in source
+
+
+def test_financial_user_data_implementation_is_retired():
+    """The generic runtime must not retain a dormant portfolio DB adapter."""
+    project_root = Path(__file__).parents[4]
+
+    assert not (project_root / "src/ptc_agent/agent/backends/user_data.py").exists()
+    assert not (project_root / "src/server/services/user_data_io.py").exists()
 
 
 def test_flash_default_tools_are_generic(monkeypatch):
@@ -77,6 +123,47 @@ def test_default_mcp_configuration_has_no_finance_servers():
     assert not (FINANCE_MCP_SERVERS & configured_names)
 
 
+def test_default_skill_registry_has_no_finance_capabilities():
+    """Retired finance Skills must not be discoverable by PTC or Flash."""
+    assert not (FINANCE_SKILLS & set(get_skill_registry()))
+
+
+def test_retired_finance_skill_templates_are_not_shipped():
+    """Removed Skills must not remain available for a later accidental re-registration."""
+    skills_root = Path(__file__).parents[4] / "skills"
+
+    assert not [
+        skill_name
+        for skill_name in FINANCE_SKILLS
+        if (skills_root / skill_name / "SKILL.md").exists()
+    ]
+
+
+def test_retained_skill_guidance_is_domain_neutral():
+    """Generic Skills must not inherit finance-only examples or dependencies."""
+    skills_root = Path(__file__).parents[4] / "skills"
+    skill_text = "\n".join(
+        (skills_root / skill_name / "SKILL.md").read_text()
+        for skill_name in RETAINED_GENERIC_SKILLS
+    ).lower()
+
+    for retired_concept in (
+        "financial",
+        "investment",
+        "portfolio",
+        "watchlist",
+        "ticker",
+        "stock",
+        "equity",
+        "earnings",
+        "valuation",
+        "market data",
+    ):
+        assert retired_concept not in skill_text
+    assert "ui-design" not in skill_text
+    assert "interactive-dashboard" not in skill_text
+
+
 def test_builtin_subagents_have_no_finance_tool_set_or_finance_role():
     """Default specialist roles must compile from generic tool groups only."""
     assert "equity-analyst" not in BUILTIN_SUBAGENTS
@@ -95,12 +182,29 @@ def test_default_agent_prompts_do_not_advertise_retired_finance_tools():
             "system.md.j2",
             "flash_system.md.j2",
             "components/tool_guide.md.j2",
+            "components/user_profile.md.j2",
+            "components/workspace_paths.md.j2",
+            "components/memory.md.j2",
+            "components/flash_identity.md.j2",
+            "components/plan_mode.md.j2",
+            "subagents/roles/data_prep.md.j2",
         )
     )
 
     for retired_tool in FINANCE_NATIVE_TOOL_SYMBOLS:
         assert retired_tool not in prompt_text
     assert "Financial Tools" not in prompt_text
+    for retired_concept in (
+        "financial",
+        "investment",
+        "portfolio",
+        "watchlist",
+        "ticker",
+        "stock",
+        "SEC filing",
+        "market data",
+    ):
+        assert retired_concept.lower() not in prompt_text.lower()
 
 
 def test_prompt_defaults_have_no_market_watch_toggle():

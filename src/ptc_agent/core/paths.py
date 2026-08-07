@@ -60,14 +60,6 @@ MEMO_INDEX_FILENAME: str = "memo.md"
 # which shadows the shipped copy exactly as name resolution does.
 WORKFLOW_DIR: str = ".agents/workflows"
 
-# User-profile data (portfolio + watchlist + preferences) — backed by DB tables
-# (user_portfolios, watchlists, watchlist_items, user_preferences). Agent reads
-# the three .json files on demand; writes validate + apply diffs atomically.
-USER_PROFILE_DATA_DIR: str = ".agents/user/profile"
-USER_PROFILE_PORTFOLIO_FILE: str = "portfolio.json"
-USER_PROFILE_WATCHLIST_FILE: str = "watchlist.json"
-USER_PROFILE_PREFERENCE_FILE: str = "preference.json"
-
 # ---------------------------------------------------------------------------
 # Hidden path filters (always hidden from listings and completions)
 # ---------------------------------------------------------------------------

@@ -14,32 +14,6 @@ logger = logging.getLogger(__name__)
 _USER_PROFILE_TTL = 86400  # 24h — freshness via explicit invalidation
 
 
-async def fetch_user_data_counts(user_id: str | None) -> dict[str, Any] | None:
-    """Lightweight counts for the static `<user_profile>` block.
-
-    Three indexed queries in parallel. Failure is non-fatal — returns None and
-    the awareness block omits the counts line.
-    """
-    if not user_id:
-        return None
-    try:
-        from src.server.services import user_data_io as io
-        portfolio_count, watchlist_counts, prefs_set = await asyncio.gather(
-            io.count_portfolio_for_user(user_id),
-            io.count_watchlist_for_user(user_id),
-            io.exists_preferences_for_user(user_id),
-        )
-        wl_count, item_count = watchlist_counts
-        return {
-            "portfolio_count": int(portfolio_count),
-            "watchlist_summary": f"{wl_count}:{item_count}",
-            "prefs_set": bool(prefs_set),
-        }
-    except Exception:
-        logger.warning("user-data counts fetch failed; awareness block will omit counts", exc_info=True)
-        return None
-
-
 async def get_user_profile_for_prompt(user_id: str) -> dict[str, Any] | None:
     """Fetch user profile for system prompt injection, cached in Redis for up to ``_USER_PROFILE_TTL`` seconds.
 
@@ -143,10 +117,7 @@ async def build_ptc_graph(
             f"Failed to initialize session for conversation {conversation_id}"
         )
 
-    ptc_agent, user_data_counts = await asyncio.gather(
-        asyncio.to_thread(PTCAgent, config),
-        fetch_user_data_counts(user_id),
-    )
+    ptc_agent = await asyncio.to_thread(PTCAgent, config)
 
     inner_agent = ptc_agent.create_agent(
         sandbox=session.sandbox,
@@ -160,7 +131,6 @@ async def build_ptc_graph(
         store=store,
         on_signed_url=on_signed_url,
         user_id=user_id,
-        user_data_counts=user_data_counts,
         tool_summary=getattr(session, "mcp_tool_summary", None),
     )
 
@@ -198,16 +168,14 @@ async def build_ptc_graph_with_session(
         )
 
     if user_id:
-        user_profile, user_data_counts, ptc_agent = await asyncio.gather(
+        user_profile, ptc_agent = await asyncio.gather(
             get_user_profile_for_prompt(user_id),
-            fetch_user_data_counts(user_id),
             asyncio.to_thread(PTCAgent, config),
         )
         if user_profile:
             logger.debug(f"Loaded user profile for {user_id}: {user_profile}")
     else:
         user_profile = None
-        user_data_counts = None
         ptc_agent = await asyncio.to_thread(PTCAgent, config)
 
     vault_secrets = getattr(session.sandbox, "vault_secrets", None)
@@ -230,7 +198,6 @@ async def build_ptc_graph_with_session(
         on_signed_url=on_signed_url,
         vault_secrets=vault_secrets,
         user_id=user_id,
-        user_data_counts=user_data_counts,
         # Session-cached tool summary (precomputed once per session) so the per
         # turn create_agent never recomputes it — keeps the prompt-cache prefix
         # byte-stable. None → create_agent computes from the registry.
