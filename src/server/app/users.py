@@ -420,8 +420,6 @@ async def update_preferences(
     # Use exclude_unset=True (not exclude_none=True) so explicitly-sent null
     # values are preserved — _split_updates_and_deletes uses None to signal
     # key deletion from the JSONB column.
-    risk_pref = request.risk_preference.model_dump(exclude_unset=True) if request.risk_preference else None
-    investment_pref = request.investment_preference.model_dump(exclude_unset=True) if request.investment_preference else None
     agent_pref = request.agent_preference.model_dump(exclude_unset=True) if request.agent_preference else None
     other_pref = request.other_preference.model_dump(exclude_unset=True) if request.other_preference else None
 
@@ -489,8 +487,6 @@ async def update_preferences(
 
     preferences = await upsert_user_preferences(
         user_id=user_id,
-        risk_preference=risk_pref,
-        investment_preference=investment_pref,
         agent_preference=agent_pref,
         other_preference=other_pref,
     )

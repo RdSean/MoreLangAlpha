@@ -51,8 +51,6 @@ def _prefs(user_id="test-user-123"):
     return {
         "user_preference_id": PREF_ID,
         "user_id": user_id,
-        "risk_preference": {"risk_tolerance": "moderate"},
-        "investment_preference": {},
         "agent_preference": {},
         "other_preference": {},
         "created_at": NOW,
@@ -318,7 +316,7 @@ async def test_update_preferences(client):
         resp = await client.put(
             "/api/v1/users/me/preferences",
             json={
-                "risk_preference": {"risk_tolerance": "moderate"},
+                "agent_preference": {"output_style": "concise"},
             },
         )
 

@@ -399,7 +399,6 @@ async def get_user_preferences(user_id: str) -> Optional[Dict[str, Any]]:
             await cur.execute("""
                 SELECT
                     user_preference_id, user_id,
-                    risk_preference, investment_preference,
                     agent_preference, other_preference,
                     created_at, updated_at
                 FROM user_preferences
@@ -457,8 +456,6 @@ def _split_updates_and_deletes(data: Optional[Dict[str, Any]]) -> tuple[Dict[str
 
 async def upsert_user_preferences(
     user_id: str,
-    risk_preference: Optional[Dict[str, Any]] = None,
-    investment_preference: Optional[Dict[str, Any]] = None,
     agent_preference: Optional[Dict[str, Any]] = None,
     other_preference: Optional[Dict[str, Any]] = None,
     replace: bool = False,
@@ -472,8 +469,6 @@ async def upsert_user_preferences(
 
     Args:
         user_id: User ID
-        risk_preference: Risk settings dict (None values = delete field)
-        investment_preference: Investment settings dict (None values = delete field)
         agent_preference: Agent behavior settings dict (None values = delete field)
         other_preference: Miscellaneous settings dict (None values = delete field)
         replace: If True, replace entire preference instead of merging
@@ -483,9 +478,7 @@ async def upsert_user_preferences(
     """
     user_preference_id = str(uuid4())
 
-    # Split each preference into updates and deletes
-    risk_updates, risk_deletes = _split_updates_and_deletes(risk_preference)
-    inv_updates, inv_deletes = _split_updates_and_deletes(investment_preference)
+    # Split each preference into updates and deletes.
     agent_updates, agent_deletes = _split_updates_and_deletes(agent_preference)
     other_updates, other_deletes = _split_updates_and_deletes(other_preference)
 
@@ -496,32 +489,24 @@ async def upsert_user_preferences(
                 await cur.execute("""
                     INSERT INTO user_preferences (
                         user_preference_id, user_id,
-                        risk_preference, investment_preference,
                         agent_preference, other_preference,
                         created_at, updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    VALUES (%s, %s, %s, %s, NOW(), NOW())
                     ON CONFLICT (user_id) DO UPDATE
                     SET
-                        risk_preference = CASE WHEN %s THEN %s::jsonb ELSE user_preferences.risk_preference END,
-                        investment_preference = CASE WHEN %s THEN %s::jsonb ELSE user_preferences.investment_preference END,
                         agent_preference = CASE WHEN %s THEN %s::jsonb ELSE user_preferences.agent_preference END,
                         other_preference = CASE WHEN %s THEN %s::jsonb ELSE user_preferences.other_preference END,
                         updated_at = NOW()
                     RETURNING
                         user_preference_id, user_id,
-                        risk_preference, investment_preference,
                         agent_preference, other_preference,
                         created_at, updated_at
                 """, (
                     user_preference_id, user_id,
-                    Json(risk_updates or {}),
-                    Json(inv_updates or {}),
                     Json(agent_updates or {}),
                     Json(other_updates or {}),
                     # For UPDATE: flag if provided, then the value
-                    risk_preference is not None, Json(risk_updates or {}),
-                    investment_preference is not None, Json(inv_updates or {}),
                     agent_preference is not None, Json(agent_updates or {}),
                     other_preference is not None, Json(other_updates or {}),
                 ))
@@ -530,32 +515,24 @@ async def upsert_user_preferences(
                 await cur.execute("""
                     INSERT INTO user_preferences (
                         user_preference_id, user_id,
-                        risk_preference, investment_preference,
                         agent_preference, other_preference,
                         created_at, updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    VALUES (%s, %s, %s, %s, NOW(), NOW())
                     ON CONFLICT (user_id) DO UPDATE
                     SET
-                        risk_preference = (COALESCE(user_preferences.risk_preference, '{}'::jsonb) - %s::text[]) || COALESCE(%s::jsonb, '{}'::jsonb),
-                        investment_preference = (COALESCE(user_preferences.investment_preference, '{}'::jsonb) - %s::text[]) || COALESCE(%s::jsonb, '{}'::jsonb),
                         agent_preference = (COALESCE(user_preferences.agent_preference, '{}'::jsonb) - %s::text[]) || COALESCE(%s::jsonb, '{}'::jsonb),
                         other_preference = (COALESCE(user_preferences.other_preference, '{}'::jsonb) - %s::text[]) || COALESCE(%s::jsonb, '{}'::jsonb),
                         updated_at = NOW()
                     RETURNING
                         user_preference_id, user_id,
-                        risk_preference, investment_preference,
                         agent_preference, other_preference,
                         created_at, updated_at
                 """, (
                     user_preference_id, user_id,
-                    Json(risk_updates or {}),
-                    Json(inv_updates or {}),
                     Json(agent_updates or {}),
                     Json(other_updates or {}),
                     # For the UPDATE clause: deletes then updates for each column
-                    risk_deletes, Json(risk_updates) if risk_updates else None,
-                    inv_deletes, Json(inv_updates) if inv_updates else None,
                     agent_deletes, Json(agent_updates) if agent_updates else None,
                     other_deletes, Json(other_updates) if other_updates else None,
                 ))
@@ -606,8 +583,7 @@ async def get_user_with_preferences(user_id: str) -> Optional[Dict[str, Any]]:
                     u.auth_provider,
                     u.created_at, u.updated_at, u.last_login_at,
                     """ + _gate_cols("u") + """,
-                    p.user_preference_id, p.risk_preference, p.investment_preference,
-                    p.agent_preference, p.other_preference,
+                    p.user_preference_id, p.agent_preference, p.other_preference,
                     p.created_at as pref_created_at, p.updated_at as pref_updated_at
                 FROM users u
                 LEFT JOIN user_preferences p ON u.user_id = p.user_id
@@ -641,8 +617,6 @@ async def get_user_with_preferences(user_id: str) -> Optional[Dict[str, Any]]:
                 preferences = {
                     'user_preference_id': result['user_preference_id'],
                     'user_id': result['user_id'],
-                    'risk_preference': result['risk_preference'],
-                    'investment_preference': result['investment_preference'],
                     'agent_preference': result['agent_preference'],
                     'other_preference': result['other_preference'],
                     'created_at': result['pref_created_at'],

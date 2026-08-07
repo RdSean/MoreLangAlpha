@@ -1,4 +1,4 @@
-"""Pydantic models for User, UserPreferences, Watchlist, and Portfolio."""
+"""Pydantic models for user records, preferences, watchlists, and portfolios."""
 
 from datetime import datetime
 from decimal import Decimal
@@ -40,32 +40,6 @@ def normalize_instrument_type(v: Any) -> Any:
 # =============================================================================
 # JSONB Schema Models (for validation)
 # =============================================================================
-
-
-class RiskPreference(BaseModel):
-    """Risk preference settings stored in JSONB."""
-
-    model_config = ConfigDict(extra="allow")
-
-    risk_tolerance: Optional[str] = Field(
-        None, description="Risk tolerance description"
-    )
-
-
-class InvestmentPreference(BaseModel):
-    """Investment preference settings stored in JSONB."""
-
-    model_config = ConfigDict(extra="allow")
-
-    company_interest: Optional[str] = Field(
-        None, description="Type of companies interested in"
-    )
-    holding_period: Optional[str] = Field(
-        None, description="Preferred holding period"
-    )
-    analysis_focus: Optional[str] = Field(
-        None, description="Primary analysis focus area"
-    )
 
 
 class AgentPreference(BaseModel):
@@ -180,12 +154,8 @@ class UserResponse(UserBase):
 class UserPreferencesBase(BaseModel):
     """Base preferences fields."""
 
-    risk_preference: Optional[RiskPreference] = Field(
-        default_factory=RiskPreference, description="Risk tolerance settings"
-    )
-    investment_preference: Optional[InvestmentPreference] = Field(
-        default_factory=InvestmentPreference, description="Investment style settings"
-    )
+    model_config = ConfigDict(extra="forbid")
+
     agent_preference: Optional[AgentPreference] = Field(
         default_factory=AgentPreference, description="AI agent behavior settings"
     )
@@ -214,7 +184,7 @@ class UserPreferencesResponse(UserPreferencesBase):
     created_at: datetime = Field(description="Creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
 
 
 # =============================================================================
