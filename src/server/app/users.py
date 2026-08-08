@@ -3,11 +3,9 @@
 import asyncio
 import logging
 import re
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi import File, UploadFile
-from pydantic import BaseModel
 from src.utils.storage import get_public_url, upload_bytes
 
 from src.server.database.user import (

@@ -47,3 +47,9 @@ async def test_parent_keeps_general_agent_capabilities(monkeypatch):
 
     await education_access.require_nonstudent_agent_features("parent-1")
     await education_access.require_student_flash_workspace("parent-1", {"status": "running"})
+
+
+@pytest.mark.asyncio
+async def test_unit_default_user_has_no_household_role():
+    """The unit-test app's synthetic user must not require a database lookup."""
+    assert await education_access.is_student_account("test-user-123") is False

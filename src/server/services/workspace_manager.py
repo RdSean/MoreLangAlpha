@@ -1254,10 +1254,17 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             RuntimeError: If workspace is in error/deleted state
         """
         if user_id:
-            from src.server.services.education_access import require_student_flash_workspace
+            from src.server.services.education_access import (
+                is_student_account,
+                require_student_flash_workspace,
+            )
 
-            workspace_for_policy = await db_get_workspace(workspace_id)
-            await require_student_flash_workspace(user_id, workspace_for_policy)
+            # The common parent path must retain the cache-only warm acquire.
+            # Only student requests need a workspace record to enforce the
+            # Flash-only boundary.
+            if await is_student_account(user_id):
+                workspace_for_policy = await db_get_workspace(workspace_id)
+                await require_student_flash_workspace(user_id, workspace_for_policy)
 
         _t0 = time.time()
         _session_phases: dict[str, float] = {}
