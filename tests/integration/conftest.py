@@ -18,31 +18,6 @@ from psycopg_pool import AsyncConnectionPool
 
 
 # ---------------------------------------------------------------------------
-# MCP singleton teardown (pre-existing)
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def _reset_fmp_singleton():
-    """Close and reset the FMP client singleton after each test."""
-    yield
-    from data_client.fmp import close_fmp_client
-    await close_fmp_client()
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def _reset_ginlix_singleton():
-    """Close and reset the ginlix-data httpx client after each test."""
-    yield
-    try:
-        import mcp_servers.price_data_mcp_server as mod
-        if hasattr(mod, "_ginlix_http") and mod._ginlix_http is not None:
-            await mod._ginlix_http.aclose()
-            mod._ginlix_http = None
-    except (ImportError, AttributeError):
-        pass
-
-
 # ---------------------------------------------------------------------------
 # Database integration fixtures
 # ---------------------------------------------------------------------------
@@ -61,9 +36,6 @@ _ALL_TABLES = [
     "workspace_mcp_servers",
     "user_mcp_servers",
     "workspace_files",
-    "watchlist_items",
-    "watchlists",
-    "user_portfolios",
     "user_api_keys",
     "user_preferences",
     "workspaces",

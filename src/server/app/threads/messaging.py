@@ -18,6 +18,7 @@ from src.server.utils.api import (
     require_workspace_owner,
     service_token_matches,
 )
+from src.server.services.education_access import require_student_flash_workspace
 from src.server.models.chat import ChatRequest
 from src.server.models.workflow import RetryRequest
 from src.server.database.conversation import (
@@ -392,6 +393,7 @@ async def _handle_send_message(
         # a fresh thread_id cannot run inside another user's workspace/sandbox.
         # The internal report-back dispatch sets X-User-Id to the owner, so it passes.
         require_workspace_owner(workspace, user_id=user_id)
+        await require_student_flash_workspace(user_id, workspace)
 
         # Extract user input
         user_input = ""

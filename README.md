@@ -20,6 +20,9 @@ chat workbench without coupling the core runtime to a single business domain.
   persistent, or current thread.
 - **Artifacts and provenance**: files, documents, spreadsheets, visualizations,
   web sources, and MCP calls can be surfaced beside a conversation.
+- **Family education**: first-party local household accounts, private homework
+  workflows, and private education attachments. Student accounts are restricted
+  to their own Flash session and cannot use PTC sandboxes, Vault, MCP, or automations.
 
 ## Architecture
 

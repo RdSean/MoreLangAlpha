@@ -44,7 +44,7 @@ class ToolResultCacheMiddleware(AgentMiddleware):
 
         # Cache analysis tools
         analyze_cache = ToolResultCacheMiddleware(
-            monitored_tools={"technical_analyze", "financial_analyze"},
+            monitored_tools={"analyze_document", "summarize_research"},
             cache_file_path="/data/analysis.md",
             agent_types={"deep_research/coder"},
             cache_header="# Analysis Tool Result Cache"

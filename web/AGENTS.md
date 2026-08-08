@@ -16,11 +16,11 @@ pnpm lint         # ESLint 9 flat config (advisory — NOT gated in CI)
 
 ## Landmines (non-obvious)
 
-- **Dual-mode auth** (`contexts/AuthContext.tsx`), switched by `VITE_HOST_MODE` (`config/hostMode.ts`, default `oss`): `platform` → `SupabaseAuthProvider` (real session; Bearer token wired into the axios interceptor via `setTokenGetter()`); `oss` → static local-dev context, always logged in as `VITE_AUTH_USER_ID` (default `local-dev-user`). `VITE_SUPABASE_URL`/`_KEY` only gate Supabase-*client* construction, NOT the mode — check `isPlatformMode`, never `VITE_SUPABASE_URL`.
-- **Chat SSE uses raw `fetch()` + `ReadableStream`, NOT axios** (axios can't stream) — `streamFetch()` in `pages/ChatAgent/utils/api.ts`. Its token comes straight from `supabase.auth.getSession()`, not the axios interceptor. Most *authenticated* REST goes through the shared axios instance (`api/client.ts`, auto-Bearer, base `VITE_API_BASE_URL`); public/unauthenticated calls (`pages/SharedChat/api.ts`) and `auth/sync` also use raw `fetch`.
+- **Local cookie auth** (`contexts/AuthContext.tsx`) restores the authenticated household member through `/api/v1/auth/me`. Axios uses `withCredentials`; Chat SSE uses raw `fetch()` with `credentials: 'include'`. Never add browser Supabase clients or Bearer-token plumbing.
+- **Student accounts** may use their private Flash workspace and `/education` only. The backend enforces this, while `StudentFlashChat` and navigation provide the corresponding UI guard.
 - **Agent artifact path routing has ONE source of truth: `pages/ChatAgent/utils/agentPaths.ts`.** `classifyAgentPath` (→ `memory|memo|user-profile|skill|file`, normalizing `file://`, `/home/(workspace|daytona)/`, `./`, `__wsref__/<wsid>/…` cross-workspace refs) + `computeAgentArtifactRouting` (pure: which panel tab/key/workspace to open). Add new path types here, not in panel components — each new location duplicates the normalization rules.
 - **Zod validates untrusted *persisted/user* input at the boundary, not API responses.** Widget prefs (schemas in `configSchemas.ts`, applied via `safeParse` in `migrations.ts`), onboarding prefs, MCP config — all `safeParse` + per-field `.catch()` (never throw). Typed API responses are plain TS interfaces, not runtime-validated.
-- **First-load bundle is asserted, not eyeballed** (`scripts/check-critical-path.mjs`, gated in `pnpm build` + CI). Vite's build table lists every chunk as if it were lazy; only what `dist/index.html` references is actually on the critical path. A `manualChunks` entry naming a *lazy* vendor pins it to the entry — that is how the chart bundle rode first paint for five months. If the guard trips, fix the import graph; bump `EXPECTED`/`MAX_EAGER_KB` only deliberately. Reproducing the shipped bundle needs `VITE_HOST_MODE=platform` **and** `VITE_SUPABASE_URL`/`_PUBLISHABLE_KEY` — `lib/supabase.ts` guards the client behind `url && key`, so unset vars tree-shake the whole SDK out and understate first load by ~57 kB gz.
+- **First-load bundle is asserted, not eyeballed** (`scripts/check-critical-path.mjs`, gated in `pnpm build` + CI). Vite's build table lists every chunk as if it were lazy; only what `dist/index.html` references is actually on the critical path. Fix the import graph rather than raising the budget casually.
 - **i18n re-render gotcha:** locale lives in a `locale` cookie (cookie → browser → `en-US`), no live cross-tab sync. Components that format numbers/dates via `createFormatter`/`createDateFormatter` (`lib/format.ts`) MUST also call `useTranslation()`, or they won't re-render on a locale switch.
 
 ## Conventions
@@ -46,13 +46,10 @@ pnpm lint         # ESLint 9 flat config (advisory — NOT gated in CI)
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `VITE_HOST_MODE` | `oss` | `platform` → Supabase auth mode; `oss` → local-dev, no auth |
+| `VITE_HOST_MODE` | `oss` | Deployment/quota mode; local cookie auth is used in both modes |
 | `VITE_API_BASE_URL` | (empty = same-origin) | Backend base URL for axios (dev: same-origin, proxied) |
 | `VITE_PROXY_BACKEND` | `http://localhost:8000` | Dev-server proxy target for `/api/v1` + `/ws/v1` |
 | `VITE_DEV_ALLOWED_HOSTS` | (unset = Vite default) | Comma-separated extra Host headers the dev server accepts, for tunnels (ngrok etc.) |
-| `VITE_SUPABASE_URL` | — | Supabase project URL (gates client creation, not mode) |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | — | Supabase anon key |
-| `VITE_AUTH_USER_ID` | `local-dev-user` | User id in `oss` mode |
 | `VITE_CDN_BASE` | `/` | Asset base for CDN builds |
 | `VITE_COOKIE_DOMAIN` | (unset = host-only) | Parent domain to share auth/locale cookies across subdomains |
 | `VITE_APP_ENTRY_PATH` | `/app` (platform) / `/` (oss) | Where the SPA entry (login + anonymous bounce) mounts; set `/` on a dedicated app subdomain |

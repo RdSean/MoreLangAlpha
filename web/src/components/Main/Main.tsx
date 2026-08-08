@@ -5,6 +5,7 @@ import PageLoading from '@/components/PageLoading/PageLoading';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSyncUserLocale } from '@/hooks/useSyncUserLocale';
 import { ContextOverflowPill } from '@/components/ui/ContextOverflowPill';
+import StudentFlashChat from '@/pages/Education/StudentFlashChat';
 
 // Chunk thunks shared by the lazy components and preloadRouteChunk — import()
 // is deduped by the module system, so a preload and the lazy mount share one
@@ -44,10 +45,10 @@ function Main() {
     <Suspense fallback={<PageLoading variant="pane" />}>
       <Routes location={location}>
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/chat" element={<ChatAgent />} />
-        <Route path="/chat/t/:threadId/:taskId" element={<ChatAgent />} />
-        <Route path="/chat/t/:threadId" element={<ChatAgent />} />
-        <Route path="/chat/:workspaceId" element={<ChatAgent />} />
+        <Route path="/chat" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
+        <Route path="/chat/t/:threadId/:taskId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
+        <Route path="/chat/t/:threadId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
+        <Route path="/chat/:workspaceId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
         <Route path="/automations" element={<Automations />} />
         <Route path="/education" element={<Education />} />
         <Route path="/settings" element={<Settings />} />

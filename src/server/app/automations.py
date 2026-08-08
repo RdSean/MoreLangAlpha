@@ -18,7 +18,7 @@ Endpoints (/api/v1/automations):
 
 import logging
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 
 from src.server.database import automation as auto_db
@@ -32,10 +32,19 @@ from src.server.models.automation import (
     AutomationUpdate,
 )
 from src.server.utils.api import CurrentUserId, handle_api_exceptions, raise_not_found
+from src.server.services.education_access import require_nonstudent_agent_features
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1", tags=["Automations"])
+async def _require_nonstudent_automation_access(user_id: CurrentUserId) -> None:
+    await require_nonstudent_agent_features(user_id)
+
+
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["Automations"],
+    dependencies=[Depends(_require_nonstudent_automation_access)],
+)
 
 
 # =============================================================================

@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from src.server.database.vault_secrets import (
@@ -32,10 +32,19 @@ from src.server.database.vault_secrets import (
 from src.server.database.workspace import get_workspace as db_get_workspace
 from src.server.services.workspace_manager import WorkspaceManager
 from src.server.utils.api import CurrentUserId, handle_api_exceptions, require_workspace_owner
+from src.server.services.education_access import require_nonstudent_agent_features
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/workspaces", tags=["Vault Secrets"])
+async def _require_nonstudent_vault_access(user_id: CurrentUserId) -> None:
+    await require_nonstudent_agent_features(user_id)
+
+
+router = APIRouter(
+    prefix="/api/v1/workspaces",
+    tags=["Vault Secrets"],
+    dependencies=[Depends(_require_nonstudent_vault_access)],
+)
 
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 

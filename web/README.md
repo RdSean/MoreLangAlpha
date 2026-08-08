@@ -10,6 +10,7 @@ React frontend for the LangAlpha workspace-first agent platform.
 - Scheduled and one-time automations
 - Public thread sharing, OAuth flows, i18n, dark/light theme, and responsive UI
 - Inline document viewers, HTML widgets, code artifacts, and task tracking
+- Family education homework workspace with parent/student roles and private attachments
 
 ## Stack
 
@@ -33,5 +34,10 @@ The development server must be reachable on the LAN at
 | `/dashboard` | Workspace overview |
 | `/chat` | Workspace and thread chat |
 | `/automations` | Scheduled tasks |
+| `/education` | Family homework workspace |
 | `/settings` | Preferences, Vault, MCP, and API keys |
 | `/s/:shareToken` | Public shared thread |
+
+Student accounts are limited to their private Flash workspace and `/education`.
+The server, not this UI, enforces the restriction on PTC, sandbox, Vault, MCP,
+and automation routes.

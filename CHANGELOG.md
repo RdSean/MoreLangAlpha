@@ -19,6 +19,12 @@
 - 新增响应式“学习”入口，家长可从家庭学生列表创建或取消作业并给出纯文本反馈；学生可提交、根据反馈重新提交并添加受限附件。
 - 前端通过 React Query 访问 FastAPI 教育 API，复用现有 Button、Dialog、Input、Textarea、Tooltip 和 Quiet Workspace 设计令牌，不引入 Supabase 或旧家庭学习组件。
 
+### 学生 Agent 权限与平台收口
+
+- 学生账户按需获得私有 Flash workspace；服务端拒绝其创建或进入 PTC sandbox，以及 Vault、MCP、自定义 sandbox 配置和自动化 API。家长与学生线程仍按 workspace 所有者隔离。
+- 前端学生会话自动解析到 Flash workspace，隐藏自动化和设置入口，并跳过通用 PTC 配置引导；后端限制仍为最终授权依据。
+- 清理遗留的 MarketView 监控、`data_client` 刷新标记、金融缓存示例、集成测试清理钩子和 Supabase 运行说明，文档改为本地 Cookie 认证与家庭教育模块表述。
+
 ### 本地账户与家庭成员认证
 
 - 新增基于 PostgreSQL 的本地家长注册、家长创建学生账户和家庭成员关系，使用 Argon2id 保存密码哈希。

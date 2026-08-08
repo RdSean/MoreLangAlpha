@@ -15,6 +15,7 @@ import type { NavWorkspace } from '@/pages/ChatAgent/hooks/useNavigationData';
 import AccountMenu from './AccountMenu';
 import { useChatRoute } from './useChatRoute';
 import { useSidebarAgents } from '@/pages/ChatAgent/components/sidebarAgentsBridge';
+import { useAuth } from '@/contexts/AuthContext';
 import { SIDEBAR_DEFAULT_WIDTH, clampSidebarWidth } from './sidebarWidth';
 import './Sidebar.css';
 
@@ -38,6 +39,10 @@ function AppSidebar({ collapsed, onToggleCollapse, width, onWidthChange }: AppSi
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { theme } = useTheme();
+  const { member } = useAuth();
+  const visibleNavItems = member?.role === 'student'
+    ? NAV_ITEMS.filter((item) => item.key !== '/automations')
+    : NAV_ITEMS;
   const isActive = useNavActive();
   const logo = theme === 'light' ? logoDark : logoLight;
 
@@ -158,7 +163,7 @@ function AppSidebar({ collapsed, onToggleCollapse, width, onWidthChange }: AppSi
         </button>
         <nav className="sidebar-nav">
           <TooltipProvider delayDuration={300}>
-            {NAV_ITEMS.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const label = t(item.labelKey);
               const active = isActive(item);
@@ -218,7 +223,7 @@ function AppSidebar({ collapsed, onToggleCollapse, width, onWidthChange }: AppSi
           <SquarePen className="sidebar-panel-item-icon" />
           <span>{t('sidebar.newChat')}</span>
         </button>
-        {NAV_ITEMS.filter((item) => item.key !== '/chat').map((item) => {
+        {visibleNavItems.filter((item) => item.key !== '/chat').map((item) => {
           const Icon = item.icon;
           const active = isActive(item);
           return (

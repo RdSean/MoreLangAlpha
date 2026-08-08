@@ -275,7 +275,7 @@ class SkillsMiddleware(AgentMiddleware):
         2. **Inject** SKILL.md bodies for skills the client requested this turn
            (``config["configurable"]["skill_contexts"]``). A skill whose body is
            still live in the thread is skipped — only its per-turn instruction is
-           refreshed — so a re-sent skill (e.g. MarketView's chart-annotation)
+           refreshed — so a re-sent skill remains current without duplicating history.
            isn't pasted into history every turn. The returned ``loaded_skills``
            persists via reducer, exposing the skill's tools the same turn.
         """

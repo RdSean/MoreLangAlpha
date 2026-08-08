@@ -27,6 +27,9 @@ vi.mock('@/pages/Settings/Settings', () => ({
 vi.mock('@/pages/Education/EducationPage', () => ({
   default: () => <div data-testid="education-page" />,
 }));
+vi.mock('@/pages/Education/StudentFlashChat', () => ({
+  default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
 
 import Main from '../Main';
 

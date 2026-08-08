@@ -37,6 +37,11 @@ available on the LAN.
 and enabled MCP tools through the middleware stack. Flash has no sandbox and is
 limited to lightweight external tools and dispatching deeper PTC work.
 
+The first-party family education module is isolated from this runtime spine.
+Student household members use only their private Flash workspace and education
+APIs; PTC workspaces, sandbox execution, Vault, MCP configuration, custom
+Skills, and automations remain parent-only capabilities.
+
 The LLM uses Programmatic Tool Calling: it writes code that calls generated MCP
 wrappers inside the sandbox. Workspace-scoped custom MCP servers are configured
 in the database and their credentials resolve through the Vault.

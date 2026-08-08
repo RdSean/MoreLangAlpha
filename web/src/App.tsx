@@ -64,6 +64,7 @@ function AuthenticatedShell() {
   const location = useLocation();
   const hideTabBar = isMobile && location.pathname.startsWith('/chat/t/');
   const { isLoading, needsSetup } = useSetupGate();
+  const { member } = useAuth();
 
   // Warm the target route's chunk while /users/me resolves — the gate below
   // otherwise serializes two network legs (profile fetch, then the lazy
@@ -144,7 +145,7 @@ function AuthenticatedShell() {
     return <PageLoading />;
   }
 
-  if (needsSetup) {
+  if (needsSetup && member?.role !== 'student') {
     return <Navigate to="/setup/method" replace />;
   }
 

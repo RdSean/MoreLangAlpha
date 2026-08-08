@@ -148,8 +148,7 @@ def build_skill_content(
 
     Skills whose name is in ``already_loaded`` are active in the thread already —
     their tools persist via ``loaded_skills`` state — so the (large) SKILL.md body
-    is skipped and only their per-turn instruction is re-emitted (e.g. MarketView
-    re-sends chart-annotation every turn with a fresh symbol/timeframe).
+    is skipped and only their per-turn instruction is re-emitted.
 
     Args:
         skills: Skills to load (anything exposing ``.name``/``.instruction``).

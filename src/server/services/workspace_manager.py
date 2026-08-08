@@ -1070,6 +1070,9 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         Returns:
             Created workspace record
         """
+        from src.server.services.education_access import require_nonstudent_agent_features
+
+        await require_nonstudent_agent_features(user_id)
         # 1. Create DB record (no lock needed — DB generates unique ID)
         workspace = await db_create_workspace(
             user_id=user_id,
@@ -1250,6 +1253,12 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             ValueError: If workspace not found
             RuntimeError: If workspace is in error/deleted state
         """
+        if user_id:
+            from src.server.services.education_access import require_student_flash_workspace
+
+            workspace_for_policy = await db_get_workspace(workspace_id)
+            await require_student_flash_workspace(user_id, workspace_for_policy)
+
         _t0 = time.time()
         _session_phases: dict[str, float] = {}
 

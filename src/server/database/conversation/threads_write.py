@@ -92,7 +92,6 @@ async def create_thread(
 
     `platform` records the user surface the chat originated from. Conventions:
       - "web"                   — main ChatAgent page
-      - "market_view:<SYMBOL>"  — MarketView side panel, symbol uppercased
       - "telegram" | "slack" | "discord" | "feishu" — channel integrations
       - NULL                    — no user surface (system-initiated threads)
     `metadata` is the general thread annotation column. Known keys:

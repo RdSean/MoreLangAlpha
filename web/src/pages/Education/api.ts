@@ -11,6 +11,11 @@ export async function listEducationMembers(): Promise<EducationMember[]> {
   return data;
 }
 
+export async function ensureStudentFlashWorkspace(): Promise<{ workspace_id: string }> {
+  const { data } = await api.post<{ workspace_id: string }>('/api/v1/workspaces/flash');
+  return data;
+}
+
 export async function createEducationTask(input: CreateEducationTaskInput): Promise<EducationTask> {
   const { data } = await api.post<EducationTask>('/api/v1/education/tasks', input);
   return data;

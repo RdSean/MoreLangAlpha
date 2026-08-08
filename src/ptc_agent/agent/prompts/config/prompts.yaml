@@ -58,7 +58,7 @@ subagents:
 # Component template metadata
 components:
   tool_guide:
-    description: Unified 3-tier tool reference (Core, Financial, MCP)
+    description: Unified 3-tier tool reference (Core, external tools, MCP)
     required_vars:
       - tool_summary
 
