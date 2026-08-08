@@ -14,6 +14,11 @@
 - 家长可创建、取消任务或停止后续重复规则；学生只能提交分配给自己的任务，重复请求通过每任务幂等键复用同一提交。
 - 状态机限定为 `open -> submitted -> revision_requested -> submitted -> completed`，历史任务、提交和反馈在规则停止后保留。
 
+### 家庭教育界面
+
+- 新增响应式“学习”入口，家长可从家庭学生列表创建或取消作业并给出纯文本反馈；学生可提交、根据反馈重新提交并添加受限附件。
+- 前端通过 React Query 访问 FastAPI 教育 API，复用现有 Button、Dialog、Input、Textarea、Tooltip 和 Quiet Workspace 设计令牌，不引入 Supabase 或旧家庭学习组件。
+
 ### 本地账户与家庭成员认证
 
 - 新增基于 PostgreSQL 的本地家长注册、家长创建学生账户和家庭成员关系，使用 Argon2id 保存密码哈希。

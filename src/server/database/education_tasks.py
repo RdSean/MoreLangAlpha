@@ -297,9 +297,18 @@ async def list_tasks_for_user(user_id: str) -> list[dict[str, Any]]:
                 """
                 SELECT tasks.task_id, tasks.task_rule_id, tasks.household_id, tasks.assigned_student_id,
                        tasks.occurrence_date, tasks.due_at, tasks.title, tasks.description,
-                       tasks.status, tasks.created_at
+                       tasks.status, tasks.created_at, latest_review.decision AS latest_review_decision,
+                       latest_review.feedback_text AS latest_feedback_text
                 FROM education_tasks AS tasks
                 JOIN education_memberships AS memberships ON memberships.household_id = tasks.household_id
+                LEFT JOIN LATERAL (
+                    SELECT reviews.decision, reviews.feedback_text
+                    FROM education_task_submissions AS submissions
+                    JOIN education_task_reviews AS reviews ON reviews.submission_id = submissions.submission_id
+                    WHERE submissions.task_id = tasks.task_id
+                    ORDER BY submissions.sequence DESC
+                    LIMIT 1
+                ) AS latest_review ON TRUE
                 WHERE memberships.user_id = %s
                   AND (memberships.role = 'parent' OR tasks.assigned_student_id = %s)
                 ORDER BY tasks.due_at ASC, tasks.created_at ASC

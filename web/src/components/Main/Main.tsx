@@ -13,12 +13,14 @@ const routeChunks = {
   dashboard: () => import('../../pages/Dashboard/DashboardRouter'),
   chat: () => import('../../pages/ChatAgent/ChatAgent'),
   automations: () => import('../../pages/Automations/Automations'),
+  education: () => import('../../pages/Education/EducationPage'),
   settings: () => import('../../pages/Settings/Settings'),
 };
 
 const Dashboard = React.lazy(routeChunks.dashboard);
 const ChatAgent = React.lazy(routeChunks.chat);
 const Automations = React.lazy(routeChunks.automations);
+const Education = React.lazy(routeChunks.education);
 const Settings = React.lazy(routeChunks.settings);
 
 /** Start downloading the chunk for `pathname` without rendering it, so the
@@ -47,6 +49,7 @@ function Main() {
         <Route path="/chat/t/:threadId" element={<ChatAgent />} />
         <Route path="/chat/:workspaceId" element={<ChatAgent />} />
         <Route path="/automations" element={<Automations />} />
+        <Route path="/education" element={<Education />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

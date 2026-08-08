@@ -24,6 +24,9 @@ vi.mock('@/pages/Automations/Automations', () => ({
 vi.mock('@/pages/Settings/Settings', () => ({
   default: () => <div data-testid="settings-page" />,
 }));
+vi.mock('@/pages/Education/EducationPage', () => ({
+  default: () => <div data-testid="education-page" />,
+}));
 
 import Main from '../Main';
 
@@ -36,11 +39,12 @@ function renderAt(pathname: string) {
 }
 
 describe('generic application routes', () => {
-  it('keeps only generic primary navigation entries', () => {
+  it('keeps generic primary navigation plus the first-party education entry', () => {
     expect(NAV_ITEMS.map((item) => item.key)).toEqual([
       '/dashboard',
       '/chat',
       '/automations',
+      '/education',
     ]);
   });
 
@@ -53,6 +57,7 @@ describe('generic application routes', () => {
   it.each([
     ['/chat', 'chat-page'],
     ['/automations', 'automations-page'],
+    ['/education', 'education-page'],
     ['/settings', 'settings-page'],
   ])('preserves the %s route', async (pathname, pageTestId) => {
     renderAt(pathname);

@@ -1,4 +1,4 @@
-import { LayoutDashboard, MessagesSquare, Settings, Timer } from 'lucide-react';
+import { BookOpenCheck, LayoutDashboard, MessagesSquare, Settings, Timer } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 export interface NavItem {
@@ -16,6 +16,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: '/dashboard', icon: LayoutDashboard, labelKey: 'sidebar.dashboard', match: 'exact-or-sub' },
   { key: '/chat', icon: MessagesSquare, labelKey: 'sidebar.chatAgent', match: 'prefix' },
   { key: '/automations', icon: Timer, labelKey: 'sidebar.automations', match: 'exact-or-sub' },
+  { key: '/education', icon: BookOpenCheck, labelKey: 'sidebar.education', match: 'exact-or-sub' },
 ];
 
 // Settings only appears in the mobile tab bar (desktop reaches it via AccountMenu).

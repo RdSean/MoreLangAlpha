@@ -52,6 +52,8 @@ class EducationTaskResponse(BaseModel):
     description: str
     status: str
     created_at: datetime | None = None
+    latest_review_decision: Literal["revision_requested", "completed"] | None = None
+    latest_feedback_text: str | None = None
 
 
 class EducationSubmissionResponse(BaseModel):
