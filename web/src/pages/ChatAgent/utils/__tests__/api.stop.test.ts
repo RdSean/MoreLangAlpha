@@ -25,7 +25,6 @@ vi.mock('@/api/client', () => {
   };
 });
 
-vi.mock('@/lib/supabase', () => ({ supabase: null }));
 
 import { api } from '@/api/client';
 import * as apiModule from '../api';

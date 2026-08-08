@@ -14,7 +14,7 @@ React frontend for the LangAlpha workspace-first agent platform.
 ## Stack
 
 React 19, Vite, TypeScript, React Router, React Query, Tailwind, shadcn/ui,
-Zod, Supabase Auth, Axios, Monaco, i18next, and Vitest.
+Zod, local cookie authentication, Axios, Monaco, i18next, and Vitest.
 
 ## Local development
 

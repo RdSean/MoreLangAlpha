@@ -166,6 +166,7 @@ export async function streamWorkspaceEvents(
     res = await fetch(`${baseURL}/api/v1/workspaces/${workspaceId}/events`, {
       method: 'GET',
       headers: { ...authHeaders, Accept: 'text/event-stream' },
+      credentials: 'include',
       signal,
     });
   } catch {

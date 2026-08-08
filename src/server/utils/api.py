@@ -15,15 +15,16 @@ from urllib.parse import parse_qs
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-
-from src.config.settings import HOST_MODE, LOCAL_DEV_USER_ID
-from src.server.auth.jwt_bearer import _decode_token
+from src.server.auth.local_sessions import (
+    SESSION_COOKIE_NAME,
+    get_user_id_for_session_token,
+)
 
 # Type variable for generic return type preservation
 T = TypeVar("T")
 
-_optional_bearer = HTTPBearer(auto_error=False)
 _SERVICE_TOKEN = os.getenv("INTERNAL_SERVICE_TOKEN", "")
+_legacy_bearer = HTTPBearer(auto_error=False)
 
 
 def service_token_matches(candidate: str, secret: str) -> bool:
@@ -68,16 +69,9 @@ def _service_token_user_id(request: Request) -> tuple[bool, Optional[str]]:
 
 async def get_current_user_id(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_legacy_bearer),
 ) -> str:
-    """
-    FastAPI dependency to extract user ID.
-
-    When Supabase auth is disabled (``SUPABASE_URL`` unset), returns the
-    configured local user ID (``AUTH_USER_ID`` env var, default ``local-dev-user``).
-
-    When auth is enabled, requires a valid Bearer JWT (Supabase).
-    """
+    """Resolve a service caller or a valid first-party local session cookie."""
     # Service-to-service auth (only active if INTERNAL_SERVICE_TOKEN is set)
     matched, user_id = _service_token_user_id(request)
     if matched:
@@ -85,13 +79,13 @@ async def get_current_user_id(
             raise HTTPException(status_code=401, detail="Missing X-User-Id")
         return user_id
 
-    if HOST_MODE == "oss":
-        return LOCAL_DEV_USER_ID
-
-    if credentials is None:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
         raise HTTPException(status_code=401, detail="Missing authentication")
-
-    return _decode_token(credentials.credentials).user_id
+    user_id = await get_user_id_for_session_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Session expired or revoked")
+    return user_id
 
 
 # Annotated type for cleaner endpoint signatures
@@ -100,7 +94,7 @@ CurrentUserId = Annotated[str, Depends(get_current_user_id)]
 
 async def get_stamp_auth(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_legacy_bearer),
 ) -> Optional[str]:
     """Auth resolver for the external-id stamp route (PUT /threads/{id}/external-id).
 

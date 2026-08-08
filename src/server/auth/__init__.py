@@ -1,5 +1,5 @@
-"""Supabase JWT authentication for FastAPI."""
+"""First-party local authentication helpers for FastAPI and WebSockets."""
 
-from src.server.auth.jwt_bearer import verify_jwt_token, _decode_token
+from src.server.auth.local_sessions import get_user_id_for_session_token
 
-__all__ = ["verify_jwt_token", "_decode_token"]
+__all__ = ["get_user_id_for_session_token"]

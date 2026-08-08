@@ -7,12 +7,16 @@ No YAML dependency — pure os.getenv.
 
 import os
 
-# Deployment mode: "oss" (self-hosted, no auth) or "platform" (Supabase auth + quota service)
+# Deployment mode: "oss" (self-hosted) or "platform" (hosted quota service).
 HOST_MODE: str = os.getenv("HOST_MODE", "oss")
 
-# Auth / Login Service (Supabase) — credential, not a mode flag
-SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
-LOCAL_DEV_USER_ID: str = os.getenv("AUTH_USER_ID", "local-dev-user")
+# Local authentication session policy. Secure cookies must be enabled behind HTTPS.
+LOCAL_AUTH_SESSION_TTL_DAYS: int = int(os.getenv("LOCAL_AUTH_SESSION_TTL_DAYS", "14"))
+AUTH_COOKIE_SECURE: bool = os.getenv("AUTH_COOKIE_SECURE", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 # Quota / auth enforcement service URL
 AUTH_SERVICE_URL: str = os.getenv("AUTH_SERVICE_URL", "")

@@ -3,25 +3,20 @@
 import asyncio
 import logging
 import re
-from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi import File, UploadFile
 from pydantic import BaseModel
 from src.utils.storage import get_public_url, upload_bytes
 
-from src.server.auth.jwt_bearer import get_current_auth_info, AuthInfo
 from src.server.database.user import (
     create_user as db_create_user,
-    create_user_from_auth,
     delete_user_preferences as db_delete_user_preferences,
-    find_user_by_email,
     get_user as db_get_user,
     get_user_preferences as db_get_user_preferences,
     get_user_with_preferences,
     invalidate_user_prefs_cache,
-    migrate_user_id,
     update_user as db_update_user,
     upsert_user_preferences,
 )
@@ -41,96 +36,6 @@ logger = logging.getLogger(__name__)
 _VALID_MODALITIES = frozenset({"text", "image", "pdf"})
 
 router = APIRouter(prefix="/api/v1", tags=["Users"])
-
-
-# ==================== Auth Sync ====================
-
-
-class AuthSyncRequest(BaseModel):
-    email: Optional[str] = None
-    name: Optional[str] = None
-    avatar_url: Optional[str] = None
-    timezone: Optional[str] = None
-    locale: Optional[str] = None
-
-
-@router.post("/auth/sync", response_model=UserWithPreferencesResponse)
-@handle_api_exceptions("sync user", logger)
-async def sync_user(
-    body: AuthSyncRequest,
-    auth_info: AuthInfo = Depends(get_current_auth_info),
-):
-    """
-    Sync Supabase user to backend after OAuth/email login.
-
-    Three cases: existing UUID match (backfill auth_provider/timezone), legacy
-    email match (migrate PK to UUID), or new user (create with auth_provider).
-    ``locale`` is never backfilled here — NULL means "no explicit preference".
-    """
-    user_id = auth_info.user_id
-    auth_provider = auth_info.auth_provider
-
-    # 1. Already exists by UUID?
-    existing = await db_get_user(user_id)
-    if existing:
-        updates = {}
-
-        # Lazy-backfill NULL fields. Deliberately skip `locale` — that column
-        # encodes the user's explicit Settings preference. A NULL row means
-        # "no preference; use browser locale via the frontend detector".
-        if auth_provider and not existing.get("auth_provider"):
-            updates["auth_provider"] = auth_provider
-        if body.timezone and not existing.get("timezone"):
-            updates["timezone"] = body.timezone
-
-        # Throttle last_login_at writes — only update if stale (>1 hour)
-        last_login = existing.get("last_login_at")
-        now = datetime.now(tz=last_login.tzinfo if last_login else None)
-        if not last_login or (now - last_login).total_seconds() > 3600:
-            updates["last_login_at"] = now
-
-        if updates:
-            await db_update_user(user_id=user_id, **updates)
-
-        result = await get_user_with_preferences(user_id)
-        if not result:
-            raise_not_found("User")
-        user_resp = UserResponse.model_validate(result["user"])
-        pref_resp = None
-        if result.get("preferences"):
-            pref_resp = UserPreferencesResponse.model_validate(result["preferences"])
-        return UserWithPreferencesResponse(user=user_resp, preferences=pref_resp)
-
-    # 2. Legacy email-based user?
-    if body.email:
-        legacy = await find_user_by_email(body.email)
-        if legacy:
-            migrated = await migrate_user_id(legacy["user_id"], user_id)
-            if migrated:
-                logger.info(f"Migrated legacy user {legacy['user_id']} -> {user_id}")
-                result = await get_user_with_preferences(user_id)
-                if not result:
-                    raise_not_found("User")
-                user_resp = UserResponse.model_validate(result["user"])
-                pref_resp = None
-                if result.get("preferences"):
-                    pref_resp = UserPreferencesResponse.model_validate(result["preferences"])
-                return UserWithPreferencesResponse(user=user_resp, preferences=pref_resp)
-
-    # 3. Brand-new user. `locale` is left NULL — only set when the user
-    # explicitly picks a language in Settings. The frontend detector handles
-    # browser-locale and English-fallback at render time.
-    user = await create_user_from_auth(
-        user_id=user_id,
-        email=body.email,
-        name=body.name,
-        avatar_url=body.avatar_url,
-        auth_provider=auth_provider,
-        timezone=body.timezone,
-        locale=None,
-    )
-    user_resp = UserResponse.model_validate(user)
-    return UserWithPreferencesResponse(user=user_resp, preferences=None)
 
 
 # ==================== User CRUD ====================

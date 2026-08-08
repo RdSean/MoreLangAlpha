@@ -18,15 +18,13 @@ import { act, waitFor } from '@testing-library/react';
 import { renderHookWithProviders } from '@/test/utils';
 
 // ---------------------------------------------------------------------------
-// Mocks — only i18n / supabase / threadStorage / api are mocked. The real
+// Mocks — only i18n / threadStorage / api are mocked. The real
 // stream + history event handlers run so we observe `provenanceRecords`.
 // ---------------------------------------------------------------------------
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));
-
-vi.mock('@/lib/supabase', () => ({ supabase: null }));
 
 vi.mock('../utils/threadStorage', () => ({
   // Default: no stored thread (live-send test). The history test overrides

@@ -47,7 +47,6 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
-vi.mock('@/lib/supabase', () => ({ supabase: null }));
 vi.mock('@/hooks/useUser', () => ({ useUser: () => ({ user: null }) }));
 vi.mock('@/contexts/ThemeContext', () => ({
   useTheme: () => ({ theme: 'light', setTheme: () => {} }),

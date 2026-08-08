@@ -161,8 +161,8 @@ function PrivacyPolicy() {
                 responses (see Section 4).
               </li>
               <li>
-                <strong>Authentication</strong> — Supabase manages account sign-in, session
-                tokens, and OAuth handshakes with Google and GitHub.
+                <strong>Authentication</strong> — LangAlpha stores local account credentials
+                and encrypted-session identifiers in its configured PostgreSQL database.
               </li>
               <li>
                 <strong>Sandbox execution</strong> — Daytona runs code generated on your

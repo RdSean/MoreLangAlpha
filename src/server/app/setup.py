@@ -174,14 +174,6 @@ async def lifespan(app: FastAPI):
     _log_container_hardening()
 
     # Security warnings (one-time, startup only)
-    from src.config.env import HOST_MODE
-
-    if HOST_MODE == "oss":
-        logger.warning(
-            "HOST_MODE=oss: authentication is disabled. "
-            "All endpoints are accessible without a token. "
-            "Set HOST_MODE=platform for production use."
-        )
     if os.getenv("BYOK_ENCRYPTION_KEY") == "langalpha-local-dev-encryption-key":
         logger.warning(
             "BYOK_ENCRYPTION_KEY is set to the default value from the repository. "
@@ -221,21 +213,6 @@ async def lifespan(app: FastAPI):
         else:
             logger.error(f"Conversation DB: Failed to connect - {e}")
         raise
-
-    # Auto-provision local dev user when Supabase auth is disabled
-    from src.config.settings import HOST_MODE, LOCAL_DEV_USER_ID
-
-    if HOST_MODE == "oss":
-        from src.server.database.user import get_user, create_user_from_auth
-
-        # Only provision if name is missing or user doesn't exist
-        existing = await get_user(LOCAL_DEV_USER_ID)
-        if not existing or not existing.get("name"):
-            await create_user_from_auth(
-                user_id=LOCAL_DEV_USER_ID,
-                name="Local User",
-            )
-            logger.info(f"[auth] Local dev user provisioned: {LOCAL_DEV_USER_ID}")
 
     # Initialize Redis cache
     try:
@@ -903,6 +880,7 @@ from src.server.app.workspace_files import wsfiles_router
 from src.server.app.workspace_sandbox import router as workspace_sandbox_router
 from src.server.app.workspace_sandbox import preview_redirect_router
 from src.server.app.user_events import router as user_events_router
+from src.server.app.auth import router as auth_router
 from src.server.app.users import router as users_router
 from src.server.app.features import router as features_router
 from src.server.app.api_keys import router as api_keys_router
@@ -928,6 +906,7 @@ app.include_router(
     workspace_sandbox_router
 )  # /api/v1/workspaces/{id}/sandbox/* - Sandbox stats & packages
 app.include_router(cache_router)  # /api/v1/cache/* - Cache management
+app.include_router(auth_router)  # /api/v1/auth/* - Local accounts and household membership
 app.include_router(users_router)  # /api/v1/users/* - User management
 app.include_router(
     user_events_router

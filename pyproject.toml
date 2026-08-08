@@ -88,7 +88,7 @@ dependencies = [
     "daytona>=0.200.1",
     "boto3>=1.42.28",
     "tavily-python>=0.7.18",
-    "PyJWT[crypto]>=2.8",
+    "argon2-cffi>=25.1.0",
     "langalpha-cli",
     "certifi>=2026.1.4",
     "requests>=2.32.5",

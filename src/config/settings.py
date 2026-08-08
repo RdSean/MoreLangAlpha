@@ -19,10 +19,10 @@ from src.config.env import (  # noqa: F401
     AUTH_SERVICE_URL,
     AUTOMATION_WEBHOOK_SECRET,
     AUTOMATION_WEBHOOK_URL,
+    AUTH_COOKIE_SECURE,
     HOST_MODE,
-    LOCAL_DEV_USER_ID,
+    LOCAL_AUTH_SESSION_TTL_DAYS,
     SEARCH_PROVIDER_MIN_TIER,
-    SUPABASE_URL,
 )
 
 logger = logging.getLogger(__name__)
