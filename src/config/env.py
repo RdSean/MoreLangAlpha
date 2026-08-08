@@ -18,6 +18,12 @@ AUTH_COOKIE_SECURE: bool = os.getenv("AUTH_COOKIE_SECURE", "false").strip().lowe
     "yes",
 }
 
+# Education attachments stay private and are served by short-lived signed URLs.
+EDUCATION_ASSET_MAX_BYTES: int = int(os.getenv("EDUCATION_ASSET_MAX_BYTES", str(10 * 1024 * 1024)))
+EDUCATION_ASSET_DOWNLOAD_TTL_SECONDS: int = int(
+    os.getenv("EDUCATION_ASSET_DOWNLOAD_TTL_SECONDS", "300")
+)
+
 # Quota / auth enforcement service URL
 AUTH_SERVICE_URL: str = os.getenv("AUTH_SERVICE_URL", "")
 

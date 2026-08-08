@@ -41,6 +41,36 @@ services:
       timeout: 3s
       retries: 5
 
+  minio:
+    profiles: ["education-storage"]
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MINIO_API_HOST_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-}
+    volumes:
+      - langalpha-minio-data:/data
+
+  minio-init:
+    profiles: ["education-storage"]
+    image: minio/mc:RELEASE.2025-07-21T05-28-08Z
+    depends_on:
+      minio:
+        condition: service_started
+    restart: "no"
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-}
+      EDUCATION_ASSET_BUCKET: ${EDUCATION_ASSET_BUCKET:-langalpha-education}
+    volumes:
+      - ./deploy/minio/init-education-bucket.sh:/init-education-bucket.sh:ro
+    entrypoint: ["/bin/sh", "/init-education-bucket.sh"]
+
   backend:
     build:
       context: .
@@ -107,5 +137,6 @@ services:
 volumes:
   langalpha-postgresql-data:
   langalpha-redis-data:
+  langalpha-minio-data:
   frontend_node_modules:
   frontend_pnpm_store:

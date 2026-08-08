@@ -130,8 +130,9 @@ filesystem:
   enable_path_validation: true # Validate paths against allowed_directories
 
 storage:
-  # Cloud storage provider for image/chart/file uploads and avator
-  # All credentials and settings are loaded from .env file
+  # S3-compatible storage for private file uploads. Local MinIO deployments
+  # use STORAGE_ADDRESSING_STYLE=path and a dedicated education asset bucket.
+  # All credentials and settings are loaded from .env file.
   # Options: s3, r2, oss, none (to disable uploads)
   provider: "s3"
 
