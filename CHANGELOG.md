@@ -23,6 +23,7 @@
 
 - 新增响应式“学习”入口，家长可从家庭学生列表创建或取消作业并给出纯文本反馈；学生可提交、根据反馈重新提交并添加受限附件。
 - 前端通过 React Query 访问 FastAPI 教育 API，复用现有 Button、Dialog、Input、Textarea、Tooltip 和 Quiet Workspace 设计令牌，不引入 Supabase 或旧家庭学习组件。
+- 提交附件控件补充可访问标签，完成状态改用已声明的语义颜色令牌；新增家长创建/反馈与学生附件重交的 Vitest、Playwright 双角色回归覆盖。
 
 ### 学生 Agent 权限与平台收口
 
