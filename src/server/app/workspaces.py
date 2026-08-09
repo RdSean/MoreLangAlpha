@@ -621,6 +621,14 @@ async def start_workspace(
                 message="Workspace is already starting",
             )
 
+        if workspace["status"] == "creating":
+            workspace = await manager.reclaim_stale_workspace_creation(workspace_id)
+            if workspace is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Workspace is still being created",
+                )
+
         if workspace["status"] != "stopped":
             raise HTTPException(
                 status_code=400,

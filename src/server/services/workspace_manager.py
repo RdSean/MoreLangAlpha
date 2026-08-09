@@ -7,7 +7,7 @@ import logging
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 
@@ -39,6 +39,7 @@ from src.server.database.workspace import (
     get_workspace as db_get_workspace,
     get_workspaces_by_status,
     try_claim_workspace_for_start,
+    try_reclaim_stale_workspace_creation,
     update_workspace_activity,
     update_workspace_status,
 )
@@ -1126,6 +1127,15 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                 )
                 raise
 
+    async def reclaim_stale_workspace_creation(
+        self, workspace_id: str
+    ) -> Dict[str, Any] | None:
+        """Claim a dead creator's no-sandbox row after the recovery window."""
+        stale_before = datetime.now(timezone.utc) - timedelta(
+            seconds=self.reap_stuck_after
+        )
+        return await try_reclaim_stale_workspace_creation(workspace_id, stale_before)
+
     def has_ready_session(self, workspace_id: str) -> bool:
         """Check if a ready session exists in cache (no I/O).
 
@@ -1375,6 +1385,21 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
 
             # No usable cached session — handle based on status
             if session is None:
+                if status == "creating":
+                    # A crashed process can leave the initial DB row behind
+                    # before a sandbox exists. Claim only an old no-sandbox row
+                    # so a still-live creator cannot be raced.
+                    reclaimed = await self.reclaim_stale_workspace_creation(
+                        workspace_id
+                    )
+                    if reclaimed is None:
+                        raise RuntimeError(
+                            f"Workspace {workspace_id} is still being created. "
+                            "Please wait and try again."
+                        )
+                    workspace = reclaimed
+                    status = "stopped"
+
                 if status in ("stopped", "starting"):
                     # Cross-worker mutex: only one worker may transition
                     # stopped → starting at a time. Try the claim HERE (a fast
@@ -1408,12 +1433,6 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                     if not did_init:
                         # Session was already initialized — refresh via Phase 2 sync.
                         needs_sync = True
-
-                elif status == "creating":
-                    raise RuntimeError(
-                        f"Workspace {workspace_id} is still being created. "
-                        "Please wait and try again."
-                    )
 
                 elif status == "stopping":
                     logger.info(
@@ -2167,6 +2186,16 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
 
         try:
             logger.info(f"Restarting workspace {workspace_id} (claimed for start)")
+            if not claimed.get("sandbox_id"):
+                logger.warning(
+                    "Workspace %s was reclaimed without a sandbox; provisioning it",
+                    workspace_id,
+                )
+                return await self._recover_sandbox(
+                    workspace_id,
+                    workspace_user_id,
+                    self.config.to_core_config(),
+                )
             return await self._restart_workspace(
                 claimed,
                 user_id=workspace_user_id,
@@ -2693,7 +2722,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         return stopped_count
 
     async def reap_stuck_starting_workspaces(self) -> int:
-        """Revert workspaces wedged in 'starting' back to 'stopped'.
+        """Recover stale ``starting`` rows and abandoned ``creating`` rows.
 
         Backstop for the cross-worker start mutex: if a claim winner's Phase 2
         dies without reverting (worker crash, event-loop teardown that beats the
@@ -2757,8 +2786,40 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                     f"Error reaping stuck-starting workspace {workspace_id}: {e}"
                 )
 
+        creating_workspaces = await get_workspaces_by_status("creating", limit=1000)
+        if len(creating_workspaces) == 1000:
+            logger.warning(
+                "reap_stuck_creating hit the 1000-row scan cap; more stuck "
+                "rows may remain and will be reaped on the next cycle"
+            )
+        for workspace in creating_workspaces:
+            # A row with a recorded sandbox may still be provisioned or require
+            # provider-specific recovery; this path is only for an unambiguous
+            # crash before sandbox creation.
+            if workspace.get("sandbox_id"):
+                continue
+            updated_at = workspace.get("updated_at")
+            if not updated_at:
+                continue
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            if (now - updated_at).total_seconds() <= self.reap_stuck_after:
+                continue
+
+            workspace_id = str(workspace["workspace_id"])
+            if workspace_id in self._sessions:
+                continue
+            try:
+                reclaimed = await self.reclaim_stale_workspace_creation(workspace_id)
+                if reclaimed is not None:
+                    reverted += 1
+            except Exception as e:
+                logger.error(
+                    f"Error reaping stuck-creating workspace {workspace_id}: {e}"
+                )
+
         if reverted > 0:
-            logger.info(f"Reaped {reverted} workspaces stuck in 'starting'")
+            logger.info(f"Reaped {reverted} stale workspace lifecycle rows")
 
         return reverted
 

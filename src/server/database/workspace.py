@@ -503,6 +503,46 @@ async def try_claim_workspace_for_start(
         raise
 
 
+async def try_reclaim_stale_workspace_creation(
+    workspace_id: str,
+    stale_before: datetime,
+) -> Optional[Dict[str, Any]]:
+    """Atomically return an abandoned, unprovisioned workspace to ``stopped``.
+
+    A process can die after inserting the ``creating`` row but before it has a
+    sandbox to clean up. The compare-and-set guards a live creator: only rows
+    with no sandbox identity that have exceeded the caller's stale threshold
+    may be reclaimed.
+    """
+    try:
+        query = f"""
+            UPDATE workspaces
+            SET status = 'stopped', updated_at = NOW(), stopped_at = NOW()
+            WHERE status = 'creating'
+              AND sandbox_id IS NULL
+              AND updated_at <= %s
+              AND workspace_id = %s
+            RETURNING {_WS_COLS}
+        """
+
+        async with get_db_connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(query, (stale_before, workspace_id))
+                result = await cur.fetchone()
+
+        if result:
+            logger.warning(
+                "Reclaimed stale workspace creation %s with no sandbox", workspace_id
+            )
+            await publish_status_change(workspace_id, "stopped")
+            return dict(result)
+        return None
+
+    except Exception as e:
+        logger.error(f"Error reclaiming stale workspace creation {workspace_id}: {e}")
+        raise
+
+
 async def _set_workspace_scalar(
     workspace_id: str,
     column: str,
