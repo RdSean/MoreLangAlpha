@@ -2,6 +2,10 @@
 
 ## 2026-08-09
 
+### 本地 Sandbox 镜像构建
+
+- Docker Desktop 的 HTTP 缓存返回过期 APT 索引时，sandbox 镜像构建改为强制重新获取索引，避免 `fonts-noto-cjk` 依赖的已移除归档版本导致首次工作区预置失败。
+
 ### 工作区创建存活保护
 
 - 本地 sandbox 镜像首次构建等慢速预置尚未生成 sandbox 标识时，周期性回收会识别同一进程中的创建所有者，不再把仍在执行的 `creating` 工作区提前回收为 `stopped`；跨进程或已中断的无 sandbox 创建仍按原条件回收。
