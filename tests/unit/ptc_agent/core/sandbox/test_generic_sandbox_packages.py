@@ -38,4 +38,5 @@ def test_sandbox_dockerfile_bypasses_stale_http_apt_indexes():
         Path(__file__).resolve().parents[5] / "Dockerfile.sandbox"
     ).read_text()
 
-    assert dockerfile.count("Acquire::http::No-Cache=true") == 3
+    assert 'Acquire::http::No-Cache "true";' in dockerfile
+    assert 'Acquire::http::Pipeline-Depth "0";' in dockerfile
