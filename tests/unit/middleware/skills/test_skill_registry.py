@@ -1,4 +1,4 @@
-"""Tests for the retained HTML-output Skill in the registry."""
+"""Tests for retained guidance-only PTC skills in the registry."""
 
 import re
 from pathlib import Path
@@ -15,12 +15,16 @@ from ptc_agent.agent.middleware.skills.registry import (
     list_skills,
 )
 
-# Retained HTML-output Skill under test.
-NEW_SKILLS = ("html-report",)
 
-# Expected slash-command shortcut per skill (None = no shortcut).
-# html-report is user-invocable (like /dashboard); ui-design is a pure design reference.
-EXPECTED_COMMANDS = {"html-report": "html-report"}
+# Retained generic and native book-learning skills under test.
+NEW_SKILLS = ("html-report", "book-to-skill", "the-knowledge-guy")
+
+# Expected slash-command shortcut per skill.
+EXPECTED_COMMANDS = {
+    "html-report": "html-report",
+    "book-to-skill": "book-to-skill",
+    "the-knowledge-guy": "the-knowledge-guy",
+}
 
 # Repo root: tests/unit/middleware/skills/ -> repo root is four parents up.
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -84,7 +88,7 @@ def test_skill_md_exists_and_frontmatter_parses(name):
 
 
 def test_command_shortcuts():
-    """html-report remains invocable via the /html-report shortcut."""
+    """All retained guidance skills expose their declared slash command."""
     commands = get_command_to_skill_map("ptc")
-    assert commands.get("html-report") == "html-report"
-    assert "ui-design" not in commands.values()
+    for name, command in EXPECTED_COMMANDS.items():
+        assert commands.get(command) == name

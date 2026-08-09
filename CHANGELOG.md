@@ -2,6 +2,12 @@
 
 ## 2026-08-09
 
+### 原生图书学习 Skills 集成
+
+- 集成 `book-to-skill` 与 `the-knowledge-guy` 为项目原生 PTC Skills；宿主源码保留在项目 `skills/`，PTC sandbox 中生成的图书知识写入 `.agents/skills/` 并可被运行时发现。
+- `/api/v1/skills?mode=ptc` 与移动端斜杠菜单均可使用这两个命令；`mode=flash` 明确不返回它们，学生 Flash 会话不会获得文件系统、sandbox 或子 Agent 依赖的能力。
+- PDF/EPUB 提取依赖仍只在技能的按需隔离环境中安装，未加入平台运行时依赖。
+
 ### 通用自动化保护
 
 - 金融清理明确保留通用自动化的 `cron` 与 `once` 调度、执行、持久化、API 和前端入口；仅退役金融价格触发变体。

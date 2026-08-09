@@ -17,10 +17,15 @@ import ChatInput from '../chat-input';
 import { ChatInputRegistry, ContextBus } from '@/lib/contextBus';
 
 vi.mock('@/pages/ChatAgent/utils/api', () => ({
-  getSkills: vi.fn().mockResolvedValue([
-    { name: 'Comps Analysis', command: 'comps-analysis', description: 'Comparable company analysis' },
-    { name: 'DCF Model', command: 'dcf-model', description: 'DCF valuation' },
-  ]),
+  getSkills: vi.fn((mode?: string) => Promise.resolve(
+    mode === 'flash'
+      ? []
+      : [
+          { name: 'Comps Analysis', command: 'comps-analysis', description: 'Comparable company analysis' },
+          { name: 'DCF Model', command: 'dcf-model', description: 'DCF valuation' },
+          { name: 'The Knowledge Guy', command: 'the-knowledge-guy', description: 'Book learning guidance' },
+        ],
+  )),
   getModelMetadata: vi.fn().mockResolvedValue({}),
 }));
 
@@ -36,14 +41,18 @@ vi.mock('../use-toast', () => ({
   useToast: () => ({ toast: vi.fn() }),
 }));
 
-function renderInput(props: { onSend?: ReturnType<typeof vi.fn>; onAction?: ReturnType<typeof vi.fn> } = {}) {
+function renderInput(props: {
+  onSend?: ReturnType<typeof vi.fn>;
+  onAction?: ReturnType<typeof vi.fn>;
+  mode?: 'fast' | 'ptc';
+} = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onSend = props.onSend ?? vi.fn();
   const onAction = props.onAction ?? vi.fn();
   const utils = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <ChatInput onSend={onSend} onAction={onAction} />
+        <ChatInput onSend={onSend} onAction={onAction} mode={props.mode} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -105,6 +114,20 @@ describe('ChatInput — slash command menu', () => {
     expect(names).not.toContain('/subagent');
     expect(names[0]).toBe('/dcf-model');
     expect(names.indexOf('/dcf-model')).toBeLessThan(names.indexOf('/offload'));
+  });
+
+  it('renders the PTC book-learning command in the slash menu', async () => {
+    renderInput({ mode: 'ptc' });
+    typeSlash('/the');
+
+    await waitFor(() => expect(menuNames()).toContain('/the-knowledge-guy'));
+  });
+
+  it('does not render the PTC book-learning command in Flash mode', async () => {
+    renderInput({ mode: 'fast' });
+    typeSlash('/the');
+
+    await waitFor(() => expect(menuNames()).not.toContain('/the-knowledge-guy'));
   });
 
   it('defers /compact to send: selecting adds a pill (no onAction), sending dispatches it', async () => {
