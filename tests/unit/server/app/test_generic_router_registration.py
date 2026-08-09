@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import get_args
 
 from src.server.app.setup import app
+from src.server.models.automation import AutomationCreate
 
 
 RETIRED_ROUTE_SEGMENTS = (
@@ -90,3 +92,28 @@ def test_retired_finance_packages_are_not_shipped():
         for relative_path in RETIRED_FINANCE_SOURCE_PATHS
         if is_shipped_source(relative_path)
     ]
+
+
+def test_general_automation_routes_and_schedule_contract_remain_available():
+    """Finance cleanup may remove price triggers, never general task automation."""
+    registered_methods = {
+        (method, route.path)
+        for route in app.routes
+        for method in getattr(route, "methods", set())
+    }
+
+    assert {
+        ("POST", "/api/v1/automations"),
+        ("GET", "/api/v1/automations"),
+        ("GET", "/api/v1/automations/{automation_id}"),
+        ("PATCH", "/api/v1/automations/{automation_id}"),
+        ("DELETE", "/api/v1/automations/{automation_id}"),
+        ("POST", "/api/v1/automations/{automation_id}/trigger"),
+        ("POST", "/api/v1/automations/{automation_id}/pause"),
+        ("POST", "/api/v1/automations/{automation_id}/resume"),
+        ("GET", "/api/v1/automations/{automation_id}/executions"),
+    } <= registered_methods
+    assert set(get_args(AutomationCreate.model_fields["trigger_type"].annotation)) == {
+        "cron",
+        "once",
+    }
