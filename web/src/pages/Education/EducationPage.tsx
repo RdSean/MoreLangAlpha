@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ClipboardPlus, RotateCcw, Send, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/contexts/AuthContext';
+import { createRequestKeyTracker } from '@/pages/ChatAgent/hooks/utils/requestKey';
 import { uploadEducationAsset } from './api';
 import { useEducationMembers, useEducationTaskMutations, useEducationTasks } from './queries';
 import type { EducationMember, EducationTask, EducationTaskStatus } from './types';
@@ -59,9 +60,23 @@ function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'st
   const [text, setText] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [open, setOpen] = useState(false);
+  const requestKeyTracker = useRef(createRequestKeyTracker());
   const canSubmit = role === 'student' && (task.status === 'open' || task.status === 'revision_requested');
   const canReview = role === 'parent' && task.status === 'submitted';
-  const submit = async () => { const assetIds = await uploadSelectedFile(file); await mutations.submit.mutateAsync({ taskId: task.task_id, submission_text: text, idempotency_key: crypto.randomUUID(), asset_ids: assetIds }); setOpen(false); setText(''); setFile(null); };
+  const submit = async () => {
+    const assetIds = await uploadSelectedFile(file);
+    const fingerprint = [task.task_id, text, file?.name, file?.size, file?.lastModified].join('\u0000');
+    await mutations.submit.mutateAsync({
+      taskId: task.task_id,
+      submission_text: text,
+      idempotency_key: requestKeyTracker.current.take(fingerprint),
+      asset_ids: assetIds,
+    });
+    requestKeyTracker.current.clear();
+    setOpen(false);
+    setText('');
+    setFile(null);
+  };
   const review = async (decision: 'revision_requested' | 'completed') => { await mutations.review.mutateAsync({ taskId: task.task_id, decision, feedbackText: text }); setOpen(false); setText(''); };
   if (canSubmit) return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button size="sm"><Send className="mr-2 size-4" aria-hidden="true" />提交作业</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg"><DialogHeader><DialogTitle>提交作业</DialogTitle><DialogDescription>可添加简短说明和一份 PDF 或图片附件。</DialogDescription></DialogHeader><div className="grid gap-4"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="写下完成情况" /><label className="grid gap-1.5 text-sm font-medium">附件<Input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label><DialogFooter><Button onClick={() => void submit()} disabled={mutations.submit.isPending || (!text.trim() && !file)}>{mutations.submit.isPending ? '正在提交' : '提交'}</Button></DialogFooter></div></DialogContent></Dialog>;
   if (canReview) return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button size="sm" variant="outline"><RotateCcw className="mr-2 size-4" aria-hidden="true" />反馈</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg"><DialogHeader><DialogTitle>作业反馈</DialogTitle><DialogDescription>反馈仅支持纯文本。</DialogDescription></DialogHeader><div className="grid gap-4"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="写下修改建议或完成反馈" /><DialogFooter><Button variant="outline" onClick={() => void review('revision_requested')} disabled={!text.trim() || mutations.review.isPending}>请求修改</Button><Button onClick={() => void review('completed')} disabled={!text.trim() || mutations.review.isPending}>标记完成</Button></DialogFooter></div></DialogContent></Dialog>;

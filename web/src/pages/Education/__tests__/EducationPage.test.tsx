@@ -130,4 +130,23 @@ describe('EducationPage', () => {
       asset_ids: ['asset-1'],
     }));
   });
+
+  it('submits from an HTTP context without crypto.randomUUID', async () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    state.tasks = [task('open')];
+    vi.stubGlobal('crypto', {});
+
+    render(<EducationPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: '提交作业' }));
+    fireEvent.change(screen.getByPlaceholderText('写下完成情况'), { target: { value: '已完成。' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => expect(state.submit).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'task-1',
+      submission_text: '已完成。',
+      idempotency_key: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+      asset_ids: [],
+    })));
+  });
 });
