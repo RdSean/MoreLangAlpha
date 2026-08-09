@@ -448,7 +448,7 @@ def build_web_search_tool(
         time_range: Optional[Literal["day", "week", "month", "year", "d", "w", "m", "y"]] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        topic: Optional[Literal["general", "news", "finance"]] = "general",
+        topic: Optional[Literal["general", "news"]] = "general",
     ) -> Tuple[Union[List[Dict[str, Any]], str], Dict[str, Any]]:
         """Search the web for current information, news, and facts.
 
@@ -467,7 +467,7 @@ def build_web_search_tool(
                 Takes priority over time_range.
             end_date: End date for results (YYYY-MM-DD format).
                 Takes priority over time_range.
-            topic: Search topic - 'general' (default), 'news', or 'finance'
+            topic: Search topic - 'general' (default) or 'news'.
         """
         try:
             # Validate date formats

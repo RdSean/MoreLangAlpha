@@ -1,5 +1,5 @@
 """Bocha provider: AI Search optimized for Chinese-language queries and
-Chinese market content.
+Chinese-language content.
 
 Auth via ``Authorization: Bearer`` (BOCHA_API_KEY).
 """

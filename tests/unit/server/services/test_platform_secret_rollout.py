@@ -39,19 +39,19 @@ PLACEHOLDER = "dtn_secret_opaque"
 _MODULE = "src.server.services.platform_secret_rollout"
 
 
-_FMP_DEFINITION = PlatformSecretDefinition(
-    source_env_var="FMP_API_KEY",
-    sandbox_env_var="FMP_API_KEY",
-    name_suffix="platform-fmp-api-key",
-    description="Platform FMP API key",
-    hosts=("financialmodelingprep.com",),
+_PLATFORM_SECRET_DEFINITION = PlatformSecretDefinition(
+    source_env_var="PLATFORM_SECRET_API_KEY",
+    sandbox_env_var="PLATFORM_SECRET_API_KEY",
+    name_suffix="platform-secret",
+    description="Platform API key",
+    hosts=("example.invalid",),
 )
 
 
 def _config(
     *,
     provider: str = "daytona",
-    platform_secrets: tuple[PlatformSecretDefinition, ...] = (_FMP_DEFINITION,),
+    platform_secrets: tuple[PlatformSecretDefinition, ...] = (_PLATFORM_SECRET_DEFINITION,),
 ) -> CoreConfig:
     return CoreConfig(
         sandbox=SandboxConfig(
@@ -68,9 +68,9 @@ def _config(
 
 def _rollout_set(generation: int = 1) -> PlatformSecretRolloutSet:
     rollout = PlatformSecretRollout(
-        secret_key="FMP_API_KEY",
+        secret_key="PLATFORM_SECRET_API_KEY",
         provider="daytona",
-        secret_name="prod-platform-fmp-api-key",
+        secret_name="prod-platform-secret",
         provider_secret_id="secret-id",
         placeholder_sha256=hashlib.sha256(PLACEHOLDER.encode()).hexdigest(),
         current_credential_sha256="current",
@@ -122,7 +122,7 @@ async def test_resync_is_inert_without_catalog(monkeypatch):
 async def test_resync_short_circuits_on_session_generation(monkeypatch):
     # The session already applied the active generation: zero provider calls.
     monkeypatch.setattr("src.config.env.HOST_MODE", "platform")
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     monkeypatch.setattr(
         f"{_MODULE}.get_platform_secret_rollouts",
         AsyncMock(return_value=_rollout_set()),
@@ -141,7 +141,7 @@ async def test_resync_trusts_a_certified_current_row(monkeypatch):
     # Row already at the active generation (fresh provision / sweep): bindings
     # are mounted; only the session stamp was missing.
     monkeypatch.setattr("src.config.env.HOST_MODE", "platform")
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     monkeypatch.setattr(
         f"{_MODULE}.get_platform_secret_rollouts",
         AsyncMock(return_value=_rollout_set()),
@@ -160,7 +160,7 @@ async def test_resync_hot_swaps_verifies_and_stamps_a_certified_behind_row(
     monkeypatch,
 ):
     monkeypatch.setattr("src.config.env.HOST_MODE", "platform")
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     rollout_set = _rollout_set(generation=2)
     monkeypatch.setattr(
         f"{_MODULE}.get_platform_secret_rollouts",
@@ -180,7 +180,7 @@ async def test_resync_hot_swaps_verifies_and_stamps_a_certified_behind_row(
     remount.assert_awaited_once_with(
         runtime,
         expected=rollout_set.placeholders,
-        bindings={"FMP_API_KEY": "prod-platform-fmp-api-key"},
+        bindings={"PLATFORM_SECRET_API_KEY": "prod-platform-secret"},
     )
     verify.assert_awaited_once_with(runtime, expected=rollout_set.placeholders)
     stamp.assert_awaited_once_with(
@@ -194,7 +194,7 @@ async def test_resync_remounts_a_legacy_row_without_certifying_it(monkeypatch):
     # hot remount protects new processes but the row must stay behind for the
     # sweep's scrub-restart — no verify, no stamp.
     monkeypatch.setattr("src.config.env.HOST_MODE", "platform")
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     monkeypatch.setattr(
         f"{_MODULE}.get_platform_secret_rollouts",
         AsyncMock(return_value=_rollout_set()),
@@ -217,7 +217,7 @@ async def test_resync_remounts_a_legacy_row_without_certifying_it(monkeypatch):
 @pytest.mark.asyncio
 async def test_resync_raises_on_remount_failure_without_stamping(monkeypatch):
     monkeypatch.setattr("src.config.env.HOST_MODE", "platform")
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     monkeypatch.setattr(
         f"{_MODULE}.get_platform_secret_rollouts",
         AsyncMock(return_value=_rollout_set(generation=2)),
@@ -237,7 +237,7 @@ async def test_resync_raises_on_remount_failure_without_stamping(monkeypatch):
 @pytest.mark.asyncio
 async def test_resync_skips_sandboxless_workspace(monkeypatch):
     monkeypatch.setattr("src.config.env.HOST_MODE", "platform")
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     monkeypatch.setattr(
         f"{_MODULE}.get_platform_secret_rollouts",
         AsyncMock(return_value=_rollout_set()),
@@ -266,7 +266,7 @@ async def test_boot_missing_provider_credentials_fail_hosted_readiness(monkeypat
 @pytest.mark.asyncio
 async def test_boot_reconciles_and_registers_provider(monkeypatch):
     monkeypatch.setattr("src.config.env.HOST_MODE", "platform")
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     config = _config()
     agent_config = SimpleNamespace(
         to_core_config=lambda: config,
@@ -274,12 +274,12 @@ async def test_boot_reconciles_and_registers_provider(monkeypatch):
     )
     definition = resolve_platform_secrets(
         config,
-        environ={"FMP_API_KEY": "real-fmp-value"},
+        environ={"PLATFORM_SECRET_API_KEY": "real-platform-value"},
         host_mode="platform",
     )[0].definition
     reconciled = ReconciledPlatformSecret(
         definition=definition,
-        name="prod-platform-fmp-api-key",
+        name="prod-platform-secret",
         provider_secret_id="secret-id",
         placeholder="dtn_secret_opaque",
     )
@@ -301,7 +301,7 @@ async def test_boot_reconciles_and_registers_provider(monkeypatch):
     provider.close.assert_awaited_once()
     register.assert_awaited_once_with(
         (reconciled,),
-        credential_values={"FMP_API_KEY": "real-fmp-value"},
+        credential_values={"PLATFORM_SECRET_API_KEY": "real-platform-value"},
         provider="daytona",
     )
 
@@ -330,18 +330,18 @@ async def test_boot_oss_with_catalog_opts_in(monkeypatch):
     # OSS + Daytona + a configured catalog opts in: boot reconciles and
     # registers, no HOST_MODE=platform required.
     monkeypatch.setattr("src.config.env.HOST_MODE", "oss")
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     config = _config()
     agent_config = SimpleNamespace(
         to_core_config=lambda: config,
         validate_api_keys=MagicMock(),
     )
     definition = resolve_platform_secrets(
-        config, environ={"FMP_API_KEY": "real-fmp-value"}
+        config, environ={"PLATFORM_SECRET_API_KEY": "real-platform-value"}
     )[0].definition
     reconciled = ReconciledPlatformSecret(
         definition=definition,
-        name="prod-platform-fmp-api-key",
+        name="prod-platform-secret",
         provider_secret_id="secret-id",
         placeholder="dtn_secret_opaque",
     )
@@ -362,7 +362,7 @@ async def test_boot_oss_with_catalog_opts_in(monkeypatch):
     provider.reconcile_platform_secrets.assert_awaited_once()
     register.assert_awaited_once_with(
         (reconciled,),
-        credential_values={"FMP_API_KEY": "real-fmp-value"},
+        credential_values={"PLATFORM_SECRET_API_KEY": "real-platform-value"},
         provider="daytona",
     )
 
@@ -372,7 +372,7 @@ async def test_boot_reconcile_softens_provider_outage_with_existing_rollout(
     monkeypatch,
 ):
     monkeypatch.setattr("src.config.env.HOST_MODE", "platform")
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     rollout_set = _rollout_set()
     provider = MagicMock()
     provider.reconcile_platform_secrets = AsyncMock(
@@ -404,7 +404,7 @@ async def test_boot_reconcile_count_mismatch_fails_closed_despite_prior_rollout(
     # not a provider outage — it must fail closed even when a prior rollout
     # exists (the outage path would soften here; this must not).
     monkeypatch.setattr("src.config.env.HOST_MODE", "platform")
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     provider = MagicMock()
     provider.reconcile_platform_secrets = AsyncMock(return_value=())  # 0 != 1
     provider.close = AsyncMock()
@@ -429,7 +429,7 @@ async def test_boot_reconcile_count_mismatch_fails_closed_despite_prior_rollout(
 @pytest.mark.asyncio
 async def test_boot_reconcile_fails_closed_without_prior_rollout(monkeypatch):
     monkeypatch.setattr("src.config.env.HOST_MODE", "platform")
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     provider = MagicMock()
     provider.reconcile_platform_secrets = AsyncMock(
         side_effect=ConnectionError("daytona down")

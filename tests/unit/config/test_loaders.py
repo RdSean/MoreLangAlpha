@@ -246,7 +246,7 @@ class TestLoadFromDictMCP:
         data = _full_config_dict()
         data["mcp"]["servers"] = [
             {"name": "tavily", "command": "npx", "args": ["-y", "tavily-mcp"]},
-            {"name": "finance", "command": "python", "args": ["server.py"], "enabled": False},
+            {"name": "research", "command": "python", "args": ["server.py"], "enabled": False},
         ]
         config = load_from_dict(data)
         assert len(config.mcp.servers) == 2

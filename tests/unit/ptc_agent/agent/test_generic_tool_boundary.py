@@ -78,6 +78,22 @@ RETIRED_FINANCE_RUNTIME_PATHS = (
     "src/utils/market_hours.py",
 )
 
+RETIRED_FINANCE_TEST_PATHS = (
+    "tests/regression/market_data",
+    "tests/unit/data_client",
+    "tests/unit/market_protocol",
+    "tests/unit/tools/sec",
+)
+
+RETIRED_FINANCE_CONFIGURATION_TERMS = (
+    "edgartools",
+    "FMP_API_KEY",
+    "ALPHA_VANTAGE_API_KEY",
+    "Yahoo Finance",
+    "Financial Modeling Prep",
+    "exchange-calendars",
+)
+
 
 def _tool_name(tool: object) -> str:
     return str(getattr(tool, "name", getattr(tool, "__name__", "")))
@@ -239,6 +255,11 @@ def test_generic_runtime_has_no_finance_only_modules_or_user_contracts():
         for relative_path in RETIRED_FINANCE_RUNTIME_PATHS
         if (project_root / relative_path).exists()
     ]
+    assert not [
+        relative_path
+        for relative_path in RETIRED_FINANCE_TEST_PATHS
+        if list((project_root / relative_path).glob("*.py"))
+    ]
 
     user_models = (project_root / "src/server/models/user.py").read_text()
     for retired_contract in (
@@ -250,6 +271,35 @@ def test_generic_runtime_has_no_finance_only_modules_or_user_contracts():
         "KNOWN_INSTRUMENT_TYPES",
     ):
         assert retired_contract not in user_models
+
+
+def test_runtime_configuration_and_workflow_contracts_are_finance_neutral():
+    """Removed data providers cannot survive in shipped config or workflow APIs."""
+    project_root = Path(__file__).parents[4]
+    configuration = "\n".join(
+        (project_root / relative_path).read_text()
+        for relative_path in (
+            "pyproject.toml",
+            ".env.example",
+            "src/config/logging_config.py",
+        )
+    )
+    workflow_models = (project_root / "src/server/models/workflow.py").read_text()
+    cache_helpers = (project_root / "src/ptc_agent/agent/middleware/provider_cache.py").read_text()
+    tavily_provider = (project_root / "src/tools/web/providers/tavily.py").read_text()
+    exa_provider = (project_root / "src/tools/web/providers/exa.py").read_text()
+    run_finalization = (project_root / "src/server/services/runs/finalization.py").read_text()
+    tool_tracking = (project_root / "src/utils/tracking/core.py").read_text()
+
+    assert not [
+        term for term in RETIRED_FINANCE_CONFIGURATION_TERMS if term in configuration
+    ]
+    assert "market_type" not in workflow_models
+    assert "MarketWatchMiddleware" not in cache_helpers
+    assert '"finance"' not in tavily_provider
+    assert '"financial report"' not in exa_provider
+    assert "stock_code" not in run_finalization
+    assert "technical_analyze_stock_with_indicators" not in tool_tracking
 
 
 def test_default_sandbox_has_no_financial_dependencies_or_token_channel():
@@ -282,6 +332,10 @@ def test_default_prompts_and_public_docs_describe_a_generic_agent_platform():
             "AGENTS.md",
             "web/README.md",
             "src/ptc_agent/agent/prompts/templates/components/workspace_context.md.j2",
+            "src/ptc_agent/agent/prompts/templates/components/task_workflow.md.j2",
+            "src/ptc_agent/agent/prompts/templates/components/workspace_paths.md.j2",
+            "src/ptc_agent/agent/prompts/templates/components/memo.md.j2",
+            "src/ptc_agent/agent/prompts/templates/subagents/roles/researcher.md.j2",
             "src/ptc_agent/agent/middleware/compaction/utils.py",
         )
     )
@@ -296,5 +350,11 @@ def test_default_prompts_and_public_docs_describe_a_generic_agent_platform():
         "fmp",
         "portfolio",
         "watchlist",
+        "earnings",
+        "10-k",
+        "sector_analysis",
+        "comp methodology",
+        "investment thesis",
+        "valuation framework",
     ):
         assert retired_term not in source

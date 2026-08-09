@@ -1,6 +1,6 @@
 """Model resilience middleware: retry with backoff, model fallback, SSE signals.
 
-Replaces the stock langchain ``ModelRetryMiddleware`` + ``ModelFallbackMiddleware``
+Replaces the standard LangChain ``ModelRetryMiddleware`` + ``ModelFallbackMiddleware``
 pair so that:
 
 - non-retryable errors (bad request / auth / unknown model) skip straight to

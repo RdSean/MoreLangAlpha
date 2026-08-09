@@ -59,8 +59,6 @@ THIRD_PARTY_LIBRARIES = [
     'urllib3',
     'requests',
     'litellm',
-    'edgar',  # SEC EDGAR library (verbose cache/request logs)
-    'httpxthrottlecache',  # HTTP cache/throttle library used by edgar
     'mcp',  # MCP SDK library (verbose ListToolsRequest logs)
 ]
 

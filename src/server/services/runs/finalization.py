@@ -128,7 +128,6 @@ async def assemble_finalize_artifacts(
 
     persist_metadata = {
         "msg_type": metadata.get("msg_type"),
-        "stock_code": metadata.get("stock_code"),
         "agent_llm_preset": metadata.get("agent_llm_preset", "default"),
         "deepthinking": metadata.get("deepthinking", False),
         "is_byok": metadata.get("is_byok", False),

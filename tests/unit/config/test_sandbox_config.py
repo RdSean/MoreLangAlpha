@@ -283,7 +283,7 @@ class TestPlatformSecretCatalogValidation:
     """SandboxConfig rejects a catalog that would silently mis-bind."""
 
     @staticmethod
-    def _def(*, sandbox_env_var="FMP_API_KEY", name_suffix="platform-fmp"):
+    def _def(*, sandbox_env_var="PLATFORM_SECRET_API_KEY", name_suffix="platform-api"):
         return PlatformSecretDefinition(
             source_env_var="SRC_KEY",
             sandbox_env_var=sandbox_env_var,

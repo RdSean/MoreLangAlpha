@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 _EXTRACTION_TIMEOUT_S = 30
 
 # Bound the per-PDF page count to keep extraction memory predictable. A 1000-page
-# financial filing decompressed and held in memory comfortably crosses 1 GB on
+# large document decompressed and held in memory comfortably crosses 1 GB on
 # pdfplumber. 500 pages covers any realistic memo input; documents that exceed
 # this almost always belong in a different workflow (e.g. summarized externally
 # or chunked for retrieval) and should not blow up the FastAPI worker.

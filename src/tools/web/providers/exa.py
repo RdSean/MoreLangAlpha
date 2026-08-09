@@ -346,7 +346,7 @@ def build_web_search_tool(
     async def web_search(
         query: str,
         category: Optional[
-            Literal["company", "research paper", "financial report", "news", "people"]
+            Literal["company", "research paper", "news", "people"]
         ] = None,
         start_published_date: Optional[str] = None,
         end_published_date: Optional[str] = None,
@@ -356,17 +356,17 @@ def build_web_search_tool(
 
         Queries work best phrased as natural-language descriptions of what
         you want to find, not just keywords. Use when you need to:
-        - Find recent news, filings, or research on a topic
+        - Find recent news, reports, or research on a topic
         - Discover companies, papers, or people matching a description
         - Research topics beyond your knowledge cutoff
 
         Args:
             query: What you want to find, as a natural-language description
             category: Restrict results to one content type: 'company',
-                'research paper', 'financial report', 'news', or 'people'
+                'research paper', 'news', or 'people'
             start_published_date: Only results published on/after this date (YYYY-MM-DD)
             end_published_date: Only results published on/before this date (YYYY-MM-DD)
-            include_domains: Restrict results to these domains (e.g. ['sec.gov'])
+            include_domains: Restrict results to these domains (e.g. ['example.edu'])
         """
         try:
             api = _get_api_wrapper()

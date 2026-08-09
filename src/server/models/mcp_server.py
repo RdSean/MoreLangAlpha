@@ -340,7 +340,7 @@ def coerce_mcp_name(raw: Any) -> tuple[Optional[str], bool]:
     """Coerce an arbitrary server key into a legal MCP name (``NAME_RE``).
 
     Illegal characters become ``_`` and a leading digit is prefixed, so
-    ``hexin-ifind-ds-stock-mcp`` → ``hexin_ifind_ds_stock_mcp``. Returns
+    ``acme-project-mcp`` → ``acme_project_mcp``. Returns
     ``(name, renamed)``, or ``(None, False)`` when nothing salvageable remains.
     """
     if not isinstance(raw, str) or not raw:

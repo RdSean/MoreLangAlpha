@@ -23,8 +23,8 @@ from src.server.utils.secret_redactor import SecretRedactor
 pytestmark = pytest.mark.asyncio
 
 # Test data
-_SECRET_NAME = "FMP_API_KEY"
-_SECRET_VALUE = "sk_test_fmp_1234567890abcdef"
+_SECRET_NAME = "PLATFORM_SECRET_API_KEY"
+_SECRET_VALUE = "sk_test_platform_1234567890abcdef"
 _SHARE_TOKEN = "share_abc123"
 _WORKSPACE_ID = "ws-test-001"
 _THREAD_ID = "thread-001"

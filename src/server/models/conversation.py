@@ -271,7 +271,7 @@ class ThreadUpdateRequest(BaseModel):
     )
 
     model_config = ConfigDict(json_schema_extra={
-        "example": {"title": "Tesla Stock Analysis"},
+        "example": {"title": "Quarterly research brief"},
     })
 
 
