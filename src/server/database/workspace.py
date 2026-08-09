@@ -543,6 +543,42 @@ async def try_reclaim_stale_workspace_creation(
         raise
 
 
+async def try_abandon_workspace_creation(
+    workspace_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Release a cancelled creation only while it has no sandbox identity.
+
+    Once a sandbox has been recorded, this compare-and-set deliberately does
+    nothing so cancellation cannot demote a usable workspace.
+    """
+    try:
+        query = f"""
+            UPDATE workspaces
+            SET status = 'stopped', updated_at = NOW(), stopped_at = NOW()
+            WHERE status = 'creating'
+              AND sandbox_id IS NULL
+              AND workspace_id = %s
+            RETURNING {_WS_COLS}
+        """
+
+        async with get_db_connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(query, (workspace_id,))
+                result = await cur.fetchone()
+
+        if result:
+            logger.warning(
+                "Released cancelled workspace creation %s with no sandbox", workspace_id
+            )
+            await publish_status_change(workspace_id, "stopped")
+            return dict(result)
+        return None
+
+    except Exception as e:
+        logger.error(f"Error releasing cancelled workspace creation {workspace_id}: {e}")
+        raise
+
+
 async def _set_workspace_scalar(
     workspace_id: str,
     column: str,

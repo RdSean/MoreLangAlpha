@@ -38,6 +38,7 @@ from src.server.database.workspace import (
     delete_workspace as db_delete_workspace,
     get_workspace as db_get_workspace,
     get_workspaces_by_status,
+    try_abandon_workspace_creation,
     try_claim_workspace_for_start,
     try_reclaim_stale_workspace_creation,
     update_workspace_activity,
@@ -787,6 +788,18 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
 
             self._record_sync(workspace_id)
             return session, workspace
+        except asyncio.CancelledError:
+            # Cancellation is a BaseException. Complete the same identity-
+            # guarded teardown as ordinary provision failures before allowing
+            # the outer create path to release its no-sandbox row.
+            cleanup = asyncio.create_task(
+                self._clear_session(workspace_id, evict_session=session)
+            )
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                pass
+            raise
         except Exception:
             # Unwind a half-built provision: cancel discovery, drop the broken
             # cached session (identity-guarded), and destroy the Daytona sandbox
@@ -1115,6 +1128,24 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                 safe_add(workspace_created, 1)
                 return workspace
 
+            except asyncio.CancelledError:
+                # A cancellation during first provision used to bypass the
+                # Exception handler below, leaving a no-sandbox row in
+                # ``creating`` indefinitely. The guarded update never changes
+                # a row that already recorded a sandbox identity.
+                release = asyncio.create_task(
+                    try_abandon_workspace_creation(workspace_id)
+                )
+                try:
+                    await asyncio.shield(release)
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception(
+                        "Failed to release cancelled workspace creation %s",
+                        workspace_id,
+                    )
+                raise
             except Exception as e:
                 # The provisioning spine already tore down any half-built sandbox;
                 # mark the row error so it stops claiming 'creating'/'running'.

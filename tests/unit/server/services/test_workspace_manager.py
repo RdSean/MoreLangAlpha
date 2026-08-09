@@ -243,6 +243,44 @@ class TestCreateWorkspace:
         ]
         assert len(error_call) > 0
 
+    @pytest.mark.asyncio
+    @patch("src.server.services.workspace_manager.db_create_workspace", new_callable=AsyncMock)
+    @patch("src.server.services.workspace_manager.SessionManager")
+    async def test_create_workspace_cancellation_releases_unprovisioned_row(
+        self, mock_sm, mock_db_create, monkeypatch
+    ):
+        """Cancellation before a sandbox id exists must not strand ``creating``."""
+        from src.server.services import workspace_manager
+
+        ws_id = str(uuid.uuid4())
+        created_ws = _make_workspace(
+            workspace_id=ws_id, status="creating", sandbox_id=None
+        )
+        mock_db_create.return_value = created_ws
+        mock_session = _make_mock_session(initialized=False, has_sandbox=False)
+        mock_session.initialize.side_effect = asyncio.CancelledError()
+        mock_sm.get_session.return_value = mock_session
+        mock_sm.cleanup_session = AsyncMock()
+        abandon = AsyncMock(
+            return_value=_make_workspace(
+                workspace_id=ws_id, status="stopped", sandbox_id=None
+            )
+        )
+        monkeypatch.setattr(
+            workspace_manager,
+            "try_abandon_workspace_creation",
+            abandon,
+            raising=False,
+        )
+
+        with pytest.raises(asyncio.CancelledError):
+            await WorkspaceManager(_make_config()).create_workspace(
+                user_id="user-1", name="Test"
+            )
+
+        mock_sm.cleanup_session.assert_awaited_once_with(ws_id)
+        abandon.assert_awaited_once_with(ws_id)
+
 
 class TestAbandonedCreationRecovery:
     """A crashed creator must not permanently strand a no-sandbox row."""
