@@ -41,3 +41,17 @@ def test_sandbox_dockerfile_handles_flaky_http_apt_proxy_requests():
     assert 'Acquire::http::No-Cache "true";' in dockerfile
     assert 'Acquire::http::Pipeline-Depth "0";' in dockerfile
     assert 'Acquire::Retries "10";' in dockerfile
+
+
+def test_sandbox_dockerfile_uses_reachable_ubuntu_ports_mirror():
+    """The local Docker build must select the validated ARM Ubuntu mirror first."""
+    dockerfile = (
+        Path(__file__).resolve().parents[5] / "Dockerfile.sandbox"
+    ).read_text()
+
+    mirror_command = (
+        "sed -i 's|http://ports.ubuntu.com/ubuntu-ports|"
+        "http://mirrors.ustc.edu.cn/ubuntu-ports|g'"
+    )
+    assert mirror_command in dockerfile
+    assert dockerfile.index(mirror_command) < dockerfile.index("apt-get update")

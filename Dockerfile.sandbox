@@ -16,7 +16,8 @@ FROM ubuntu:24.04
 ARG NODE_VERSION=24.14.1
 
 # ---------- System packages ----------
-RUN printf '%s\n' \
+RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.ustc.edu.cn/ubuntu-ports|g' /etc/apt/sources.list.d/ubuntu.sources \
+    && printf '%s\n' \
         'Acquire::http::No-Cache "true";' \
         'Acquire::http::Pipeline-Depth "0";' \
         'Acquire::Retries "10";' \
