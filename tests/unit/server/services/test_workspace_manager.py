@@ -763,6 +763,33 @@ class TestReapStuckStarting:
 
     @pytest.mark.asyncio
     @patch(
+        "src.server.services.workspace_manager.get_workspaces_by_status",
+        new_callable=AsyncMock,
+    )
+    async def test_leaves_in_flight_creation_past_threshold(
+        self, mock_get_by_status
+    ):
+        """A slow initial provision on this worker must not be reclaimed."""
+        manager = WorkspaceManager.get_instance(config=_make_config())
+        ws_id = str(uuid.uuid4())
+        creating = _make_workspace(
+            workspace_id=ws_id,
+            status="creating",
+            sandbox_id=None,
+            updated_at=datetime.now(timezone.utc)
+            - timedelta(seconds=manager.reap_stuck_after + 1),
+        )
+        mock_get_by_status.side_effect = [[], [creating]]
+        manager._pending_creations = {ws_id}
+        manager.reclaim_stale_workspace_creation = AsyncMock(return_value=creating)
+
+        reclaimed = await manager.reap_stuck_starting_workspaces()
+
+        assert reclaimed == 0
+        manager.reclaim_stale_workspace_creation.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @patch(
         "src.server.services.workspace_manager.update_workspace_status",
         new_callable=AsyncMock,
     )

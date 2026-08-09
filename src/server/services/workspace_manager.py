@@ -97,6 +97,11 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         # Once sandbox is ready and sync completes, workspace is removed from this set
         self._pending_lazy_sync: set[str] = set()
 
+        # Initial provisioning does not cache its Session until the sandbox is
+        # initialized. Keep a local liveness marker so the stale-row reaper
+        # cannot reclaim a legitimately slow image build on this worker.
+        self._pending_creations: set[str] = set()
+
         # Elevated-tier workspaces restarted this request, owed an entitlement
         # re-check in Phase 2 (lazy spec reclaim). Marked in _restart_workspace
         # where the row is already in hand, so standard-tier restarts skip the
@@ -1101,6 +1106,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         async with self._observed_lock(
             workspace_id, "workspace.create", user_id=_obs_hash_id(user_id)
         ):
+            self._pending_creations.add(workspace_id)
             try:
                 # A brand-new workspace has zero MCP rows → builtins-only identity
                 # (ws_version=0, no discovery to kick). Seed a default agent.md as
@@ -1157,6 +1163,8 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                     status="error",
                 )
                 raise
+            finally:
+                self._pending_creations.discard(workspace_id)
 
     async def reclaim_stale_workspace_creation(
         self, workspace_id: str
@@ -2838,6 +2846,11 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                 continue
 
             workspace_id = str(workspace["workspace_id"])
+            if workspace_id in self._pending_creations:
+                # A first provision on this worker has no cached Session until
+                # initialization succeeds, which can legitimately exceed the
+                # stale threshold while building the local sandbox image.
+                continue
             if workspace_id in self._sessions:
                 continue
             try:
