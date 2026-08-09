@@ -32,11 +32,12 @@ def test_internal_package_sync_skips_retired_finance_packages(tmp_path: Path):
     assert uploaded_paths == {Path("__init__.py")}
 
 
-def test_sandbox_dockerfile_bypasses_stale_http_apt_indexes():
-    """The local sandbox build must request fresh APT indexes from its proxy."""
+def test_sandbox_dockerfile_handles_flaky_http_apt_proxy_requests():
+    """The local sandbox build must tolerate transient Docker proxy failures."""
     dockerfile = (
         Path(__file__).resolve().parents[5] / "Dockerfile.sandbox"
     ).read_text()
 
     assert 'Acquire::http::No-Cache "true";' in dockerfile
     assert 'Acquire::http::Pipeline-Depth "0";' in dockerfile
+    assert 'Acquire::Retries "10";' in dockerfile

@@ -4,7 +4,7 @@
 
 ### 本地 Sandbox 镜像构建
 
-- Docker Desktop 的 HTTP 代理返回过期索引或中断并发归档连接时，sandbox 镜像构建改为强制重新获取索引并关闭 HTTP 请求管线，避免 `fonts-noto-cjk` 依赖下载失败导致首次工作区预置失败。
+- Docker Desktop 的 HTTP 代理返回过期索引或中断并发归档连接时，sandbox 镜像构建改为强制重新获取索引、关闭 HTTP 请求管线并将 APT 重试次数提高到 10 次，避免 `fonts-noto-cjk` 等依赖下载失败导致首次工作区预置失败。
 
 ### 工作区创建存活保护
 

@@ -19,6 +19,7 @@ ARG NODE_VERSION=24.14.1
 RUN printf '%s\n' \
         'Acquire::http::No-Cache "true";' \
         'Acquire::http::Pipeline-Depth "0";' \
+        'Acquire::Retries "10";' \
         > /etc/apt/apt.conf.d/99langalpha-http \
     && echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections \
     && apt-get update \
