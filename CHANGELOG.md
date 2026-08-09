@@ -2,6 +2,11 @@
 
 ## 2026-08-09
 
+### PTC 重连流恢复
+
+- PTC 的 Redis 事件流在浏览器读取连接中断后，重连路径现在会保留原运行标识与游标，并复用既有的最多五次退避重连；重试内部的再次断开会回到同一受限重试循环，不再直接向用户显示“Reconnection stream disconnected”。
+- 增加前端回归测试，覆盖已存活运行的首个重连读取失败后继续附着同一运行并渲染后续事件，保留家长/学生权限、Flash、PTC、自动化与 Skills 的既有边界。
+
 ### 本地 Sandbox 镜像构建
 
 - Docker Desktop 的 HTTP 代理到 `ports.ubuntu.com` 的上游连接不稳定时，sandbox 镜像构建改用已验证可达的 USTC Ubuntu Ports 镜像，仍使用签名仓库元数据，并保留强制重新获取索引、关闭 HTTP 请求管线与 10 次 APT 重试，避免 `fonts-noto-cjk` 等依赖下载失败导致首次工作区预置失败。

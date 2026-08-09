@@ -201,4 +201,33 @@ describe('useChatMessages — cross-thread navigation reconnect', () => {
     expect(result.current.isReconnecting).toBe(false);
     await waitFor(() => expect(result.current.isLoading).toBe(false));
   });
+
+  it('retries a dropped reconnect reader for the still-live run', async () => {
+    mockStatus.mockResolvedValue({
+      can_reconnect: true,
+      status: 'running',
+      run_id: 'run-recover',
+      active_tasks: [],
+    });
+    mockReconnect
+      .mockResolvedValueOnce({ disconnected: true, aborted: false })
+      .mockImplementationOnce((...args: unknown[]) => {
+        const onEvent = args[3] as (event: Record<string, unknown>) => void;
+        onEvent({
+          event: 'message_chunk',
+          role: 'assistant',
+          agent: 'main',
+          content_type: 'text',
+          content: 'recovered stream content',
+        });
+        return Promise.resolve({ disconnected: false, aborted: false });
+      });
+
+    const { result } = renderHookWithProviders(() => useChatMessages('ws', 'th-recover'));
+
+    await waitFor(() => expect(mockReconnect).toHaveBeenCalledTimes(2));
+    expect(mockReconnect.mock.calls[0][1]).toBe('run-recover');
+    expect(mockReconnect.mock.calls[1][1]).toBe('run-recover');
+    expect(JSON.stringify(result.current.messages)).toContain('recovered stream content');
+  });
 });
