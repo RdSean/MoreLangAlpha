@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import EducationPage from '../EducationPage';
@@ -29,6 +30,7 @@ vi.mock('../queries', () => ({
     state.membersEnabled(enabled);
     return { data: state.members };
   },
+  useLearningAssignments: () => ({ data: [], isLoading: false }),
   useEducationTaskMutations: () => ({
     create: { mutateAsync: state.create, isPending: false },
     submit: { mutateAsync: state.submit, isPending: false },
@@ -68,7 +70,7 @@ describe('EducationPage', () => {
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student' }];
     state.tasks = [task('submitted')];
 
-    render(<EducationPage />);
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
 
     expect(screen.getByRole('heading', { name: '家庭作业' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '反馈' })).toBeInTheDocument();
@@ -92,7 +94,7 @@ describe('EducationPage', () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
     state.tasks = [task('submitted')];
 
-    render(<EducationPage />);
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
 
     fireEvent.click(screen.getByRole('button', { name: '反馈' }));
     fireEvent.change(screen.getByPlaceholderText('写下修改建议或完成反馈'), { target: { value: '请补充第二段。' } });
@@ -109,7 +111,7 @@ describe('EducationPage', () => {
     state.member = { user_id: 'student-1', name: '学生', role: 'student' };
     state.tasks = [task('revision_requested')];
 
-    render(<EducationPage />);
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
 
     expect(screen.getByRole('heading', { name: '我的作业' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '创建作业' })).not.toBeInTheDocument();
@@ -136,7 +138,7 @@ describe('EducationPage', () => {
     state.tasks = [task('open')];
     vi.stubGlobal('crypto', {});
 
-    render(<EducationPage />);
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
 
     fireEvent.click(screen.getByRole('button', { name: '提交作业' }));
     fireEvent.change(screen.getByPlaceholderText('写下完成情况'), { target: { value: '已完成。' } });

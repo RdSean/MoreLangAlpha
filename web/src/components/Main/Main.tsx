@@ -15,6 +15,9 @@ const routeChunks = {
   chat: () => import('../../pages/ChatAgent/ChatAgent'),
   automations: () => import('../../pages/Automations/Automations'),
   education: () => import('../../pages/Education/EducationPage'),
+  textbookLibrary: () => import('../../pages/Education/TextbooksPage'),
+  textbookDetail: () => import('../../pages/Education/TextbookDetailPage'),
+  studentLearning: () => import('../../pages/Education/StudentLearningPage'),
   settings: () => import('../../pages/Settings/Settings'),
 };
 
@@ -22,6 +25,9 @@ const Dashboard = React.lazy(routeChunks.dashboard);
 const ChatAgent = React.lazy(routeChunks.chat);
 const Automations = React.lazy(routeChunks.automations);
 const Education = React.lazy(routeChunks.education);
+const TextbookLibrary = React.lazy(routeChunks.textbookLibrary);
+const TextbookDetail = React.lazy(routeChunks.textbookDetail);
+const StudentLearning = React.lazy(routeChunks.studentLearning);
 const Settings = React.lazy(routeChunks.settings);
 
 /** Start downloading the chunk for `pathname` without rendering it, so the
@@ -51,6 +57,9 @@ function Main() {
         <Route path="/chat/:workspaceId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
         <Route path="/automations" element={<Automations />} />
         <Route path="/education" element={<Education />} />
+        <Route path="/education/textbooks" element={<TextbookLibrary />} />
+        <Route path="/education/textbooks/:textbookId" element={<TextbookDetail />} />
+        <Route path="/education/learn/:assignmentId/:chapterId?" element={<StudentLearning />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

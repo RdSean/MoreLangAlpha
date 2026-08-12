@@ -42,3 +42,149 @@ export interface EducationAsset {
   content_type: string;
   size_bytes: number;
 }
+
+export type TextbookVersionStatus = 'draft' | 'processing' | 'review' | 'published' | 'failed';
+
+export interface TextbookLibraryItem {
+  textbook_id: string;
+  household_id: string;
+  title: string;
+  slug: string;
+  created_at?: string;
+  latest_version_id?: string | null;
+  latest_version_sequence?: number | null;
+  latest_version_status?: TextbookVersionStatus | null;
+  chapter_count: number;
+  assignment_count: number;
+}
+
+export interface TextbookQuestion {
+  question_id: string;
+  position: number;
+  prompt: string;
+  options: Record<string, string>;
+  correct_option?: string;
+  explanation?: string;
+  knowledge_point: string;
+  selected_option?: string | null;
+  is_correct?: boolean | null;
+}
+
+export interface TextbookChapter {
+  chapter_id: string;
+  position: number;
+  slug: string;
+  title: string;
+  markdown: string;
+  teaching_material: string;
+  progress_status?: 'not_started' | 'learning' | 'read' | 'check_completed' | 'review_recommended';
+  questions: TextbookQuestion[];
+}
+
+export interface TextbookAssignmentSummary {
+  assignment_id: string;
+  student_user_id: string;
+  student_name?: string;
+  created_at?: string;
+}
+
+export interface TextbookVersion {
+  version_id: string;
+  sequence: number;
+  status: TextbookVersionStatus;
+  extractor_name?: string | null;
+  extractor_version?: string | null;
+  processing_error?: string | null;
+  processing_job_id?: string | null;
+  processing_job_status?: string | null;
+  processing_attempt_count?: number | null;
+  chapter_count: number;
+  is_published: boolean;
+  publication_id?: string | null;
+  chapters: TextbookChapter[];
+  assignments: TextbookAssignmentSummary[];
+}
+
+export interface TextbookDetail {
+  textbook_id: string;
+  household_id: string;
+  title: string;
+  slug: string;
+  created_at?: string;
+  versions: TextbookVersion[];
+}
+
+export interface TextbookProcessingJob {
+  job_id: string;
+  version_id: string;
+  status: string;
+  attempt_count?: number;
+}
+
+export interface TextbookPublication {
+  publication_id: string;
+  version_id: string;
+  created_at?: string;
+}
+
+export interface TextbookAssignment {
+  assignment_id: string;
+  publication_id: string;
+  student_user_id: string;
+  created_at?: string;
+}
+
+export interface LearningAssignment {
+  assignment_id: string;
+  publication_id: string;
+  textbook_title: string;
+  textbook_slug: string;
+  version_sequence: number;
+  chapter_count: number;
+  completed_chapter_count: number;
+  created_at?: string;
+}
+
+export interface StudentLearning extends Omit<LearningAssignment, 'chapter_count' | 'completed_chapter_count'> {
+  chapters: TextbookChapter[];
+}
+
+export interface LearningAnswer {
+  answer_id?: string;
+  assignment_id?: string;
+  question_id?: string;
+  selected_option?: string;
+  is_correct: boolean;
+}
+
+export interface ParentLearningRecords {
+  assignment_id: string;
+  student_user_id: string;
+  textbook_title: string;
+  records: Array<{
+    chapter_id: string;
+    chapter_title: string;
+    status: string;
+    correct_count: number;
+    answer_count: number;
+  }>;
+}
+
+export interface LearningChatSpace {
+  assignment_id: string;
+  workspace_id: string;
+  conversation_thread_id: string;
+  created_at?: string;
+}
+
+export interface ParentLearningTranscript {
+  assignment_id: string;
+  student_user_id: string;
+  textbook_title: string;
+  conversation_thread_id: string | null;
+  messages: Array<{
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp?: string | null;
+  }>;
+}

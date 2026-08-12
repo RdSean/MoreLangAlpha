@@ -1,5 +1,5 @@
 import { api } from '@/api/client';
-import type { CreateEducationTaskInput, EducationAsset, EducationMember, EducationTask, SubmitEducationTaskInput } from './types';
+import type { CreateEducationTaskInput, EducationAsset, EducationMember, EducationTask, LearningAnswer, LearningAssignment, LearningChatSpace, ParentLearningRecords, ParentLearningTranscript, StudentLearning, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookPublication } from './types';
 
 export async function listEducationTasks(): Promise<EducationTask[]> {
   const { data } = await api.get<EducationTask[]>('/api/v1/education/tasks');
@@ -42,5 +42,84 @@ export async function uploadEducationAsset(file: File): Promise<EducationAsset> 
   const { data } = await api.post<EducationAsset>('/api/v1/education/assets', body, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
+  return data;
+}
+
+export async function listTextbooks(): Promise<TextbookLibraryItem[]> {
+  const { data } = await api.get<TextbookLibraryItem[]>('/api/v1/education/textbooks');
+  return data;
+}
+
+export async function getTextbook(textbookId: string): Promise<TextbookDetail> {
+  const { data } = await api.get<TextbookDetail>(`/api/v1/education/textbooks/${textbookId}`);
+  return data;
+}
+
+export async function createTextbook(input: { title: string }): Promise<TextbookLibraryItem> {
+  const { data } = await api.post<TextbookLibraryItem>('/api/v1/education/textbooks', input);
+  return data;
+}
+
+export async function startTextbookProcessing(textbookId: string, sourceAssetIds: string[]): Promise<TextbookProcessingJob> {
+  const { data } = await api.post<TextbookProcessingJob>(`/api/v1/education/textbooks/${textbookId}/processing`, { source_asset_ids: sourceAssetIds });
+  return data;
+}
+
+export async function runTextbookProcessing(jobId: string): Promise<TextbookProcessingJob> {
+  const { data } = await api.post<TextbookProcessingJob>(`/api/v1/education/textbook-processing/${jobId}/run`);
+  return data;
+}
+
+export async function retryTextbookProcessing(jobId: string): Promise<TextbookProcessingJob> {
+  const { data } = await api.post<TextbookProcessingJob>(`/api/v1/education/textbook-processing/${jobId}/retry`);
+  return data;
+}
+
+export async function publishTextbookVersion(textbookId: string, versionId: string): Promise<TextbookPublication> {
+  const { data } = await api.post<TextbookPublication>(`/api/v1/education/textbooks/${textbookId}/versions/${versionId}/publish`);
+  return data;
+}
+
+export async function assignTextbookPublication(publicationId: string, studentUserId: string): Promise<TextbookAssignment> {
+  const { data } = await api.post<TextbookAssignment>(`/api/v1/education/textbook-publications/${publicationId}/assignments`, { student_user_id: studentUserId });
+  return data;
+}
+
+export async function listLearningAssignments(): Promise<LearningAssignment[]> {
+  const { data } = await api.get<LearningAssignment[]>('/api/v1/education/learning');
+  return data;
+}
+
+export async function getStudentLearning(assignmentId: string): Promise<StudentLearning> {
+  const { data } = await api.get<StudentLearning>(`/api/v1/education/learning/${assignmentId}`);
+  return data;
+}
+
+export async function getStudentChapterContext(assignmentId: string, chapterId: string): Promise<{ content: string }> {
+  const { data } = await api.get<{ content: string }>(`/api/v1/education/learning/${assignmentId}/chapters/${chapterId}/context`);
+  return data;
+}
+
+export async function getLearningChatSpace(assignmentId: string): Promise<LearningChatSpace> {
+  const { data } = await api.get<LearningChatSpace>(`/api/v1/education/learning/${assignmentId}/chat-space`);
+  return data;
+}
+
+export async function updateLearningProgress(assignmentId: string, chapterId: string, status: 'learning' | 'read' | 'check_completed' | 'review_recommended'): Promise<void> {
+  await api.post(`/api/v1/education/learning/${assignmentId}/chapters/${chapterId}/progress`, { status });
+}
+
+export async function answerLearningQuestion(assignmentId: string, questionId: string, selectedOption: string): Promise<LearningAnswer> {
+  const { data } = await api.post<LearningAnswer>(`/api/v1/education/learning/${assignmentId}/questions/${questionId}/answers`, { selected_option: selectedOption });
+  return data;
+}
+
+export async function getParentLearningRecords(assignmentId: string): Promise<ParentLearningRecords> {
+  const { data } = await api.get<ParentLearningRecords>(`/api/v1/education/learning/${assignmentId}/records`);
+  return data;
+}
+
+export async function getParentLearningTranscript(assignmentId: string): Promise<ParentLearningTranscript> {
+  const { data } = await api.get<ParentLearningTranscript>(`/api/v1/education/learning/${assignmentId}/chat-transcript`);
   return data;
 }

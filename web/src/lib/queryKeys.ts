@@ -86,6 +86,10 @@ export const queryKeys = {
   education: {
     all: ['education'],
     tasks: () => [...queryKeys.education.all, 'tasks'],
+    textbooks: () => [...queryKeys.education.all, 'textbooks'],
+    textbook: (id: string) => [...queryKeys.education.textbooks(), id],
+    learning: () => [...queryKeys.education.all, 'learning'],
+    assignment: (id: string) => [...queryKeys.education.learning(), id],
   },
 };
 

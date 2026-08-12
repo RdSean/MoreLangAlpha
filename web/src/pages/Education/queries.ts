@@ -29,3 +29,80 @@ export function useEducationTaskMutations() {
     cancel: useMutation({ mutationFn: educationApi.cancelEducationTask, onSuccess: invalidate }),
   };
 }
+
+export function useTextbookLibrary() {
+  return useQuery({
+    queryKey: queryKeys.education.textbooks(),
+    queryFn: educationApi.listTextbooks,
+    staleTime: 15_000,
+  });
+}
+
+export function useTextbook(textbookId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.education.textbook(textbookId ?? ''),
+    queryFn: () => educationApi.getTextbook(textbookId ?? ''),
+    enabled: Boolean(textbookId),
+    staleTime: 10_000,
+  });
+}
+
+export function useLearningAssignments(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.education.learning(),
+    queryFn: educationApi.listLearningAssignments,
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+export function useStudentLearning(assignmentId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.education.assignment(assignmentId ?? ''),
+    queryFn: () => educationApi.getStudentLearning(assignmentId ?? ''),
+    enabled: Boolean(assignmentId),
+    staleTime: 10_000,
+  });
+}
+
+export function useLearningChatSpace(assignmentId: string | undefined) {
+  return useQuery({
+    queryKey: [...queryKeys.education.assignment(assignmentId ?? ''), 'chat-space'],
+    queryFn: () => educationApi.getLearningChatSpace(assignmentId ?? ''),
+    enabled: Boolean(assignmentId),
+    staleTime: Infinity,
+  });
+}
+
+export function useParentLearningRecords(assignmentId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: [...queryKeys.education.assignment(assignmentId ?? ''), 'records'],
+    queryFn: () => educationApi.getParentLearningRecords(assignmentId ?? ''),
+    enabled: Boolean(assignmentId) && enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useParentLearningTranscript(assignmentId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: [...queryKeys.education.assignment(assignmentId ?? ''), 'chat-transcript'],
+    queryFn: () => educationApi.getParentLearningTranscript(assignmentId ?? ''),
+    enabled: Boolean(assignmentId) && enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useTextbookMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
+  return {
+    create: useMutation({ mutationFn: educationApi.createTextbook, onSuccess: invalidate }),
+    start: useMutation({ mutationFn: ({ textbookId, sourceAssetIds }: { textbookId: string; sourceAssetIds: string[] }) => educationApi.startTextbookProcessing(textbookId, sourceAssetIds), onSuccess: invalidate }),
+    run: useMutation({ mutationFn: educationApi.runTextbookProcessing, onSuccess: invalidate }),
+    retry: useMutation({ mutationFn: educationApi.retryTextbookProcessing, onSuccess: invalidate }),
+    publish: useMutation({ mutationFn: ({ textbookId, versionId }: { textbookId: string; versionId: string }) => educationApi.publishTextbookVersion(textbookId, versionId), onSuccess: invalidate }),
+    assign: useMutation({ mutationFn: ({ publicationId, studentUserId }: { publicationId: string; studentUserId: string }) => educationApi.assignTextbookPublication(publicationId, studentUserId), onSuccess: invalidate }),
+    progress: useMutation({ mutationFn: ({ assignmentId, chapterId, status }: { assignmentId: string; chapterId: string; status: 'learning' | 'read' | 'check_completed' | 'review_recommended' }) => educationApi.updateLearningProgress(assignmentId, chapterId, status), onSuccess: invalidate }),
+    answer: useMutation({ mutationFn: ({ assignmentId, questionId, selectedOption }: { assignmentId: string; questionId: string; selectedOption: string }) => educationApi.answerLearningQuestion(assignmentId, questionId, selectedOption), onSuccess: invalidate }),
+  };
+}
