@@ -65,4 +65,18 @@ describe('StudentLearningPage', () => {
       assignmentId: 'assignment-1', questionId: 'question-1', selectedOption: 'A',
     }));
   });
+
+  it('opens directory and knowledge checks in separate mobile panels', () => {
+    render(
+      <MemoryRouter initialEntries={['/education/learn/assignment-1/chapter-1']}>
+        <Routes><Route path="/education/learn/:assignmentId/:chapterId" element={<StudentLearningPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '目录' }));
+    expect(screen.getByRole('navigation', { name: '章节目录' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: '知识检查' }));
+    expect(screen.getByRole('heading', { name: '知识检查' })).toBeVisible();
+  });
 });
