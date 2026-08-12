@@ -8,7 +8,10 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from src.server.app.education.assets import router
-from src.server.services.education_assets import EducationAssetNotFoundError
+from src.server.services.education_assets import (
+    EducationAssetAccessDeniedError,
+    EducationAssetNotFoundError,
+)
 from src.server.utils.api import get_current_user_id
 
 
@@ -68,3 +71,30 @@ async def test_cross_household_download_is_not_found(client):
         response = await client.get(f"/api/v1/education/assets/{ASSET['asset_id']}/download")
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_parent_lists_candidate_assets_without_storage_keys(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    candidate = {**ASSET, "created_at": None}
+    with patch(
+        "src.server.app.education.assets.list_parent_education_assets",
+        new=AsyncMock(return_value=[candidate]),
+    ):
+        response = await client.get("/api/v1/education/assets")
+
+    assert response.status_code == 200
+    assert response.json()[0]["asset_id"] == ASSET["asset_id"]
+    assert "storage_key" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_list_parent_candidate_assets(client):
+    with patch(
+        "src.server.app.education.assets.list_parent_education_assets",
+        new=AsyncMock(side_effect=EducationAssetAccessDeniedError("Parents only")),
+    ):
+        response = await client.get("/api/v1/education/assets")
+
+    assert response.status_code == 403

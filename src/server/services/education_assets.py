@@ -12,6 +12,7 @@ from src.config.env import (
 from src.server.database.education_assets import (
     get_education_asset_for_user,
     insert_education_asset,
+    list_education_assets_for_parent,
 )
 from src.server.database.education_members import get_membership_for_user
 from src.utils.storage import delete_object, get_signed_url, upload_bytes
@@ -148,6 +149,16 @@ async def create_education_asset(
         await asyncio.to_thread(delete_object, storage_key)
         raise EducationAssetAccessDeniedError("Education household membership is required")
     return asset
+
+
+async def list_parent_education_assets(*, user_id: str) -> list[dict]:
+    """Return reusable textbook-source metadata to a household parent only."""
+    membership = await get_membership_for_user(user_id)
+    if not membership or membership["role"] != "parent":
+        raise EducationAssetAccessDeniedError(
+            "Only a parent can list textbook source candidates"
+        )
+    return await list_education_assets_for_parent(parent_user_id=user_id)
 
 
 async def get_education_asset_download_url(*, user_id: str, asset_id: str) -> str:

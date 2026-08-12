@@ -67,3 +67,26 @@ async def get_education_asset_for_user(
             )
             row = await cur.fetchone()
     return dict(row) if row else None
+
+
+async def list_education_assets_for_parent(
+    *, parent_user_id: str
+) -> list[dict[str, Any]]:
+    """List only candidate asset metadata owned by the parent's household."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT assets.asset_id, assets.household_id, assets.created_by_user_id,
+                       assets.original_filename, assets.content_type, assets.size_bytes,
+                       assets.created_at
+                FROM education_assets AS assets
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = assets.household_id
+                WHERE memberships.user_id = %s AND memberships.role = 'parent'
+                ORDER BY assets.created_at DESC
+                """,
+                (parent_user_id,),
+            )
+            rows = await cur.fetchall()
+    return [dict(row) for row in rows]

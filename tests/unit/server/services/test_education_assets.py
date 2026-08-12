@@ -21,6 +21,32 @@ ASSET = {
 }
 
 
+@pytest.mark.asyncio
+async def test_parent_lists_candidate_assets_from_only_their_household(monkeypatch):
+    parent = {"user_id": "parent-1", "household_id": HOUSEHOLD_ID, "role": "parent"}
+    listed = [{**ASSET, "created_at": None}]
+    monkeypatch.setattr(
+        education_assets, "get_membership_for_user", AsyncMock(return_value=parent)
+    )
+    candidates = AsyncMock(return_value=listed)
+    monkeypatch.setattr(education_assets, "list_education_assets_for_parent", candidates)
+
+    result = await education_assets.list_parent_education_assets(user_id="parent-1")
+
+    assert result == listed
+    candidates.assert_awaited_once_with(parent_user_id="parent-1")
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_list_parent_candidate_assets(monkeypatch):
+    monkeypatch.setattr(
+        education_assets, "get_membership_for_user", AsyncMock(return_value=MEMBER)
+    )
+
+    with pytest.raises(education_assets.EducationAssetAccessDeniedError):
+        await education_assets.list_parent_education_assets(user_id="student-1")
+
+
 def test_validate_upload_rejects_disallowed_content_type():
     with pytest.raises(education_assets.EducationAssetValidationError, match="content type"):
         education_assets.validate_upload(

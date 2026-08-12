@@ -1,5 +1,6 @@
 """Private upload and temporary-download routes for education attachments."""
 
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
@@ -14,6 +15,7 @@ from src.server.services.education_assets import (
     EducationAssetValidationError,
     create_education_asset,
     get_education_asset_download_url,
+    list_parent_education_assets,
 )
 from src.server.utils.api import CurrentUserId
 
@@ -24,19 +26,33 @@ router = APIRouter(prefix="/api/v1/education/assets", tags=["Education assets"])
 class EducationAssetResponse(BaseModel):
     """Client-safe metadata; the storage key never leaves the API."""
 
-    asset_id: str
-    household_id: str
+    asset_id: UUID
+    household_id: UUID
     created_by_user_id: str
     original_filename: str
     content_type: str
     size_bytes: int
+    created_at: datetime | None = None
 
 
 class EducationAssetDownloadResponse(BaseModel):
     url: str
 
 
-@router.post("", response_model=EducationAssetResponse, status_code=status.HTTP_201_CREATED)
+@router.get("", response_model=list[EducationAssetResponse])
+async def list_education_assets(user_id: CurrentUserId):
+    try:
+        return await list_parent_education_assets(user_id=user_id)
+    except EducationAssetAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@router.post(
+    "",
+    response_model=EducationAssetResponse,
+    response_model_exclude_none=True,
+    status_code=status.HTTP_201_CREATED,
+)
 async def upload_education_asset(
     user_id: CurrentUserId,
     file: UploadFile = File(...),
