@@ -31,9 +31,7 @@ from src.server.models.additional_context import AdditionalContext
 # FAILS bar 2 (not in langgraph's ``_MESSAGE_ROLES``), so it is excluded — clients
 # wanting developer semantics send ``system``, which maps identically and stamps.
 # ``role`` is client-controlled; reject the rest with a clean 422 before persisting.
-_VALID_MESSAGE_ROLES = frozenset(
-    {"user", "assistant", "system", "human", "ai"}
-)
+_VALID_MESSAGE_ROLES = frozenset({"user", "assistant", "system", "human", "ai"})
 
 
 # =============================================================================
@@ -245,6 +243,11 @@ class ChatRequest(BaseModel):
         description="Workspace identifier - required for 'full' mode, optional for 'flash' mode",
     )
 
+    # Student textbook-learning chat references. The server resolves published
+    # chapter material from these IDs; browser content never becomes textbook context.
+    education_assignment_id: Optional[str] = Field(default=None, max_length=64)
+    education_chapter_id: Optional[str] = Field(default=None, max_length=64)
+
     # Messages
     messages: List[ChatMessage] = Field(
         default_factory=list,
@@ -364,8 +367,7 @@ class ChatRequest(BaseModel):
     # the authoritative origin from Redis at execution time.
     origin_flash_thread_id: Optional[str] = Field(
         default=None,
-        description="Flash thread watching this dispatched PTC run. "
-        "Internal use only.",
+        description="Flash thread watching this dispatched PTC run. Internal use only.",
     )
 
     # Internal: dispatch-incarnation token for the report-back pair, minted
@@ -455,5 +457,6 @@ class GeneratePodcastRequest(BaseModel):
 class SubagentMessageRequest(BaseModel):
     """Request model for sending a message to a running subagent."""
 
-    content: str = Field(..., description="The instruction/message to send to the subagent")
-
+    content: str = Field(
+        ..., description="The instruction/message to send to the subagent"
+    )

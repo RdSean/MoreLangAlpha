@@ -87,7 +87,7 @@ async def write_textbook_bundle(job: dict[str, Any], package: dict[str, Any]) ->
                 "sha256": hashlib.sha256(source_bytes).hexdigest(),
             }
         )
-    readme = "# {}\n\n版本：v{}\n\n本目录由 LangAlpha 家庭教材本地加工器生成，可凭 `manifest.json` 重建索引。\n".format(
+    readme = "# {}\n\n版本：v{}\n\n本目录由 LangAlpha 家庭教材本地加工器生成，可凭 `manifest.json` 重建索引。知识教学后续由 `book-to-skill` 与 `the-knowledge-guy` 的 PTC 处理基础扩展。\n".format(
         job["title"], job["version_sequence"]
     )
     manifest = {
@@ -95,6 +95,9 @@ async def write_textbook_bundle(job: dict[str, Any], package: dict[str, Any]) ->
         "title": job["title"],
         "version": job["version_sequence"],
         "extractor": package["extractor"],
+        "knowledge_foundations": package.get(
+            "knowledge_foundations", ["book-to-skill", "the-knowledge-guy"]
+        ),
         "sources": source_entries,
         "chapters": [
             {

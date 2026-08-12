@@ -1,6 +1,8 @@
 """Contract tests for versioned family textbook learning."""
 
 from unittest.mock import AsyncMock
+from types import SimpleNamespace
+import sys
 
 import pytest
 
@@ -72,6 +74,7 @@ async def test_processing_job_writes_a_bundle_before_making_a_version_reviewable
         "title": "英语第二册",
         "slug": "english-2",
         "version_sequence": 1,
+        "attempt_count": 1,
         "sources": [{"asset_id": "asset-1", "original_filename": "book.pdf"}],
     }
     monkeypatch.setattr(
@@ -94,3 +97,45 @@ async def test_processing_job_writes_a_bundle_before_making_a_version_reviewable
         complete.await_args.kwargs["bundle_prefix"]
         == "education/household-1/english-2/v1"
     )
+    assert complete.await_args.kwargs["extractor"] == {
+        "name": "local_fixture",
+        "version": "1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_parent_retry_requeues_only_a_failed_frozen_job(monkeypatch):
+    retry = AsyncMock(
+        return_value={"job_id": "job-1", "status": "queued", "attempt_count": 1}
+    )
+    monkeypatch.setattr(education_textbooks, "retry_textbook_processing_job", retry)
+
+    result = await education_textbooks.retry_processing_for_parent(
+        parent_user_id="parent-1", job_id="job-1"
+    )
+
+    assert result["status"] == "queued"
+    retry.assert_awaited_once_with(parent_user_id="parent-1", job_id="job-1")
+
+
+@pytest.mark.asyncio
+async def test_local_processor_makes_stable_chapters_from_extractable_pdf_pages(monkeypatch):
+    class Page:
+        def extract_text(self):
+            return "教材正文"
+
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=lambda _stream: SimpleNamespace(pages=[Page(), Page()])))
+    monkeypatch.setattr(education_textbooks, "get_bytes", lambda _key: b"%PDF-1.7")
+    job = {
+        "household_id": "household-1",
+        "title": "英语第二册",
+        "slug": "english-2",
+        "version_sequence": 1,
+        "sources": [{"storage_key": "education/h/book.pdf", "content_type": "application/pdf", "original_filename": "book.pdf"}],
+    }
+
+    package = await education_textbooks.build_local_pdf_package(job)
+
+    assert package["extractor"] == {"name": "local_pypdf", "version": "1"}
+    assert package["knowledge_foundations"] == ["book-to-skill", "the-knowledge-guy"]
+    assert package["chapters"][0]["markdown"].endswith("教材正文\n\n教材正文")

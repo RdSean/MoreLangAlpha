@@ -1,5 +1,7 @@
 """Versioning, explicit local processing, and authorization for family textbooks."""
 
+import asyncio
+from io import BytesIO
 from typing import Any
 
 from src.server.database.education_tasks import get_household_context_for_parent
@@ -10,6 +12,7 @@ from src.server.database.education_textbooks import (
     create_textbook_record,
     fail_textbook_processing_job,
     get_processing_job_for_parent,
+    get_student_chapter_context_record,
     get_student_learning as get_student_learning_record,
     get_textbook_for_parent,
     list_student_assignments,
@@ -17,11 +20,13 @@ from src.server.database.education_textbooks import (
     list_textbooks_for_parent,
     publish_textbook_version,
     queue_textbook_processing,
+    retry_textbook_processing_job,
     submit_student_answer,
     update_student_progress,
 )
 from src.server.database.education_members import get_membership_for_user
 from src.server.services.education_textbook_storage import write_textbook_bundle
+from src.utils.storage import get_bytes
 
 
 _VALID_VERSION_TRANSITIONS = {
@@ -160,18 +165,101 @@ def build_local_fixture_package(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def build_local_pdf_package(job: dict[str, Any]) -> dict[str, Any]:
+    """Extract frozen PDF text into stable review chapters without using RAG."""
+    extracted_sources: list[tuple[str, list[str]]] = []
+    for source in job["sources"]:
+        if source.get("content_type") != "application/pdf":
+            continue
+        content = await asyncio.to_thread(get_bytes, source["storage_key"])
+        if content is None:
+            raise TextbookProcessingError(
+                "A frozen textbook source is no longer available"
+            )
+        try:
+            import pypdf
+
+            reader = await asyncio.to_thread(pypdf.PdfReader, BytesIO(content))
+            pages = [
+                (await asyncio.to_thread(page.extract_text) or "").strip()
+                for page in reader.pages
+            ]
+        except Exception as exc:
+            raise TextbookProcessingError(
+                "The local PDF extractor could not read a source"
+            ) from exc
+        if any(pages):
+            extracted_sources.append(
+                (source["original_filename"], [page for page in pages if page])
+            )
+    if not extracted_sources:
+        return build_local_fixture_package(job)
+
+    prefix = f"education/{job['household_id']}/{_slug(job['slug'])}/v{job['version_sequence']}"
+    chapters: list[dict[str, Any]] = []
+    position = 1
+    for filename, pages in extracted_sources:
+        for offset in range(0, len(pages), 10):
+            selected_pages = pages[offset : offset + 10]
+            page_start = offset + 1
+            page_end = offset + len(selected_pages)
+            slug = f"{position:02d}-pages-{page_start}-{page_end}"
+            title = f"{job['title']}：{filename} 第 {page_start}-{page_end} 页"
+            chapters.append(
+                {
+                    "position": position,
+                    "slug": slug,
+                    "title": title,
+                    "page_start": page_start,
+                    "page_end": page_end,
+                    "markdown_key": f"{prefix}/chapters/{slug}.md",
+                    "teaching_material_key": f"{prefix}/teaching/{slug}-material.md",
+                    "markdown": f"# {title}\n\n" + "\n\n".join(selected_pages),
+                    "teaching_material": (
+                        f"# {title} 学习材料\n\n## 学习目标\n\n"
+                        "- 阅读并概括本节教材的关键信息。\n"
+                        "- 根据原文完成基础知识检查。\n\n"
+                        "## 学习建议\n\n先阅读教材正文，再完成知识检查。"
+                    ),
+                    "questions": [
+                        {
+                            "position": 1,
+                            "prompt": "完成本节阅读后，下一步应该做什么？",
+                            "options": {
+                                "A": "完成知识检查",
+                                "B": "修改已发布版本",
+                                "C": "删除原始资料",
+                                "D": "跳过本节内容",
+                            },
+                            "correct_option": "A",
+                            "explanation": "知识检查用于形成可追溯的学习证据。",
+                            "knowledge_point": "学习证据",
+                        }
+                    ],
+                }
+            )
+            position += 1
+    return {
+        "extractor": {"name": "local_pypdf", "version": "1"},
+        "knowledge_foundations": ["book-to-skill", "the-knowledge-guy"],
+        "chapters": chapters,
+    }
+
+
 async def process_textbook_job(*, job_id: str) -> dict[str, Any]:
     """Claim a persisted job, write its recoverable bundle, then make it reviewable."""
     job = await claim_textbook_processing_job(job_id=job_id)
     if not job:
         raise TextbookNotFoundError("Textbook processing job is not queued")
     try:
-        package = build_local_fixture_package(job)
+        package = await build_local_pdf_package(job)
         prefix = await write_textbook_bundle(job, package)
         completed = await complete_textbook_processing_job(
             job_id=str(job["job_id"]),
             version_id=str(job["version_id"]),
+            attempt_count=int(job["attempt_count"]),
             bundle_prefix=prefix,
+            extractor=package["extractor"],
             chapters=package["chapters"],
         )
         if not completed:
@@ -181,6 +269,7 @@ async def process_textbook_job(*, job_id: str) -> dict[str, Any]:
         await fail_textbook_processing_job(
             job_id=str(job["job_id"]),
             version_id=str(job["version_id"]),
+            attempt_count=int(job["attempt_count"]),
             error_message=str(exc),
         )
         if isinstance(exc, TextbookError):
@@ -218,6 +307,19 @@ async def run_processing_for_parent(
             f"Textbook processing job cannot run from {job['status']}"
         )
     return await process_textbook_job(job_id=job_id)
+
+
+async def retry_processing_for_parent(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any]:
+    job = await retry_textbook_processing_job(
+        parent_user_id=parent_user_id, job_id=job_id
+    )
+    if not job:
+        raise TextbookTransitionError(
+            "Only a failed or expired textbook processing job can be retried"
+        )
+    return job
 
 
 async def publish_version(
@@ -272,6 +374,37 @@ async def get_student_learning(
     if not learning:
         raise TextbookNotFoundError("Learning assignment not found")
     return learning
+
+
+async def get_student_chapter_context(
+    *, student_user_id: str, assignment_id: str, chapter_id: str
+) -> dict[str, Any]:
+    membership = await get_membership_for_user(student_user_id)
+    if not membership or membership["role"] != "student":
+        raise TextbookPermissionError(
+            "Only a student can access learning chapter context"
+        )
+    chapter = await get_student_chapter_context_record(
+        student_user_id=student_user_id,
+        assignment_id=assignment_id,
+        chapter_id=chapter_id,
+    )
+    if not chapter:
+        raise TextbookNotFoundError("Learning chapter not found")
+    content = "\n\n".join(
+        [
+            f"# {chapter['textbook_title']} - {chapter['chapter_title']}",
+            "以下是学生已分配且已发布的章节材料。只根据这些材料解释、提问和引导学习；"
+            "不声称能访问未发布版本、其他学生记录或家长管理资料。",
+            chapter["markdown"],
+            chapter["teaching_material"],
+        ]
+    )
+    return {
+        "assignment_id": str(chapter["assignment_id"]),
+        "chapter_id": str(chapter["chapter_id"]),
+        "content": content,
+    }
 
 
 async def record_learning_progress(

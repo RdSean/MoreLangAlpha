@@ -14,6 +14,7 @@ from src.server.services.thread_lifecycle_feed import (
     publish_thread_title,
     publish_thread_unarchived,
 )
+
 # require_thread_owner is called through the module (auth_api.…) so a single
 # definition-site patch governs every route — a consumer-site patch that stops
 # intercepting after a move would silently bypass auth in tests.
@@ -40,6 +41,9 @@ from src.server.database.conversation import (
     update_thread_fields,
     update_thread_external_id,
     get_thread_by_id,
+)
+from src.server.database.education_textbooks import (
+    get_student_learning_space_for_thread,
 )
 
 from ._deps import logger, router
@@ -218,6 +222,17 @@ async def delete_thread_endpoint(thread_id: str, x_user_id: CurrentUserId):
 
     try:
         await auth_api.require_thread_owner(thread_id, x_user_id)
+        learning_space = await get_student_learning_space_for_thread(
+            student_user_id=x_user_id, conversation_thread_id=thread_id
+        )
+        if learning_space:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This learning conversation is retained with its published "
+                    "textbook assignment and cannot be deleted."
+                ),
+            )
         # Read the row pre-delete: the thread_deleted feed event needs the
         # workspace_id and the row is gone afterwards.
         try:
@@ -252,9 +267,7 @@ async def delete_thread_endpoint(thread_id: str, x_user_id: CurrentUserId):
         await publish_thread_deleted(
             user_id=x_user_id,
             thread_id=thread_id,
-            workspace_id=(
-                str(thread_row["workspace_id"]) if thread_row else None
-            ),
+            workspace_id=(str(thread_row["workspace_id"]) if thread_row else None),
         )
 
         logger.info(f"Successfully deleted thread thread_id={thread_id}")
@@ -314,9 +327,7 @@ async def update_thread_endpoint(
         if "archived" in provided and request.archived is not None:
             updates["archived"] = request.archived
         if not updates:
-            raise HTTPException(
-                status_code=400, detail="No updatable fields provided"
-            )
+            raise HTTPException(status_code=400, detail="No updatable fields provided")
         updated_thread = await update_thread_fields(thread_id, **updates)
         if not updated_thread:
             raise HTTPException(
@@ -396,6 +407,4 @@ async def stamp_thread_external_id_endpoint(
         raise
     except Exception as e:
         logger.exception(f"Error stamping thread {thread_id}: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to stamp thread: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to stamp thread: {str(e)}")

@@ -27,13 +27,19 @@ from src.server.services.education_textbooks import (
     create_textbook,
     get_parent_learning_records,
     get_parent_textbook,
+    get_student_chapter_context,
     get_student_learning,
     list_learning_assignments,
     list_parent_textbooks,
     publish_version,
     record_learning_progress,
+    retry_processing_for_parent,
     run_processing_for_parent,
     start_processing,
+)
+from src.server.services.education_learning_chat import get_learning_chat_space
+from src.server.services.education_learning_transcript import (
+    get_parent_learning_transcript,
 )
 from src.server.utils.api import CurrentUserId
 
@@ -110,6 +116,20 @@ async def run_family_textbook_processing(job_id: UUID, user_id: CurrentUserId):
 
 
 @router.post(
+    "/textbook-processing/{job_id}/retry",
+    response_model=TextbookProcessingResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_family_textbook_processing(job_id: UUID, user_id: CurrentUserId):
+    try:
+        return await retry_processing_for_parent(
+            parent_user_id=user_id, job_id=str(job_id)
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
     "/textbooks/{textbook_id}/versions/{version_id}/publish",
     response_model=TextbookPublicationResponse,
     status_code=status.HTTP_201_CREATED,
@@ -163,6 +183,34 @@ async def get_student_assignment_learning(assignment_id: UUID, user_id: CurrentU
         raise _textbook_http_error(exc) from exc
 
 
+@router.get(
+    "/learning/{assignment_id}/chapters/{chapter_id}/context", response_model=dict
+)
+async def get_student_learning_chapter_context(
+    assignment_id: UUID, chapter_id: UUID, user_id: CurrentUserId
+):
+    try:
+        return await get_student_chapter_context(
+            student_user_id=user_id,
+            assignment_id=str(assignment_id),
+            chapter_id=str(chapter_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get("/learning/{assignment_id}/chat-space", response_model=dict)
+async def get_student_learning_chat_space(assignment_id: UUID, user_id: CurrentUserId):
+    try:
+        return await get_learning_chat_space(
+            user_id=user_id, assignment_id=str(assignment_id)
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post(
     "/learning/{assignment_id}/chapters/{chapter_id}/progress",
     response_model=LearningProgressResponse,
@@ -212,6 +260,18 @@ async def get_parent_student_learning_records(
 ):
     try:
         return await get_parent_learning_records(
+            parent_user_id=user_id, assignment_id=str(assignment_id)
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get("/learning/{assignment_id}/chat-transcript", response_model=dict)
+async def get_parent_student_learning_chat_transcript(
+    assignment_id: UUID, user_id: CurrentUserId
+):
+    try:
+        return await get_parent_learning_transcript(
             parent_user_id=user_id, assignment_id=str(assignment_id)
         )
     except TextbookError as exc:

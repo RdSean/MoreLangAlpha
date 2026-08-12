@@ -9,6 +9,180 @@ from psycopg.types.json import Json
 from src.server.database.pool import get_db_connection
 
 
+async def get_or_create_student_learning_space(
+    *, student_user_id: str, assignment_id: str
+) -> dict[str, Any] | None:
+    """Create exactly one canonical Flash thread for an assigned publication.
+
+    The assignment row is locked before inspecting its mapping, so concurrent
+    reader tabs cannot create two conversation threads for the same immutable
+    publication snapshot.
+    """
+    from src.server.database.conversation import create_thread
+    from src.server.database.workspace import get_or_create_flash_workspace
+
+    thread_id = str(uuid4())
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT assignments.assignment_id, textbooks.title AS textbook_title
+                    FROM education_textbook_assignments AS assignments
+                    JOIN education_textbook_publications AS publications
+                      ON publications.publication_id = assignments.publication_id
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = publications.version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.user_id = assignments.student_user_id
+                     AND memberships.household_id = textbooks.household_id
+                    WHERE assignments.assignment_id = %s
+                      AND assignments.student_user_id = %s
+                      AND memberships.role = 'student'
+                    FOR UPDATE OF assignments
+                    """,
+                    (assignment_id, student_user_id),
+                )
+                assignment = await cur.fetchone()
+                if not assignment:
+                    return None
+                await cur.execute(
+                    """
+                    SELECT spaces.assignment_id, spaces.workspace_id,
+                           spaces.conversation_thread_id, spaces.created_at
+                    FROM education_learning_spaces AS spaces
+                    WHERE spaces.assignment_id = %s
+                    """,
+                    (assignment_id,),
+                )
+                existing = await cur.fetchone()
+                if existing:
+                    return dict(existing)
+
+                workspace = await get_or_create_flash_workspace(
+                    student_user_id, conn=conn
+                )
+                await create_thread(
+                    conversation_thread_id=thread_id,
+                    workspace_id=str(workspace["workspace_id"]),
+                    current_status="completed",
+                    msg_type="flash",
+                    title=f"{assignment['textbook_title']} 学习问答"[:255],
+                    platform="education",
+                    metadata={"education": {"assignment_id": assignment_id}},
+                    conn=conn,
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_learning_spaces (
+                        assignment_id, workspace_id, conversation_thread_id
+                    ) VALUES (%s, %s, %s)
+                    RETURNING assignment_id, workspace_id, conversation_thread_id, created_at
+                    """,
+                    (assignment_id, workspace["workspace_id"], thread_id),
+                )
+                created = await cur.fetchone()
+    return dict(created) if created else None
+
+
+async def get_student_learning_space(
+    *, student_user_id: str, assignment_id: str
+) -> dict[str, Any] | None:
+    """Read a student's assignment-scoped Flash thread without creating one."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT spaces.assignment_id, spaces.workspace_id,
+                       spaces.conversation_thread_id, spaces.created_at
+                FROM education_learning_spaces AS spaces
+                JOIN education_textbook_assignments AS assignments
+                  ON assignments.assignment_id = spaces.assignment_id
+                JOIN education_textbook_publications AS publications
+                  ON publications.publication_id = assignments.publication_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = publications.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.user_id = assignments.student_user_id
+                 AND memberships.household_id = textbooks.household_id
+                WHERE spaces.assignment_id = %s
+                  AND assignments.student_user_id = %s
+                  AND memberships.role = 'student'
+                """,
+                (assignment_id, student_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_student_learning_space_for_thread(
+    *, student_user_id: str, conversation_thread_id: str
+) -> dict[str, Any] | None:
+    """Resolve a mapped learning thread only when owned by the student."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT spaces.assignment_id, spaces.workspace_id,
+                       spaces.conversation_thread_id
+                FROM education_learning_spaces AS spaces
+                JOIN education_textbook_assignments AS assignments
+                  ON assignments.assignment_id = spaces.assignment_id
+                JOIN education_textbook_publications AS publications
+                  ON publications.publication_id = assignments.publication_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = publications.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.user_id = assignments.student_user_id
+                 AND memberships.household_id = textbooks.household_id
+                WHERE spaces.conversation_thread_id = %s
+                  AND assignments.student_user_id = %s
+                  AND memberships.role = 'student'
+                """,
+                (conversation_thread_id, student_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_parent_learning_space(
+    *, parent_user_id: str, assignment_id: str
+) -> dict[str, Any] | None:
+    """Return an assigned student's mapped Flash thread to an authorized parent."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT assignments.assignment_id, assignments.student_user_id,
+                       textbooks.title AS textbook_title, spaces.workspace_id,
+                       spaces.conversation_thread_id, spaces.created_at
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbook_publications AS publications
+                  ON publications.publication_id = assignments.publication_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = publications.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                LEFT JOIN education_learning_spaces AS spaces
+                  ON spaces.assignment_id = assignments.assignment_id
+                WHERE assignments.assignment_id = %s
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (assignment_id, parent_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def create_textbook_record(
     *, household_id: str, parent_user_id: str, title: str, slug: str
 ) -> dict[str, Any]:
@@ -137,11 +311,15 @@ async def claim_textbook_processing_job(*, job_id: str) -> dict[str, Any] | None
                 await cur.execute(
                     """
                     UPDATE education_processing_jobs
-                    SET status = 'processing', attempt_count = attempt_count + 1, claimed_at = NOW(), updated_at = NOW()
+                    SET status = 'processing', attempt_count = attempt_count + 1,
+                        claimed_at = NOW(), claim_expires_at = NOW() + INTERVAL '15 minutes',
+                        updated_at = NOW()
                     WHERE job_id = %s
+                    RETURNING attempt_count
                     """,
                     (job_id,),
                 )
+                claimed_attempt = await cur.fetchone()
                 await cur.execute(
                     """
                     SELECT assets.asset_id, assets.storage_key, assets.original_filename, assets.content_type, assets.size_bytes
@@ -154,20 +332,32 @@ async def claim_textbook_processing_job(*, job_id: str) -> dict[str, Any] | None
                 )
                 sources = [dict(row) for row in await cur.fetchall()]
     result = dict(job)
+    result["attempt_count"] = claimed_attempt["attempt_count"]
     result["sources"] = sources
     return result
 
 
 async def complete_textbook_processing_job(
-    *, job_id: str, version_id: str, bundle_prefix: str, chapters: list[dict[str, Any]]
+    *,
+    job_id: str,
+    version_id: str,
+    attempt_count: int,
+    bundle_prefix: str,
+    extractor: dict[str, str],
+    chapters: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     """Persist reviewed candidate material only while the claimed job is still processing."""
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
                 await cur.execute(
-                    "SELECT 1 FROM education_processing_jobs WHERE job_id = %s AND version_id = %s AND status = 'processing' FOR UPDATE",
-                    (job_id, version_id),
+                    """
+                    SELECT 1 FROM education_processing_jobs
+                    WHERE job_id = %s AND version_id = %s AND status = 'processing'
+                      AND attempt_count = %s
+                    FOR UPDATE
+                    """,
+                    (job_id, version_id, attempt_count),
                 )
                 if not await cur.fetchone():
                     return None
@@ -215,26 +405,34 @@ async def complete_textbook_processing_job(
                 await cur.execute(
                     """
                     UPDATE education_textbook_versions
-                    SET status = 'review', bundle_prefix = %s, processing_error = NULL, reviewed_at = NOW()
+                    SET status = 'review', bundle_prefix = %s, processing_error = NULL,
+                        extractor_name = %s, extractor_version = %s, reviewed_at = NOW()
                     WHERE version_id = %s AND status = 'processing'
                     """,
-                    (bundle_prefix, version_id),
+                    (
+                        bundle_prefix,
+                        extractor["name"],
+                        extractor["version"],
+                        version_id,
+                    ),
                 )
                 await cur.execute(
                     """
                     UPDATE education_processing_jobs
-                    SET status = 'completed', completed_at = NOW(), updated_at = NOW(), error_message = NULL
-                    WHERE job_id = %s
+                    SET status = 'completed', completed_at = NOW(), claim_expires_at = NULL,
+                        updated_at = NOW(), error_message = NULL
+                    WHERE job_id = %s AND version_id = %s AND status = 'processing'
+                      AND attempt_count = %s
                     RETURNING job_id, version_id, status, attempt_count, completed_at
                     """,
-                    (job_id,),
+                    (job_id, version_id, attempt_count),
                 )
                 row = await cur.fetchone()
     return dict(row) if row else None
 
 
 async def fail_textbook_processing_job(
-    *, job_id: str, version_id: str, error_message: str
+    *, job_id: str, version_id: str, attempt_count: int, error_message: str
 ) -> None:
     async with get_db_connection() as conn:
         async with conn.transaction():
@@ -242,19 +440,66 @@ async def fail_textbook_processing_job(
                 await cur.execute(
                     """
                     UPDATE education_processing_jobs
-                    SET status = 'failed', error_message = %s, updated_at = NOW()
+                    SET status = 'failed', error_message = %s, claim_expires_at = NULL,
+                        updated_at = NOW()
                     WHERE job_id = %s AND version_id = %s AND status = 'processing'
+                      AND attempt_count = %s
                     """,
-                    (error_message[:10_000], job_id, version_id),
+                    (error_message[:10_000], job_id, version_id, attempt_count),
                 )
                 await cur.execute(
                     """
-                    UPDATE education_textbook_versions
+                    UPDATE education_textbook_versions AS versions
                     SET status = 'failed', processing_error = %s
-                    WHERE version_id = %s AND status = 'processing'
+                    FROM education_processing_jobs AS jobs
+                    WHERE versions.version_id = %s AND versions.status = 'processing'
+                      AND jobs.job_id = %s AND jobs.version_id = versions.version_id
+                      AND jobs.status = 'failed' AND jobs.attempt_count = %s
                     """,
-                    (error_message[:10_000], version_id),
+                    (error_message[:10_000], version_id, job_id, attempt_count),
                 )
+
+
+async def retry_textbook_processing_job(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any] | None:
+    """Requeue only the parent's failed job; its frozen version and sources remain unchanged."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_processing_jobs AS jobs
+                    SET status = 'queued', error_message = NULL, claimed_at = NULL,
+                        claim_expires_at = NULL, completed_at = NULL, updated_at = NOW()
+                    FROM education_textbook_versions AS versions
+                    JOIN education_textbooks AS textbooks ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships ON memberships.household_id = textbooks.household_id
+                    WHERE jobs.job_id = %s AND jobs.version_id = versions.version_id
+                      AND memberships.user_id = %s AND memberships.role = 'parent'
+                      AND (
+                        (jobs.status = 'failed' AND versions.status = 'failed')
+                        OR (
+                          jobs.status = 'processing' AND versions.status = 'processing'
+                          AND jobs.claim_expires_at <= NOW()
+                        )
+                      )
+                    RETURNING jobs.job_id, jobs.version_id, jobs.status, jobs.attempt_count, jobs.created_at
+                    """,
+                    (job_id, parent_user_id),
+                )
+                job = await cur.fetchone()
+                if not job:
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_textbook_versions
+                    SET status = 'processing', processing_error = NULL
+                    WHERE version_id = %s AND status IN ('failed', 'processing')
+                    """,
+                    (job["version_id"],),
+                )
+    return dict(job)
 
 
 async def list_textbooks_for_parent(user_id: str) -> list[dict[str, Any]]:
@@ -493,7 +738,9 @@ async def list_student_assignments(student_user_id: str) -> list[dict[str, Any]]
                 JOIN education_textbook_publications AS publications ON publications.publication_id = assignments.publication_id
                 JOIN education_textbook_versions AS versions ON versions.version_id = publications.version_id
                 JOIN education_textbooks AS textbooks ON textbooks.textbook_id = versions.textbook_id
-                JOIN education_memberships AS memberships ON memberships.user_id = assignments.student_user_id
+                JOIN education_memberships AS memberships
+                  ON memberships.user_id = assignments.student_user_id
+                 AND memberships.household_id = textbooks.household_id
                 WHERE assignments.student_user_id = %s AND memberships.role = 'student'
                 ORDER BY assignments.created_at DESC
                 """,
@@ -516,7 +763,9 @@ async def get_student_learning(
                 JOIN education_textbook_publications AS publications ON publications.publication_id = assignments.publication_id
                 JOIN education_textbook_versions AS versions ON versions.version_id = publications.version_id
                 JOIN education_textbooks AS textbooks ON textbooks.textbook_id = versions.textbook_id
-                JOIN education_memberships AS memberships ON memberships.user_id = assignments.student_user_id
+                JOIN education_memberships AS memberships
+                  ON memberships.user_id = assignments.student_user_id
+                 AND memberships.household_id = textbooks.household_id
                 WHERE assignments.assignment_id = %s AND assignments.student_user_id = %s AND memberships.role = 'student'
                 """,
                 (assignment_id, student_user_id),
@@ -558,6 +807,33 @@ async def get_student_learning(
     return result
 
 
+async def get_student_chapter_context_record(
+    *, student_user_id: str, assignment_id: str, chapter_id: str
+) -> dict[str, Any] | None:
+    """Return published chapter material only through the student's assigned snapshot."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT assignments.assignment_id, chapters.chapter_id, textbooks.title AS textbook_title,
+                       chapters.title AS chapter_title, chapters.markdown, chapters.teaching_material
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbook_publications AS publications ON publications.publication_id = assignments.publication_id
+                JOIN education_textbook_versions AS versions ON versions.version_id = publications.version_id
+                JOIN education_textbooks AS textbooks ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_textbook_chapters AS chapters ON chapters.version_id = versions.version_id
+                JOIN education_memberships AS memberships
+                  ON memberships.user_id = assignments.student_user_id
+                 AND memberships.household_id = textbooks.household_id
+                WHERE assignments.assignment_id = %s AND assignments.student_user_id = %s
+                  AND chapters.chapter_id = %s AND memberships.role = 'student'
+                """,
+                (assignment_id, student_user_id, chapter_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def update_student_progress(
     *, student_user_id: str, assignment_id: str, chapter_id: str, status: str
 ) -> dict[str, Any] | None:
@@ -570,8 +846,12 @@ async def update_student_progress(
                        CASE WHEN %s IN ('read', 'check_completed') THEN NOW() ELSE NULL END, NOW()
                 FROM education_textbook_assignments AS assignments
                 JOIN education_textbook_publications AS publications ON publications.publication_id = assignments.publication_id
+                JOIN education_textbook_versions AS versions ON versions.version_id = publications.version_id
+                JOIN education_textbooks AS textbooks ON textbooks.textbook_id = versions.textbook_id
                 JOIN education_textbook_chapters AS chapters ON chapters.version_id = publications.version_id
-                JOIN education_memberships AS memberships ON memberships.user_id = assignments.student_user_id
+                JOIN education_memberships AS memberships
+                  ON memberships.user_id = assignments.student_user_id
+                 AND memberships.household_id = textbooks.household_id
                 WHERE assignments.assignment_id = %s AND assignments.student_user_id = %s
                   AND chapters.chapter_id = %s AND memberships.role = 'student'
                 ON CONFLICT (assignment_id, chapter_id) DO UPDATE
@@ -596,11 +876,15 @@ async def submit_student_answer(
                 await cur.execute(
                     """
                     SELECT questions.question_id, questions.chapter_id, questions.correct_option
-                    FROM education_textbook_assignments AS assignments
-                    JOIN education_textbook_publications AS publications ON publications.publication_id = assignments.publication_id
-                    JOIN education_textbook_chapters AS chapters ON chapters.version_id = publications.version_id
-                    JOIN education_chapter_questions AS questions ON questions.chapter_id = chapters.chapter_id
-                    JOIN education_memberships AS memberships ON memberships.user_id = assignments.student_user_id
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbook_publications AS publications ON publications.publication_id = assignments.publication_id
+                JOIN education_textbook_versions AS versions ON versions.version_id = publications.version_id
+                JOIN education_textbooks AS textbooks ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_textbook_chapters AS chapters ON chapters.version_id = publications.version_id
+                JOIN education_chapter_questions AS questions ON questions.chapter_id = chapters.chapter_id
+                JOIN education_memberships AS memberships
+                  ON memberships.user_id = assignments.student_user_id
+                 AND memberships.household_id = textbooks.household_id
                     WHERE assignments.assignment_id = %s AND assignments.student_user_id = %s
                       AND questions.question_id = %s AND memberships.role = 'student'
                     FOR UPDATE

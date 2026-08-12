@@ -82,8 +82,7 @@ async def _assert_stream_transport_ready() -> None:
         detail={
             "code": "transport_unavailable",
             "message": (
-                "The event-stream transport is temporarily unreachable; "
-                "retry shortly."
+                "The event-stream transport is temporarily unreachable; retry shortly."
             ),
         },
         headers={"Retry-After": "3"},
@@ -188,7 +187,9 @@ async def send_new_thread_message(
 
 @router.post("/{thread_id}/messages")
 async def send_thread_message(
-    thread_id: str, request: ChatRequest, auth: ChatRateLimited,
+    thread_id: str,
+    request: ChatRequest,
+    auth: ChatRateLimited,
     raw_request: Request,
 ):
     """
@@ -232,7 +233,9 @@ async def _reject_duplicate_request(request_key: str, user_id: str) -> None:
 
 
 async def _handle_send_message(
-    request: ChatRequest, auth: ChatRateLimited, thread_id: str,
+    request: ChatRequest,
+    auth: ChatRateLimited,
+    thread_id: str,
     raw_request: Request | None = None,
     *,
     retry_of_run_id: str | None = None,
@@ -281,9 +284,7 @@ async def _handle_send_message(
         # Burst slot: server-stamped from the admission dependency; never
         # trust a client-sent value (see ChatRequest.burst_slot_id).
         if request.burst_slot_id != auth.burst_slot_id:
-            request = request.model_copy(
-                update={"burst_slot_id": auth.burst_slot_id}
-            )
+            request = request.model_copy(update={"burst_slot_id": auth.burst_slot_id})
 
         # Idempotency: a request_key that already produced a run is a
         # retransmit — classify it before any durable work happens for
@@ -294,7 +295,13 @@ async def _handle_send_message(
         # 403 guard: require BYOK, OAuth, or platform access (tier >= 0).
         # All flags are pre-checked by enforce_chat_limit — no DB calls here.
         from src.config.settings import HOST_MODE
-        if HOST_MODE == "platform" and not auth.is_byok and not auth.has_oauth and auth.access_tier < 0:
+
+        if (
+            HOST_MODE == "platform"
+            and not auth.is_byok
+            and not auth.has_oauth
+            and auth.access_tier < 0
+        ):
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -311,7 +318,9 @@ async def _handle_send_message(
         # authenticate against, so the self-dispatch is trusted; a configured
         # token is enforced in every mode. This single is_internal value is
         # reused by the field strip and both dispatch branches below.
-        _req_token = (raw_request.headers.get("X-Service-Token", "") if raw_request else "")
+        _req_token = (
+            raw_request.headers.get("X-Service-Token", "") if raw_request else ""
+        )
         _svc_token = _get_service_token()
         is_internal = service_token_matches(_req_token, _svc_token) or (
             HOST_MODE == "oss" and not _svc_token
@@ -381,6 +390,7 @@ async def _handle_send_message(
         # the status check when a ready session exists (PTC workspace, common path).
         if agent_mode != "flash" and workspace_id:
             from src.server.services.workspace_manager import WorkspaceManager
+
             if not WorkspaceManager.get_instance().has_ready_session(workspace_id):
                 if workspace and workspace.get("status") == "flash":
                     agent_mode = "flash"
@@ -394,6 +404,56 @@ async def _handle_send_message(
         # The internal report-back dispatch sets X-User-Id to the owner, so it passes.
         require_workspace_owner(workspace, user_id=user_id)
         await require_student_flash_workspace(user_id, workspace)
+
+        # A learning reference can only ever drive the student's private Flash
+        # workspace. Resolve the immutable published chapter on the server so a
+        # browser cannot inject arbitrary material or cross-household content.
+        if request.education_assignment_id or request.education_chapter_id:
+            if (
+                agent_mode != "flash"
+                or not workspace
+                or workspace.get("status") != "flash"
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Learning context is available only in a student Flash workspace",
+                )
+            from src.server.services.education_learning_chat import (
+                EducationLearningChatContextError,
+                attach_learning_chat_context,
+                require_learning_chat_thread,
+            )
+
+            try:
+                await require_learning_chat_thread(
+                    user_id=user_id,
+                    assignment_id=request.education_assignment_id or "",
+                    thread_id=thread_id,
+                )
+                request = request.model_copy(
+                    update={
+                        "additional_context": await attach_learning_chat_context(
+                            user_id=user_id,
+                            assignment_id=request.education_assignment_id,
+                            chapter_id=request.education_chapter_id,
+                            additional_context=request.additional_context,
+                        )
+                    }
+                )
+            except EducationLearningChatContextError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+        elif agent_mode == "flash":
+            from src.server.services.education_learning_chat import (
+                EducationLearningChatContextError,
+                reject_unscoped_learning_thread,
+            )
+
+            try:
+                await reject_unscoped_learning_thread(
+                    user_id=user_id, thread_id=thread_id
+                )
+            except EducationLearningChatContextError as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
 
         # Extract user input
         user_input = ""
@@ -432,7 +492,10 @@ async def _handle_send_message(
 
         # is_byok is True only when the stamped credential_source confirms the user
         # supplied their own key (OAUTH or BYOK), not merely that a client object exists.
-        is_byok = config.credential_source in (CredentialSource.OAUTH, CredentialSource.BYOK)
+        is_byok = config.credential_source in (
+            CredentialSource.OAUTH,
+            CredentialSource.BYOK,
+        )
 
         # Credit check: always enforce.
         # - Platform-served (is_byok=False): block when daily limit reached.
@@ -469,7 +532,11 @@ async def _handle_send_message(
 
     # Resolve model name for observability labels (bounded by models.json keys).
     _llm = getattr(config, "llm", None)
-    _model = (getattr(_llm, "flash", None) if agent_mode == "flash" else getattr(_llm, "name", None)) or ""
+    _model = (
+        getattr(_llm, "flash", None)
+        if agent_mode == "flash"
+        else getattr(_llm, "name", None)
+    ) or ""
 
     # Content-Location header advertises the reconnect URL for this run.
     # Mirrors langgraph_sdk's protocol so reconnects target the exact run.
@@ -500,6 +567,7 @@ async def _handle_send_message(
         if is_flash_dispatch:
             from src.server.database.runs.lifecycle import DuplicateRequestError
             from src.server.handlers.chat.request_prep import DISPATCH_STARTED_MARKER
+
             # Report-back idempotency: a lost-response retry of the drainer's
             # POST must NOT start a second summary run. The claim CM SET-NXs
             # the per-(flash, ptc) run pointer (atomic on its own — no outer
@@ -511,10 +579,15 @@ async def _handle_send_message(
             rb_cache = None
             if rb_ptc:
                 from src.utils.cache.redis_cache import get_cache_client
+
                 rb_cache = get_cache_client()
             from src.server.services.report_back.flash import pointer
+
             async with pointer.claim(
-                rb_cache, thread_id, rb_ptc, run_id,
+                rb_cache,
+                thread_id,
+                rb_ptc,
+                run_id,
                 request.origin_dispatch_gen,
                 request.request_key,
             ) as rb_claim:
@@ -525,11 +598,13 @@ async def _handle_send_message(
                         f"in-flight run {rb_claim.incumbent} for ptc={rb_ptc} on "
                         f"flash thread {thread_id} (no second run)"
                     )
-                    return JSONResponse({
-                        "status": "dispatched",
-                        "thread_id": thread_id,
-                        "run_id": rb_claim.incumbent,
-                    })
+                    return JSONResponse(
+                        {
+                            "status": "dispatched",
+                            "thread_id": thread_id,
+                            "run_id": rb_claim.incumbent,
+                        }
+                    )
                 if rb_claim.pair_gone:
                     await scope.release_slot()
                     logger.warning(
@@ -543,8 +618,7 @@ async def _handle_send_message(
                     raise HTTPException(
                         status_code=410,
                         detail=(
-                            "Report-back pair already resolved; summary not "
-                            "scheduled."
+                            "Report-back pair already resolved; summary not scheduled."
                         ),
                     )
                 if rb_claim.in_flight:
@@ -579,11 +653,13 @@ async def _handle_send_message(
                         f"[FLASH_DISPATCH] Retransmit adopted existing run "
                         f"{existing} for thread {thread_id}"
                     )
-                    return JSONResponse({
-                        "status": "dispatched",
-                        "thread_id": thread_id,
-                        "run_id": existing,
-                    })
+                    return JSONResponse(
+                        {
+                            "status": "dispatched",
+                            "thread_id": thread_id,
+                            "run_id": existing,
+                        }
+                    )
                 except HTTPException:
                     await scope.release_slot()
                     raise
@@ -601,31 +677,35 @@ async def _handle_send_message(
                         detail="Dispatch priming yielded an unexpected event.",
                     )
                 rb_claim.consummate()
-            _track_task(asyncio.create_task(
-                observe_background_chat_turn(
-                    _consume_background_gen(
-                        flash_gen,
-                        "FLASH_DISPATCH",
-                        thread_id,
-                        run_id,
+            _track_task(
+                asyncio.create_task(
+                    observe_background_chat_turn(
+                        _consume_background_gen(
+                            flash_gen,
+                            "FLASH_DISPATCH",
+                            thread_id,
+                            run_id,
+                        ),
+                        mode="flash",
+                        model=_model,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        thread_id=thread_id,
                     ),
-                    mode="flash",
-                    model=_model,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                    thread_id=thread_id,
-                ),
-                name=f"flash-dispatch-{thread_id}-{run_id[:8]}",
-            ))
+                    name=f"flash-dispatch-{thread_id}-{run_id[:8]}",
+                )
+            )
             logger.info(
                 f"[FLASH_DISPATCH] Started background workflow: "
                 f"thread_id={thread_id} run_id={run_id}"
             )
-            return JSONResponse({
-                "status": "dispatched",
-                "thread_id": thread_id,
-                "run_id": run_id,
-            })
+            return JSONResponse(
+                {
+                    "status": "dispatched",
+                    "thread_id": thread_id,
+                    "run_id": run_id,
+                }
+            )
 
         return StreamingResponse(
             observe_chat_stream(
@@ -702,12 +782,14 @@ async def _handle_send_message(
                 f"[PTC_DISPATCH] Retransmit adopted existing run {existing} "
                 f"for thread {thread_id}"
             )
-            return JSONResponse({
-                "status": "dispatched",
-                "thread_id": thread_id,
-                "run_id": existing,
-                "workspace_id": workspace_id,
-            })
+            return JSONResponse(
+                {
+                    "status": "dispatched",
+                    "thread_id": thread_id,
+                    "run_id": existing,
+                    "workspace_id": workspace_id,
+                }
+            )
         except HTTPException:
             await scope.release_slot()
             if request.origin_dispatch_gen:
@@ -733,29 +815,36 @@ async def _handle_send_message(
                 detail="Dispatch priming yielded an unexpected event.",
             )
 
-        _track_task(asyncio.create_task(
-            observe_background_chat_turn(
-                _consume_background_gen(
-                    ptc_gen, "PTC_DISPATCH", thread_id, run_id,
+        _track_task(
+            asyncio.create_task(
+                observe_background_chat_turn(
+                    _consume_background_gen(
+                        ptc_gen,
+                        "PTC_DISPATCH",
+                        thread_id,
+                        run_id,
+                    ),
+                    mode="ptc",
+                    model=_model,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    thread_id=thread_id,
                 ),
-                mode="ptc",
-                model=_model,
-                user_id=user_id,
-                workspace_id=workspace_id,
-                thread_id=thread_id,
-            ),
-            name=f"ptc-dispatch-{thread_id}-{run_id[:8]}",
-        ))
+                name=f"ptc-dispatch-{thread_id}-{run_id[:8]}",
+            )
+        )
         logger.info(
             f"[PTC_DISPATCH] Started background workflow: "
             f"thread_id={thread_id} run_id={run_id} workspace_id={workspace_id}"
         )
-        return JSONResponse({
-            "status": "dispatched",
-            "thread_id": thread_id,
-            "run_id": run_id,
-            "workspace_id": workspace_id,
-        })
+        return JSONResponse(
+            {
+                "status": "dispatched",
+                "thread_id": thread_id,
+                "run_id": run_id,
+                "workspace_id": workspace_id,
+            }
+        )
 
     return StreamingResponse(
         observe_chat_stream(
@@ -880,9 +969,14 @@ async def replay_thread_messages(
     - replay_done: terminal sentinel
     """
     try:
-        owner_id, thread, queries, responses, usages, provenance = (
-            await get_replay_thread_data(thread_id)
-        )
+        (
+            owner_id,
+            thread,
+            queries,
+            responses,
+            usages,
+            provenance,
+        ) = await get_replay_thread_data(thread_id)
 
         # Preserve existing 404/403 semantics from require_thread_owner
         if owner_id is None:
@@ -1296,8 +1390,6 @@ async def retry_thread(
     return await _handle_send_message(
         request, auth, thread_id, retry_of_run_id=latest_run_id
     )
-
-
 
 
 @router.get("/{thread_id}/stream")
