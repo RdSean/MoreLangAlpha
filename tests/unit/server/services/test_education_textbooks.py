@@ -35,6 +35,28 @@ async def test_only_parent_can_start_a_frozen_textbook_processing_job(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_creating_chinese_textbooks_uses_distinct_storage_slugs(monkeypatch):
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    create = AsyncMock(return_value={"textbook_id": "textbook-1"})
+    monkeypatch.setattr(education_textbooks, "create_textbook_record", create)
+
+    await education_textbooks.create_textbook(
+        parent_user_id="parent-1", title="语文上册"
+    )
+    await education_textbooks.create_textbook(
+        parent_user_id="parent-1", title="数学上册"
+    )
+
+    slugs = [call.kwargs["slug"] for call in create.await_args_list]
+    assert len(set(slugs)) == 2
+    assert all(slug.startswith("textbook-") for slug in slugs)
+
+
+@pytest.mark.asyncio
 async def test_start_processing_freezes_sources_before_queueing(monkeypatch):
     context = {"household_id": "household-1", "timezone": "Asia/Tokyo"}
     monkeypatch.setattr(

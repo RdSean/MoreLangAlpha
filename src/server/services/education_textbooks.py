@@ -3,6 +3,7 @@
 import asyncio
 from io import BytesIO
 from typing import Any
+from uuid import uuid4
 
 from src.server.database.education_tasks import get_household_context_for_parent
 from src.server.database.education_textbooks import (
@@ -72,13 +73,15 @@ def _required_title(value: str) -> str:
     return title
 
 
-def _slug(value: str) -> str:
+def _slug(value: str, *, unique_suffix: str | None = None) -> str:
     import re
 
-    return (
-        re.sub(r"[^0-9A-Za-z._-]+", "-", value.strip()).strip(".-").lower()[:80]
-        or "textbook"
-    )
+    base = re.sub(r"[^0-9A-Za-z._-]+", "-", value.strip()).strip(".-").lower()
+    if not base:
+        base = "textbook"
+    if unique_suffix:
+        return f"{base[: max(1, 80 - len(unique_suffix) - 1)]}-{unique_suffix}"
+    return base[:80]
 
 
 async def create_textbook(*, parent_user_id: str, title: str) -> dict[str, Any]:
@@ -89,7 +92,7 @@ async def create_textbook(*, parent_user_id: str, title: str) -> dict[str, Any]:
         household_id=str(context["household_id"]),
         parent_user_id=parent_user_id,
         title=_required_title(title),
-        slug=_slug(title),
+        slug=_slug(title, unique_suffix=uuid4().hex[:12]),
     )
     if not textbook:
         raise TextbookPermissionError(
