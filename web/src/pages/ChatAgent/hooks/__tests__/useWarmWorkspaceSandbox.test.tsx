@@ -19,7 +19,6 @@ vi.mock('@/api/client', () => {
   };
 });
 
-vi.mock('@/lib/supabase', () => ({ supabase: null }));
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 

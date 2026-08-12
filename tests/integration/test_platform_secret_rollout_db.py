@@ -32,11 +32,11 @@ def _reset_rollout_cache():
 
 def _identity(*, secret_id: str, placeholder: str) -> ReconciledPlatformSecret:
     definition = PlatformSecretDefinition(
-        source_env_var="FMP_API_KEY",
-        sandbox_env_var="FMP_API_KEY",
-        name_suffix="platform-fmp-api-key",
-        description="Platform FMP API key",
-        hosts=("financialmodelingprep.com",),
+        source_env_var="PLATFORM_SECRET_API_KEY",
+        sandbox_env_var="PLATFORM_SECRET_API_KEY",
+        name_suffix="platform-secret",
+        description="Platform API key",
+        hosts=("example.invalid",),
     )
     return ReconciledPlatformSecret(
         definition=definition,
@@ -51,11 +51,11 @@ def _capable_config():
     catalog, so ``platform_secrets_active`` is True (certify never iterates it)."""
 
     definition = PlatformSecretDefinition(
-        source_env_var="FMP_API_KEY",
-        sandbox_env_var="FMP_API_KEY",
-        name_suffix="platform-fmp-api-key",
-        description="Platform FMP API key",
-        hosts=("financialmodelingprep.com",),
+        source_env_var="PLATFORM_SECRET_API_KEY",
+        sandbox_env_var="PLATFORM_SECRET_API_KEY",
+        name_suffix="platform-secret",
+        description="Platform API key",
+        hosts=("example.invalid",),
     )
     sandbox = type(
         "Sandbox", (), {"provider": "daytona", "platform_secrets": (definition,)}
@@ -159,18 +159,18 @@ async def test_identity_change_bumps_generation_and_keeps_certified_version(
 async def test_set_membership_change_bumps_generation_monotonically(
     seed_workspace, patched_get_db_connection
 ):
-    fmp = _identity(secret_id="secret-1", placeholder="dtn_secret_one")
+    platform_secret = _identity(secret_id="secret-1", placeholder="dtn_secret_one")
 
-    first = await _register(fmp)
-    grown = await _register(fmp, _extra_identity())
-    shrunk = await _register(fmp)
+    first = await _register(platform_secret)
+    grown = await _register(platform_secret, _extra_identity())
+    shrunk = await _register(platform_secret)
 
     # Addition and removal are both identity changes; the shared sequence
     # never regresses even though the removed row carried the highest value.
     assert grown.generation == first.generation + 1
-    assert sorted(grown.bindings) == ["EXTRA_API_KEY", "FMP_API_KEY"]
+    assert sorted(grown.bindings) == ["EXTRA_API_KEY", "PLATFORM_SECRET_API_KEY"]
     assert shrunk.generation == grown.generation + 1
-    assert sorted(shrunk.bindings) == ["FMP_API_KEY"]
+    assert sorted(shrunk.bindings) == ["PLATFORM_SECRET_API_KEY"]
 
 
 async def test_credential_rotation_without_identity_change_keeps_generation(
@@ -184,7 +184,7 @@ async def test_credential_rotation_without_identity_change_keeps_generation(
     first = await _register(identity)
     second = await register_platform_secret_rollouts(
         [identity],
-        credential_values={"FMP_API_KEY": "rotated-credential-value"},
+        credential_values={"PLATFORM_SECRET_API_KEY": "rotated-credential-value"},
         provider="daytona",
     )
 

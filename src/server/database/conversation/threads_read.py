@@ -20,7 +20,7 @@ def _like_escape(value: str) -> str:
     """Escape LIKE wildcards so caller-supplied prefixes match literally.
 
     Use with `ESCAPE '\\'` in the LIKE clause so `_` and `%` in the prefix
-    (e.g. `market_view`) bind to themselves instead of matching any character.
+    bind to themselves instead of matching any character.
     """
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
@@ -126,8 +126,7 @@ async def get_workspace_threads(
     """Get threads for a workspace with pagination.
 
     `platform_prefix`: if set, restricts to rows where `platform` LIKE
-    '<prefix>%' (e.g. "market_view" matches "market_view:AAPL" and any future
-    "market_view:*" suffixes). Sargable on Postgres btree, but after the
+    '<prefix>%' for a client-surface family. Sargable on Postgres btree, but after the
     workspace_id filter this is a tiny scan in practice.
 
     `archived`: the two views are disjoint — False (default) lists only
@@ -215,7 +214,7 @@ async def get_threads_for_user(
     has no archived counterpart (the workspace listing serves that). Pinning
     does not reorder here either: pin scope is within a workspace.
 
-    `platform_prefix`: optional prefix match on `platform` (e.g. "market_view").
+    `platform_prefix`: optional prefix match on `platform`.
     """
     sort_fields = {
         "created_at": "t.created_at",

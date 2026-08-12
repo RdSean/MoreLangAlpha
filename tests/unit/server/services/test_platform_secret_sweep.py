@@ -24,9 +24,9 @@ _MECHANICS = "ptc_agent.core.sandbox.platform_secrets"
 
 def _rollout_set(generation: int = 1) -> PlatformSecretRolloutSet:
     rollout = PlatformSecretRollout(
-        secret_key="FMP_API_KEY",
+        secret_key="PLATFORM_SECRET_API_KEY",
         provider="daytona",
-        secret_name="prod-platform-fmp-api-key",
+        secret_name="prod-platform-secret",
         provider_secret_id="secret-id",
         placeholder_sha256=hashlib.sha256(PLACEHOLDER.encode()).hexdigest(),
         current_credential_sha256="current",

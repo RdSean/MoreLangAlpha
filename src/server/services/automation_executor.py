@@ -13,7 +13,6 @@ from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from src.server.database import automation as auto_db
-from src.server.models.automation import PriceTriggerConfig, RetriggerMode
 from src.server.database.api_keys import is_byok_active
 from src.server.database.oauth_tokens import has_any_oauth_token
 from src.server.database.workspace import get_or_create_flash_workspace
@@ -298,18 +297,6 @@ class AutomationExecutor:
                 await auto_db.update_automation_next_run(
                     automation_id, next_run_at=None, status="completed"
                 )
-            elif automation["trigger_type"] == "price":
-                tc = automation.get("trigger_config") or {}
-                config = PriceTriggerConfig(**tc)
-                if config.retrigger.mode == RetriggerMode.ONE_SHOT:
-                    await auto_db.update_automation_next_run(
-                        automation_id, next_run_at=None, status="completed"
-                    )
-                else:
-                    # Recurring — restore to active only if still 'executing'
-                    # (user may have paused/disabled during execution)
-                    await auto_db.restore_executing_to_active(automation_id)
-
             safe_add(automation_executions, 1, {"status": "success", "trigger": _trigger})
             _exec_span.set_attribute("status", "success")
 
@@ -333,11 +320,6 @@ class AutomationExecutor:
             # enforce_credit_limit lands here too — intentionally counted as a
             # failure so a persistently zero-credit automation auto-disables.
             await auto_db.increment_failure_count(automation_id)
-
-            # Restore price automations from 'executing' to 'active' on failure
-            # (increment_failure_count may have set 'disabled' — only restore if still 'executing')
-            if automation.get("trigger_type") == "price":
-                await auto_db.restore_executing_to_active(automation_id)
 
             # Notify webhooks: failed
             delivery_result = await self._fire_webhook(

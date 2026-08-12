@@ -50,14 +50,7 @@ vi.mock('../Markdown', () => ({
 // ActivityBlock — stub them so the module graph stays light.
 vi.mock('../charts/InlineArtifactCards', () => ({
   INLINE_ARTIFACT_TOOLS: new Set<string>(),
-  InlineStockPriceCard: () => null,
-  InlineCompanyOverviewCard: () => null,
-  InlineMarketIndicesCard: () => null,
-  InlineSectorPerformanceCard: () => null,
-  InlineMarketOverviewCard: () => null,
-  InlineSecFilingCard: () => null,
-  InlineStockScreenerCard: () => null,
-  InlineWebSearchCard: () => null,
+  INLINE_ARTIFACT_MAP: {},
 }));
 
 vi.mock('../charts/InlineAutomationCards', () => ({

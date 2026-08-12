@@ -202,10 +202,10 @@ describe('deriveChildIdentity', () => {
   it('lets a caller-known description and type win over the run', () => {
     const identity = deriveChildIdentity(dispatched, {
       description: 'what the user typed',
-      type: 'equity-analyst',
+      type: 'research',
     });
     expect(identity.description).toBe('what the user typed');
-    expect(identity.type).toBe('equity-analyst');
+    expect(identity.type).toBe('research');
   });
 
   it('treats the default subagent name as unknown, not as an answer', () => {

@@ -46,7 +46,7 @@
     "noAccount": "Don't have an account? <1>Sign up</1>",
     "haveAccount": "Already have an account? <1>Sign in</1>",
     "backToOptions": "← Other sign-in options",
-    "visualTitle": "AI-powered financial research\nfor global markets.",
+    "visualTitle": "AI-powered research\nfor everyday work.",
     "visualSubtitle": "Your dedicated AI research team, available 24/7.",
     "backToLogin": "← Back to sign in",
     "useDifferentEmail": "← Use a different email",
@@ -100,8 +100,8 @@
   "sidebar": {
     "dashboard": "Dashboard",
     "chatAgent": "Chat Agent",
-    "marketView": "Market View",
     "automations": "Automations",
+    "education": "Education",
     "settings": "Settings",
     "account": "Usage & Plan",
     "newChat": "New chat",
@@ -177,8 +177,6 @@
     "selectLocale": "Select locale...",
     "preferencesDesc": "Preferences are managed through conversation with the agent. Use the button below to update them.",
     "noPreferencesYet": "No preferences set yet. Use the button below to set up your profile.",
-    "riskTolerance": "Risk Tolerance",
-    "investmentStyle": "Investment Style",
     "agentSettings": "Agent Settings",
     "outputFormat": "Output format",
     "outputFormatDefault": "Default",
@@ -186,16 +184,13 @@
     "outputFormatDescriptionDefault": "Answers come back as clean, easy-to-read text — the standard format.",
     "outputFormatDescriptionHtml": "In-depth answers come back as a polished visual report — with charts, tables, and interactive views you can explore — instead of plain text. It's easier to read and more engaging, but takes a little longer to prepare and uses more credits.",
     "resetPreferences": "Reset Preferences",
-    "resetConfirmMsg": "This will clear all your preferences (risk tolerance, investment style, agent settings). You can set them up again anytime via the agent. Are you sure?",
+    "resetConfirmMsg": "This will clear all your preferences and agent settings. You can set them up again anytime via the agent. Are you sure?",
     "resetting": "Resetting...",
     "modifyWithAgent": "Modify with Agent",
-    "completeProfile": "Complete your profile setup",
-    "completeProfileDesc": "Set up your stocks, risk tolerance, and preferences through a quick conversation.",
-    "startOnboarding": "Start Onboarding",
     "defaultModel": "Default Model",
     "defaultModelDesc": "Used for workspace conversations (code execution, sandbox).",
     "flashModel": "Flash Model",
-    "flashModelDesc": "Used for quick queries without sandbox (web search, market data).",
+    "flashModelDesc": "Used for quick requests without a sandbox.",
     "systemDefault": "System default",
     "byok": "Bring Your Own Key (BYOK)",
     "byokDesc": "Provide your own API keys to bypass credit limits.",
@@ -319,795 +314,36 @@
     }
   },
   "dashboard": {
-    "title": "LangAlpha",
-    "searchPlaceholder": "Search by symbol or company name...",
-    "searching": "Searching...",
-    "noResults": "No results found",
-    "contactMessage": "If you have any questions or suggestions, please contact us through the following methods",
-    "prefIncomplete": "Preference Information Incomplete",
-    "prefIncompleteMsg": "Your preference information is not complete. Please complete your preferences to get the best experience with the agent.",
-    "ignoreFor24h": "Ignore for 24 hours",
-    "settingUp": "Setting up...",
-    "proceed": "Proceed",
-    "failedOnboarding": "Failed to set up onboarding. Please try again.",
-    "failedPrefUpdate": "Failed to start preference update. Please try again.",
-    "watchlist": "Watchlist",
-    "personalizeTitle": "Personalize your experience",
-    "personalizeDesc": "Chat with our agent to customize watchlists, risk preferences, and alerts",
-    "personalize": "Personalize",
-    "layoutToggle": {
-      "groupAria": "Dashboard layout",
-      "classic": "Classic",
-      "custom": "Custom",
-      "editLayout": "Edit layout",
-      "exitEditLayout": "Exit edit layout"
-    },
-    "widgets": {
-      "common": {
-        "save": "Save",
-        "cancel": "Cancel",
-        "done": "Done",
-        "close": "Close",
-        "search": "Search",
-        "searching": "Searching…",
-        "loading": "Loading…",
-        "viewAll": "View all",
-        "relativeNow": "now",
-        "relativeFuture": "in {{when}}",
-        "relativePast": "{{when}} ago"
-      },
-      "shell": {
-        "addWidget": "Add widget",
-        "presets": "Presets",
-        "reset": "Reset",
-        "done": "Done",
-        "resetTitle": "Reset to Morning Brief?",
-        "resetMessage": "This replaces your current widgets and layout with the default preset. This action can't be undone.",
-        "resetConfirm": "Reset layout",
-        "deleteConfirm": "Delete",
-        "settingsDialogTitle": "{{title}} settings",
-        "editHoldingTitle": "Edit holding — {{symbol}}",
-        "quantityLabel": "Quantity *",
-        "quantityPlaceholder": "e.g. 10.5",
-        "averageCostLabel": "Average Cost Per Share *",
-        "averageCostPlaceholder": "e.g. 175.50",
-        "notesLabel": "Notes",
-        "notesPlaceholder": "Optional",
-        "cancel": "Cancel",
-        "save": "Save"
-      },
-      "frame": {
-        "drag": "Drag to rearrange",
-        "settings": "Widget settings",
-        "settingsTitle": "Settings",
-        "menu": "Widget menu",
-        "duplicate": "Duplicate",
-        "remove": "Remove",
-        "errorBoundary": "Widget failed to render",
-        "addToContext": "Add to context",
-        "addToContextTitle": "Add this widget to chat context",
-        "contextAttached": "Added to context",
-        "contextUnavailable": "Widget not available",
-        "contextUnavailableHint": "This widget has not registered a context exporter yet.",
-        "addRowToContext": "Add row to context",
-        "addRowToContextTitle": "Add this row to chat context",
-        "contextUnsupportedTradingView": "Can't attach this — the content is managed by TradingView, so the agent can't access it."
-      },
-      "addDialog": {
-        "eyebrow": "Widget Gallery",
-        "title": "Add a widget",
-        "searchPlaceholder": "Search widgets…",
-        "results": "Results",
-        "resultCount_one": "{{count}} widget matches \"{{search}}\".",
-        "resultCount_other": "{{count}} widgets match \"{{search}}\".",
-        "tip": "tip",
-        "tipBody": "Click a widget to drop it at the next open slot on your dashboard.",
-        "totalCount": "{{count}} total widgets",
-        "noMatches": "No widgets match your search.",
-        "hintClickToSelect": "Click to select · double-click or",
-        "hintToAdd": "to add",
-        "hintAddSentence": "Click to select · double-click or <enter></enter> to add",
-        "cancel": "Cancel",
-        "addWidget": "Add widget",
-        "addNamed": "Add {{title}}",
-        "closeAria": "Close",
-        "badgeSingleton": "singleton",
-        "badgeMulti": "multi",
-        "badgeTradingView": "TradingView",
-        "metaConfigurable": "configurable",
-        "metaNoSettings": "no settings",
-        "metaOnDashboard": "· on dashboard",
-        "category": {
-          "marketsLabel": "Markets",
-          "marketsBlurb": "Real-time quotes, indices, charts and calendars.",
-          "intelligenceLabel": "Intelligence",
-          "intelligenceBlurb": "AI-generated briefs and curated news streams.",
-          "personalLabel": "Personal",
-          "personalBlurb": "Your portfolio, watchlist, and holdings.",
-          "agentLabel": "Agent",
-          "agentBlurb": "Kick off a research session from the dashboard.",
-          "workspaceLabel": "Workspace",
-          "workspaceBlurb": "Jump into a past conversation or workspace."
+    "overview": {
+      "eyebrow": "Agent workspace",
+      "heading": "Workspace",
+      "description": "Start a conversation, return to recent work, or open the files that support it.",
+      "workspaceCount_one": "{{count}} workspace",
+      "workspaceCount_other": "{{count}} workspaces",
+      "actionsLabel": "Workspace actions",
+      "actions": {
+        "chat": {
+          "title": "Start a chat",
+          "description": "Open the agent workspace"
+        },
+        "automations": {
+          "title": "Manage automations",
+          "description": "Review scheduled work"
+        },
+        "files": {
+          "title": "Open workspace files",
+          "description": "Browse files in the active workspace",
+          "unavailable": "Create a workspace to manage files"
         }
       },
-      "presetsDialog": {
-        "eyebrow": "Dashboard layouts",
-        "title": "Start with a preset",
-        "description": "Six curated layouts tuned to different workflows. Pick one to start, then rearrange and swap widgets freely. Your existing layout is saved and can be restored.",
-        "tailoredBadge": "tailored to your holdings",
-        "popularBadge": "most popular",
-        "bestWhen": "Best when: {{bestFor}}",
-        "useLayout": "Use this layout →"
-      },
-      "embedFallback": {
-        "title": "Widget unavailable",
-        "body": "TradingView didn't load. Check your network or ad-blocker.",
-        "retry": "Retry",
-        "status": "Status"
-      },
-      "tvFooter": {
-        "providedBy": "Provided by ",
-        "tradingView": "TradingView",
-        "legal": "Legal & attributions"
-      },
-      "tvAttribution": {
-        "powered": "Powered by TradingView ↗"
-      },
-      "settings": {
-        "symbolFieldPlaceholder": "e.g. NASDAQ:NVDA or AAPL",
-        "symbolListPlaceholder": "Add symbols (Enter)",
-        "symbolListAtCap": "Max {{max}} reached",
-        "symbolListHelperAtCap": "Max {{max}} symbols.",
-        "symbolListRemove": "Remove {{symbol}}",
-        "doneButton": "Done"
-      },
-      "presets": {
-        "morningBrief": {
-          "name": "Morning Brief",
-          "tag": "balanced",
-          "description": "The first five minutes of your day. AI Daily Brief anchors the canvas; market news, earnings, and your portfolio + watchlist sit one glance away.",
-          "bestFor": "Opening the app once a day and wanting the full picture.",
-          "pills": {
-            "aiBrief": "AI daily brief",
-            "portfolioWatchlist": "Portfolio + Watchlist",
-            "news": "News",
-            "earnings": "Earnings",
-            "marketsOverview": "Markets overview"
-          }
-        },
-        "agentDesk": {
-          "name": "Agent Desk",
-          "tag": "agent-led",
-          "description": "The agent's working surface. A full-width ask console anchors the top — put a question on the table, then read today's AI brief beneath. Workspaces, recent threads, automations, and your book round out the desk.",
-          "bestFor": "Living next to the agent — reading, asking, running automations, jumping across workspaces.",
-          "pills": {
-            "aiBrief": "AI brief",
-            "askConsole": "Ask console",
-            "workspaces": "Workspaces",
-            "recentThreads": "Recent threads",
-            "automations": "Automations",
-            "holdingsWatchlist": "Holdings + Watchlist"
-          }
-        },
-        "researcher": {
-          "name": "Researcher",
-          "tag": "sources-first",
-          "description": "Deep qualitative work. The ask console leads; a tall market news rail keeps sources in view. AI brief, holdings + watchlist, and a 2-week earnings calendar round out the canvas.",
-          "bestFor": "Writing memos, running deep-dives, chasing citations.",
-          "pills": {
-            "askConsole": "Ask console",
-            "marketNewsRail": "Market news rail",
-            "aiBrief": "AI brief",
-            "portfolioWatchlist": "Portfolio + Watchlist",
-            "earnings2w": "Earnings (2w)",
-            "marketsOverview": "Markets overview"
-          }
-        },
-        "trader": {
-          "name": "Trader",
-          "tag": "multi-timeframe",
-          "description": "Multi-timeframe workstation. A 2×2 chart grid reads the same symbol at four zoom levels — short-horizon candles over long-horizon area views and a benchmark. Portfolio + watchlist and a wide news tape close the canvas.",
-          "bestFor": "Reading one symbol deeply across horizons with context in view.",
-          "pills": {
-            "chartX4": "Chart × 4",
-            "multiTimeframe": "Multi-timeframe",
-            "portfolioWatchlist": "Portfolio + Watchlist",
-            "newsFeed": "News feed",
-            "marketsOverview": "Markets overview"
-          }
-        },
-        "traderTv": {
-          "name": "Trader (TV)",
-          "tag": "tradingview-first",
-          "description": "A TradingView-driven trading desk. Ticker tape anchors the top, stock heatmap as hero, symbol spotlight with market movers alongside, economic events + a technical analysis gauge below, and a native mini-chart grid closes the canvas.",
-          "bestFor": "Tape-to-sector-to-symbol scan, with TV-native interactivity inside each card.",
-          "pills": {
-            "tickerTape": "Ticker tape",
-            "stockHeatmap": "Stock heatmap",
-            "symbolSpotlight": "Symbol spotlight",
-            "marketMovers": "Market movers",
-            "economicEvents": "Economic events",
-            "technicals": "Technicals",
-            "miniChartGrid": "Mini chart grid"
-          }
-        },
-        "portfolioSteward": {
-          "name": "Portfolio Steward",
-          "tag": "wealth-first",
-          "description": "Your book, actively tended. Your top holding's chart anchors the canvas alongside the combined portfolio + watchlist; a portfolio-filtered news rail runs tall on the right. Ask console and recent threads sit below for when you need to dig in.",
-          "bestFor": "Tending a concentrated book and asking questions about positions.",
-          "pills": {
-            "topHoldingChart": "Top holding chart",
-            "portfolioWatchlist": "Portfolio + Watchlist",
-            "newsPortfolio": "News (portfolio)",
-            "askConsole": "Ask console",
-            "recentThreads": "Recent threads",
-            "markets": "Markets"
-          }
-        }
-      },
-      "holdings": {
-        "stock": "Stock",
-        "sharesHidden": "*** shares",
-        "shares": "{{n}} shares",
-        "nav": "Net Asset Value",
-        "navByCurrency": "Net Asset Value by Currency",
-        "showValues": "Show values",
-        "hideValues": "Hide values",
-        "delete": "Delete",
-        "edit": "Edit"
-      },
-      "tickerTape": {
-        "title": "Ticker Tape",
-        "description": "Scrolling real-time quotes across your chosen symbols.",
-        "symbols": "Symbols",
-        "symbolsPlaceholder": "e.g. NASDAQ:NVDA",
-        "symbolsHelper": "Use TradingView's exchange-qualified form (e.g. NASDAQ:NVDA) for best results.",
-        "displayMode": "Display mode",
-        "displayMode_adaptive": "Adaptive",
-        "displayMode_regular": "Regular",
-        "displayMode_compact": "Compact"
-      },
-      "stockHeatmap": {
-        "title": "Stock Heatmap",
-        "description": "Sector-grouped treemap sized by market cap, colored by % change.",
-        "market": "Market",
-        "market_sp500": "S&P 500",
-        "market_ndx": "NASDAQ 100",
-        "market_dji": "Dow Jones 30",
-        "market_ftse": "FTSE 100",
-        "market_hsi": "Hang Seng",
-        "cellSize": "Cell size",
-        "cellSize_marketCap": "Market cap",
-        "cellSize_volume": "Volume",
-        "cellSize_employees": "Employees",
-        "cellColor": "Cell color",
-        "cellColor_changeDay": "% change (day)",
-        "cellColor_changeWeek": "% change (week)",
-        "cellColor_changeMonth": "% change (month)",
-        "cellColor_volatility": "Volatility"
-      },
-      "cryptoHeatmap": {
-        "title": "Crypto Heatmap",
-        "description": "Crypto treemap sized by market cap, colored by performance.",
-        "dataSource": "Data source",
-        "dataSource_all": "All crypto",
-        "dataSource_markets": "Crypto markets",
-        "cellSize": "Cell size",
-        "cellSize_marketCap": "Market cap",
-        "cellSize_volume24": "24h volume",
-        "cellColor": "Cell color",
-        "cellColor_change24": "24h change",
-        "cellColor_change1w": "1W change",
-        "cellColor_change1m": "1M change"
-      },
-      "forexHeatmap": {
-        "title": "Forex Cross Rates",
-        "description": "Major-currency cross-rate grid with live spreads.",
-        "info": "Shows cross-rates for major currencies. The currency set is fixed by TradingView in this widget."
-      },
-      "etfHeatmap": {
-        "title": "ETF Heatmap",
-        "description": "Treemap of ETFs sized by AUM, colored by performance.",
-        "universe": "Universe",
-        "universe_allUS": "All US ETFs",
-        "universe_equity": "Equity ETFs",
-        "universe_bond": "Bond ETFs",
-        "universe_commodity": "Commodity ETFs",
-        "universe_currency": "Currency ETFs",
-        "blockSize": "Block size by",
-        "blockSize_aum": "AUM",
-        "blockSize_volume": "Volume",
-        "blockSize_equal": "Equal size",
-        "color": "Color by",
-        "color_change": "% change",
-        "color_1w": "1 week performance",
-        "color_1m": "1 month performance",
-        "color_ytd": "YTD performance",
-        "groupBy": "Group by",
-        "groupBy_assetClass": "Asset class",
-        "groupBy_none": "None"
-      },
-      "economicEvents": {
-        "title": "Economic Calendar",
-        "description": "Upcoming releases (CPI, NFP, FOMC, etc.) filtered by importance.",
-        "importance": "Importance",
-        "importance_all": "All (low, medium, high)",
-        "importance_mediumHigh": "Medium + high",
-        "importance_high": "High only",
-        "countries": "Countries",
-        "countries_major": "Major (US, EU, JP, GB, CN)",
-        "countries_us": "US only",
-        "countries_usEuGb": "US + EU + GB"
-      },
-      "economicMap": {
-        "title": "Economic Map",
-        "description": "World map of economic indicators (GDP, inflation, interest rates) by country.",
-        "region": "Region",
-        "region_global": "Global",
-        "region_northAmerica": "North America",
-        "region_southAmerica": "South America",
-        "region_europe": "Europe",
-        "region_asia": "Asia",
-        "region_africa": "Africa",
-        "region_oceania": "Oceania",
-        "metric": "Metric",
-        "metric_gdp": "GDP",
-        "metric_inflation": "Inflation Rate",
-        "metric_interest": "Interest Rate",
-        "metric_unemployment": "Unemployment Rate",
-        "metric_debtGdp": "Government Debt to GDP"
-      },
-      "technicals": {
-        "title": "Technical Analysis",
-        "description": "Oscillator + moving-average consensus gauge with buy/sell/neutral verdict.",
-        "symbol": "Symbol",
-        "interval": "Interval",
-        "interval_1m": "1 minute",
-        "interval_5m": "5 minutes",
-        "interval_15m": "15 minutes",
-        "interval_1h": "1 hour",
-        "interval_4h": "4 hours",
-        "interval_1d": "1 day",
-        "interval_1w": "1 week",
-        "interval_1M": "1 month"
-      },
-      "movers": {
-        "title": "Market Movers",
-        "description": "Top gainers / losers / most-active across US exchanges.",
-        "exchange": "Exchange",
-        "exchange_us": "US (NYSE + NASDAQ)",
-        "exchange_nasdaq": "NASDAQ",
-        "exchange_nyse": "NYSE",
-        "exchange_lse": "London (LSE)",
-        "exchange_hkex": "Hong Kong (HKEX)",
-        "category": "Category",
-        "category_all": "All (gainers/losers/active)",
-        "category_gainers": "Top gainers",
-        "category_losers": "Top losers",
-        "category_active": "Most active"
-      },
-      "symbolSpotlight": {
-        "title": "Symbol Spotlight",
-        "description": "Price + chart overview with key stats for a single symbol.",
-        "symbol": "Symbol",
-        "range": "Range",
-        "range_1d": "1 day",
-        "range_5d": "5 days",
-        "range_1m": "1 month",
-        "range_3m": "3 months",
-        "range_12m": "12 months",
-        "range_5y": "5 years",
-        "range_all": "All time"
-      },
-      "singleTicker": {
-        "title": "Single Ticker",
-        "description": "Compact live-price card for one symbol.",
-        "symbol": "Symbol"
-      },
-      "symbolInfo": {
-        "title": "Symbol Info",
-        "description": "Compact summary card — price, day range, market cap, volume.",
-        "symbol": "Symbol"
-      },
-      "companyProfile": {
-        "title": "Company Profile",
-        "description": "Business description, sector, industry, and HQ for a single company.",
-        "symbol": "Symbol"
-      },
-      "companyFinancials": {
-        "title": "Company Financials",
-        "description": "Fundamentals — income statement, balance sheet, cash flow, key ratios.",
-        "symbol": "Symbol",
-        "layout": "Layout",
-        "layout_regular": "Regular",
-        "layout_compact": "Compact",
-        "layout_adaptive": "Adaptive"
-      },
-      "stockScreener": {
-        "title": "Stock Screener",
-        "description": "Filter the full stock universe by price, market cap, technicals, fundamentals.",
-        "market": "Market",
-        "market_us": "USA (NYSE + NASDAQ + AMEX)",
-        "market_uk": "United Kingdom (LSE)",
-        "market_de": "Germany (XETR)",
-        "market_jp": "Japan",
-        "market_cn": "China (SSE)",
-        "market_hk": "Hong Kong (HKEX)",
-        "columns": "Default column set",
-        "columns_overview": "Overview",
-        "columns_performance": "Performance",
-        "columns_valuation": "Valuation",
-        "columns_dividends": "Dividends",
-        "columns_profitability": "Profitability",
-        "columns_technicals": "Technicals",
-        "screen": "Default screen",
-        "screen_general": "General",
-        "screen_mostCap": "Most capitalized",
-        "screen_topGainers": "Top gainers",
-        "screen_topLosers": "Top losers",
-        "screen_active": "Most active"
-      },
-      "cryptoScreener": {
-        "title": "Crypto Screener",
-        "description": "Filter the crypto universe by market cap, performance, technicals.",
-        "columns": "Default column set",
-        "columns_overview": "Overview",
-        "columns_performance": "Performance",
-        "columns_oscillators": "Oscillators",
-        "columns_movingAverages": "Moving averages",
-        "screen": "Default screen",
-        "screen_general": "General",
-        "screen_mostCap": "Most capitalized",
-        "screen_topGainers": "Top gainers",
-        "screen_topLosers": "Top losers",
-        "screen_active": "Most active"
-      },
-      "topStories": {
-        "title": "Top Stories",
-        "description": "Market headlines from TradingView — by market or pinned to a single symbol.",
-        "feed": "Feed",
-        "feed_all": "All markets",
-        "feed_market": "Specific market",
-        "feed_symbol": "Specific symbol",
-        "market": "Market",
-        "market_stocks": "Stocks",
-        "market_crypto": "Crypto",
-        "market_forex": "Forex",
-        "market_indices": "Indices",
-        "market_futures": "Futures",
-        "market_bonds": "Bonds",
-        "market_economic": "Economic",
-        "symbol": "Symbol",
-        "density": "Density",
-        "density_regular": "Regular (headlines + snippets)",
-        "density_compact": "Compact (headlines only)"
-      },
-      "marketsOverview": {
-        "title": "Markets Overview",
-        "description": "Live tiles for major indices with sparklines."
-      },
-      "insightBrief": {
-        "title": "AI Daily Brief",
-        "description": "Auto-generated market insight with a \"Read Full Brief\" CTA."
-      },
-      "newsFeed": {
-        "title": "News Feed",
-        "description": "Top / Market / Portfolio / Watchlist news with ticker, source + time filters.",
-        "tab_top": "Top",
-        "tab_market": "Market",
-        "tab_portfolio": "Portfolio",
-        "tab_watchlist": "Watchlist",
-        "header": "News · {{label}}",
-        "range_all": "All",
-        "range_1h": "1H",
-        "range_6h": "6H",
-        "range_24h": "24H",
-        "range_7d": "7D",
-        "tickerPlaceholder": "Ticker…",
-        "clearTicker": "Clear ticker filter",
-        "clear": "Clear",
-        "sourceLabel": "Filter by source",
-        "allSources": "All sources",
-        "emptyFiltered": "No news matching filters",
-        "emptyMarket": "No market news",
-        "emptyTop": "No top news",
-        "emptyAddTo": "Add to {{label}} to see news"
-      },
-      "earningsCalendar": {
-        "title": "Earnings Calendar",
-        "description": "Upcoming earnings, grouped by Today / Tomorrow / This week / Next week.",
-        "header": "Earnings",
-        "windowLabel": "Next {{days}}d",
-        "bucket_today": "Today",
-        "bucket_tomorrow": "Tomorrow",
-        "bucket_thisWeek": "This week",
-        "bucket_nextWeek": "Next week",
-        "bucket_later": "Later",
-        "empty": "No earnings ahead",
-        "emptyHint": "Nothing scheduled in the next {{days}} days."
-      },
-      "watchlist": {
-        "title": "Watchlist",
-        "description": "Compact ticker list with live prices.",
-        "header": "Watchlist",
-        "addSymbol": "Add Symbol"
-      },
-      "portfolio": {
-        "title": "Portfolio",
-        "description": "Your holdings with market value and unrealized P/L.",
-        "header": "Holdings",
-        "addTransaction": "Add Transaction"
-      },
-      "portfolioWatchlist": {
-        "title": "Portfolio + Watchlist",
-        "description": "Combined holdings and watchlist with a Watch / Holdings tab switcher.",
-        "headerWatchlist": "Watchlist",
-        "headerHoldings": "Holdings",
-        "tabWatch": "Watch",
-        "tabHoldings": "Holdings",
-        "addSymbol": "Add Symbol",
-        "addTransaction": "Add Transaction"
-      },
-      "miniChartGrid": {
-        "title": "Mini Chart Grid",
-        "description": "Sparkline grid across multiple symbols — 30-day trend at a glance.",
-        "header": "Mini Chart Grid",
-        "summary": "{{count}} symbols · {{days}}d",
-        "empty": "No data available",
-        "symbols": "Symbols",
-        "symbolsPlaceholder": "Add a symbol (Enter)"
-      },
-      "chart": {
-        "title": "Price Chart",
-        "description": "Candlestick, area, or line chart for any symbol.",
-        "clickToChange": "Click to change symbol",
-        "searchPlaceholder": "Search…",
-        "searching": "Searching…",
-        "noMatchesEnter": "No matches. Press Enter to use \"{{symbol}}\".",
-        "zoomIn": "Zoom in",
-        "zoomOut": "Zoom out",
-        "fitAll": "Fit all",
-        "resetView": "Reset view",
-        "openInMarket": "Open in Market view",
-        "settingsSymbol": "Symbol",
-        "settingsChartType": "Chart type",
-        "chartType_candle": "Candle",
-        "chartType_area": "Area",
-        "chartType_line": "Line"
-      },
-      "automations": {
-        "title": "Automations",
-        "description": "Scheduled runs with next-run times and quick pause / resume / trigger.",
-        "header": "Automations",
-        "viewAll": "View all",
-        "bucket_active": "Active",
-        "bucket_paused": "Paused",
-        "bucket_attention": "Needs attention",
-        "untitled": "Untitled automation",
-        "runNow": "Run now",
-        "pause": "Pause",
-        "resume": "Resume",
-        "pauseAria": "Pause automation",
-        "resumeAria": "Resume automation",
-        "lastRun": "last {{when}}",
-        "statusPaused": "paused",
-        "statusError": "error",
-        "empty": "No automations yet",
-        "emptyCta": "Create your first →",
-        "trigger": {
-          "price": "price",
-          "priceSymbol": "price · {{symbol}}",
-          "once": "once",
-          "cron": "cron",
-          "auto": "auto"
-        }
-      },
-      "conversation": {
-        "title": "Workbench",
-        "description": "A chat-first console: greeting, live chat input, and one-click resume.",
-        "placeholder": "Put LangAlpha to work — a ticker to unpack, a filing to parse, a thesis to stress-test…",
-        "resume": "Resume",
-        "untitledThread": "Untitled thread",
-        "greetingLate": "Up late",
-        "greetingMorning": "Good morning",
-        "greetingAfternoon": "Good afternoon",
-        "greetingEvening": "Good evening",
-        "greetingStillAtIt": "Still at it"
-      },
-      "workspacePicker": {
-        "title": "Workspaces",
-        "description": "Jump into an existing workspace.",
-        "header": "Workspaces",
-        "viewAll": "View all",
-        "untitled": "Untitled workspace",
-        "flashDesc": "Instant answers, no sandbox.",
-        "noDescription": "No description",
-        "tagFlash": "flash",
-        "tagWorkspace": "workspace",
-        "empty": "No workspaces yet",
-        "emptyCta": "Start your first one →"
-      },
-      "recentThreads": {
-        "title": "Recent Threads",
-        "description": "Latest research conversations.",
-        "header": "Recent Threads",
-        "viewAll": "View all",
-        "bucket_today": "Today",
-        "bucket_thisWeek": "Earlier this week",
-        "bucket_older": "Older",
-        "untitled": "Untitled thread",
-        "flash": "Flash",
-        "empty": "No recent threads",
-        "emptyHint": "Start a conversation to fill this log."
-      }
-    },
-    "classic": {
-      "marketOverview": "Market Overview",
-      "editHoldingTitle": "Edit holding — {{symbol}}",
-      "quantityLabel": "Quantity *",
-      "quantityPlaceholder": "e.g. 10.5",
-      "averageCostLabel": "Average Cost Per Share *",
-      "averageCostPlaceholder": "e.g. 175.50",
-      "notesLabel": "Notes",
-      "notesPlaceholder": "Optional",
-      "cancel": "Cancel",
-      "save": "Save",
-      "emailLabel": "Email"
-    },
-    "brief": {
-      "eyebrow": "AI Generated Insight",
-      "personalizedBrief": "Personalized Brief",
-      "basedOnWatchlistPortfolio": "Based on your watchlist & portfolio",
-      "updatedWhen": "Updated {{when}}",
-      "generatingFirst": "Generating first insight...",
-      "readFullBrief": "Read Full Brief",
-      "generatePersonalized": "Generate Personalized Brief",
-      "generating": "Generating...",
-      "generateTooltip": "Generate a personalized market brief based on your watchlist and portfolio holdings",
-      "earlierInsights": "Earlier Insights",
-      "earlierToday_one": "{{count}} earlier today",
-      "earlierToday_other": "{{count}} earlier today",
-      "earlierCount_one": "{{count}} earlier",
-      "earlierCount_other": "{{count}} earlier",
-      "overflowMore_one": "+{{count}} more",
-      "overflowMore_other": "+{{count}} more",
-      "typeLabel": {
-        "preMarket": "Pre-Market",
-        "marketUpdate": "Market Update",
-        "postMarket": "Post-Market",
-        "personalized": "Personalized"
-      },
-      "errors": {
-        "generationFailed": "Brief generation failed. Please try again.",
-        "timeout": "Generation timed out. Please try again later.",
-        "alreadyGenerating": "Brief is already being generated. Try again in a moment.",
-        "creditLimit": "Credit limit reached. Upgrade to generate more briefs.",
-        "generic": "Failed to generate brief. Please try again."
-      }
-    },
-    "insightDetail": {
-      "eyebrow": "AI Research Brief",
-      "notFound": "Insight not found",
-      "allSources_one": "All Sources ({{count}})",
-      "allSources_other": "All Sources ({{count}})"
-    },
-    "portfolio": {
-      "createTitle": "Create My Portfolio",
-      "colSymbol": "Symbol",
-      "colName": "Name",
-      "colPrice": "Price",
-      "colChange": "Change"
-    },
-    "portfolioWatchlistCard": {
-      "stock": "Stock",
-      "shares": "{{qty}} shares",
-      "sharesHidden": "*** shares",
-      "edit": "Edit",
-      "delete": "Delete",
-      "headerWatchlist": "Watchlist",
-      "headerPortfolio": "Portfolio",
-      "tabWatch": "Watch",
-      "tabHoldings": "Holdings",
-      "netAssetValue": "Net Asset Value",
-      "netAssetValueByCurrency": "Net Asset Value by Currency",
-      "addSymbol": "Add Symbol",
-      "addTransaction": "Add Transaction"
-    },
-    "addWatchlistDialog": {
-      "titleSearch": "Add Watchlist Item",
-      "titleDetails": "Add to Watchlist",
-      "searchPlaceholder": "Search by symbol or company name...",
-      "searching": "Searching...",
-      "noResults": "No results found",
-      "searchHint": "Type to search for stocks...",
-      "back": "Back",
-      "currentPrice": "Current Price",
-      "priceNA": "N/A",
-      "notesLabel": "Notes",
-      "notesPlaceholder": "Enter notes about this stock...",
-      "priceAlertsLabel": "Price Alerts",
-      "priceAboveLabel": "Above",
-      "priceBelowLabel": "Below",
-      "addButton": "Add to Watchlist",
-      "alertPriceAboveBelow": "Price above must be greater than price below."
-    },
-    "addPortfolioDialog": {
-      "titleSearch": "Add Portfolio Holding",
-      "titleDetails": "Add to Portfolio",
-      "searchPlaceholder": "Search by symbol or company name...",
-      "searching": "Searching...",
-      "noResults": "No results found",
-      "searchHint": "Type to search for stocks...",
-      "back": "Back",
-      "quantityLabel": "Quantity",
-      "quantityPlaceholder": "e.g. 10.5",
-      "averageCostLabel": "Avg Cost",
-      "averageCostPlaceholder": "e.g. 175.50",
-      "accountNameLabel": "Account Name",
-      "accountNamePlaceholder": "e.g. Robinhood",
-      "notesLabel": "Notes",
-      "notesPlaceholder": "Optional",
-      "addButton": "Add to Portfolio",
-      "alertQuantityMissing": "Please enter quantity.",
-      "alertAverageCostMissing": "Please enter average cost.",
-      "alertQuantityInvalid": "Please enter a valid quantity greater than 0.",
-      "alertAverageCostInvalid": "Please enter a valid average cost greater than 0."
-    },
-    "earningsCalendarCard": {
-      "viewAll": "View All",
-      "close": "Close",
-      "sectionRecent": "Recent",
-      "sectionUpcoming": "Upcoming",
-      "emptyPeriod": "No earnings in this period",
-      "emptyOnDate": "No earnings on this date",
-      "stockCount_one": "{{count}} stock",
-      "stockCount_other": "{{count}} stocks"
-    },
-    "chatInputCard": {
-      "suggestion1": "Summarize Apple's earnings",
-      "suggestion2": "Compare TSLA vs BYD",
-      "suggestion3": "Predict market volatility",
-      "suggestion4": "Analyze my portfolio risk",
-      "placeholderMobile": "Ask AI about market trends...",
-      "placeholderDesktop": "Ask AI about market trends, specific stocks, or portfolio analysis..."
-    },
-    "networkBanner": {
-      "offlineMessage": "Network offline — dashboard data may be stale until you reconnect."
-    },
-    "newsFeedCard": {
-      "tabMarket": "Market Pulse",
-      "tabPortfolio": "Your Portfolio",
-      "tabWatchlist": "Your Watchlist",
-      "rangeAll": "All",
-      "range1h": "1H",
-      "range6h": "6H",
-      "range24h": "24H",
-      "range7d": "7D",
-      "tickerPlaceholder": "Ticker...",
-      "emptyFilters": "No news matching your filters",
-      "emptyMarket": "No market news available",
-      "emptyPortfolio": "Add stocks to your portfolio to see relevant news here",
-      "emptyWatchlist": "Add stocks to your watchlist to see relevant news here",
-      "emptyDefault": "No news available"
-    },
-    "topNews": {
-      "title": "Top News",
-      "sample1": "Retail Sales Slump Takes Toll on Market,...",
-      "sample2": "Tech Giant's Earnings Soar, Stock Hits All-Ti...",
-      "sample3": "High-Profile IPO Falls Short of Expectations...",
-      "sample4": "Electric Vehicle Stocks Skyrocket as Deman..."
-    },
-    "topResearch": {
-      "title": "Top Research",
-      "sample1": "Retail Sales Slump Takes Toll on Market, Stocks Dip"
-    },
-    "watchlistCard": {
-      "createTitle": "Create watchlist",
-      "colSymbol": "Symbol",
-      "colName": "Name",
-      "colPrice": "Price",
-      "colChange": "Change"
+      "recentWork": "Recent work",
+      "recentEmpty": "Your recent conversations will appear here.",
+      "workspaces": "Workspaces",
+      "workspacesEmpty": "Create a workspace to begin organizing work.",
+      "viewAll": "View all",
+      "loading": "Loading workspace activity",
+      "untitledThread": "Untitled conversation",
+      "untitledWorkspace": "Untitled workspace"
     }
   },
   "workspace": {
@@ -1233,9 +469,7 @@
     },
     "pills": {
       "plan": "Plan",
-      "planTitle": "Plan mode — agent creates a plan for approval before executing",
-      "watch": "Watch",
-      "watchTitle": "Market watch — live prices for tickers the agent tracks"
+      "planTitle": "Plan mode — agent creates a plan for approval before executing"
     },
     "moreTools": "More tools",
     "widgetContext": {
@@ -1380,16 +614,6 @@
       "ctaAnswerContinue": "Answer & continue",
       "ctaViewThread": "View thread"
     },
-    "marketWatch": {
-      "watching": "Watching {{symbols}}",
-      "chipTitle": "Live prices for the tickers the agent is watching",
-      "chipTitleUpdated": "Live prices for watched tickers — updated {{time}}",
-      "chipAction": "Open live market watch",
-      "panelTitle": "Market watch",
-      "panelUpdated": "Updated {{time}}",
-      "panelWaiting": "Live prices appear here while the agent is working.",
-      "panelEmpty": "No tickers are being watched."
-    },
     "missingWorkspaceOrThread": "Missing workspace or thread information",
     "accessDeniedTitle": "You don't have access to this conversation",
     "accessDeniedDesc": "Ask the owner to share the conversation to view it.",
@@ -1434,22 +658,6 @@
       "compactDesc": "Compact conversation context to free up token space",
       "offloadDesc": "Offload large tool arguments to sandbox filesystem",
       "noMatching": "No matching commands",
-      "comps-analysisDesc": "Comparable company analysis: operating metrics, valuation multiples, peer benchmarking",
-      "dcf-modelDesc": "DCF valuation: free cash flow projections, WACC, terminal value, sensitivity analysis",
-      "earnings-previewDesc": "Pre-earnings analysis: consensus estimates, key metrics to watch, bull/base/bear scenarios",
-      "idea-generationDesc": "Stock screening and idea generation: quantitative screens, thematic analysis, shortlist",
-      "check-modelDesc": "Financial model audit: structural checks, formula validation, integrity testing",
-      "morning-noteDesc": "Daily research briefing: overnight news, pre-market movers, earnings, macro events",
-      "catalyst-calendarDesc": "Event tracker: earnings dates, economic releases, conferences, regulatory events",
-      "check-deckDesc": "Investment deck QC: number consistency, data-narrative alignment, IB language, formatting audit",
-      "thesis-trackerDesc": "Investment thesis scorecard: track pillars, risks, catalysts, and conviction over time",
-      "model-updateDesc": "Update financial model with new quarterly actuals, revised estimates, and updated price target",
-      "3-statement-modelDesc": "Integrated 3-statement financial model: linked income statement, balance sheet, and cash flow",
-      "earnings-analysisDesc": "Post-earnings analysis report: beat/miss breakdown, estimate revisions, thesis impact, charts",
-      "sector-overviewDesc": "Industry landscape report: market size, competitive dynamics, company profiles, valuation context",
-      "competitive-analysisDesc": "Competitive landscape analysis: positioning, scorecards, moat assessment, market share trends",
-      "initiating-coverageDesc": "Full equity research initiation: company research, financial model, valuation, charts, 30-50 page report",
-      "chart-annotationDesc": "Annotate a price chart: price lines, trendlines, zones, and event markers, live on MarketView or as a clickable preview card",
       "report-issueDesc": "Report issues and propose fixes to improve agent capabilities"
     },
     "compactedNotification": "Context compacted · {{from}} messages → summary",
@@ -1495,9 +703,7 @@
         "file_read": "Files",
         "memo_read": "Memos",
         "memory_read": "Memory",
-        "sec_filing": "SEC filings",
-        "market_data": "Market data",
-        "mcp_tool": "Financial data tools"
+        "mcp_tool": "MCP tools"
       },
       "fingerprint": {
         "checksum": "Checksum",
@@ -1525,39 +731,11 @@
       },
       "sourceCount": "{{count}} sources",
       "resultCount": "{{count}} results",
-      "pageCount": "{{count}} pages",
-      "kind": {
-        "company_overview": "Company overview",
-        "daily_prices": "Daily prices",
-        "options_chain": "Options chain",
-        "market_index": "Market index",
-        "quote": "Quote",
-        "market_overview": "Market overview"
-      }
+      "pageCount": "{{count}} pages"
     },
     "a11y": {
       "toolCallCompleted": "completed",
       "toolCallFailed": "failed"
-    },
-    "chartAnnotationCard": {
-      "openAnnotatedChart": "Open annotated chart",
-      "openInMarketView": "Open in MarketView",
-      "loadingChart": "Loading chart…",
-      "previewUnavailable": "Preview unavailable",
-      "close": "Close",
-      "cardAria_one": "{{symbol}} {{timeframe}}, {{count}} annotation. Open annotated chart.",
-      "cardAria_other": "{{symbol}} {{timeframe}}, {{count}} annotations. Open annotated chart.",
-      "dialogTitle_one": "{{symbol}} {{timeframe}} — {{count}} annotation",
-      "dialogTitle_other": "{{symbol}} {{timeframe}} — {{count}} annotations",
-      "chipJumpTitle": "Switch the chart to {{symbol}} · {{timeframe}} to show these annotations",
-      "chipShowTitle": "Show these annotations on the chart",
-      "chipShownTitle": "Shown on the chart",
-      "chipViewCount_one": "View {{count}} annotation on chart",
-      "chipViewCount_other": "View {{count}} annotations on chart",
-      "chipShowCount_one": "Show {{count}} annotation on chart",
-      "chipShowCount_other": "Show {{count}} annotations on chart",
-      "chipShownCount_one": "{{count}} annotation on chart",
-      "chipShownCount_other": "{{count}} annotations on chart"
     }
   },
   "context": {
@@ -1829,44 +1007,23 @@
     "statusRunning": "Running",
     "statusPending": "Pending",
     "statusUnknown": "Unknown",
-    "namePlaceholder": "e.g. Daily market summary",
+    "namePlaceholder": "e.g. Weekly workspace review",
     "descPlaceholder": "Optional description",
     "delivery": "Delivery",
     "deliverNone": "None",
     "deliverToSlack": "Slack",
     "deliverToDiscord": "Discord",
-    "priceAlert": "Price Alert",
-    "marketStock": "Stock",
-    "marketIndex": "Index",
-    "priceSymbol": "Symbol",
-    "priceCondition": "Condition",
-    "priceValue": "Value",
-    "priceReference": "Reference",
-    "priceRetrigger": "Retrigger Mode",
-    "priceCooldown": "Cooldown Duration",
     "minutes": "minutes",
-    "priceConditionAbove": "Price goes above",
-    "priceConditionBelow": "Price drops below",
-    "pctChangeAbove": "% change up",
-    "pctChangeBelow": "% change down",
-    "refPreviousClose": "Previous close",
-    "refDayOpen": "Day open",
-    "retriggerOneShot": "One-shot",
-    "retriggerRecurring": "Recurring",
-    "cooldownHint": "Min 4 hours (240 min). Leave empty for once per trading day.",
-    "onTrigger": "On trigger",
     "advancedOptions": "Advanced Options",
     "noAutomationsHint": "No automations yet. Select a template above to get started.",
-    "templatePriceAlert": "Price Alert + Analysis",
-    "templatePriceAlertDesc": "Get notified and analyzed when a stock hits your price target",
-    "templateMorningBriefing": "Morning Market Briefing",
-    "templateMorningBriefingDesc": "Daily pre-market overview delivered before the bell",
-    "templateWeeklyReview": "Weekly Portfolio Review",
-    "templateWeeklyReviewDesc": "End-of-week performance analysis with charts",
-    "templateEarningsWatch": "Earnings Watch",
-    "templateEarningsWatchDesc": "Deep pre-earnings analysis report",
+    "templateWeeklyReview": "Weekly Workspace Review",
+    "templateWeeklyReviewDesc": "Summarize the work completed this week and prepare next week's plan",
+    "templateDailySummary": "Daily Workspace Summary",
+    "templateDailySummaryDesc": "Review recent workspace activity and identify the next useful actions",
     "templateCustom": "Custom",
     "templateCustomDesc": "Start from scratch",
+    "templateOneTimeTask": "One-Time Task",
+    "templateOneTimeTaskDesc": "Run a task once at a scheduled time",
     "freqMinutes": "Every N minutes",
     "freqHourly": "Hourly",
     "freqDaily": "Daily",
@@ -1887,114 +1044,6 @@
     "daySat": "Saturday"
   },
   "toolArtifact": {
-    "open": "Open",
-    "floatPct": "Float %",
-    "prevClose": "Prev Close",
-    "dayRange": "Day Range",
-    "52wRange": "52W Range",
-    "volume": "Volume",
-    "marketCap": "Market Cap",
-    "periodHigh": "Period High",
-    "periodLow": "Period Low",
-    "high": "H",
-    "low": "L",
-    "vol": "Vol",
-    "liveQuotes": "Live Quotes",
-    "extendedHours": {
-      "preMarket": {
-        "long": "Pre-Mkt",
-        "short": "Pre"
-      },
-      "afterHours": {
-        "long": "After-Hrs",
-        "short": "AH"
-      }
-    },
-    "marketStatus": {
-      "early_trading": "Pre-Market",
-      "open": "Regular",
-      "late_trading": "After-Hours",
-      "closed": "Closed"
-    },
-    "marketIndices": "Market Indices",
-    "marketOverview": "Market Overview",
-    "sectorPerformance": "Sector Performance",
-    "stockScreener": "Stock Screener",
-    "pricePerformance": "Price Performance",
-    "analystRatings": "Analyst Ratings",
-    "revenueBreakdown": "Revenue Breakdown",
-    "byProduct": "By Product",
-    "byGeography": "By Geography",
-    "quarterlyRevenue": "Quarterly Revenue & Net Income",
-    "profitMargins": "Profit Margins",
-    "epsActualVsEstimate": "EPS: Actual vs Estimate",
-    "cashFlowQuarterly": "Cash Flow (Quarterly)",
-    "openInMarketView": "Open in Market View ↗",
-    "revenue": "Revenue",
-    "netIncome": "Net Income",
-    "grossMargin": "Gross Margin",
-    "operatingMargin": "Operating Margin",
-    "netMargin": "Net Margin",
-    "epsActual": "EPS Actual",
-    "epsEstimate": "EPS Estimate",
-    "operatingCF": "Operating CF",
-    "capEx": "CapEx",
-    "freeCF": "Free CF",
-    "periodChange": "Period Change",
-    "avgVolume": "Avg Volume",
-    "volatility": "Volatility",
-    "shareStructure": "Share Structure",
-    "sharesOutstanding": "Shares Out",
-    "float": "Float",
-    "shortInterest": "Short Interest",
-    "shortPctFloat": "SI % of Float",
-    "daysToCover": "Days to Cover",
-    "shortVolRatio": "Short Vol Ratio",
-    "nResults": "{{count}} result",
-    "nResults_other": "{{count}} results",
-    "nRatings": "{{count}} ratings",
-    "nMoreStocks": "+{{count}} more stock",
-    "nMoreStocks_other": "+{{count}} more stocks",
-    "noPriceData": "No price data available",
-    "noSectorData": "No sector data available",
-    "noIndexData": "No index data available",
-    "noScreenerResults": "No screener results available",
-    "symbol": "Symbol",
-    "company": "Company",
-    "price": "Price",
-    "mktCap": "Mkt Cap",
-    "sector": "Sector",
-    "industry": "Industry",
-    "beta": "Beta",
-    "dividend": "Dividend",
-    "exchange": "Exchange",
-    "country": "Country",
-    "changePct": "Change%",
-    "filing": "{{type}} Filing",
-    "filingDate": "Filing Date",
-    "periodEnd": "Period End",
-    "cik": "CIK",
-    "sections": "Sections",
-    "sectionsExtracted": "Sections Extracted",
-    "earningsCall": "Earnings Call",
-    "included": "Included",
-    "recent8Ks": "Recent 8-Ks",
-    "recent8KFilings": "Recent 8-K Filings",
-    "viewOnEdgar": "View on SEC EDGAR ↗",
-    "openOnEdgar": "Open on SEC EDGAR",
-    "8kFilings": "8-K Filings",
-    "nFilings": "{{count}} filing in the last {{days}} days",
-    "nFilings_other": "{{count}} filings in the last {{days}} days",
-    "nMoreFilings": "+{{count}} more filing",
-    "nMoreFilings_other": "+{{count}} more filings",
-    "nMoreAutomations": "+{{count}} more automation",
-    "nMoreAutomations_other": "+{{count}} more automations",
-    "pressRelease": "Press Release",
-    "view": "View",
-    "secFilingDocument": "SEC Filing Document",
-    "loadingSecDocument": "Loading SEC document...",
-    "no8KFilings": "No 8-K filings found in the last {{days}} days.",
-    "nLast90Days": "{{count}} (last 90 days)",
     "automations": "Automations",
     "automationCreated": "Automation Created",
     "automationCreatedSuccess": "Automation Created Successfully",
@@ -2005,6 +1054,8 @@
     "nTotal": "{{count}} total",
     "nAutomations": "{{count}} automation",
     "nAutomations_other": "{{count}} automations",
+    "nMoreAutomations": "+{{count}} more automation",
+    "nMoreAutomations_other": "+{{count}} more automations",
     "next": "Next: {{time}}",
     "instruction": "Instruction",
     "configuration": "Configuration",
@@ -2012,7 +1063,6 @@
     "triggerType": "Trigger Type",
     "trigger": "Trigger",
     "retrigger": "Retrigger",
-    "priceTrigger": "Price",
     "recurringCron": "Recurring (cron)",
     "oneTime": "One-time",
     "recurring": "Recurring",
@@ -2049,26 +1099,6 @@
     "done": "done",
     "toolCall": "Tool Call",
     "tool": {
-      "stockPrices": "Stock Prices",
-      "companyOverview": "Company Overview",
-      "liveQuotes": "Live Quotes",
-      "marketIndices": "Market Indices",
-      "marketOverview": "Market Overview",
-      "sectorPerformance": "Sector Performance",
-      "stockScreener": "Stock Screener",
-      "watchMarket": "Watch Market",
-      "secFiling": "SEC Filing",
-      "entityNews": "Entity News",
-      "tickerSearch": "Ticker Search",
-      "financialStatements": "Financial Statements",
-      "financialRatios": "Financial Ratios",
-      "growthMetrics": "Growth Metrics",
-      "valuationHistory": "Valuation History",
-      "stockData": "Stock Data",
-      "assetData": "Asset Data",
-      "userData": "User Data",
-      "updateData": "Update Data",
-      "removeData": "Remove Data",
       "bash": "Bash",
       "glob": "Glob",
       "grep": "Grep",
@@ -2083,15 +1113,10 @@
       "automations": "Automations",
       "createAutomation": "Create Automation",
       "manageAutomation": "Manage Automation",
-      "annotateChart": "Annotate Chart",
-      "manageAnnotations": "Manage Annotations",
       "skill": "Skill",
       "memory": "Memory",
       "workspaceMemory": "Workspace Memory",
-      "memo": "Memo",
-      "portfolio": "Portfolio",
-      "watchlist": "Watchlist",
-      "preference": "Preferences"
+      "memo": "Memo"
     },
     "completed": {
       "activatedSkill": "Activated skill",
@@ -2102,13 +1127,7 @@
       "readMemo": "Read memo",
       "readMemoIndex": "Read memo index",
       "wroteMemo": "Wrote memo",
-      "updatedMemo": "Updated memo",
-      "read_portfolio": "Read portfolio",
-      "read_watchlist": "Read watchlist",
-      "read_preference": "Read preferences",
-      "updated_portfolio": "Updated portfolio",
-      "updated_watchlist": "Updated watchlist",
-      "updated_preference": "Updated preferences"
+      "updatedMemo": "Updated memo"
     },
     "inProgress": {
       "activatingSkill": "activating skill...",
@@ -2129,26 +1148,6 @@
       "readingMemoSlug": "reading memo {{slug}}...",
       "writingMemoSlug": "writing memo {{slug}}...",
       "updatingMemoSlug": "updating memo {{slug}}...",
-      "reading_portfolio": "reading portfolio...",
-      "reading_watchlist": "reading watchlist...",
-      "reading_preference": "reading preferences...",
-      "updating_portfolio": "updating portfolio...",
-      "updating_watchlist": "updating watchlist...",
-      "updating_preference": "updating preferences...",
-      "fetchingSymbolPrices": "fetching {{symbol}} prices...",
-      "fetchingPrices": "fetching prices...",
-      "fetchingSymbolQuotes": "quoting {{symbols}}...",
-      "fetchingQuotes": "fetching quotes...",
-      "analyzingSymbol": "analyzing {{symbol}}...",
-      "analyzing": "analyzing...",
-      "fetchingMarketIndices": "fetching market indices...",
-      "fetchingMarketOverview": "fetching market overview...",
-      "fetchingSectorData": "fetching sector data...",
-      "screeningStocks": "screening stocks...",
-      "watchingMarket": "starting market watch...",
-      "unwatchingMarket": "stopping market watch...",
-      "fetchingSymbolFiling": "fetching {{symbol}} filing...",
-      "fetchingFiling": "fetching filing...",
       "searchingPattern": "searching '{{pattern}}'...",
       "searching": "searching...",
       "searchingForPattern": "searching for '{{pattern}}'...",
@@ -2170,8 +1169,6 @@
       "creatingAutomation": "creating automation...",
       "actionAutomation": "{{action}} automation...",
       "managingAutomation": "managing automation...",
-      "annotatingChart": "annotating chart...",
-      "updatingAnnotations": "updating annotations...",
       "processing": "processing..."
     },
     "preparing": {
@@ -2195,8 +1192,6 @@
       "memo_other": "read {{count}} memos",
       "memoWrite": "wrote {{count}} memo",
       "memoWrite_other": "wrote {{count}} memos",
-      "profileRead": "read profile",
-      "profileUpdated": "updated profile",
       "code": "executed {{count}} code block",
       "code_other": "executed {{count}} code blocks",
       "web": "made {{count}} web call",
@@ -2257,7 +1252,6 @@
     "doneTitle": "You're all set!",
     "doneSummary": "Your AI research assistant is configured and ready to go.",
     "goToDashboard": "Go to Dashboard",
-    "personalizeLink": "Set up investment profile",
     "invitationCodeLink": "Have an invitation code?",
     "invitationCodePlaceholder": "Enter your invitation code",
     "testButton": "Test",
@@ -2414,195 +1408,5 @@
     "flashModelLabel": "Flash model",
     "notSet": "Not set",
     "notConfigured": "Not configured"
-  },
-  "marketView": {
-    "chatHistory": {
-      "missingThreadHint": "Don't see a thread? Threads are scoped to mode and workspace. Try switching between Flash and PTC, or pick a different workspace.",
-      "triggerLabel": "Chat history",
-      "newChat": "New chat",
-      "recent": "Recent",
-      "noWorkspace": "No workspace selected",
-      "loading": "Loading",
-      "loadError": "Failed to load history",
-      "empty": "No conversations yet",
-      "emptyPage": "Nothing on this page",
-      "untitled": "Untitled",
-      "prevPage": "Previous page",
-      "nextPage": "Next page"
-    },
-    "chatPanel": {
-      "ptcDisabledReason": "Create a workspace in /chat to use PTC mode",
-      "noWorkspacePrompt": "No workspace selected. Pick one in the chat input.",
-      "startConversation": "Start a conversation by typing a message below",
-      "defaultPlaceholder": "What would you like to know?",
-      "returnToChat": "Return to Chat",
-      "openInChat": "Open in Chat"
-    },
-    "chart": {
-      "clearAnnotations": "Clear",
-      "clearAnnotationsTitle": "Clear annotations from the chart (kept in chat — click the artifact to restore)",
-      "modeLabel": "Mode",
-      "newsEventAria": "News event: {{title}}"
-    },
-    "selection": {
-      "toolTooltip": "Select a region or price level to ask the agent",
-      "toolRegion": "Region",
-      "toolPriceLevel": "Price level",
-      "commentPlaceholder": "Add a comment…",
-      "commentAdd": "Add",
-      "commentSave": "Save",
-      "cardRegionTitle": "Selected region",
-      "cardPriceTitle": "Selected price level",
-      "cardOpenPreview": "View what the agent sees",
-      "previewSubtitle": "The context the agent received for this selection",
-      "previewKind": "Selection",
-      "previewTimeRange": "Time range",
-      "previewPrice": "Price",
-      "previewNote": "Your note",
-      "colTime": "Time",
-      "colOpen": "Open",
-      "colHigh": "High",
-      "colLow": "Low",
-      "colClose": "Close",
-      "colVolume": "Volume",
-      "previewBars": "OHLCV bars",
-      "previewBarsCount": "{{count}} bar",
-      "previewBarsCount_other": "{{count}} bars",
-      "previewBarsShown": "Showing {{shown}} of {{total}} bars",
-      "previewBarsTruncated": "downsampled to fit",
-      "previewDrawBack": "The agent can analyze this and draw its read back onto the same region of the chart.",
-      "editChip": "Edit note",
-      "chipRegion": "Region · {{symbol}} {{timeframe}}",
-      "chipPriceLevel": "Price ${{price}} · {{symbol}} {{timeframe}}",
-      "removeChip": "Remove selection"
-    }
-  },
-  "onboarding": {
-    "badge": "Quick tour",
-    "back": "Back",
-    "next": "Continue",
-    "done": "Start exploring",
-    "step": "Step {{n}}",
-    "intros": {
-      "chat": {
-        "steps": {
-          "modes": {
-            "title": "Two modes: Flash and PTC",
-            "body": "The agent works in two modes: Flash for everyday coordination and quick questions, and PTC for deep analysis that produces real deliverables. The next steps show what each one is best at."
-          },
-          "workspace": {
-            "title": "Meet workspaces",
-            "body": "Every workspace is a project desk: the conversations about one task live there together, sharing the same files, data, and results — completely separate from other workspaces. The built-in Flash workspace collects all your quick questions; every workspace you create yourself runs PTC."
-          },
-          "flash": {
-            "title": "Flash — your personal assistant",
-            "body": "Flash keeps the whole desk running: just say what you need, and it creates and manages workspaces for you, dispatches heavy tasks to a PTC workspace to run, and manages your automations. It also handles quick questions — a stock price, a news lookup, a fast fact-check — in seconds. Every Flash thread is collected in the first workspace card, so past sessions are always easy to find."
-          },
-          "ptc": {
-            "title": "PTC — where the real work happens",
-            "body": "PTC workspaces host our most capable agent. Every thread inside shares the same files, data, and prior work, so research compounds. It processes large datasets, coordinates teams of subagents — something Flash can't do — and produces any deliverable: Excel models, Word docs, PDFs, dashboards."
-          },
-          "create": {
-            "title": "Give real tasks a PTC workspace",
-            "body": "If it involves data work or ends in a deliverable, don't leave it in Flash. Hit \"New workspace\", name it after the task — the agent boots a dedicated sandbox and brings its full capability to it."
-          }
-        }
-      },
-      "thread": {
-        "steps": {
-          "filePanel": {
-            "title": "Every artifact lands in the file panel",
-            "body": "Word docs, Excel models, PDFs, charts — whatever the agent produces is saved to the workspace. Open the folder icon up top to browse, preview, and download."
-          },
-          "memory": {
-            "title": "The agent remembers how you work",
-            "body": "The agent keeps long-term memory across threads: your preferences, conventions, and conclusions worth reusing. Say \"remember this\" and it persists."
-          },
-          "memo": {
-            "title": "Ground it with your memos",
-            "body": "Upload PDFs, notes, or spreadsheets as memos. The agent reads them on demand — your private research becomes part of its context."
-          }
-        }
-      },
-      "dashboard": {
-        "steps": {
-          "overview": {
-            "title": "Your market homepage",
-            "body": "Watchlist, portfolio, news, and live charts in one place — a real-time overview that's ready before you ask anything."
-          },
-          "customize": {
-            "title": "Make it yours",
-            "body": "Switch to Custom mode to add, remove, resize, and rearrange widgets. Build the exact monitor you want to wake up to."
-          },
-          "attach": {
-            "title": "Clip any widget into chat",
-            "body": "See something worth digging into? Hit the paperclip on a row to attach it to chat as context — the agent picks up exactly what you're looking at."
-          }
-        }
-      }
-    },
-    "gettingStarted": {
-      "title": "Get started",
-      "dismiss": "Hide guide",
-      "tasks": {
-        "dashboard": {
-          "title": "Explore the dashboard",
-          "desc": "Watchlist, portfolio, news, and live widgets in one place."
-        },
-        "market": {
-          "title": "Check live markets",
-          "desc": "Real-time charts with streaming market data."
-        },
-        "stocks": {
-          "title": "Share your watchlist & portfolio",
-          "desc": "A short chat — tell the agent the tickers you watch and hold."
-        },
-        "preferences": {
-          "title": "Share your investing preferences",
-          "desc": "Set your risk tolerance, investing style, and how you want answers framed."
-        },
-        "createWorkspace": {
-          "title": "Create your first workspace",
-          "desc": "Spin up a dedicated PTC workspace — the agent gets a full sandbox for real research."
-        },
-        "firstChat": {
-          "title": "Run your first analysis",
-          "desc": "Open a chat and ask about any ticker, sector, or filing."
-        },
-        "models": {
-          "title": "Visit the model configuration",
-          "desc": "Choose default models and connect providers in Settings."
-        },
-        "integrations": {
-          "title": "Use LangAlpha on other platforms",
-          "desc": "Reach the agent from Slack, email, and more via platform integrations."
-        }
-      },
-      "interview": {
-        "title": "A quick chat to personalize your experience",
-        "body": "We'll open a chat where the agent asks a few questions about your portfolio, watchlist, risk tolerance, and investment preferences — so its answers fit you. You can change any of it later in Settings, or simply ask the agent to update it.",
-        "cancel": "Not now",
-        "confirm": "Start the chat"
-      }
-    },
-    "announce": {
-      "dashCustom": {
-        "modalTitle": "Customizable dashboard",
-        "modalBody": "Switch your dashboard to Custom mode to rearrange, resize, and add widgets — then attach any of them to chat."
-      }
-    },
-    "whatsNew": {
-      "title": "What's new",
-      "subtitle": "A few updates since you were last here.",
-      "gotIt": "Got it"
-    },
-    "settings": {
-      "sectionTitle": "Tips & guides",
-      "description": "Re-show the page tips and the getting-started guide.",
-      "replayGuides": "Show tips again",
-      "replayDone": "Page tips and the getting-started guide will show again.",
-      "reset": "Reset onboarding",
-      "resetDone": "Onboarding reset — tips and the guide start fresh."
-    }
   }
 }

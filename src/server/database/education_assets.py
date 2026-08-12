@@ -1,0 +1,69 @@
+"""Private metadata persistence for household-scoped education assets."""
+
+from typing import Any
+
+from psycopg.rows import dict_row
+
+from src.server.database.pool import get_db_connection
+
+
+async def insert_education_asset(
+    *,
+    asset_id: str,
+    household_id: str,
+    created_by_user_id: str,
+    storage_key: str,
+    original_filename: str,
+    content_type: str,
+    size_bytes: int,
+) -> dict[str, Any] | None:
+    """Record an uploaded object only while its creator remains a household member."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                INSERT INTO education_assets (
+                    asset_id, household_id, created_by_user_id, storage_key,
+                    original_filename, content_type, size_bytes, created_at
+                )
+                SELECT %s, memberships.household_id, %s, %s, %s, %s, %s, NOW()
+                FROM education_memberships AS memberships
+                WHERE memberships.household_id = %s AND memberships.user_id = %s
+                RETURNING asset_id, household_id, created_by_user_id, storage_key,
+                          original_filename, content_type, size_bytes, created_at
+                """,
+                (
+                    asset_id,
+                    created_by_user_id,
+                    storage_key,
+                    original_filename,
+                    content_type,
+                    size_bytes,
+                    household_id,
+                    created_by_user_id,
+                ),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_education_asset_for_user(
+    *, user_id: str, asset_id: str
+) -> dict[str, Any] | None:
+    """Return an asset only when the requester belongs to its household."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT assets.asset_id, assets.household_id, assets.created_by_user_id,
+                       assets.storage_key, assets.original_filename,
+                       assets.content_type, assets.size_bytes, assets.created_at
+                FROM education_assets AS assets
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = assets.household_id
+                WHERE assets.asset_id = %s AND memberships.user_id = %s
+                """,
+                (asset_id, user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None

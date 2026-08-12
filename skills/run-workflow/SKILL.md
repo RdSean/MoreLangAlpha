@@ -1,18 +1,18 @@
 ---
 name: run-workflow
-description: Orchestrate parallel subagent pipelines from a JavaScript workflow script — fan out work across many items (tickers, filings, findings) then synthesize, or run a saved workflow by name. Unlocks the RunWorkflow tool.
+description: Orchestrate parallel subagent pipelines from a JavaScript workflow script — fan out work across many items and synthesize the results, or run a saved workflow by name. Unlocks the RunWorkflow tool.
 ---
 
 # Programmatic Workflows (RunWorkflow)
 
-Use `RunWorkflow` when a deterministic pipeline should orchestrate multiple subagents — fan-out research then synthesize, classify then act per item, generate then verify. Prefer it over issuing many `Task` calls yourself when the dispatches are data-driven (one per ticker, per filing, per finding). Do NOT use it for a single subagent (use `Task`) or for code that dispatches nothing (use `ExecuteCode`).
+Use `RunWorkflow` when a deterministic pipeline should orchestrate multiple subagents — fan-out research then synthesize, classify then act per item, generate then verify. Prefer it over issuing many `Task` calls yourself when the dispatches are data-driven (one per document, assignment, or finding). Do NOT use it for a single subagent (use `Task`) or for code that dispatches nothing (use `ExecuteCode`).
 
 ## The script
 
 You write JavaScript (ES2020). It executes server-side: the script itself cannot touch the workspace filesystem — the subagents it dispatches can. The script must declare a pure object literal first:
 
 ```js
-export const meta = { name: 'ticker-briefs', description: 'Fan out research, synthesize' }
+export const meta = { name: 'source-briefs', description: 'Fan out research, synthesize' }
 ```
 
 `name` (letters, digits, `-`, `_`) and `description` are required; no variables or function calls inside the literal. The rest of the body is free-form async JS — top-level `await` and `return` both work, and the `return` value (JSON-serializable) becomes the run result. Return a synthesis rather than the raw children: a large result is clipped for display, and a clipped object is unparseable.
@@ -37,7 +37,7 @@ Limits (defaults): 64 dispatches per run, 8 running at once — extra `agent()` 
 Single fan-out — one dispatch per item, synthesized in JS:
 
 ```js
-export const meta = { name: 'ticker-briefs', description: 'Research each ticker, then synthesize' }
+export const meta = { name: 'source-briefs', description: 'Research each source, then synthesize' }
 
 phase('Research')
 const briefSchema = {
@@ -45,33 +45,33 @@ const briefSchema = {
   properties: { summary: { type: 'string' }, risks: { type: 'array', items: { type: 'string' } } },
   required: ['summary'],
 }
-const results = await parallel(args.tickers.map((t) => () =>
-  agent(`Research ${t}: fundamentals, recent news, key risks.`, { agentType: 'research', label: t, schema: briefSchema })))
+const results = await parallel(args.sources.map((source) => () =>
+  agent(`Research ${source}: key facts, open questions, and useful supporting evidence.`, { agentType: 'research', label: source, schema: briefSchema })))
 
 phase('Synthesize')
 const briefs = {}
 const failed = []
-results.forEach((r, i) => { if (r !== null) briefs[args.tickers[i]] = r; else failed.push(args.tickers[i]) })
+results.forEach((r, i) => { if (r !== null) briefs[args.sources[i]] = r; else failed.push(args.sources[i]) })
 log(`${Object.keys(briefs).length} briefs, ${failed.length} failed`)
 return { briefs, failed }
 ```
 
-Two stages per item, no barrier — a slow filing never holds up the others:
+Two stages per item, no barrier — a slow document never holds up the others:
 
 ```js
-export const meta = { name: 'filing-risk-sweep', description: 'Summarize each filing, then stress-test it' }
+export const meta = { name: 'document-review', description: 'Summarize each document, then challenge it' }
 
 const reviewed = await pipeline(
-  args.tickers,
-  (ticker) => agent(`Summarize ${ticker}'s latest 10-Q: segment results, guidance changes, new risk language.`,
-    { agentType: 'research', label: ticker, phase: 'Read' }),
-  (summary, ticker) => summary === null ? null : agent(
-    `Challenge this ${ticker} summary — what does it overstate, omit, or take on trust?\n\n${summary}`,
-    { agentType: 'equity-analyst', label: `${ticker} review`, phase: 'Challenge' }),
+  args.documents,
+  (document) => agent(`Summarize ${document}: key claims, supporting evidence, and open questions.`,
+    { agentType: 'research', label: document, phase: 'Read' }),
+  (summary, document) => summary === null ? null : agent(
+    `Challenge this ${document} summary — what does it overstate, omit, or take on trust?\n\n${summary}`,
+    { agentType: 'analyst', label: `${document} review`, phase: 'Challenge' }),
 )
 
-log(`${reviewed.filter((r) => r !== null).length}/${args.tickers.length} reviewed`)
-return Object.fromEntries(args.tickers.map((t, i) => [t, reviewed[i]]))
+log(`${reviewed.filter((r) => r !== null).length}/${args.documents.length} reviewed`)
+return Object.fromEntries(args.documents.map((document, i) => [document, reviewed[i]]))
 ```
 
 Set `phase` per dispatch rather than calling `phase()` inside a stage: items run concurrently, so a global marker set mid-pipeline reflects whichever item reached it last. Guard each stage on its input, and test against `null` rather than truthiness — `0`, `false` and `""` are answers a child succeeded with, and `summary && agent(...)` would drop them as failures.

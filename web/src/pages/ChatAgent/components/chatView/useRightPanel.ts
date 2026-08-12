@@ -47,7 +47,7 @@ export function useRightPanel({
   const fileDeepLinkConsumedRef = useRef(false);
 
   // Single source of truth for what the RightPanel is pointed at. Exactly one
-  // target is ever set (file/memory/memo/sources/status); the panel derives the
+  // target is ever set (file/memory/memo/sources); the panel derives the
   // active tab, tab visibility, and snap-back from `.kind`. Sources/status stay
   // set while their tab is open (tab chrome persistence) and are cleared on
   // panel close by the effect below; file/memory/memo self-clear once the child
@@ -269,20 +269,10 @@ export function useRightPanel({
   const handleOpenFileFromChat = handleOpenAgentArtifactFromChat;
 
   // Opens the Sources tab for a turn by pinning the message id — the single
-  // target replaces any prior file/memory/memo/status one, so the panel snaps
+  // target replaces any prior file/memory/memo one, so the panel snaps
   // to Sources; it resolves live records from `messages`.
   const handleOpenSourcesFromChat = useCallback((messageId: string) => {
     setPanelTarget({ kind: 'sources', messageId });
-    setRightPanelWidth(clampPanelWidth(850));
-    setRightPanelType('file');
-    pushPanelHistory();
-  }, [clampPanelWidth, pushPanelHistory]);
-
-  // Opens the Status tab (live market watch) from the persistent chip. The
-  // single 'status' target replaces any prior one, so the panel snaps to Status;
-  // it resolves live watch state from `marketWatch`.
-  const handleOpenStatusFromChat = useCallback(() => {
-    setPanelTarget({ kind: 'status' });
     setRightPanelWidth(clampPanelWidth(850));
     setRightPanelType('file');
     pushPanelHistory();
@@ -320,13 +310,13 @@ export function useRightPanel({
     return merged;
   }, [sourcesMessageId, messages]);
 
-  // Drop a sticky sources/status target whenever the right panel is closed or
+  // Drop a sticky sources target whenever the right panel is closed or
   // switches to a non-file view (detail/preview), so a later file/memory click
   // doesn't reopen that tab. These two are the only kinds that persist while
   // their tab is open; file/memory/memo self-clear via the handled callbacks.
   // The many close call sites all funnel through rightPanelType.
   useEffect(() => {
-    if (rightPanelType !== 'file' && (panelTarget?.kind === 'sources' || panelTarget?.kind === 'status')) {
+    if (rightPanelType !== 'file' && panelTarget?.kind === 'sources') {
       setPanelTarget(null);
     }
   }, [rightPanelType, panelTarget]);
@@ -370,15 +360,12 @@ export function useRightPanel({
       const toolName = toolCallProcess.toolName || '';
       const artifactType = toolCallProcess.toolCallResult?.artifact?.type;
 
-      // Wide: file reading, SEC filings, subagent results
-      if (artifactType === 'sec_filing') desired = 850;
-      else if (toolName === 'Read') desired = 850;
+      // Wide: file reading and subagent results.
+      if (toolName === 'Read') desired = 850;
       else if (toolName === 'Task' || toolName === 'task') desired = 750;
-      // Medium: charts, search results, default markdown
-      else if (artifactType === 'stock_prices' || artifactType === 'market_indices' || artifactType === 'sector_performance') desired = 650;
+      // Medium: search results and default markdown.
       else if (toolName === 'WebSearch' || toolName === 'web_search') desired = 650;
-      // Slim: compact data cards
-      else if (artifactType === 'company_overview') desired = 480;
+      // Slim: compact automation cards.
       else if (artifactType === 'automations') desired = 480;
     }
     return clampPanelWidth(desired);
@@ -546,7 +533,6 @@ export function useRightPanel({
     popPanelHistory,
     handleOpenFileFromChat,
     handleOpenSourcesFromChat,
-    handleOpenStatusFromChat,
     handleOpenDirFromChat,
     handleToolCallDetailClick,
     handlePlanDetailClick,

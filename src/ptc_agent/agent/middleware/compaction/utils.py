@@ -697,23 +697,23 @@ def parse_summary_message(message: HumanMessage) -> str:
 # Prompt template
 # =============================================================================
 
-# Financial research summarization prompt. Instructions only — the conversation
+# General workspace summarization prompt. Instructions only — the conversation
 # history is delivered in a separate HumanMessage so the system channel stays
 # bounded and cacheable, and so BaseChatModel.format() doesn't try to interpret
 # message content as further format placeholders.
 DEFAULT_SUMMARY_PROMPT = """<role>
-Financial Research Context Summarizer
+Workspace Context Summarizer
 </role>
 
 <context>
 You're nearing your input token limit. The conversation history in the user
 message will be replaced with the context you extract. This is critical -
-ensure you capture all important information so you can continue the research
+ensure you capture all important information so you can continue the work
 without losing progress.
 </context>
 
 <objective>
-Extract the most important context to preserve research continuity and prevent
+Extract the most important context to preserve task continuity and prevent
 repeating completed work. Think deeply about what information is essential to
 achieving the user's overall goal.
 </objective>
@@ -725,12 +725,12 @@ Use your judgment on structure - the categories below are guidelines, not rigid 
 
 Key information to capture:
 
-1. **Current Query**: What is the user asking? Include the verbatim question, relevant tickers/entities, and scope.
+1. **Current Query**: What is the user asking? Include the verbatim question, relevant entities, and scope.
 
 2. **Progress**: What has been done and what remains? List completed steps with outcomes, current work, and pending tasks.
 
 3. **Key Findings**: All critical discoveries with their sources:
-   - Data points with exact values: prices, ratios, growth rates (always include source)
+   - Data points with exact values and their source
    - Observations and patterns identified
    - Conclusions reached from analysis
    - URLs crawled, APIs used, files created
@@ -750,7 +750,7 @@ Guidelines:
 <output_format>
 Respond ONLY with the extracted context. Do not include preamble or commentary.
 
-Begin with a Brief 1-2 sentence overview of the research session and current goal.
+Begin with a brief 1-2 sentence overview of the session and current goal.
 Make sure you maintain the user original query and goal.
 
 Then organize naturally using markdown headers.

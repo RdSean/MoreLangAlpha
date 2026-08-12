@@ -5,6 +5,7 @@ import PageLoading from '@/components/PageLoading/PageLoading';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSyncUserLocale } from '@/hooks/useSyncUserLocale';
 import { ContextOverflowPill } from '@/components/ui/ContextOverflowPill';
+import StudentFlashChat from '@/pages/Education/StudentFlashChat';
 
 // Chunk thunks shared by the lazy components and preloadRouteChunk — import()
 // is deduped by the module system, so a preload and the lazy mount share one
@@ -12,17 +13,15 @@ import { ContextOverflowPill } from '@/components/ui/ContextOverflowPill';
 const routeChunks = {
   dashboard: () => import('../../pages/Dashboard/DashboardRouter'),
   chat: () => import('../../pages/ChatAgent/ChatAgent'),
-  market: () => import('../../pages/MarketView/MarketView'),
-  news: () => import('../../pages/Detail/NewsDetailPage'),
   automations: () => import('../../pages/Automations/Automations'),
+  education: () => import('../../pages/Education/EducationPage'),
   settings: () => import('../../pages/Settings/Settings'),
 };
 
 const Dashboard = React.lazy(routeChunks.dashboard);
 const ChatAgent = React.lazy(routeChunks.chat);
-const MarketView = React.lazy(routeChunks.market);
-const NewsDetailPage = React.lazy(routeChunks.news);
 const Automations = React.lazy(routeChunks.automations);
+const Education = React.lazy(routeChunks.education);
 const Settings = React.lazy(routeChunks.settings);
 
 /** Start downloading the chunk for `pathname` without rendering it, so the
@@ -46,14 +45,13 @@ function Main() {
     <Suspense fallback={<PageLoading variant="pane" />}>
       <Routes location={location}>
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/chat" element={<ChatAgent />} />
-        <Route path="/chat/t/:threadId/:taskId" element={<ChatAgent />} />
-        <Route path="/chat/t/:threadId" element={<ChatAgent />} />
-        <Route path="/chat/:workspaceId" element={<ChatAgent />} />
-        <Route path="/market" element={<MarketView />} />
+        <Route path="/chat" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
+        <Route path="/chat/t/:threadId/:taskId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
+        <Route path="/chat/t/:threadId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
+        <Route path="/chat/:workspaceId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
         <Route path="/automations" element={<Automations />} />
+        <Route path="/education" element={<Education />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="/news/:id" element={<NewsDetailPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Suspense>

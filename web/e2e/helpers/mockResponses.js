@@ -55,18 +55,6 @@ export const defaultResponses = {
     },
   },
   'GET /skills': { skills: [] },
-  'GET /market-data/snapshots/indexes': { snapshots: [] },
-  'GET /market-data/intraday/indexes/*': { data: [] },
-  'GET /news': { results: [], count: 0, next_cursor: null },
-  'GET /insights/today': { insights: [] },
-  'GET /users/me/watchlists': {
-    watchlists: [{ watchlist_id: 'wl-1', name: 'Default' }],
-    total: 1,
-  },
-  'GET /users/me/watchlists/*/items': { items: [], total: 0 },
-  'GET /users/me/portfolio': { holdings: [] },
-  'GET /market-data/snapshots/stocks': { snapshots: [] },
-  'GET /calendar/earnings': { data: [], count: 0 },
 };
 
 // ── Sample data factories ──
@@ -88,47 +76,6 @@ export const sampleThread = (overrides = {}) => ({
   title: 'Test conversation',
   created_at: '2025-01-01T00:00:00Z',
   ...overrides,
-});
-
-export const samplePortfolioHolding = (overrides = {}) => ({
-  user_portfolio_id: 'ph-1',
-  symbol: 'AAPL',
-  quantity: '10',
-  average_cost: '150.00',
-  name: 'Apple Inc.',
-  exchange: 'NASDAQ',
-  instrument_type: 'stock',
-  notes: '',
-  ...overrides,
-});
-
-export const sampleWatchlistItem = (overrides = {}) => ({
-  watchlist_item_id: 'wi-1',
-  symbol: 'TSLA',
-  name: 'Tesla Inc.',
-  exchange: 'NASDAQ',
-  instrument_type: 'stock',
-  ...overrides,
-});
-
-export const sampleNewsArticle = (overrides = {}) => ({
-  id: 'news-1',
-  title: 'Markets Rally on Strong Earnings',
-  published_at: '2025-01-01T12:00:00Z',
-  source: { name: 'Reuters', favicon_url: '' },
-  image_url: '',
-  tickers: ['AAPL'],
-  has_sentiment: true,
-  ...overrides,
-});
-
-export const sampleIndexSnapshot = (symbol, price, change) => ({
-  symbol,
-  name: symbol,
-  price,
-  change,
-  change_percent: ((change / (price - change)) * 100).toFixed(2),
-  previous_close: price - change,
 });
 
 // ── SSE event factories (shapes match real captured events) ──

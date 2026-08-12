@@ -6,7 +6,6 @@ import {
   FileText,
   StickyNote,
   Brain,
-  LineChart,
   Wrench,
   FileSearch,
   ChevronRight,
@@ -30,7 +29,7 @@ import { Favicon } from './Favicon';
 import './SourcesPanel.css';
 
 /** Source types that carry a URL/domain and render a {@link Favicon}. */
-const URL_SOURCE_TYPES = new Set<ProvenanceSourceType>(['web_search', 'web_fetch', 'sec_filing']);
+const URL_SOURCE_TYPES = new Set<ProvenanceSourceType>(['web_search', 'web_fetch']);
 
 /** Source types that resolve to an agent file path (routed via onOpenFile). */
 const FILE_SOURCE_TYPES = new Set<ProvenanceSourceType>(['file_read', 'memo_read', 'memory_read']);
@@ -39,8 +38,6 @@ const FILE_SOURCE_TYPES = new Set<ProvenanceSourceType>(['file_read', 'memo_read
 const GROUP_ORDER: ProvenanceSourceType[] = [
   'web_search',
   'web_fetch',
-  'sec_filing',
-  'market_data',
   'mcp_tool',
   'file_read',
   'memo_read',
@@ -78,8 +75,6 @@ function NonUrlIcon({ type, size = 14 }: { type: ProvenanceSourceType; size?: nu
       return <StickyNote {...props} />;
     case 'memory_read':
       return <Brain {...props} />;
-    case 'market_data':
-      return <LineChart {...props} />;
     case 'mcp_tool':
       return <Wrench {...props} />;
     default:
@@ -219,8 +214,7 @@ interface SourceRowData {
   /** Representative record (the first seen) — drives the row label/icon. */
   record: ProvenanceRecord;
   /** Every record sharing this row's (source_type, identifier), in arrival
-   *  order. A single ticker can collect several data products here; the row
-   *  becomes a deck of one card per distinct access. */
+   *  order. The row becomes a deck of one card per distinct access. */
   records: ProvenanceRecord[];
 }
 
@@ -262,7 +256,7 @@ function rowKey(record: ProvenanceRecord): string {
 
 /**
  * Group records by `source_type` in {@link GROUP_ORDER}, then collapse to one
- * row per {@link rowKey} (one row per ticker; one row per web search). Records
+ * row per {@link rowKey} (one row per source; one row per web search). Records
  * that share a key are NOT dropped — they're collected on the row so it can
  * become a deck of the distinct accesses/results behind it. Unrecognized types
  * are appended so nothing is silently dropped.
@@ -313,7 +307,7 @@ function kindLabel(t: TFunction, slug?: string): string {
  *     content (block/paywall/redirect pages share a hash) stay separate cards
  *     rather than one silently swallowing the other; a true re-fetch of the same
  *     URL still collapses.
- *   - Entity decks (a shared identifier, e.g. a ticker read several ways) — key
+ *   - Entity decks (a shared identifier, e.g. a document read several ways) — key
  *     on content hash so the same data product collapses but different
  *     products/periods stay; fall back to data-kind, then identifier, so a
  *     hash-less, kind-less pair collapses rather than padding with look-alikes. */
@@ -351,7 +345,7 @@ function recordTitle(t: TFunction, record: ProvenanceRecord): string {
 /**
  * Lists a message's provenance records grouped by `source_type` with per-group
  * counts. A single-access row is a card that opens its detail dialog. A row
- * that collapses several accesses (e.g. one ticker read several ways) becomes a
+ * that collapses several accesses (e.g. one document read several ways) becomes a
  * peeking deck of one card per access; clicking it fans the deck open (the same
  * motion as the chat-input widget deck) and each card then opens its own detail
  * dialog.
@@ -609,7 +603,7 @@ function SourceRow({
   // Three deck shapes, by how the row was grouped (see rowKey):
   //  - 'query' (web_search): labeled by the query; each card is a result page.
   //  - 'domain' (web_fetch): labeled by the site; each card is a page on it.
-  //  - 'entity' (default, e.g. a ticker): labeled by the entity; cards share it.
+  //  - 'entity' (default): labeled by the entity; cards share it.
   const variant = isWebSearch ? 'query' : isWebFetch ? 'domain' : 'entity';
   const frontLabel = isWebSearch
     ? queryText(record) || t('chat.sources.groups.web_search')
@@ -632,9 +626,8 @@ function SourceRow({
 
 /**
  * A deck of cards behind one front card. Three shapes, set by `variant`:
- *  - `entity`: one source read several ways (e.g. a ticker via company overview
- *    + daily prices + options chain). Every card shares `frontLabel` (the
- *    entity); cards differ by their data-kind/args subtitle.
+ *  - `entity`: one source read several ways. Every card shares `frontLabel`
+ *    (the entity); cards differ by their data-kind/args subtitle.
  *  - `query`: one web search's many results. The front is labeled by the query;
  *    each card keeps its own result title and shows its domain.
  *  - `domain`: pages fetched from one site. The front is labeled by the domain;

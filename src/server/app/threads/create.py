@@ -34,6 +34,7 @@ from src.server.models.conversation import (
 )
 from src.server.services.thread_title import schedule_title_generation
 from src.server.utils.api import CurrentUserId, require_workspace_owner
+from src.server.services.education_access import require_student_flash_workspace
 
 from ._deps import SSE_HEADERS, logger, router
 
@@ -113,6 +114,7 @@ async def create_thread_endpoint(
     else:
         workspace = await get_workspace(workspace_id)
     require_workspace_owner(workspace, user_id=x_user_id)
+    await require_student_flash_workspace(x_user_id, workspace)
 
     # Same credit gate the follow-up /messages call enforces — a quota-blocked
     # client must not mint durable rows + platform title calls through this

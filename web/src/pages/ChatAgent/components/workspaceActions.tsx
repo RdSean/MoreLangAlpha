@@ -22,7 +22,6 @@ import { useWorkspaceMutation } from '../hooks/useWorkspaceMutation';
 import { forgetStableNavOrder } from '../hooks/useNavigationData';
 import { forgetSharedWorkspaceThreads } from '@/lib/navThreadsStore';
 import { removeStoredThreadId } from '../hooks/useChatMessages';
-import { clearAllMarketThreadsForWorkspace } from '../../MarketView/utils/threadPersistence';
 import { forgetNavPanelExpansion } from './navExpansionStore';
 import { scrollMemory } from '@/lib/scrollMemory';
 import ChangeSpecDialog, { tierLabel } from './ChangeSpecDialog';
@@ -262,7 +261,6 @@ export function useWorkspaceActions({
       // (chat + market), remembered tree expansion, frozen nav orders, and the
       // shared thread lists — so nothing re-expands or 404s a dead workspace.
       removeStoredThreadId(wsId);
-      clearAllMarketThreadsForWorkspace(wsId);
       forgetNavPanelExpansion(wsId);
       forgetStableNavOrder(wsId);
       forgetSharedWorkspaceThreads(wsId);

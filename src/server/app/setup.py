@@ -174,14 +174,6 @@ async def lifespan(app: FastAPI):
     _log_container_hardening()
 
     # Security warnings (one-time, startup only)
-    from src.config.env import HOST_MODE
-
-    if HOST_MODE == "oss":
-        logger.warning(
-            "HOST_MODE=oss: authentication is disabled. "
-            "All endpoints are accessible without a token. "
-            "Set HOST_MODE=platform for production use."
-        )
     if os.getenv("BYOK_ENCRYPTION_KEY") == "langalpha-local-dev-encryption-key":
         logger.warning(
             "BYOK_ENCRYPTION_KEY is set to the default value from the repository. "
@@ -222,21 +214,6 @@ async def lifespan(app: FastAPI):
             logger.error(f"Conversation DB: Failed to connect - {e}")
         raise
 
-    # Auto-provision local dev user when Supabase auth is disabled
-    from src.config.settings import HOST_MODE, LOCAL_DEV_USER_ID
-
-    if HOST_MODE == "oss":
-        from src.server.database.user import get_user, create_user_from_auth
-
-        # Only provision if name is missing or user doesn't exist
-        existing = await get_user(LOCAL_DEV_USER_ID)
-        if not existing or not existing.get("name"):
-            await create_user_from_auth(
-                user_id=LOCAL_DEV_USER_ID,
-                name="Local User",
-            )
-            logger.info(f"[auth] Local dev user provisioned: {LOCAL_DEV_USER_ID}")
-
     # Initialize Redis cache
     try:
         from src.utils.cache.redis_cache import init_cache
@@ -248,15 +225,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis cache initialization failed: {e}")
         logger.warning("Server will continue without caching")
-
-    # Pre-build market calendars so session lookups never build on a request path
-    try:
-        from src.market_protocol.calendars import prebuild_calendars
-
-        built = await asyncio.to_thread(prebuild_calendars)
-        logger.info(f"Market calendars pre-built: {built}")
-    except Exception as e:
-        logger.warning(f"Market calendar pre-build failed: {e}")
 
     # Start LocalRunExecutor cleanup task
     try:
@@ -525,20 +493,6 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Failed to start {name}: {e}")
 
-    # Start MarketDataFeed (shared upstream WS to ginlix-data)
-    try:
-        from src.server.services.market_data_feed import (
-            DEFAULT_WS_FEEDS,
-            MarketDataFeed,
-        )
-
-        for market, interval, tier in DEFAULT_WS_FEEDS:
-            ws = MarketDataFeed.get_instance(market, interval, tier)
-            await ws.start()
-        logger.info("MarketDataFeed instances started")
-    except Exception as e:
-        logger.warning(f"Failed to start MarketDataFeed: {e}")
-
     # Start AutomationScheduler (polling loop for time-based triggers)
     try:
         from src.server.services.automation_scheduler import AutomationScheduler
@@ -549,35 +503,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to start AutomationScheduler: {e}")
         logger.warning("Scheduled automations will not run")
-
-    # Start PriceMonitorService (real-time price condition triggers)
-    try:
-        from src.server.services.price_monitor import PriceMonitorService
-
-        price_monitor = PriceMonitorService.get_instance()
-        await price_monitor.start()
-        logger.info("PriceMonitorService started")
-    except Exception as e:
-        logger.warning(f"Failed to start PriceMonitorService: {e}")
-        logger.warning("Price-triggered automations will not run")
-
-    # Start MarketInsightService (schedule-based market news gathering)
-    try:
-        from src.server.services.insight_service import InsightService
-
-        insight_service_inst = InsightService.get_instance()
-        await insight_service_inst.start()
-    except Exception as e:
-        logger.warning(f"Failed to start MarketInsightService: {e}")
-
-    # Start NewsRefreshService (delta-poll global news feeds keep-warm)
-    try:
-        from src.server.services.news_refresh_service import NewsRefreshService
-
-        news_refresh = NewsRefreshService.get_instance()
-        await news_refresh.start()
-    except Exception as e:
-        logger.warning(f"Failed to start NewsRefreshService: {e}")
 
     # Start ProvenanceGCService (daily mark-sweep of orphaned result bodies)
     try:
@@ -637,32 +562,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Error shutting down ProvenanceGCService: {e}")
 
-    # 0.2. Shutdown NewsRefreshService
-    try:
-        from src.server.services.news_refresh_service import NewsRefreshService
-
-        await NewsRefreshService.get_instance().stop()
-    except Exception as e:
-        logger.warning(f"Error shutting down NewsRefreshService: {e}")
-
-    # 0.3. Shutdown MarketInsightService
-    try:
-        from src.server.services.insight_service import InsightService
-
-        insight_svc = InsightService.get_instance()
-        await insight_svc.shutdown()
-    except Exception as e:
-        logger.warning(f"Error shutting down MarketInsightService: {e}")
-
-    # 0.5. Shutdown PriceMonitorService (before scheduler so executions can drain)
-    try:
-        from src.server.services.price_monitor import PriceMonitorService
-
-        price_mon = PriceMonitorService.get_instance()
-        await price_mon.stop()
-    except Exception as e:
-        logger.warning(f"Error shutting down PriceMonitorService: {e}")
-
     # 1. Shutdown AutomationScheduler
     try:
         from src.server.services.automation_scheduler import AutomationScheduler
@@ -671,15 +570,6 @@ async def lifespan(app: FastAPI):
         await scheduler.shutdown()
     except Exception as e:
         logger.warning(f"Error shutting down AutomationScheduler: {e}")
-
-    # 1.5. Shutdown MarketDataFeed
-    try:
-        from src.server.services.market_data_feed import MarketDataFeed
-
-        for ws in MarketDataFeed.all_instances():
-            await ws.stop()
-    except Exception as e:
-        logger.warning(f"Error shutting down MarketDataFeed: {e}")
 
     # 2. Cancel background subagent tasks
     try:
@@ -988,21 +878,15 @@ from src.server.app.workspaces import router as workspaces_router
 from src.server.app.workspace_files import router as workspace_files_router
 from src.server.app.workspace_files import wsfiles_router
 from src.server.app.workspace_sandbox import router as workspace_sandbox_router
-from src.server.app.chart_annotations import router as chart_annotations_router
 from src.server.app.workspace_sandbox import preview_redirect_router
-from src.server.app.market_data import router as market_data_router
-from src.server.app.bars import router as bars_router
 from src.server.app.user_events import router as user_events_router
+from src.server.app.auth import router as auth_router
+from src.server.app.education.assets import router as education_assets_router
+from src.server.app.education.router import router as education_tasks_router
 from src.server.app.users import router as users_router
 from src.server.app.features import router as features_router
-from src.server.app.watchlist import router as watchlist_router
-from src.server.app.portfolio import router as portfolio_router
-from src.server.app.news import router as news_router
-from src.server.app.calendar import router as calendar_router
-from src.server.app.sec_proxy import router as sec_proxy_router
 from src.server.app.api_keys import router as api_keys_router
 from src.server.app.automations import router as automations_router
-from src.server.app.insights import router as insights_router
 from src.server.app.oauth import router as oauth_router
 from src.server.app.public import router as public_router
 from src.server.app.skills import router as skills_router
@@ -1012,26 +896,6 @@ from src.server.app.memory import router as memory_router
 from src.server.app.workflows import include_workflow_router
 from src.server.app.mcp_catalog import router as mcp_catalog_router
 from src.server.app.mcp_servers import router as mcp_servers_router
-
-# Conditionally import ginlix-data WS proxy (only when GINLIX_DATA_WS_URL is set)
-from src.config.settings import GINLIX_DATA_ENABLED
-
-if GINLIX_DATA_ENABLED:
-    from src.server.app.market_data_ws import router as market_data_ws_router
-
-    logger.info("ginlix-data WS proxy enabled")
-else:
-    # Register a minimal status endpoint so the frontend preflight check
-    # gets a clean 200 instead of a noisy 404.
-    from fastapi import APIRouter as _APIRouter
-
-    market_data_ws_router = _APIRouter()
-
-    @market_data_ws_router.get("/ws/v1/market-data/status")
-    async def market_data_ws_status_disabled():
-        return {"enabled": False}
-
-    logger.info("ginlix-data WS proxy disabled (GINLIX_DATA_URL not set)")
 
 # Include all routers
 app.include_router(threads_router)  # /api/v1/threads/* - Thread CRUD, messages, control
@@ -1043,37 +907,21 @@ app.include_router(
 app.include_router(
     workspace_sandbox_router
 )  # /api/v1/workspaces/{id}/sandbox/* - Sandbox stats & packages
-app.include_router(
-    chart_annotations_router
-)  # /api/v1/workspaces/{id}/chart-annotations - Agent-drawn chart annotations
 app.include_router(cache_router)  # /api/v1/cache/* - Cache management
-app.include_router(market_data_router)  # /api/v1/market-data/* - Market data proxy
-app.include_router(
-    bars_router
-)  # /api/v1/market-data/bars/* - Protocol-native progressive bars
+app.include_router(auth_router)  # /api/v1/auth/* - Local accounts and household membership
+app.include_router(education_assets_router)  # /api/v1/education/assets/* - Private attachments
+app.include_router(education_tasks_router)  # /api/v1/education/tasks/* - Homework workflow
 app.include_router(users_router)  # /api/v1/users/* - User management
 app.include_router(
     user_events_router
 )  # /api/v1/users/me/thread-events - Thread lifecycle SSE feed
 app.include_router(features_router)  # /api/v1/features/* - Feature flags (per-user resolved)
 app.include_router(
-    watchlist_router
-)  # /api/v1/users/me/watchlist/* - Watchlist management
-app.include_router(
-    portfolio_router
-)  # /api/v1/users/me/portfolio/* - Portfolio management
-app.include_router(news_router)  # /api/v1/news - News feed (general + ticker-filtered)
-app.include_router(
-    calendar_router
-)  # /api/v1/calendar/* - Economic & earnings calendars
-app.include_router(sec_proxy_router)  # /api/v1/sec-proxy/* - SEC EDGAR document proxy
-app.include_router(
     api_keys_router
 )  # /api/v1/users/me/api-keys + /api/v1/models - BYOK & model config
 app.include_router(
     automations_router
 )  # /api/v1/automations/* - Scheduled automation triggers
-app.include_router(insights_router)  # /api/v1/insights/* - AI market insights
 app.include_router(oauth_router)  # /api/v1/oauth/* - OAuth provider connections (Codex)
 app.include_router(
     public_router
@@ -1102,7 +950,3 @@ app.include_router(
 app.include_router(
     wsfiles_router
 )  # /api/v1/wsfiles/{workspace_id}/{path} - Unauthenticated path-style file serving
-
-app.include_router(
-    market_data_ws_router
-)  # /ws/v1/market-data/* - Real-time WS proxy (or just status endpoint when disabled)

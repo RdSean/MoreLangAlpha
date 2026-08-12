@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatInputRegistry, ContextBus } from '../contextBus';
-import type { WidgetContextSnapshot } from '@/pages/Dashboard/widgets/framework/contextSnapshot';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
 
 const SNAP: WidgetContextSnapshot = {
   widget_type: 'markets.chart',

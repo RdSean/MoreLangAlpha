@@ -51,7 +51,7 @@ _TERMINAL_BLOCK_STATUSES = (401, 451)
 
 # Tier-1 timeout. curl_cffi calls that haven't returned in 15s are dead — release
 # the slot rather than hold it for the full 30s. Covers slow international hosts
-# and large EDGAR PDFs comfortably.
+# and large PDF documents comfortably.
 _TIER1_TIMEOUT_MS = 15000
 
 
@@ -104,7 +104,7 @@ def _needs_stealth(
 
 
 # Tuning for the trafilatura-vs-full-page decision, calibrated on a live 10-page
-# sample (financial news, IR releases, explainers, government statements). Well
+# sample (news, public reports, explainers, government statements). Well
 # extracted pages retain 88-100% of figures and stay above ~10% of the full-page
 # size; pages where trafilatura silently drops the article body retain <=28% of
 # figures (CNBC card/liveblog layouts) or collapse to <2% of the page (index/
@@ -128,8 +128,8 @@ _DOLLAR_RE = re.compile(
 _BIGNUM_RE = re.compile(r"\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b")
 
 
-def _financial_figures(text: str) -> set[str]:
-    """Normalized set of $/% /comma-grouped numbers — the detail an analyst needs."""
+def _numeric_figures(text: str) -> set[str]:
+    """Normalized set of $/% /comma-grouped numbers for completeness checks."""
     figs: set[str] = set()
     for rx in (_PCT_RE, _DOLLAR_RE, _BIGNUM_RE):
         for match in rx.findall(text):
@@ -195,7 +195,7 @@ def _html_to_markdown(html: str) -> str:
     3-7x cheaper input), but silently under-extracts on two page shapes. We compare
     it against a faithful full-page conversion (html-to-markdown's Rust core — the
     cheaper of the two and immune to recursion limits) and prefer the full page when
-    trafilatura returns an index/listing stub or drops most of the page's financial
+    trafilatura returns an index/listing stub or drops most of the page's numeric
     figures. A stdlib text extractor is the last resort.
     """
     extracted = _try_trafilatura(html)
@@ -220,9 +220,9 @@ def _html_to_markdown(html: str) -> str:
 
     # Card/liveblog layout: trafilatura kept the lead card and dropped the body's
     # figures (CNBC). Compare $/% figure sets; prefer the full page on heavy loss.
-    full_figs = _financial_figures(full)
+    full_figs = _numeric_figures(full)
     if len(full_figs) >= _FIGURE_MIN_SAMPLE:
-        kept = len(_financial_figures(extracted) & full_figs) / len(full_figs)
+        kept = len(_numeric_figures(extracted) & full_figs) / len(full_figs)
         if kept < _FIGURE_KEEP_RATIO:
             logger.debug(
                 f"trafilatura retained {kept:.0%} of {len(full_figs)} figures — "

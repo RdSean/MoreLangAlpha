@@ -403,20 +403,18 @@ class ChatRequest(BaseModel):
         description="Stable external thread identifier (e.g. 'chat_id:topic_id'). "
         "When provided with platform, langalpha resolves to an existing thread or creates a new one.",
     )
-    # Format: lowercase prefix (a-z, underscore), optionally `:<SYMBOL>` where the
-    # suffix is a market ticker — it starts with a letter OR digit and accepts
-    # A-Z, 0-9, `.` and `-`. Digit-first symbols are real and common: CN A-shares
-    # (002851.SZ, 600519.SH) and HK tickers (0700.HK) all begin with a digit, not
-    # a letter, so the suffix must not require a leading [A-Z].
-    # Current namespace: 'web', 'market_view:<SYMBOL>', 'telegram', 'slack',
-    # 'discord', 'feishu'. Reserved prefixes shouldn't be reused for other origins.
+    # Format: lowercase prefix (a-z, underscore), optionally `:<IDENTIFIER>`.
+    # The suffix may begin with a letter or digit and accepts A-Z, 0-9, `.` and
+    # `-`, which accommodates external channel and integration identifiers.
+    # Current namespace: 'web', 'telegram', 'slack', 'discord', 'feishu'.
+    # Reserved prefixes should not be reused for other origins.
     platform: Optional[str] = Field(
         default=None,
         pattern=r"^[a-z_]+(:[A-Z0-9][A-Z0-9.-]*)?$",
         max_length=50,
         description="Surface the chat originated from. Examples: 'web', "
-        "'market_view:AAPL', 'market_view:002851.SZ', 'telegram', 'slack', "
-        "'discord', 'feishu'. Absent for system-initiated threads (see origin).",
+        "'telegram:12345', 'slack', 'discord', 'feishu'. Absent for "
+        "system-initiated threads (see origin).",
     )
     # Orthogonal to platform: platform = which user surface, origin = who
     # initiated. Absent origin = user-initiated (the common case is never
@@ -458,5 +456,4 @@ class SubagentMessageRequest(BaseModel):
     """Request model for sending a message to a running subagent."""
 
     content: str = Field(..., description="The instruction/message to send to the subagent")
-
 

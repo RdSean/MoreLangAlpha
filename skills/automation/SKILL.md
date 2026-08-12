@@ -1,6 +1,6 @@
 ---
 name: automation
-description: Create and manage scheduled and price-triggered automations.
+description: Create and manage scheduled automations.
 ---
 
 # Automation Skill
@@ -18,7 +18,7 @@ You should call these tools directly instead of using ExecuteCode tool.
 
 - **Schedule** — "Every morning" is ambiguous. Confirm the exact time and days (e.g. "Weekdays at 9 AM in your timezone?").
 - **Thread strategy** — If the task involves ongoing analysis or follow-ups, ask whether they want results in a fresh thread each time, a single persistent thread, or the current conversation.
-- **Instruction** — The instruction runs without further user input. If the user gives a vague prompt like "check my portfolio", refine it: what tickers? what metrics? what format?
+- **Instruction** — The instruction runs without further user input. If the user gives a vague prompt like "send a weekly update", refine it: what sources? what scope? what format?
 - **Delivery** — If the user hasn't mentioned how they want to receive results, ask if they want delivery (e.g. Slack) or just in-app.
 
 Summarize what you're about to create and get a "yes" before calling the tool.
@@ -78,122 +78,45 @@ Create a new scheduled automation.
 ### Examples
 
 ```python
-# Daily market briefing on weekdays at 9 AM
+# Daily learning digest on weekdays at 9 AM
 create_automation(
-    name="Morning Market Brief",
-    instruction="Summarize overnight market moves, top gainers/losers, and any news for my watchlist.",
+    name="Morning Learning Digest",
+    instruction="Summarize new assignments, upcoming deadlines, and the next recommended learning activities.",
     schedule="0 9 * * 1-5",
 )
 
-# One-time earnings reminder
+# One-time preparation reminder
 create_automation(
-    name="AAPL Earnings Reminder",
-    instruction="Analyze AAPL ahead of earnings: recent price action, analyst expectations, key metrics to watch.",
+    name="Project Preparation Reminder",
+    instruction="Review the project brief and prepare a concise checklist for the presentation.",
     schedule="2026-04-30T08:00:00",
-    description="Pre-earnings analysis for Apple Q2 2026",
+    description="Preparation checklist before the project presentation",
 )
 
 # Daily report delivered to Slack
 create_automation(
-    name="Morning Market Brief",
-    instruction="Summarize overnight market moves for my watchlist.",
+    name="Daily Progress Report",
+    instruction="Summarize completed work, blocked tasks, and the next planned actions.",
     schedule="0 9 * * 1-5",
     delivery="slack",
 )
 
 # Automation with persistent thread (all runs share history)
 create_automation(
-    name="Weekly Portfolio Review",
-    instruction="Review my portfolio performance and update the analysis.",
+    name="Weekly Learning Review",
+    instruction="Review the week's completed assignments and identify topics that need more practice.",
     schedule="0 9 * * 1",
     thread="persistent",
 )
 
 # Automation that continues in the current conversation
 create_automation(
-    name="Hourly Price Check",
-    instruction="Check AAPL, MSFT, GOOGL prices and alert if any moved >2%.",
+    name="Hourly Workspace Check",
+    instruction="Summarize new workspace files and identify work that needs review.",
     schedule="0 * * * *",
     thread="current",
 )
 ```
-
----
-
-## Price-Triggered Automations
-
-In addition to cron/datetime schedules, automations can trigger when a stock price meets a specific condition. Set `trigger_type="price"` and provide a `trigger_config` dict instead of (or alongside) a `schedule`.
-
-### Condition Types
-
-| Condition | Description |
-|-----------|-------------|
-| `price_above` | Fires when price rises above the given value |
-| `price_below` | Fires when price drops below the given value |
-| `pct_change_above` | Fires when percentage change exceeds the given value |
-| `pct_change_below` | Fires when percentage change drops below the given (negative) value |
-
-For percentage conditions, `reference` sets the baseline price:
-
-| Reference | Description |
-|-----------|-------------|
-| `previous_close` | Prior trading day's closing price (default) |
-| `day_open` | Current trading day's opening price |
-
-### Retrigger Modes
-
-| Mode | Behavior |
-|------|----------|
-| `one_shot` | Trigger once, then mark completed (default) |
-| `recurring` | Re-arm after cooldown. Omit `cooldown_seconds` for once-per-trading-day default, or set `cooldown_seconds` (min 14400 = 4 hours) for custom interval. |
-
-### Examples
-
-```python
-# Alert when AAPL drops below $150 (one-shot)
-create_automation(
-    name="AAPL Price Alert",
-    instruction="AAPL has dropped below $150. Summarize recent news and analyst sentiment.",
-    trigger_type="price",
-    trigger_config={
-        "symbol": "AAPL",
-        "conditions": [{"type": "price_below", "value": 150}],
-    },
-)
-
-# Run analysis when TSLA moves up 5% from yesterday's close
-create_automation(
-    name="TSLA Momentum Alert",
-    instruction="TSLA is up 5% from yesterday's close. Analyze volume, technicals, and any catalysts.",
-    trigger_type="price",
-    trigger_config={
-        "symbol": "TSLA",
-        "conditions": [
-            {"type": "pct_change_above", "value": 5, "reference": "previous_close"},
-        ],
-    },
-)
-
-# Recurring alert with 4-hour cooldown
-create_automation(
-    name="BTC Volatility Watch",
-    instruction="BTC moved more than 3% from today's open. Summarize order flow and sentiment.",
-    trigger_type="price",
-    trigger_config={
-        "symbol": "BTC-USD",
-        "conditions": [
-            {"type": "pct_change_above", "value": 3, "reference": "day_open"},
-        ],
-        "retrigger": {"mode": "recurring", "cooldown_seconds": 14400},
-    },
-)
-```
-
-### Agent Guidelines for Price Triggers
-
-- **Confirm before creating.** Always repeat the symbol, condition, threshold value, and retrigger mode back to the user and get explicit confirmation.
-- **Default to `one_shot`** retrigger mode unless the user asks for repeated alerts. For recurring, omit cooldown_seconds to default to once per trading day.
-- **Use flash mode** by default for price-triggered automations (lightweight, low-latency execution).
 
 ---
 

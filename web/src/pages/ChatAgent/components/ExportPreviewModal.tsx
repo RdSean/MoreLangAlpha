@@ -61,7 +61,7 @@ export const GOOGLE_FONTS_URL =
   '&display=swap';
 
 export const PRINT_PRESETS: PrintPreset[] = [
-  { label: 'Equity Research', font: '"Inter", sans-serif', size: 11, height: 1.4 },
+  { label: 'Report', font: '"Inter", sans-serif', size: 11, height: 1.4 },
   { label: 'Academic', font: '"Source Serif 4", serif', size: 12, height: 1.6 },
   { label: 'Technical', font: '"JetBrains Mono", monospace', size: 12, height: 1.5 },
   { label: 'General', font: 'system-ui, -apple-system, sans-serif', size: 14, height: 1.6 },

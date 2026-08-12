@@ -19,7 +19,6 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));
 
-vi.mock('@/lib/supabase', () => ({ supabase: null }));
 
 vi.mock('../utils/threadStorage', () => ({
   getStoredThreadId: vi.fn().mockReturnValue(null),

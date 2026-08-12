@@ -16,16 +16,16 @@ pnpm lint         # ESLint 9 flat config (advisory — NOT gated in CI)
 
 ## Landmines (non-obvious)
 
-- **Dual-mode auth** (`contexts/AuthContext.tsx`), switched by `VITE_HOST_MODE` (`config/hostMode.ts`, default `oss`): `platform` → `SupabaseAuthProvider` (real session; Bearer token wired into the axios interceptor via `setTokenGetter()`); `oss` → static local-dev context, always logged in as `VITE_AUTH_USER_ID` (default `local-dev-user`). `VITE_SUPABASE_URL`/`_KEY` only gate Supabase-*client* construction, NOT the mode — check `isPlatformMode`, never `VITE_SUPABASE_URL`.
-- **Chat/market SSE uses raw `fetch()` + `ReadableStream`, NOT axios** (axios can't stream) — `streamFetch()` in `pages/ChatAgent/utils/api.ts` + `pages/MarketView/utils/api.ts`. Its token comes straight from `supabase.auth.getSession()`, not the axios interceptor. Most *authenticated* REST goes through the shared axios instance (`api/client.ts`, auto-Bearer, base `VITE_API_BASE_URL`) — but public/unauthenticated calls (`pages/SharedChat/api.ts`), `auth/sync`, and market-data **WebSocket** use raw `fetch`/`WS`, not axios.
+- **Local cookie auth** (`contexts/AuthContext.tsx`) restores the authenticated household member through `/api/v1/auth/me`. Axios uses `withCredentials`; Chat SSE uses raw `fetch()` with `credentials: 'include'`. Never add browser Supabase clients or Bearer-token plumbing.
+- **Student accounts** may use their private Flash workspace and `/education` only. The backend enforces this, while `StudentFlashChat` and navigation provide the corresponding UI guard.
 - **Agent artifact path routing has ONE source of truth: `pages/ChatAgent/utils/agentPaths.ts`.** `classifyAgentPath` (→ `memory|memo|user-profile|skill|file`, normalizing `file://`, `/home/(workspace|daytona)/`, `./`, `__wsref__/<wsid>/…` cross-workspace refs) + `computeAgentArtifactRouting` (pure: which panel tab/key/workspace to open). Add new path types here, not in panel components — each new location duplicates the normalization rules.
 - **Zod validates untrusted *persisted/user* input at the boundary, not API responses.** Widget prefs (schemas in `configSchemas.ts`, applied via `safeParse` in `migrations.ts`), onboarding prefs, MCP config — all `safeParse` + per-field `.catch()` (never throw). Typed API responses are plain TS interfaces, not runtime-validated.
-- **First-load bundle is asserted, not eyeballed** (`scripts/check-critical-path.mjs`, gated in `pnpm build` + CI). Vite's build table lists every chunk as if it were lazy; only what `dist/index.html` references is actually on the critical path. A `manualChunks` entry naming a *lazy* vendor pins it to the entry — that is how the chart bundle rode first paint for five months. If the guard trips, fix the import graph; bump `EXPECTED`/`MAX_EAGER_KB` only deliberately. Reproducing the shipped bundle needs `VITE_HOST_MODE=platform` **and** `VITE_SUPABASE_URL`/`_PUBLISHABLE_KEY` — `lib/supabase.ts` guards the client behind `url && key`, so unset vars tree-shake the whole SDK out and understate first load by ~57 kB gz.
+- **First-load bundle is asserted, not eyeballed** (`scripts/check-critical-path.mjs`, gated in `pnpm build` + CI). Vite's build table lists every chunk as if it were lazy; only what `dist/index.html` references is actually on the critical path. Fix the import graph rather than raising the budget casually.
 - **i18n re-render gotcha:** locale lives in a `locale` cookie (cookie → browser → `en-US`), no live cross-tab sync. Components that format numbers/dates via `createFormatter`/`createDateFormatter` (`lib/format.ts`) MUST also call `useTranslation()`, or they won't re-render on a locale switch.
 
 ## Conventions
 
-- **API layering:** each page group owns its calls in a local `utils/api.ts` (`ChatAgent`, `Dashboard`, `MarketView`, `Automations`); cross-page data goes through shared hooks in `hooks/`.
+- **API layering:** each page group owns its calls in a local `utils/api.ts` (`ChatAgent`, `Dashboard`, `Automations`); cross-page data goes through shared hooks in `hooks/`.
 - **React Query:** hierarchical key factory in `lib/queryKeys.ts` enables prefix invalidation (e.g. invalidate `queryKeys.user.all`). Dashboard prefs write back through a guarded writer that survives cross-tab races + cold-cache mounts.
 - **Styling:** Tailwind 3 + theme-aware CSS custom properties (`var(--color-*)`) used directly in style props; `cn()` (clsx + tailwind-merge) for conditional classes; Radix primitives in `components/ui/` via `class-variance-authority`.
   - **Design system** — palette, typography, accent discipline, and status/liveness vocabulary are defined in the repo-root [`DESIGN.md`](../DESIGN.md) ("Quiet Workspace"). Read it before styling anything user-visible.
@@ -37,7 +37,7 @@ pnpm lint         # ESLint 9 flat config (advisory — NOT gated in CI)
 
 ## Working principles
 
-- **Keep API calls in the api layer, not in components.** Endpoint/fetch calls belong in a page's `utils/api.ts` or a shared `lib/*` client module (e.g. market data in `lib/bars`, `lib/quotes`) — never inline in a component. Server-state access goes through `hooks/` + React Query; React-lifecycle singletons through `contexts/`. Components compose `components/ui/` primitives (they don't hand-roll Radix).
+- **Keep API calls in the api layer, not in components.** Endpoint/fetch calls belong in a page's `utils/api.ts` or a shared `lib/*` client module — never inline in a component. Server-state access goes through `hooks/` + React Query; React-lifecycle singletons through `contexts/`. Components compose `components/ui/` primitives (they don't hand-roll Radix).
 - **One source of truth — don't duplicate the cross-cutting modules.** Agent-path logic → `agentPaths.ts`; query keys → `queryKeys.ts` (never inline key arrays — it breaks prefix invalidation); locale/formatters → `lib/locale.ts` + `lib/format.ts` (never ad-hoc `Intl.*`); class merging → `cn()` (never concatenate class strings).
 - **Server state is React Query; validate untrusted input at the boundary.** Don't mirror server data into local state; invalidate by key prefix. Zod (`safeParse` + `.catch`, never throwing) guards only *persisted/user* input — never runtime-validate trusted API responses, never `.parse()` at a boundary. Module-level singletons that outlive React must be reset on logout.
 - **Types are the hard gate, lint is soft.** Keep `tsc --noEmit` green (it gates build + CI); avoid `any` — narrow `unknown` instead — even though ESLint won't stop you.
@@ -46,13 +46,10 @@ pnpm lint         # ESLint 9 flat config (advisory — NOT gated in CI)
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `VITE_HOST_MODE` | `oss` | `platform` → Supabase auth mode; `oss` → local-dev, no auth |
+| `VITE_HOST_MODE` | `oss` | Deployment/quota mode; local cookie auth is used in both modes |
 | `VITE_API_BASE_URL` | (empty = same-origin) | Backend base URL for axios (dev: same-origin, proxied) |
 | `VITE_PROXY_BACKEND` | `http://localhost:8000` | Dev-server proxy target for `/api/v1` + `/ws/v1` |
 | `VITE_DEV_ALLOWED_HOSTS` | (unset = Vite default) | Comma-separated extra Host headers the dev server accepts, for tunnels (ngrok etc.) |
-| `VITE_SUPABASE_URL` | — | Supabase project URL (gates client creation, not mode) |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | — | Supabase anon key |
-| `VITE_AUTH_USER_ID` | `local-dev-user` | User id in `oss` mode |
 | `VITE_CDN_BASE` | `/` | Asset base for CDN builds |
 | `VITE_COOKIE_DOMAIN` | (unset = host-only) | Parent domain to share auth/locale cookies across subdomains |
 | `VITE_APP_ENTRY_PATH` | `/app` (platform) / `/` (oss) | Where the SPA entry (login + anonymous bounce) mounts; set `/` on a dedicated app subdomain |

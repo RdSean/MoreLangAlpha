@@ -7,12 +7,22 @@ No YAML dependency — pure os.getenv.
 
 import os
 
-# Deployment mode: "oss" (self-hosted, no auth) or "platform" (Supabase auth + quota service)
+# Deployment mode: "oss" (self-hosted) or "platform" (hosted quota service).
 HOST_MODE: str = os.getenv("HOST_MODE", "oss")
 
-# Auth / Login Service (Supabase) — credential, not a mode flag
-SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
-LOCAL_DEV_USER_ID: str = os.getenv("AUTH_USER_ID", "local-dev-user")
+# Local authentication session policy. Secure cookies must be enabled behind HTTPS.
+LOCAL_AUTH_SESSION_TTL_DAYS: int = int(os.getenv("LOCAL_AUTH_SESSION_TTL_DAYS", "14"))
+AUTH_COOKIE_SECURE: bool = os.getenv("AUTH_COOKIE_SECURE", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+
+# Education attachments stay private and are served by short-lived signed URLs.
+EDUCATION_ASSET_MAX_BYTES: int = int(os.getenv("EDUCATION_ASSET_MAX_BYTES", str(10 * 1024 * 1024)))
+EDUCATION_ASSET_DOWNLOAD_TTL_SECONDS: int = int(
+    os.getenv("EDUCATION_ASSET_DOWNLOAD_TTL_SECONDS", "300")
+)
 
 # Quota / auth enforcement service URL
 AUTH_SERVICE_URL: str = os.getenv("AUTH_SERVICE_URL", "")
@@ -29,15 +39,6 @@ DB_SSLMODE: str = os.getenv("DB_SSLMODE", "prefer")
 # Minimum platform access tier required to customize the web-search provider.
 # Only enforced in platform mode; OSS deployments are ungated.
 SEARCH_PROVIDER_MIN_TIER: int = int(os.getenv("SEARCH_PROVIDER_MIN_TIER", "1"))
-
-# ginlix-data (real-time market data proxy)
-GINLIX_DATA_URL: str = os.getenv("GINLIX_DATA_URL", "")
-GINLIX_DATA_WS_URL: str = os.getenv("GINLIX_DATA_WS_URL", "") or (
-    GINLIX_DATA_URL.replace("http://", "ws://").replace("https://", "wss://")
-    if GINLIX_DATA_URL
-    else ""
-)
-GINLIX_DATA_ENABLED: bool = bool(GINLIX_DATA_URL)
 
 # Public base URL of this server (used in agent-generated URLs like preview links)
 SERVER_BASE_URL: str = os.getenv("SERVER_BASE_URL", "http://localhost:8000")

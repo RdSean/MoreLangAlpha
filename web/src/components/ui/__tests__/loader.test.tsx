@@ -1,5 +1,5 @@
 /**
- * Locks the shared-ticker regression: the subscribe callback handed to
+ * Locks the shared-frame-clock regression: the subscribe callback handed to
  * useSyncExternalStore must be identity-stable across renders. An inline
  * closure resubscribed on every frame tick, so the interval was torn down and
  * recreated at frame 0 each step — the glyph froze while timers churned.
@@ -11,7 +11,7 @@ import Loader from '../loader';
 const FRAME_COUNT = 10; // ASCII_FRAMES.length
 const STEP_MS = (0.8 / FRAME_COUNT) * 1000; // default speed
 
-describe('Loader shared ticker', () => {
+describe('Loader shared frame clock', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });

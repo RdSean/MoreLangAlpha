@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '../lib/queryKeys';
-import { getCurrentUser } from '../pages/Dashboard/utils/api';
+import { getCurrentUser } from '@/api/user';
 import type { User } from '../types/api';
 
 /**

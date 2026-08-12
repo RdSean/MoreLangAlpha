@@ -11,8 +11,7 @@ import { CitationMetadataProvider } from '../CitationMetadataContext';
 import TextMessageContent from '../TextMessageContent';
 import { countDedupedSources, type ProvenanceRecord, type SubagentTaskRecord } from '@/types/chat';
 import { TextShimmer } from '@/components/ui/text-shimmer';
-import type { SelectionPreviewShape } from '../SelectionContextPreview';
-import { AttachmentCard, InlineSelectionCards, InlineWidgetDeck } from './attachments';
+import { AttachmentCard, InlineWidgetDeck } from './attachments';
 import type { AttachmentData, WidgetChipShape } from './attachments';
 import { MessageContentSegments } from './MessageContentSegments';
 import { OverflowCollapse } from './OverflowCollapse';
@@ -67,8 +66,6 @@ export const MessageBubble = memo(function MessageBubble({ message, turnIndex, i
   const hasAttachments = isUser && attachments && attachments.length > 0;
   const widgetSnapshots = message.widgetSnapshots as WidgetChipShape[] | undefined;
   const hasWidgetSnapshots = isUser && widgetSnapshots && widgetSnapshots.length > 0;
-  const chartSelections = message.chartSelections as SelectionPreviewShape[] | undefined;
-  const hasChartSelections = isUser && chartSelections && chartSelections.length > 0;
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
@@ -399,11 +396,6 @@ export const MessageBubble = memo(function MessageBubble({ message, turnIndex, i
           <InlineWidgetDeck snapshots={widgetSnapshots!} />
         )}
 
-        {/* Chart selection cards -- the regions / price levels the user picked
-            on the chart and attached to this send. Read-only summary. */}
-        {hasChartSelections && (
-          <InlineSelectionCards selections={chartSelections!} />
-        )}
         </>
         )}
 

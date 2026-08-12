@@ -437,10 +437,10 @@ class TestAgentConfigNewFields:
 class TestAgentConfigFeatureEnabled:
     def test_resolved_features_win(self):
         config = _minimal_config()
-        config.features = {"market_watch": False}
-        assert config.feature_enabled("market_watch") is False
-        config.features = {"market_watch": True}
-        assert config.feature_enabled("market_watch") is True
+        config.features = {"site_crawl": False}
+        assert config.feature_enabled("site_crawl") is False
+        config.features = {"site_crawl": True}
+        assert config.feature_enabled("site_crawl") is True
 
     def test_unresolved_falls_back_to_no_user_default(self):
         config = _minimal_config()
@@ -448,8 +448,8 @@ class TestAgentConfigFeatureEnabled:
         with patch(
             "src.config.features.default_feature_enabled", return_value=False
         ) as gate:
-            assert config.feature_enabled("market_watch") is False
-        gate.assert_called_once_with("market_watch")
+            assert config.feature_enabled("site_crawl") is False
+        gate.assert_called_once_with("site_crawl")
 
     def test_missing_key_falls_back_to_no_user_default(self):
         config = _minimal_config()
@@ -457,4 +457,4 @@ class TestAgentConfigFeatureEnabled:
         with patch(
             "src.config.features.default_feature_enabled", return_value=True
         ):
-            assert config.feature_enabled("market_watch") is True
+            assert config.feature_enabled("site_crawl") is True

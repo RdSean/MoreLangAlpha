@@ -2,15 +2,18 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { NAV_ITEMS, SETTINGS_ITEM } from '../nav/navItems';
 import { useNavActive } from '../nav/useNavActive';
+import { useAuth } from '@/contexts/AuthContext';
 import './BottomTabBar.css';
-
-const menuItems = [...NAV_ITEMS, SETTINGS_ITEM];
 
 export default function BottomTabBar() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const isActive = useNavActive();
+  const { member } = useAuth();
+  const menuItems = member?.role === 'student'
+    ? NAV_ITEMS.filter((item) => item.key !== '/automations')
+    : [...NAV_ITEMS, SETTINGS_ITEM];
   const handleItemClick = (path: string) => {
     if (location.pathname === path) return;
     navigate(path);

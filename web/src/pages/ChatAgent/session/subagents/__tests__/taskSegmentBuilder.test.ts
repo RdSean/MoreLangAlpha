@@ -83,7 +83,7 @@ describe('deriveTaskSegment', () => {
 
   it('gives a workflow run the workflow type and merges like a spawn', () => {
     const derived = deriveTaskSegment(
-      { name: 'RunWorkflow', args: { workflow: 'ticker-briefs' } },
+      { name: 'RunWorkflow', args: { workflow: 'weekly-summary' } },
       'tc-3',
       0
     );
@@ -91,7 +91,7 @@ describe('deriveTaskSegment', () => {
     expect(derived?.stacks).toBe(false);
     expect(derived?.record.type).toBe(WORKFLOW_TASK_TYPE);
     // Named runs pass no description, so the name is what the card can show.
-    expect(derived?.record.description).toBe('ticker-briefs');
+    expect(derived?.record.description).toBe('weekly-summary');
   });
 });
 
@@ -200,8 +200,8 @@ describe('applyTaskSegment', () => {
 
   it('merges a re-derived workflow run in place', () => {
     const { segments, tasks } = apply([
-      { toolCall: { name: 'RunWorkflow', args: { workflow: 'ticker-briefs' } }, id: 'tc-3' },
-      { toolCall: { name: 'RunWorkflow', args: { workflow: 'ticker-briefs' } }, id: 'tc-3' },
+      { toolCall: { name: 'RunWorkflow', args: { workflow: 'weekly-summary' } }, id: 'tc-3' },
+      { toolCall: { name: 'RunWorkflow', args: { workflow: 'weekly-summary' } }, id: 'tc-3' },
     ]);
 
     expect(segments).toHaveLength(1);

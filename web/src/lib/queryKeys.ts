@@ -83,16 +83,9 @@ export const queryKeys = {
     // Effective per-workspace server list (builtins + workspace servers).
     workspace: (wsId: string) => [...queryKeys.mcp.all, 'workspace', wsId],
   },
-  marketData: {
-    all:  ['marketData'],
-    bars: (symbol: string, interval: string) => [...queryKeys.marketData.all, 'bars', symbol, interval],
-  },
-  // Per-symbol quote cache — the unified snapshot layer (see lib/quotes/).
-  // Key = uppercase legacy symbol spelling (indexes stripped of a leading '^').
-  // Interim keying until Phase 4 re-keys on the canonical instrument_key.
-  quote: {
-    all:    ['quote'],
-    detail: (symbol: string) => [...queryKeys.quote.all, symbol],
+  education: {
+    all: ['education'],
+    tasks: () => [...queryKeys.education.all, 'tasks'],
   },
 };
 

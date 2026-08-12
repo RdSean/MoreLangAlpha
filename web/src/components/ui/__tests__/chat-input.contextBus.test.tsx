@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ChatInput, { type ChatInputHandle } from '../chat-input';
 import { ChatInputRegistry, ContextBus } from '@/lib/contextBus';
-import type { WidgetContextSnapshot } from '@/pages/Dashboard/widgets/framework/contextSnapshot';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
 
 // Mock the API helpers chat-input fetches at mount — they hit network in real
 // usage and we don't need them for deck behavior.

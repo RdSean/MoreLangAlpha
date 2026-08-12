@@ -212,11 +212,7 @@ html {
   /* Warm paper ground so white cards read as raised surfaces instead of
      border-only outlines on the same white. */
   --color-bg-canvas: #F5F4F1;
-  /* Chat artifact cards: warm paper fill (inverse of the dashboard pairing —
-     there white cards sit on tinted canvas; here tinted cards sit on the
-     white chat page). The lightweight-charts canvases inside those cards now
-     read this token (MarketDataCharts CANVAS_SOURCES) instead of mirroring
-     it, so they cannot seam. */
+  /* Chat artifact cards use a warm-paper fill against the white chat page. */
   --color-bg-tool-card: #F5F4F1;
   --color-bg-elevated: #F7F7F6;
   --color-bg-tag: #EFEFED;

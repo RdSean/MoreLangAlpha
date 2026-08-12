@@ -122,12 +122,7 @@ interface ModelOptions {
    * UserMessage so the chat history can render them as inline chip cards
    * below the user bubble (like attachments).
    */
-  widgetSnapshots?: import('@/pages/Dashboard/widgets/framework/contextSnapshot').WidgetContextSnapshot[];
-  /**
-   * Chart selections attached to this send. Stored on the UserMessage so the
-   * chat renders read-only pills below the user bubble (like widgetSnapshots).
-   */
-  chartSelections?: import('@/pages/MarketView/stores/chartSelectionStore').ChartSelectionSnapshot[];
+  widgetSnapshots?: import('@/types/widgetContext').WidgetContextSnapshot[];
 }
 
 /** Offload batch ref state. */

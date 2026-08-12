@@ -810,7 +810,7 @@ def _resolve_sse(config, server_name, *, discovery=False):
                     and args[0] == "run"
                     and args[1] == "python"
                 ):
-                    # Extract the Python file path (e.g., "mcp_servers/yfinance_mcp_server.py")
+                    # Extract the Python file path (e.g., "mcp_servers/research_mcp_server.py")
                     local_path = args[2]
                     filename = Path(local_path).name
                     # Keep uv run, just fix the path to sandbox
@@ -875,8 +875,8 @@ def _resolve_sse(config, server_name, *, discovery=False):
                 "\n"
                 "    # Ensure sandbox-internal packages are importable by Python MCP servers.\n"
                 f"    # We upload them under {working_dir}/_internal/src and add paths to PYTHONPATH.\n"
-                "    # - _internal/src: allows `from data_client.fmp import ...` (bare package name)\n"
-                "    # - _internal:     allows `from src.data_client.fmp import ...` (qualified)\n"
+                "    # - _internal/src: allows sandbox-synced packages to be imported directly\n"
+                "    # - _internal:     allows qualified imports from the synced source tree\n"
                 f'    internal_root = "{working_dir}/_internal"\n'
                 '    existing_pythonpath = proc_env.get("PYTHONPATH", "")\n'
                 f'    extra_paths = ["{working_dir}", f"{{internal_root}}/src", internal_root]\n'

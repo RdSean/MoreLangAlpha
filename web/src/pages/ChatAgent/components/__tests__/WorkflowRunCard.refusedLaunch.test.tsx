@@ -74,7 +74,7 @@ describe('WorkflowRunCard refused launch', () => {
     renderCard(
       {
         subagentId: 'tc-1',
-        description: 'ticker-briefs',
+        description: 'weekly-summary',
         type: 'workflow',
         action: 'init',
         status: 'running',
@@ -99,7 +99,7 @@ describe('WorkflowRunCard refused launch', () => {
     // start must not be promoted into the reason the run failed.
     renderCard({
       subagentId: 'tc-1',
-      description: 'ticker-briefs',
+      description: 'weekly-summary',
       type: 'workflow',
       action: 'init',
       status: 'error',
@@ -114,7 +114,7 @@ describe('WorkflowRunCard refused launch', () => {
     renderCard(
       {
         subagentId: 'tc-1',
-        description: 'ticker-briefs',
+        description: 'weekly-summary',
         type: 'workflow',
         action: 'init',
         status: 'running',
@@ -129,7 +129,7 @@ describe('WorkflowRunCard refused launch', () => {
   it('still shows nothing extra while the launch is in flight', () => {
     renderCard({
       subagentId: 'tc-1',
-      description: 'ticker-briefs',
+      description: 'weekly-summary',
       type: 'workflow',
       action: 'init',
       status: 'running',

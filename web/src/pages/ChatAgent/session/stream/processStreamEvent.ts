@@ -5,7 +5,6 @@
  */
 
 import { isUpstreamHint, type StructuredError } from '@/utils/rateLimitError';
-import { applyAnnotationArtifact } from '@/pages/MarketView/stores/chartAnnotationStore';
 import type { AssistantMessage } from '@/types/chat';
 import { setStoredThreadId } from '../../hooks/utils/threadStorage';
 import { createAssistantMessage, appendMessage, updateMessage } from '../../hooks/utils/messageHelpers';
@@ -15,8 +14,7 @@ import {
 } from '../../utils/tokenUsage';
 import { computeSteeringBoundary, shouldSkipSteeringRollback } from './steeringRollback';
 import {
-  buildModelFallbackSegment, appendNotificationSegmentOnce,
-  isOnboardingRelatedToolSuccess, mapToolCallIdToAgentId,
+  buildModelFallbackSegment, appendNotificationSegmentOnce, mapToolCallIdToAgentId,
 } from '../../hooks/utils/messageFinalizers';
 import { handleContextWindowEvent } from '../../hooks/utils/contextWindowEvent';
 import {
@@ -30,7 +28,6 @@ import {
   handleWorkflowLifecycle,
 } from '../subagents/liveEventHandlers';
 import { getOrCreateTaskRefs } from '../streamRefs';
-import { handleMarketWatchUpdate, type MarketWatchState } from '../marketWatchEvents';
 import type {
   MessageRecord, SSEEvent, HistoryInterruptInfo, StreamProcessorRefs, ModelOptions, ModelStatus,
 } from '../types';
@@ -49,7 +46,6 @@ export interface StreamRouterDeps {
   loadConversationHistory: () => Promise<boolean>;
   releaseStreamOwnership: () => void;
   attachSubagentMux: (tid: string, processEvent: (event: SSEEvent) => void, snapshotAtMs?: number) => void;
-  setMarketWatch: React.Dispatch<React.SetStateAction<MarketWatchState | null>>;
 }
 
 /**
@@ -168,13 +164,6 @@ export const createStreamEventProcessor = (rt: StreamRuntime, deps: StreamRouter
       } else {
         rt.setWorkspaceStarting(false);
       }
-      return;
-    }
-
-    // (b) Live market-watch stamp — keep the persistent watch chip current
-    // mid-turn. Swallowed here so it never leaks into the message stream.
-    if (eventType === 'market_watch_update') {
-      handleMarketWatchUpdate({ event, setMarketWatch: deps.setMarketWatch });
       return;
     }
 
@@ -734,8 +723,6 @@ export const createStreamEventProcessor = (rt: StreamRuntime, deps: StreamRouter
           setMessages: setMessagesForHandlers,
           eventId: event._eventId as number,
         });
-      } else if (artifactType === 'chart_annotation') {
-        applyAnnotationArtifact(artifactType, (event.payload || {}) as Record<string, unknown>);
       } else if (artifactType === 'file_operation' && rt.onFileArtifact) {
         rt.onFileArtifact(event);
       } else if (artifactType === 'preview_url' && rt.onPreviewUrl) {
@@ -932,11 +919,6 @@ export const createStreamEventProcessor = (rt: StreamRuntime, deps: StreamRouter
         refs,
         setMessages: setMessagesForHandlers,
       });
-
-      // When onboarding-related tools succeed, sync onboarding_completed via PUT
-      if (rt.onOnboardingRelatedToolComplete && isOnboardingRelatedToolSuccess(event.content)) {
-        rt.onOnboardingRelatedToolComplete();
-      }
 
       // Detect navigate_to_workspace action from start_question tool result
       if (rt.onWorkspaceCreated && typeof event.content === 'string') {

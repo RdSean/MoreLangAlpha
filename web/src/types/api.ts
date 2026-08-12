@@ -257,39 +257,6 @@ export type CodexDevicePollResponse =
   | { pending: true }
   | { success: true; email: string; plan_type: string; account_id: string };
 
-// --- News ---
-
-export interface NewsArticle {
-  id: string;
-  title: string;
-  url: string;
-  source?: string;
-  published_at?: string;
-  tickers?: string[];
-  [key: string]: unknown;
-}
-
-export interface NewsResponse {
-  results: NewsArticle[];
-  count: number;
-  next_cursor: string | null;
-}
-
-// --- Earnings ---
-
-export interface EarningsEntry {
-  symbol: string;
-  date: string;
-  epsEstimated?: number;
-  revenueEstimated?: number;
-  [key: string]: unknown;
-}
-
-export interface EarningsCalendarResponse {
-  data: EarningsEntry[];
-  count: number;
-}
-
 // --- SSE Streaming ---
 
 export interface StreamFetchResult {

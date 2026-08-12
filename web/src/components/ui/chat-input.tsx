@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import {
   Plus, ArrowUp, X, FileText, Archive, Square, ClipboardList,
-  ChartCandlestick, TextSelect, MoreHorizontal, Mic, MicOff,
+  TextSelect, MoreHorizontal, Mic, MicOff,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { TokenUsageRing, type TokenUsageData } from './token-usage-ring';
@@ -10,7 +10,6 @@ import {
 } from './dropdown-menu';
 import { Loader } from './loader';
 import { usePreferences } from '@/hooks/usePreferences';
-import { useFeatureEnabled } from '@/hooks/useFeatures';
 import { useAllModels } from '@/hooks/useAllModels';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { deriveQuickAccessModels } from './chat-input.models';
@@ -18,7 +17,7 @@ import type { ModelMetadataEntry } from '@/hooks/useFilteredModels';
 import { supportsXhighEffort } from '@/lib/modelCapabilities';
 import { getModelMetadata } from '../../pages/ChatAgent/utils/api';
 import { ChatInputRegistry, ContextBus } from '@/lib/contextBus';
-import type { WidgetContextSnapshot } from '@/pages/Dashboard/widgets/framework/contextSnapshot';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
 import './chat-input.css';
 import type { ModelOptions, ReadyAttachment, SlashCommand, Workspace } from './chat-input.types';
 import { getSlashCommandIcon, isLargePaste } from './chat-input.helpers';
@@ -78,17 +77,8 @@ export interface ChatInputProps {
   workspaces?: Workspace[] | null;
   selectedWorkspaceId?: string | null;
   onWorkspaceChange?: ((wsId: string) => void) | null;
-  onCaptureChart?: (() => void) | null;
-  chartImage?: string | null;
-  onRemoveChartImage?: (() => void) | null;
   prefillMessage?: string;
   onClearPrefill?: (() => void) | null;
-  /**
-   * External context attached by the host (e.g. a confirmed chart selection
-   * rendered outside this input). When true, an empty text box still counts as
-   * sendable — the selection carries its own instruction.
-   */
-  hasExternalContext?: boolean;
   tokenUsage?: TokenUsageData | null;
   onAction?: ((cmd: SlashCommand) => void) | null;
   initialModel?: string | null;
@@ -117,15 +107,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   workspaces = null,
   selectedWorkspaceId = null,
   onWorkspaceChange = null,
-  // Chart capture (trading)
-  onCaptureChart = null,
-  chartImage = null,
-  onRemoveChartImage = null,
-  // Prefill (trading)
   prefillMessage = '',
   onClearPrefill = null,
-  // Host-attached context (e.g. a chart selection pill) that makes an empty box sendable
-  hasExternalContext = false,
   // Token usage (context window progress)
   tokenUsage = null,
   // Action commands (e.g. /compact) — dispatched on send, not on selection
@@ -143,7 +126,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const { preferences } = usePreferences();
-  const marketWatchEnabled = useFeatureEnabled('market_watch');
   const { validModelNames } = useAllModels();
   const otherPref = (preferences as Record<string, Record<string, unknown>> | null)?.other_preference;
   const starredModels = Array.isArray(otherPref?.starred_models)
@@ -154,11 +136,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const [message, setMessage] = useState('');
   const { attachedFiles, setAttachedFiles, isDragging, handleFiles, removeFile, onDragOver, onDragLeave, onDrop, handlePaste } = useFileAttachments({ mode });
   const [planMode, setPlanMode] = useState(false);
-  const [watchMode, setWatchMode] = useState(false);
-  // Market watch is a PTC capability. The toggle state survives a switch to
-  // flash (the pill just hides), so every payload derives from this gated
-  // value — a watch flipped on in PTC must never ride a flash send.
-  const effectiveMarketWatch = watchMode && marketWatchEnabled && mode !== 'fast';
 
   // Model selector state — use flash model preference when in flash mode
   const modePreferredModel = mode === 'fast' ? (preferredFlashModel || preferredModel) : preferredModel;
@@ -222,7 +199,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   // Expose addContext method for external callers (e.g. FilePanel, message selection)
   useImperativeHandle(ref, () => ({
     getModelOptions() {
-      return { model: selectedModel, reasoningEffort, fastMode, marketWatch: effectiveMarketWatch };
+      return { model: selectedModel, reasoningEffort, fastMode };
     },
     addContext({ path, snippet, label, lineStart, lineEnd, lineCount, source }) {
       if (snippet) {
@@ -261,7 +238,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     setModel(model) {
       if (model) setSelectedModel(model);
     },
-  }), [selectedModel, reasoningEffort, fastMode, effectiveMarketWatch, setMentionedFiles]);
+  }), [selectedModel, reasoningEffort, fastMode, setMentionedFiles]);
 
   // Subscribe to ContextBus so this input mirrors the global widget-context
   // deck. Multiple chat inputs can be visible simultaneously (hero card +
@@ -389,7 +366,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   }, [closeMentions, closeSlash]);
 
   // --- Send ---
-  const hasContent = message.trim() || attachedFiles.length > 0 || !!chartImage || mentionedFiles.some((f) => f.snippet) || widgetSnapshots.length > 0 || hasExternalContext;
+  const hasContent = message.trim() || attachedFiles.length > 0 || mentionedFiles.some((f) => f.snippet) || widgetSnapshots.length > 0;
 
   const handleSend = useCallback(() => {
     if (!hasContent || disabled) return;
@@ -447,7 +424,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       model: selectedModel,
       reasoningEffort,
       fastMode,
-      marketWatch: effectiveMarketWatch,
       widgetSnapshots: widgetSnapshots.length ? widgetSnapshots : undefined,
     });
     setMessage('');
@@ -465,7 +441,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [hasContent, disabled, message, planMode, effectiveMarketWatch, attachedFiles, setAttachedFiles, onSend, onAction,
+  }, [hasContent, disabled, message, planMode, attachedFiles, setAttachedFiles, onSend, onAction,
     mentionedFiles, resetMentions, slashCommands, resetSlash,
     selectedModel, reasoningEffort, fastMode, widgetSnapshots, t]);
 
@@ -514,7 +490,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
    * is measured, never guessed. */
   const toolbarItems = useToolbarItems({
     mode, onModeChange, ptcDisabledReason,
-    planMode, setPlanMode, watchMode, setWatchMode, marketWatchEnabled,
+    planMode, setPlanMode,
     workspaces, selectedWorkspaceId, onWorkspaceChange,
   });
 
@@ -526,10 +502,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     // The model pill is measured too, but it isn't foldable.
     measureKey: `${selectedModel}|${fastMode && isCodexModel}`,
     // Left of the first pill: container border + px-3, the attach button, and
-    // the optional ring / chart-capture button (see the action bar below).
+    // the optional token ring.
     fixedLeft: CONTAINER_BORDER + CONTAINER_PX + ICON_BUTTON_W
-      + (ringVisible ? TOOLBAR_GAP + TOKEN_RING_W : 0)
-      + (onCaptureChart ? TOOLBAR_GAP + ICON_BUTTON_W : 0),
+      + (ringVisible ? TOOLBAR_GAP + TOKEN_RING_W : 0),
     // Right group: the model pill (measured), the mic, and send/stop. Mic
     // reserve ignores isLoading on purpose — the fold set must not jump when a
     // turn starts and the mic hides.
@@ -660,20 +635,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             </div>
           )}
 
-          {/* Chart image + File Preview Cards */}
-          {(chartImage || attachedFiles.length > 0) && (
+          {/* File preview cards */}
+          {attachedFiles.length > 0 && (
             <div className="flex gap-3 overflow-x-auto pb-2 px-1">
-              {chartImage && (
-                <div className="relative group flex-shrink-0 w-24 h-24 rounded-xl overflow-hidden border border-[var(--color-border-muted)] bg-[var(--color-bg-elevated)] animate-fade-in transition-all hover:border-[var(--color-border-default)]">
-                  <img src={chartImage} alt="Chart" className="w-full h-full object-cover" />
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onRemoveChartImage?.(); }}
-                    className={`absolute top-1 right-1 p-1 bg-black/50 hover:bg-black/70 rounded-full text-white transition-opacity ${isMobile ? 'opacity-60' : 'opacity-0 group-hover:opacity-100'}`}
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
               {attachedFiles.map((file) => (
                 <FilePreviewCard
                   key={file.id}
@@ -747,19 +711,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               {/* Token Usage Ring */}
               {ringVisible && tokenUsage && (
                 <TokenUsageRing tokenUsage={tokenUsage} />
-              )}
-
-              {/* Chart Capture (trading only) */}
-              {onCaptureChart && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onCaptureChart(); }}
-                  className="inline-flex flex-none items-center justify-center h-8 w-8 rounded-lg transition-colors text-[var(--color-icon-muted)] hover:text-[var(--color-text-muted)] hover:bg-foreground/5 active:scale-95"
-                  type="button"
-                  title="Attach chart screenshot"
-                  aria-label="Capture chart"
-                >
-                  <ChartCandlestick className="w-4 h-4" />
-                </button>
               )}
 
               {/* Foldable toggles — whatever fits, in priority order */}

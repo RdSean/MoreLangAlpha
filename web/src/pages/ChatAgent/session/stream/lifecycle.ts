@@ -19,10 +19,13 @@ import type { AssistantMessage } from '@/types/chat';
 import type { SSEEvent, HistoryInterruptInfo, StreamProcessorRefs } from '../types';
 import type { RecoveryRuntime } from '../runtime';
 
+const RECONNECT_STREAM_DISCONNECTED = 'Reconnection stream disconnected';
+
 export interface ReconnectOptions {
   activeTasks?: string[];
   runId?: string | null;
   resetCursor?: boolean;
+  retryOnDisconnect?: boolean;
   idleAbortMs?: number;
   snapshotAtMs?: number;
   resetSubagentProjection?: boolean;
@@ -83,7 +86,15 @@ export const releaseStreamOwnership = (rt: RecoveryRuntime) => {
 export const reconnectToStream = async (
   rt: RecoveryRuntime,
   deps: RecoveryDeps,
-  { activeTasks = [], runId, resetCursor = false, idleAbortMs, snapshotAtMs, resetSubagentProjection = true }: ReconnectOptions = {},
+  {
+    activeTasks = [],
+    runId,
+    resetCursor = false,
+    retryOnDisconnect = true,
+    idleAbortMs,
+    snapshotAtMs,
+    resetSubagentProjection = true,
+  }: ReconnectOptions = {},
 ) => {
   // Reconnect targets the LATCHED thread, not the threadId prop. A brand-new
   // chat keeps the prop at '__default__' until the first SSE event updates the
@@ -269,6 +280,7 @@ export const reconnectToStream = async (
   // currentRunIdRef in the finally, or attach() dedups on the stale id and the
   // still-pending summary only surfaces on reload.
   let receivedEvent = false;
+  let wasDisconnected = false;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   // The run this reconnect attached to, captured stably so the gate can tell
   // "still our run, just slow" from "superseded" via /status.report_back_run_id.
@@ -368,7 +380,16 @@ export const reconnectToStream = async (
       return;
     }
     if (result?.disconnected) {
-      throw new Error('Reconnection stream disconnected');
+      wasDisconnected = true;
+      if (retryOnDisconnect) {
+        attemptReconnectAfterDisconnect(
+          rt,
+          deps,
+          rt.currentMessageRef.current || assistantMessageId,
+        );
+        return;
+      }
+      throw new Error(RECONNECT_STREAM_DISCONNECTED);
     }
 
     // Mark message as complete
@@ -425,6 +446,9 @@ export const reconnectToStream = async (
     if ((err as Error)?.name === 'AbortError' || rt.wasStoppedRef.current) {
       return;
     }
+    if (!retryOnDisconnect && (err as Error)?.message === RECONNECT_STREAM_DISCONNECTED) {
+      throw err;
+    }
     // 404/410 = workflow no longer available, not a real error
     const status = (err as Error).message?.match(/status:\s*(\d+)/)?.[1];
     if (status === '404' || status === '410') {
@@ -462,7 +486,7 @@ export const reconnectToStream = async (
     // reads this null as "never rendered" and un-records the run for a bounded
     // retry. Guarded on stillActive so a stream that superseded us (which
     // already latched its own run id) is never clobbered.
-    if (!receivedEvent && stillActive) {
+    if (!receivedEvent && stillActive && !wasDisconnected) {
       rt.currentRunIdRef.current = null;
     }
     // Skip cleanup on a user stop too — stopWorkflow already cleared isLoading /
@@ -479,6 +503,7 @@ export const reconnectToStream = async (
       stillActive &&
       !wasInterruptedRef.current &&
       !rt.wasStoppedRef.current &&
+      !wasDisconnected &&
       (!abortController.signal.aborted || idleClosed)
     ) {
       cleanupAfterStreamEnd(rt, deps, assistantMessageId);
@@ -488,7 +513,7 @@ export const reconnectToStream = async (
     // it would hide the new thread's reconnect. Any other teardown that swapped
     // the stream out from under us (user stop, steering demoted to a new turn)
     // leaves ownership with us, so we still clear and never strand the spinner.
-    if (rt.isReconnectingOwnerRef.current === abortController) {
+    if (!wasDisconnected && rt.isReconnectingOwnerRef.current === abortController) {
       rt.setIsReconnecting(false);
       rt.isReconnectingOwnerRef.current = null;
     }
@@ -547,7 +572,12 @@ export const attemptReconnectAfterDisconnect = async (
       // would strand a task spawned earlier in this same (unpersisted) turn with
       // nothing to rebuild it. Preserve the live projection; the active_tasks
       // pre-seed below re-asserts anything still running.
-      await reconnectToStream(rt, deps, { activeTasks: status.active_tasks || [], snapshotAtMs, resetSubagentProjection: false });
+      await reconnectToStream(rt, deps, {
+        activeTasks: status.active_tasks || [],
+        retryOnDisconnect: false,
+        snapshotAtMs,
+        resetSubagentProjection: false,
+      });
 
       rt.setIsReconnecting(false);
       return;

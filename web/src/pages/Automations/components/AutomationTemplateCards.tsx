@@ -4,10 +4,9 @@ import { motion } from 'framer-motion';
 import { AUTOMATION_TEMPLATES, type TemplateId } from '../utils/templates';
 
 const TEMPLATE_ACCENT: Record<TemplateId, { color: string; bg: string }> = {
-  price_alert: { color: 'var(--color-accent-primary)', bg: 'var(--color-accent-soft)' },
-  morning_briefing: { color: 'var(--color-info)', bg: 'var(--color-info-soft)' },
+  daily_summary: { color: 'var(--color-info)', bg: 'var(--color-info-soft)' },
   weekly_review: { color: 'var(--color-profit)', bg: 'var(--color-profit-soft)' },
-  earnings_watch: { color: 'var(--color-warning)', bg: 'var(--color-warning-soft)' },
+  one_time_task: { color: 'var(--color-warning)', bg: 'var(--color-warning-soft)' },
   custom: { color: 'var(--color-text-secondary)', bg: 'var(--color-bg-surface)' },
 };
 

@@ -54,6 +54,10 @@ from src.server.models.workspace import (
 from src.server.models.workspace_refresh import WorkspaceRefreshResponse
 from src.server.services.workspace_manager import WorkspaceManager
 from src.server.services.workspace_status_pubsub import subscribe_to_status
+from src.server.services.education_access import (
+    is_student_account,
+    require_nonstudent_agent_features,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +125,7 @@ async def create_workspace(
         Created workspace details
     """
     try:
+        await require_nonstudent_agent_features(x_user_id)
         manager = WorkspaceManager.get_instance()
         workspace = await manager.create_workspace(
             user_id=x_user_id,
@@ -206,6 +211,14 @@ async def list_workspaces(
         Paginated list of workspaces
     """
     try:
+        if await is_student_account(x_user_id):
+            workspace = await get_or_create_flash_workspace(x_user_id)
+            return WorkspaceListResponse(
+                workspaces=[_workspace_to_response(workspace)],
+                total=1,
+                limit=limit,
+                offset=offset,
+            )
         workspaces, total = await get_workspaces_for_user(
             user_id=x_user_id,
             limit=limit,
@@ -608,6 +621,14 @@ async def start_workspace(
                 message="Workspace is already starting",
             )
 
+        if workspace["status"] == "creating":
+            workspace = await manager.reclaim_stale_workspace_creation(workspace_id)
+            if workspace is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Workspace is still being created",
+                )
+
         if workspace["status"] != "stopped":
             raise HTTPException(
                 status_code=400,
@@ -824,6 +845,7 @@ async def duplicate_workspace(
         The newly created workspace
     """
     async with _workspace_action_errors("duplicate", workspace_id):
+        await require_nonstudent_agent_features(x_user_id)
         workspace = await db_get_workspace(workspace_id)
         require_workspace_owner(workspace, user_id=x_user_id)
 
@@ -892,7 +914,7 @@ async def refresh_workspace(
         message="Sandbox refreshed",
         refreshed_tools=bool(
             set(result.refreshed_modules)
-            & {"mcp_servers", "data_client", "tool_modules"}
+            & {"mcp_servers", "tool_modules"}
         ),
         skills_uploaded="skills" in result.refreshed_modules,
         servers=servers,

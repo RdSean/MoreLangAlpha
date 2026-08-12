@@ -32,15 +32,15 @@ class TestSecretDiscovery:
     """Verify secrets are correctly discovered from MCP config."""
 
     def test_resolves_placeholder_secrets(self):
-        cfg = _make_agent_config([_make_server(env={"FMP_API_KEY": "${FMP_API_KEY}"})])
+        cfg = _make_agent_config([_make_server(env={"PLATFORM_SECRET_API_KEY": "${PLATFORM_SECRET_API_KEY}"})])
         with (
-            patch.dict(os.environ, {"FMP_API_KEY": "fmp_secret_12345"}, clear=False),
+            patch.dict(os.environ, {"PLATFORM_SECRET_API_KEY": "platform_secret_12345"}, clear=False),
             patch(_GAC, return_value=cfg),
             patch(_GNC, side_effect=_disable_github),
         ):
             r = SecretRedactor()
         assert len(r._secrets) == 1
-        assert r._secrets[0][0] == "FMP_API_KEY"
+        assert r._secrets[0][0] == "PLATFORM_SECRET_API_KEY"
 
     def test_skips_short_values(self):
         """Values shorter than 8 chars are ignored to avoid false positives."""
@@ -138,19 +138,19 @@ class TestRedact:
         return r
 
     def test_redacts_single_secret(self):
-        r = self._make_redactor({"FMP_API_KEY": "fmp_secret_12345"})
-        result = r.redact("key is fmp_secret_12345 here")
-        assert result == "key is [REDACTED:FMP_API_KEY] here"
+        r = self._make_redactor({"PLATFORM_SECRET_API_KEY": "platform_secret_12345"})
+        result = r.redact("key is platform_secret_12345 here")
+        assert result == "key is [REDACTED:PLATFORM_SECRET_API_KEY] here"
 
     def test_redacts_multiple_secrets(self):
         r = self._make_redactor({
-            "FMP_API_KEY": "fmp_secret_12345",
+            "PLATFORM_SECRET_API_KEY": "platform_secret_12345",
             "GITHUB_TOKEN": "ghp_abcdef1234567",
         })
-        result = r.redact("fmp_secret_12345 and ghp_abcdef1234567")
-        assert "fmp_secret_12345" not in result
+        result = r.redact("platform_secret_12345 and ghp_abcdef1234567")
+        assert "platform_secret_12345" not in result
         assert "ghp_abcdef1234567" not in result
-        assert "[REDACTED:FMP_API_KEY]" in result
+        assert "[REDACTED:PLATFORM_SECRET_API_KEY]" in result
         assert "[REDACTED:GITHUB_TOKEN]" in result
 
     def test_redacts_repeated_occurrences(self):

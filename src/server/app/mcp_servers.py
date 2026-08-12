@@ -25,7 +25,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import ValidationError
 
 from ptc_agent.core.mcp_sanitize import VAULT_REF_RE
@@ -65,10 +65,19 @@ from src.server.models.mcp_server import (
 )
 from src.server.services.workspace_manager import WorkspaceManager
 from src.server.utils.api import CurrentUserId, handle_api_exceptions, require_workspace_owner
+from src.server.services.education_access import require_nonstudent_agent_features
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/workspaces", tags=["MCP Servers"])
+async def _require_nonstudent_mcp_access(user_id: CurrentUserId) -> None:
+    await require_nonstudent_agent_features(user_id)
+
+
+router = APIRouter(
+    prefix="/api/v1/workspaces",
+    tags=["MCP Servers"],
+    dependencies=[Depends(_require_nonstudent_mcp_access)],
+)
 
 # Re-running discovery for a freshly-discovered server is wasteful; skip it if
 # the cached row at the current version is < this many seconds old and not

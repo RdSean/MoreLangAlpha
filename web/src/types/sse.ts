@@ -104,8 +104,6 @@ export type ProvenanceSourceType =
   | 'file_read'
   | 'memo_read'
   | 'memory_read'
-  | 'sec_filing'
-  | 'market_data'
   | 'mcp_tool';
 
 export interface ProvenanceEvent extends BaseSSEEvent {
@@ -118,8 +116,7 @@ export interface ProvenanceEvent extends BaseSSEEvent {
   source_type: ProvenanceSourceType;
   identifier: string;
   title?: string;
-  /** Data-kind slug within this source type (e.g. "company_overview",
-   *  "daily_prices"); i18n-mapped by the Sources panel. */
+  /** Data-kind slug within this source type, i18n-mapped by the Sources panel. */
   detail?: string;
   provider?: string;
   tool_call_id?: string;

@@ -13,7 +13,6 @@ import {
   Trash2,
   Clock,
   Timer,
-  TrendingUp,
   ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -23,7 +22,6 @@ import StatusBadge from './StatusBadge';
 import ExecutionHistoryTable from './ExecutionHistoryTable';
 import { useExecutions } from '../hooks/useExecutions';
 import { cronToHuman } from '../utils/cron';
-import { formatPriceTrigger, formatRetriggerMode } from '../utils/price';
 import { formatDateTime } from '../utils/time';
 import type { Automation } from '@/types/automation';
 
@@ -80,7 +78,6 @@ export default function AutomationDetailOverlay({
   const navigate = useNavigate();
   const { executions, loading: execLoading } = useExecutions(automation.automation_id as string);
   const isCron = automation.trigger_type === 'cron';
-  const isPrice = automation.trigger_type === 'price';
   const isMobile = useIsMobile();
 
   const latestThreadExecution = useMemo(
@@ -93,7 +90,7 @@ export default function AutomationDetailOverlay({
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
-          {isPrice ? <TrendingUp className="w-5 h-5 shrink-0" style={{ color: 'var(--color-text-secondary)' }} /> : isCron ? <Clock className="w-5 h-5 shrink-0" style={{ color: 'var(--color-text-secondary)' }} /> : <Timer className="w-5 h-5 shrink-0" style={{ color: 'var(--color-text-secondary)' }} />}
+          {isCron ? <Clock className="w-5 h-5 shrink-0" style={{ color: 'var(--color-text-secondary)' }} /> : <Timer className="w-5 h-5 shrink-0" style={{ color: 'var(--color-text-secondary)' }} />}
           <h2 className="text-lg font-semibold truncate" style={{ color: 'var(--color-text-primary)' }}>{automation.name}</h2>
           <StatusBadge status={automation.status} />
         </div>
@@ -184,42 +181,23 @@ export default function AutomationDetailOverlay({
       )}
 
       {/* Stats Grid */}
-      {isPrice ? (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <StatCard
-            label="Trigger"
-            value={formatPriceTrigger(automation.trigger_config)}
-            sub={automation.trigger_config?.symbol || null}
-          />
-          <StatCard
-            label="Retrigger"
-            value={formatRetriggerMode(automation.trigger_config)}
-          />
-          <StatCard
-            label="Last Run"
-            value={automation.last_run_at ? relativeTime(automation.last_run_at) : '\u2014'}
-            sub={automation.last_run_at ? formatDateTime(automation.last_run_at) : null}
-          />
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <StatCard
-            label="Schedule"
-            value={isCron ? cronToHuman(automation.cron_expression as string) : 'One-time'}
-            sub={isCron ? `${automation.cron_expression} (${automation.timezone as string})` : `${automation.timezone as string}`}
-          />
-          <StatCard
-            label="Next Run"
-            value={automation.next_run_at ? relativeTime(automation.next_run_at as string) : '\u2014'}
-            sub={automation.next_run_at ? formatDateTime(automation.next_run_at as string) : null}
-          />
-          <StatCard
-            label="Last Run"
-            value={automation.last_run_at ? relativeTime(automation.last_run_at) : '\u2014'}
-            sub={automation.last_run_at ? formatDateTime(automation.last_run_at) : null}
-          />
-        </div>
-      )}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <StatCard
+          label="Schedule"
+          value={isCron ? cronToHuman(automation.cron_expression as string) : 'One-time'}
+          sub={isCron ? `${automation.cron_expression} (${automation.timezone as string})` : `${automation.timezone as string}`}
+        />
+        <StatCard
+          label="Next Run"
+          value={automation.next_run_at ? relativeTime(automation.next_run_at as string) : '\u2014'}
+          sub={automation.next_run_at ? formatDateTime(automation.next_run_at as string) : null}
+        />
+        <StatCard
+          label="Last Run"
+          value={automation.last_run_at ? relativeTime(automation.last_run_at) : '\u2014'}
+          sub={automation.last_run_at ? formatDateTime(automation.last_run_at) : null}
+        />
+      </div>
 
       {/* Instruction */}
       <div>

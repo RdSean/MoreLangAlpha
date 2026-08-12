@@ -51,13 +51,6 @@ class PTCSandbox:
     SNAPSHOT_PYTHON_VERSION = SNAPSHOT_PYTHON_VERSION
     DEFAULT_DEPENDENCIES = DEFAULT_DEPENDENCIES
 
-    # Fallback only, for a mint response that carries no expires_in. The live
-    # threshold derives from it (see _token_needs_refresh): the TTL is set
-    # platform-side, so hardcoding it here lets the two drift apart silently.
-    TOKEN_FRESHNESS_SECONDS = 10 * 60
-    # Re-upload once the sandbox's copy is this far through the token's life.
-    TOKEN_REFRESH_FRACTION = 0.6
-
     def __init__(
         self, config: CoreConfig, mcp_registry: MCPRegistry | None = None
     ) -> None:
@@ -120,10 +113,6 @@ class PTCSandbox:
     @property
     def _unified_manifest_path(self) -> str:
         return f"{self._work_dir}/_internal/.sandbox_manifest.json"
-
-    @property
-    def _token_file_path(self) -> str:
-        return f"{self._work_dir}/_internal/.mcp_tokens.json"
 
     # ── Effective vs built-in server views ───────────────────────────────
     #
@@ -276,10 +265,6 @@ class PTCSandbox:
             # Playwright browsers are installed to /usr/local/ms-playwright
             # in the snapshot image; tell the Python package where to find them.
             "PLAYWRIGHT_BROWSERS_PATH": "/usr/local/ms-playwright",
-            # Tell the in-sandbox ginlix-data client the exact path the host
-            # uploads the token file to. It must not key off $HOME — Daytona
-            # runs as root ($HOME=/root) while the working dir is /home/workspace.
-            "GINLIX_TOKEN_FILE": self._token_file_path,
         }
 
         # MCP server env vars (resolve ${VAR} placeholders from host).
@@ -383,10 +368,6 @@ class PTCSandbox:
     async def setup_tools_and_mcp(
         self,
         snapshot_name: str | None,
-        *,
-        tokens: dict | None = None,
-        user_id: str | None = None,
-        workspace_id: str | None = None,
     ) -> None:
         """Install tool modules and start MCP servers.
 
@@ -394,22 +375,14 @@ class PTCSandbox:
 
         Args:
             snapshot_name: Snapshot name from setup_sandbox_workspace(), or None
-            tokens: Pre-minted OAuth tokens (written to initial manifest).
-            user_id: User ID for token tracking in manifest.
-            workspace_id: Workspace ID for token tracking in manifest.
         """
         logger.info("Setting up tools and MCP servers")
 
-        # Upload MCP server files, internal packages, and tokens in parallel (disjoint paths).
-        # Tokens must be on disk before _start_internal_mcp_servers reads them.
+        # Upload MCP server files and internal packages in parallel (disjoint paths).
         parallel = [
             self._upload_mcp_server_files_impl(),  # → mcp_servers/
             self._upload_internal_packages(),  # → _internal/src/
         ]
-        if tokens:
-            parallel.append(
-                self.upload_token_file(tokens)
-            )  # → _internal/.mcp_tokens.json
         await asyncio.gather(*parallel)
 
         # Generate and install tool modules after mcp_servers (intent: derived from MCP definitions)
@@ -427,52 +400,12 @@ class PTCSandbox:
 
         # Write initial unified manifest so subsequent syncs can diff against it
         try:
-            manifest = await self._compute_sandbox_manifest(
-                tokens=tokens, user_id=user_id, workspace_id=workspace_id
-            )
+            manifest = await self._compute_sandbox_manifest()
             await self._write_unified_manifest(manifest)
         except Exception as e:
             logger.warning("Failed to write initial unified manifest", error=str(e))
 
         logger.info("Tools and MCP servers ready", sandbox_id=self.sandbox_id)
-
-    async def upload_token_file(self, tokens: dict) -> None:
-        """Write scoped auth tokens to a file in the sandbox.
-
-        Tokens are written as a JSON file (not env vars) because refresh tokens
-        rotate on each use and the MCP server needs to update them in-place.
-        Tokens carry deterministic prefixes (gxsa_, gxsr_) so the host-side
-        LeakDetectionMiddleware can pattern-match them without knowing exact values.
-        """
-        import os
-
-        if not tokens or not self.runtime:
-            return
-
-        # Sandboxes are remote, so these must stay publicly reachable even when
-        # the host reaches the same services over a private address.
-        public_base = os.getenv("PUBLIC_API_BASE_URL", "").rstrip("/")
-
-        token_data = json.dumps(
-            {
-                "access_token": tokens["access_token"],
-                "refresh_token": tokens["refresh_token"],
-                "client_id": tokens["client_id"],
-                "auth_service_url": public_base or os.getenv("AUTH_SERVICE_URL", ""),
-                "ginlix_data_url": public_base or os.getenv("GINLIX_DATA_URL", ""),
-            }
-        )
-
-        try:
-            await self._runtime_call(
-                self.runtime.upload_file,
-                token_data.encode("utf-8"),
-                self._token_file_path,
-                retry_policy=RetryPolicy.SAFE,
-            )
-            logger.debug("Uploaded sandbox token file", path=self._token_file_path)
-        except Exception as e:
-            logger.warning("Failed to upload sandbox token file", error=str(e))
 
     async def upload_vault_secrets(self, secrets: dict[str, str]) -> None:
         """Write (or remove) vault secrets JSON in the sandbox.
@@ -922,37 +855,6 @@ class PTCSandbox:
 
 
     @staticmethod
-    def _token_needs_refresh(
-        remote_token_mod: dict[str, Any] | None,
-        tokens: dict | None,
-        user_id: str | None,
-        workspace_id: str | None,
-    ) -> bool:
-        """Check whether tokens need to be re-uploaded based on freshness."""
-        if not tokens:
-            return False
-        if remote_token_mod is None:
-            return True
-        # Re-mint if user or workspace changed
-        if remote_token_mod.get("user_id") != (user_id or ""):
-            return True
-        if remote_token_mod.get("workspace_id") != (workspace_id or ""):
-            return True
-        # Re-mint once the remote copy is most of the way through its life.
-        ttl = tokens.get("expires_in") or 0
-        threshold = (
-            ttl * PTCSandbox.TOKEN_REFRESH_FRACTION
-            if ttl > 0
-            else PTCSandbox.TOKEN_FRESHNESS_SECONDS
-        )
-        minted_at = remote_token_mod.get("minted_at", 0)
-        age = time.time() - minted_at
-        if age > threshold:
-            return True
-        return False
-
-
-    @staticmethod
     def _classify_execution_error(
         e: Exception,
         duration: float,
@@ -1124,11 +1026,8 @@ class PTCSandbox:
         self,
         *,
         skill_roots: list[str] | None = None,
-        tokens: dict | None = None,
-        user_id: str | None = None,
-        workspace_id: str | None = None,
     ) -> dict[str, Any]:
-        return await _assets._compute_sandbox_manifest(self, skill_roots=skill_roots, tokens=tokens, user_id=user_id, workspace_id=workspace_id)
+        return await _assets._compute_sandbox_manifest(self, skill_roots=skill_roots)
 
     async def _read_unified_manifest(self) -> dict[str, Any] | None:
         return await _assets._read_unified_manifest(self)
@@ -1148,12 +1047,9 @@ class PTCSandbox:
         skill_dirs: list[tuple[str, str]] | None = None,
         reusing_sandbox: bool = False,
         force_refresh: bool = False,
-        tokens: dict | None = None,
-        user_id: str | None = None,
-        workspace_id: str | None = None,
         on_progress: Callable[[str], None] | None = None,
     ) -> SyncResult:
-        return await _assets.sync_sandbox_assets(self, skill_dirs=skill_dirs, reusing_sandbox=reusing_sandbox, force_refresh=force_refresh, tokens=tokens, user_id=user_id, workspace_id=workspace_id, on_progress=on_progress)
+        return await _assets.sync_sandbox_assets(self, skill_dirs=skill_dirs, reusing_sandbox=reusing_sandbox, force_refresh=force_refresh, on_progress=on_progress)
 
     async def _prune_disabled_tool_modules(self) -> None:
         return await _assets._prune_disabled_tool_modules(self)

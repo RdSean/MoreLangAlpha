@@ -55,7 +55,7 @@ ascii liveness glyph. Never:
 - a **one-sided accent bar** on a card, panel, or blockquote — liveness and
   state are carried by glyphs + text, and borders stay uniform neutral. The
   only sanctioned edge markers are **nav selection** (sidebar rail edge,
-  bottom-bar underline, watchlist active row).
+  bottom-bar underline, active navigation row).
 
 Semantic color (profit/loss/warning/danger) is separate from the accent and
 never substitutes for it.

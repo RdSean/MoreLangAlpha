@@ -1,37 +1,15 @@
 /**
- * SSE/stream transport plumbing: auth headers for raw fetch, the shared
+ * SSE/stream transport plumbing: cookie-authenticated raw fetch, the shared
  * streamFetch/postSSEStream readers, and Content-Location parsers.
  * Package-internal — the barrel does not re-export streamFetch/postSSEStream.
  */
 import { api } from '@/api/client';
-import { supabase } from '@/lib/supabase';
 
 export const baseURL = api.defaults.baseURL;
 
-/** Get Bearer auth headers for raw fetch() calls (SSE streams). */
+/** Cookie authentication needs no script-readable authorization header. */
 export async function getAuthHeaders(): Promise<Record<string, string>> {
-  if (!supabase) return {};
-  const { data } = await supabase.auth.getSession();
-  const session = data.session;
-  let token = session?.access_token;
-  // Supabase's auto-refresh timer is frozen while the tab is backgrounded, so on
-  // resume the cached session may already be expired. If it's past (or within
-  // ~60s of) expiry, force a refresh so SSE reconnects don't fire with a dead
-  // token and 401. expires_at is a Unix timestamp in SECONDS. Never throw from
-  // this helper: a failed refresh falls back to whatever token we already have.
-  if (session && token && typeof session.expires_at === 'number') {
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (session.expires_at - nowSec <= 60) {
-      try {
-        const { data: refreshed } = await supabase.auth.refreshSession();
-        const newToken = refreshed.session?.access_token;
-        if (newToken) token = newToken;
-      } catch {
-        /* refresh failed — keep the existing (possibly stale) token */
-      }
-    }
-  }
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return {};
 }
 
 /**
@@ -85,7 +63,7 @@ export async function streamFetch(
 ): Promise<{ disconnected: boolean; aborted: boolean; contentLocation: string | null }> {
   let res: Response;
   try {
-    res = await fetch(`${baseURL}${url}`, opts);
+    res = await fetch(`${baseURL}${url}`, { ...opts, credentials: 'include' });
   } catch (error: unknown) {
     // An AbortController.abort() during the initial fetch (e.g. the user hit
     // stop before the response headers arrived) surfaces as AbortError (a

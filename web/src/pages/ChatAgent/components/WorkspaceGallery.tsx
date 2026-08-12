@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, Search, ArrowDownUp, MoreHorizontal, Zap, MessageSquareText, Pin, GripVertical, Check, Cpu, Infinity as InfinityIcon } from 'lucide-react';
+import { Plus, Search, ArrowDownUp, MoreHorizontal, Zap, Pin, GripVertical, Check, Cpu, Infinity as InfinityIcon } from 'lucide-react';
 import { Loader } from '@/components/ui/loader';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -771,31 +771,6 @@ function WorkspaceGallery({ onWorkspaceSelect, prefetchThreads }: WorkspaceGalle
               {t('workspace.welcomeDesc')}
             </p>
             <div className="flex flex-col sm:flex-row items-center gap-3">
-              <button
-                onClick={async () => {
-                  try {
-                    const flashWsData = await getFlashWorkspace();
-                    navigate(`/chat/t/__default__`, {
-                      state: {
-                        workspaceId: (flashWsData as WorkspaceRecord).workspace_id,
-                        isOnboarding: true,
-                        agentMode: 'flash',
-                        workspaceStatus: 'flash',
-                      },
-                    });
-                  } catch (err) {
-                    console.error('Error starting onboarding:', err);
-                  }
-                }}
-                className="flex items-center gap-2 px-6 py-3 rounded-lg transition-all hover:opacity-90 active:scale-[0.985]"
-                style={{
-                  backgroundColor: 'var(--color-btn-primary-bg)',
-                  color: 'var(--color-btn-primary-text)',
-                }}
-              >
-                <MessageSquareText className="h-5 w-5" />
-                <span className="font-medium">{t('settings.startOnboarding')}</span>
-              </button>
               <button
                 onClick={() => setIsModalOpen(true)}
                 className="flex items-center gap-2 px-6 py-3 rounded-lg border transition-all hover:bg-foreground/5 hover:scale-[1.01] active:scale-[0.985]"

@@ -200,8 +200,8 @@ export class ThreadStreamMux {
         // A definitive HTTP rejection (bad request/permission/gone) can't
         // heal by retrying — dispose so a later attach starts fresh instead
         // of leaving an inert registry entry. 401 stays retryable: a
-        // backgrounded tab reconnects with an expired token before Supabase
-        // refreshes it, and every retry re-reads the session.
+        // a user may regain network access before the browser sends a newly
+        // rotated session cookie, so retry after a transient authentication miss.
         if (
           e?.status &&
           e.status >= 400 &&

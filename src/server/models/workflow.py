@@ -189,7 +189,6 @@ class PlanStepResponse(BaseModel):
 class PlanResponse(BaseModel):
     """Represents the research plan."""
     title: str = Field(..., description="Plan title")
-    market_type: Optional[str] = Field(None, description="Market type (e.g. US stocks, China A-shares)")
     locale: Optional[str] = Field(None, description="Locale (zh-CN, en-US, etc.)")
     steps: List[PlanStepResponse] = Field(default_factory=list, description="Plan steps")
 
@@ -219,7 +218,6 @@ class WorkflowStateResponse(BaseModel):
 
     # State metadata
     research_topic: Optional[str] = Field(None, description="Research topic/query")
-    market_type: Optional[str] = Field(None, description="Market type identified")
     locale: Optional[str] = Field(None, description="Locale/language")
     deepthinking: bool = Field(False, description="Deep thinking mode enabled")
     auto_accepted_plan: bool = Field(True, description="Plan auto-accepted")
@@ -238,23 +236,22 @@ class WorkflowStateResponse(BaseModel):
             "thread_id": "3d4e5f6g-7h8i-9j0k-1l2m-3n4o5p6q7r8s",
             "checkpoint_id": "1ef1234-...",
             "messages": [
-                {"role": "human", "content": "Analyze AAPL stock price"},
-                {"role": "ai", "content": "I will analyze AAPL stock price for you..."}
+                {"role": "human", "content": "Research recent remote-work trends"},
+                {"role": "ai", "content": "I will prepare a research brief..."}
             ],
             "plan": {
-                "title": "AAPL Stock Analysis Plan",
-                "market_type": "US",
+                "title": "Remote Work Research Plan",
                 "steps": [
                     {
-                        "title": "Get AAPL basic info",
-                        "description": "Fetch company fundamentals",
+                        "title": "Collect primary sources",
+                        "description": "Find recent studies and reports",
                         "step_type": "DATA",
                         "execution_res": "completed"
                     }
                 ]
             },
-            "final_report": "AAPL stock analysis report...",
-            "research_topic": "AAPL Stock Analysis",
+            "final_report": "Remote work research brief...",
+            "research_topic": "Remote Work Trends",
             "completed": True
         }
     })
@@ -361,7 +358,7 @@ class CheckpointResponse(BaseModel):
             "pending_tasks": 0,
             "completed": True,
             "state_preview": {
-                "research_topic": "AAPL Stock Analysis",
+                "research_topic": "Remote Work Trends",
                 "plan_iterations": 1,
                 "has_final_report": True,
                 "message_count": 5
@@ -396,7 +393,7 @@ class CheckpointHistoryResponse(BaseModel):
                     "next_nodes": [],
                     "pending_tasks": 0,
                     "completed": True,
-                    "state_preview": {"research_topic": "AAPL Stock Analysis"}
+                    "state_preview": {"research_topic": "Remote Work Trends"}
                 }
             ]
         }

@@ -29,7 +29,7 @@ function feature(overrides: Partial<FeatureState> & { key: string }): FeatureSta
 }
 
 const FEATURES: FeatureState[] = [
-  feature({ key: 'market_watch', label: 'Market watch', enabled: true }),
+  feature({ key: 'workspace_assist', label: 'Workspace assist', enabled: true }),
   feature({ key: 'beta_thing', label: 'Beta thing', enabled: false }),
 ];
 
@@ -60,7 +60,7 @@ describe('useFeatureEnabled', () => {
 
   it('returns true for an enabled flag', async () => {
     mockGetFeatures.mockResolvedValue(FEATURES);
-    const { result } = renderHookWithProviders(() => useFeatureEnabled('market_watch'));
+    const { result } = renderHookWithProviders(() => useFeatureEnabled('workspace_assist'));
     await waitFor(() => expect(result.current).toBe(true));
   });
 
@@ -79,7 +79,7 @@ describe('useFeatureEnabled', () => {
   it('returns false while loading (fails closed)', () => {
     // Never-resolving fetch keeps the query pending; the gate must read false.
     mockGetFeatures.mockReturnValue(new Promise<FeatureState[]>(() => {}));
-    const { result } = renderHookWithProviders(() => useFeatureEnabled('market_watch'));
+    const { result } = renderHookWithProviders(() => useFeatureEnabled('workspace_assist'));
     expect(result.current).toBe(false);
   });
 
@@ -104,7 +104,7 @@ describe('useSetFeatureOverride', () => {
     const queryClient = freshQueryClient();
     mockGetFeatures.mockResolvedValue(FEATURES);
     const updated: FeatureState[] = [
-      feature({ key: 'market_watch', label: 'Market watch', enabled: false, user_override: false }),
+      feature({ key: 'workspace_assist', label: 'Workspace assist', enabled: false, user_override: false }),
       FEATURES[1],
     ];
     mockSetFeatureOverride.mockResolvedValue(updated);
@@ -115,9 +115,9 @@ describe('useSetFeatureOverride', () => {
     );
     await waitFor(() => expect(result.current.features.data).toEqual(FEATURES));
 
-    await result.current.setOverride.mutateAsync({ key: 'market_watch', enabled: false });
+    await result.current.setOverride.mutateAsync({ key: 'workspace_assist', enabled: false });
 
-    expect(mockSetFeatureOverride).toHaveBeenCalledWith('market_watch', false);
+    expect(mockSetFeatureOverride).toHaveBeenCalledWith('workspace_assist', false);
     // setQueryData in onSuccess propagates the returned list without a refetch.
     await waitFor(() => expect(result.current.features.data).toEqual(updated));
     expect(mockGetFeatures).toHaveBeenCalledTimes(1);

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowUp } from 'lucide-react';
 import { ChatInputRegistry, ContextBus } from '@/lib/contextBus';
-import type { WidgetContextSnapshot } from '@/pages/Dashboard/widgets/framework/contextSnapshot';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
 import './ContextOverflowPill.css';
 
 /**

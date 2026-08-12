@@ -243,6 +243,104 @@ class TestCreateWorkspace:
         ]
         assert len(error_call) > 0
 
+    @pytest.mark.asyncio
+    @patch("src.server.services.workspace_manager.db_create_workspace", new_callable=AsyncMock)
+    @patch("src.server.services.workspace_manager.SessionManager")
+    async def test_create_workspace_cancellation_releases_unprovisioned_row(
+        self, mock_sm, mock_db_create, monkeypatch
+    ):
+        """Cancellation before a sandbox id exists must not strand ``creating``."""
+        from src.server.services import workspace_manager
+
+        ws_id = str(uuid.uuid4())
+        created_ws = _make_workspace(
+            workspace_id=ws_id, status="creating", sandbox_id=None
+        )
+        mock_db_create.return_value = created_ws
+        mock_session = _make_mock_session(initialized=False, has_sandbox=False)
+        mock_session.initialize.side_effect = asyncio.CancelledError()
+        mock_sm.get_session.return_value = mock_session
+        mock_sm.cleanup_session = AsyncMock()
+        abandon = AsyncMock(
+            return_value=_make_workspace(
+                workspace_id=ws_id, status="stopped", sandbox_id=None
+            )
+        )
+        monkeypatch.setattr(
+            workspace_manager,
+            "try_abandon_workspace_creation",
+            abandon,
+            raising=False,
+        )
+
+        with pytest.raises(asyncio.CancelledError):
+            await WorkspaceManager(_make_config()).create_workspace(
+                user_id="user-1", name="Test"
+            )
+
+        mock_sm.cleanup_session.assert_awaited_once_with(ws_id)
+        abandon.assert_awaited_once_with(ws_id)
+
+
+class TestAbandonedCreationRecovery:
+    """A crashed creator must not permanently strand a no-sandbox row."""
+
+    def setup_method(self):
+        WorkspaceManager.reset_instance()
+
+    def teardown_method(self):
+        WorkspaceManager.reset_instance()
+
+    @pytest.mark.asyncio
+    @patch("src.server.services.workspace_manager.db_get_workspace")
+    async def test_session_acquisition_claims_stale_creation(self, mock_get_ws):
+        manager = WorkspaceManager(_make_config())
+        ws_id = str(uuid.uuid4())
+        creating = _make_workspace(
+            workspace_id=ws_id,
+            status="creating",
+            sandbox_id=None,
+        )
+        reclaimed = _make_workspace(
+            workspace_id=ws_id,
+            status="stopped",
+            sandbox_id=None,
+        )
+        session = _make_mock_session()
+        mock_get_ws.return_value = creating
+        manager.reclaim_stale_workspace_creation = AsyncMock(return_value=reclaimed)
+        manager._claim_and_restart = AsyncMock(return_value=session)
+
+        result = await manager.get_session_for_workspace(ws_id)
+
+        assert result is session
+        manager.reclaim_stale_workspace_creation.assert_awaited_once_with(ws_id)
+        manager._claim_and_restart.assert_awaited_once_with(ws_id, "user-1", None)
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.server.services.workspace_manager.try_claim_workspace_for_start",
+        new_callable=AsyncMock,
+    )
+    async def test_claim_without_sandbox_provisions_fresh_session(self, mock_claim):
+        manager = WorkspaceManager(_make_config())
+        ws_id = str(uuid.uuid4())
+        claimed = _make_workspace(
+            workspace_id=ws_id,
+            status="starting",
+            sandbox_id=None,
+        )
+        session = _make_mock_session()
+        mock_claim.return_value = claimed
+        manager._recover_sandbox = AsyncMock(return_value=session)
+
+        result = await manager._claim_and_restart(ws_id, "user-1", None)
+
+        assert result is session
+        manager._recover_sandbox.assert_awaited_once_with(
+            ws_id, "user-1", manager.config.to_core_config()
+        )
+
 
 # ---------------------------------------------------------------------------
 # stop_workspace
@@ -638,6 +736,57 @@ class TestReapStuckStarting:
 
         assert reverted == 1
         mock_status.assert_awaited_once_with(workspace_id=ws_id, status="stopped")
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.server.services.workspace_manager.get_workspaces_by_status",
+        new_callable=AsyncMock,
+    )
+    async def test_reaps_stale_creating_row_without_sandbox(self, mock_get_by_status):
+        """A dead creator cannot leave the gallery permanently in creating."""
+        manager = WorkspaceManager.get_instance(config=_make_config())
+        ws_id = str(uuid.uuid4())
+        stale = _make_workspace(
+            workspace_id=ws_id,
+            status="creating",
+            sandbox_id=None,
+            updated_at=datetime.now(timezone.utc)
+            - timedelta(seconds=manager.reap_stuck_after + 1),
+        )
+        mock_get_by_status.side_effect = [[], [stale]]
+        manager.reclaim_stale_workspace_creation = AsyncMock(return_value=stale)
+
+        reclaimed = await manager.reap_stuck_starting_workspaces()
+
+        assert reclaimed == 1
+        manager.reclaim_stale_workspace_creation.assert_awaited_once_with(ws_id)
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.server.services.workspace_manager.get_workspaces_by_status",
+        new_callable=AsyncMock,
+    )
+    async def test_leaves_in_flight_creation_past_threshold(
+        self, mock_get_by_status
+    ):
+        """A slow initial provision on this worker must not be reclaimed."""
+        manager = WorkspaceManager.get_instance(config=_make_config())
+        ws_id = str(uuid.uuid4())
+        creating = _make_workspace(
+            workspace_id=ws_id,
+            status="creating",
+            sandbox_id=None,
+            updated_at=datetime.now(timezone.utc)
+            - timedelta(seconds=manager.reap_stuck_after + 1),
+        )
+        mock_get_by_status.side_effect = [[], [creating]]
+        manager._pending_creations = {ws_id}
+        manager.reclaim_stale_workspace_creation = AsyncMock(return_value=creating)
+
+        reclaimed = await manager.reap_stuck_starting_workspaces()
+
+        assert reclaimed == 0
+        manager.reclaim_stale_workspace_creation.assert_not_awaited()
 
     @pytest.mark.asyncio
     @patch(
@@ -1063,7 +1212,6 @@ class TestSandboxRecovery:
         mock_session_mgr.get_session.return_value = session
         mock_session_mgr.cleanup_session = AsyncMock()
 
-        manager._mint_sandbox_tokens = AsyncMock(return_value={})
         manager._apply_session_mcp = AsyncMock(return_value=None)
         manager._sync_sandbox_assets = AsyncMock()
         # Sandbox is created (initialize ok) but a later step fails.
@@ -2778,7 +2926,6 @@ class TestRecoverSandboxEntitledTier:
         mock_session_mgr.get_session.return_value = session
 
         manager._entitled_tier = AsyncMock(return_value="standard")
-        manager._mint_sandbox_tokens = AsyncMock(return_value={})
         manager._apply_session_mcp = AsyncMock(return_value=None)
         manager._sync_sandbox_assets = AsyncMock()
         manager._restore_files = AsyncMock()
@@ -2988,7 +3135,6 @@ class TestDuplicateWorkspace:
 
     def _install_create_path(self, manager, session):
         """Stub the eager-create collaborators so the lock body runs clean."""
-        manager._mint_sandbox_tokens = AsyncMock(return_value={})
         manager._apply_session_mcp = AsyncMock()
         manager._sync_sandbox_assets = AsyncMock()
         manager._restore_files = AsyncMock()
@@ -3256,7 +3402,6 @@ class TestPlatformSecretWiring:
         certify = AsyncMock(return_value=None)
         status = AsyncMock(return_value=workspace)
         with (
-            patch.object(manager, "_mint_sandbox_tokens", AsyncMock(return_value={})),
             patch(
                 "src.server.services.workspace_manager.SessionManager"
             ) as session_mgr,

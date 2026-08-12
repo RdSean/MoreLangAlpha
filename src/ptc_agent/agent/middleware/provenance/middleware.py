@@ -78,37 +78,6 @@ _INFRA_FILES = ("agent.md",)
 # without this the agent's absolute paths bypass every prefix check.
 _SANDBOX_ROOT_PREFIXES = ("home/workspace/", "home/daytona/")
 
-# Market tools whose identifier is a single symbol-bearing arg.
-_MARKET_SYMBOL_ARGS = ("symbol", "underlying")
-
-# Market tool -> data-kind slug. Set as ProvenanceSource.detail on symbol-bearing
-# rows so the Sources panel can group by ticker yet still distinguish, in a
-# hover, which data products that ticker was accessed through (a single AAPL row
-# may cover both company_overview and daily_prices). The slug is i18n-mapped by
-# the frontend; symbol-less tools (screen_stocks, get_market_movers) already
-# surface their tool name as the identifier.
-_MARKET_DATA_KINDS = {
-    "get_company_overview": "company_overview",
-    "get_daily_prices": "daily_prices",
-    "get_options_chain": "options_chain",
-    "get_quote": "quote",
-    # Symbol-bearing only when the caller passes an explicit `indices` list;
-    # the no-arg form stays keyed by tool name (detail guard below).
-    "get_market_overview": "market_overview",
-}
-
-# Market-data tools that all share _extract_market_data. Superset of
-# _MARKET_DATA_KINDS — also covers the symbol-less ones (screen/movers/overview).
-_MARKET_DATA_TOOLS = (
-    "get_daily_prices",
-    "get_company_overview",
-    "get_market_overview",
-    "screen_stocks",
-    "get_options_chain",
-    "get_market_movers",
-    "get_quote",
-)
-
 # Host-side bounds on the in-sandbox MCP trace (LLM-authored, untrusted): the
 # generated client is supposed to self-limit, but it's code the agent controls,
 # so re-clamp here so a poisoned/huge trace can't amplify into DB/SSE/render.
@@ -245,10 +214,8 @@ def _coerce_result_size(value: Any) -> int | None:
 def _is_error_result(result: Any) -> bool:
     """True when a tool call failed, so we don't attest a source it never returned.
 
-    Host-side tools mostly catch errors and return an error payload with a
-    success status (market tools return ``{"error": ...}``, web_fetch returns an
-    ``[error] ...`` string), so inspect the content/artifact shape, not just
-    ``ToolMessage.status``.
+    Host-side tools can catch errors and return an error payload with a success
+    status, so inspect the content/artifact shape, not just ``ToolMessage.status``.
     """
     if getattr(result, "status", None) == "error":
         return True
@@ -291,7 +258,6 @@ class ProvenanceMiddleware(AgentMiddleware):
         ] = {
             "WebSearch": self._extract_web_search,
             "WebFetch": self._extract_web_fetch,
-            "get_sec_filing": self._extract_sec_filing,
             "Read": self._extract_file_read,
             # Glob is pure path enumeration (a directory listing), not data the
             # analysis rests on, so it is intentionally NOT tracked. Read (content
@@ -304,7 +270,6 @@ class ProvenanceMiddleware(AgentMiddleware):
             # BashOutput surfaces a backgrounded script's mcp_trace on the status
             # read that observes completion — same artifact contract as Bash.
             "BashOutput": self._extract_execute_code,
-            **dict.fromkeys(_MARKET_DATA_TOOLS, self._extract_market_data),
         }
 
     async def awrap_tool_call(
@@ -366,8 +331,8 @@ class ProvenanceMiddleware(AgentMiddleware):
                     body_batch.append(item)
             # One batched write per TOOL CALL, after this call's emits (best-effort,
             # never on the SSE event): collapses this call's per-source fan-out —
-            # web_search's N URLs, the market fan-out's duplicate shas,
-            # execute_code's N mcp_trace entries — into a single chunked upsert.
+            # WebSearch URLs and ExecuteCode MCP-trace entries — into one chunked
+            # upsert.
             # Scheduled OFF the tool-call critical path (background task, drained at
             # agent end) so a DB/object-store write never delays the tool result or
             # the next LLM step; the provenance events above already went out.
@@ -430,7 +395,7 @@ class ProvenanceMiddleware(AgentMiddleware):
         record (built from this source's sha) trusts an address we can't verify. A
         self-consistent forgery still passes, but it can only claim its own hash —
         colliding with real content would require breaking SHA-256. Host-computed
-        shas (web/sec/market) are produced by trusted code and left untouched.
+        hashes are produced by trusted code and left untouched.
 
         A legitimately truncated MCP body (>64 KiB) hashes to the head, not the full
         result, so it fails here and loses its body — honest, since we never hold the
@@ -546,121 +511,6 @@ class ProvenanceMiddleware(AgentMiddleware):
             result_snippet=snippet,
             result_body=body,
         )
-
-    def _extract_sec_filing(
-        self, request: Any, result: Any
-    ) -> Iterator[ProvenanceSource]:
-        """One source per 8-K filing, else the top-level 10-K/10-Q source_url."""
-        artifact = getattr(result, "artifact", None)
-        if not isinstance(artifact, dict):
-            return
-        tool_call_id = request.tool_call.get("id")
-        timestamp = _now_iso()
-        symbol = artifact.get("symbol")
-        filings = artifact.get("filings")
-
-        if isinstance(filings, list) and filings:
-            for filing in filings:
-                if not isinstance(filing, dict):
-                    continue
-                url = filing.get("source_url")
-                if not url:
-                    continue
-                sha256, size, snippet, body = fingerprint_result_with_body(filing)
-                yield ProvenanceSource(
-                    record_id=_new_id(),
-                    source_type="sec_filing",
-                    identifier=url,
-                    timestamp=timestamp,
-                    title=symbol,
-                    provider="edgar",
-                    tool_call_id=tool_call_id,
-                    args=redact_args(request.tool_call.get("args")),
-                    result_sha256=sha256,
-                    result_size=size,
-                    result_snippet=snippet,
-                    result_body=body,
-                )
-            return
-
-        source_url = artifact.get("source_url")
-        if not source_url:
-            return
-        sha256, size, snippet, body = fingerprint_result_with_body(artifact)
-        yield ProvenanceSource(
-            record_id=_new_id(),
-            source_type="sec_filing",
-            identifier=source_url,
-            timestamp=timestamp,
-            title=symbol,
-            provider="edgar",
-            tool_call_id=tool_call_id,
-            args=redact_args(request.tool_call.get("args")),
-            result_sha256=sha256,
-            result_size=size,
-            result_snippet=snippet,
-            result_body=body,
-        )
-
-    def _extract_market_data(
-        self, request: Any, result: Any
-    ) -> Iterator[ProvenanceSource]:
-        """One source per symbol; identifier from symbol/underlying/indices arg."""
-        args = request.tool_call.get("args") or {}
-        tool_name = request.tool_call.get("name")
-        tool_call_id = request.tool_call.get("id")
-        timestamp = _now_iso()
-
-        identifiers: list[str] = []
-        for key in _MARKET_SYMBOL_ARGS:
-            value = args.get(key)
-            if isinstance(value, str) and value:
-                identifiers.append(value)
-        indices = args.get("indices")
-        if isinstance(indices, list):
-            identifiers.extend(str(i) for i in indices if i)
-        elif isinstance(indices, str) and indices:
-            identifiers.append(indices)
-        symbols = args.get("symbols")
-        if isinstance(symbols, list):
-            identifiers.extend(str(s).upper() for s in symbols if s)
-
-        # No symbol arg (e.g. get_market_overview with no explicit indices,
-        # screen_stocks, get_market_movers) — record one source keyed by the
-        # tool name.
-        if not identifiers:
-            identifiers = [tool_name]
-
-        # Only tag a data-kind when we have real ticker(s); for symbol-less tools
-        # identifiers is just [tool_name], so a kind label would duplicate it.
-        # Guarding on identifiers (not args truthiness) stays correct even if a
-        # symbol-less tool is later added to _MARKET_DATA_KINDS.
-        detail = (
-            _MARKET_DATA_KINDS.get(tool_name)
-            if identifiers != [tool_name]
-            else None
-        )
-
-        artifact = getattr(result, "artifact", None)
-        fingerprint_target = (
-            artifact if artifact is not None else getattr(result, "content", result)
-        )
-        sha256, size, snippet, body = fingerprint_result_with_body(fingerprint_target)
-        for identifier in identifiers:
-            yield ProvenanceSource(
-                record_id=_new_id(),
-                source_type="market_data",
-                identifier=identifier,
-                timestamp=timestamp,
-                detail=detail,
-                provider="market_data_proxy",
-                tool_call_id=tool_call_id,
-                args=redact_args(args),
-                result_sha256=sha256,
-                result_size=size,
-                result_snippet=snippet,
-                result_body=body,
-            )
 
     def _extract_file_read(
         self, request: Any, result: Any

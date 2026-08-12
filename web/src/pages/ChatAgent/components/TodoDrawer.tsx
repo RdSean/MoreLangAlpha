@@ -175,7 +175,7 @@ function TodoDrawer({ todoData }: { todoData: TodoData | null }) {
         )}
       </AnimatePresence>
 
-      {/* Expanded: ticker-tape list */}
+      {/* Expanded task list */}
       <AnimatePresence>
         {isExpanded && (
           <motion.div

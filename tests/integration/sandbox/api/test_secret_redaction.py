@@ -19,8 +19,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 BASE = f"/api/v1/workspaces/{TEST_WS_ID}/files"
 
 # A fake secret that will be "known" to the redactor
-_SECRET_NAME = "FMP_API_KEY"
-_SECRET_VALUE = "sk_test_fmp_1234567890abcdef"
+_SECRET_NAME = "PLATFORM_SECRET_API_KEY"
+_SECRET_VALUE = "sk_test_platform_1234567890abcdef"
 
 
 @pytest.fixture

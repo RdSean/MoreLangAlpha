@@ -66,10 +66,10 @@ class TestWorkspaceCreate:
     def test_valid_full(self):
         ws = WorkspaceCreate(
             name="Analysis",
-            description="Portfolio research workspace",
+            description="Project research workspace",
             config={"theme": "dark"},
         )
-        assert ws.description == "Portfolio research workspace"
+        assert ws.description == "Project research workspace"
         assert ws.config == {"theme": "dark"}
 
     def test_name_too_short(self):

@@ -51,15 +51,15 @@ from ptc_agent.agent.subagents.builtins import BUILTIN_SUBAGENTS
 # ---------------------------------------------------------------------------
 
 STUB_TOOL_SUMMARY = """\
-### financial_data (3 tools)
-Financial market data server — historical prices, fundamentals, screening.
-- Module: `tools.financial_data`
-- Docs: `tools/docs/financial_data/`
+### web_research (2 tools)
+Search and fetch public web sources for research and verification.
+- Module: `tools.web_research`
+- Docs: `tools/docs/web_research/`
 
-### yfinance (5 tools)
-Yahoo Finance data — quotes, options, earnings, holders.
-- Module: `tools.yfinance`
-- Docs: `tools/docs/yfinance/`"""
+### workspace_tools (3 tools)
+Read, write, and organize files in the current workspace.
+- Module: `tools.workspace_tools`
+- Docs: `tools/docs/workspace_tools/`"""
 
 STUB_SUBAGENTS = [
     {"name": defn.name, "description": defn.description, "tools": defn.tools}
@@ -73,16 +73,7 @@ STUB_USER_PROFILE = {
     "agent_preference": {
         "proactive_questions": "sometimes",
     },
-    "context_files": [
-        {
-            "name": "portfolio.json",
-            "description": "Current stock portfolio holdings",
-        },
-        {
-            "name": "watchlist.json",
-            "description": "Watchlist of tracked tickers",
-        },
-    ],
+    "context_files": [],
 }
 
 

@@ -35,11 +35,6 @@ import type { PreviewData } from './utils/types';
 import { createRecentlySentTracker } from './utils/recentlySentTracker';
 import { createRequestKeyTracker } from './utils/requestKey';
 import { handleReasoningSignal, handleTextContent } from './utils/streamEventHandlers';
-import { useMarketWatch } from './useMarketWatch';
-// Chart-annotation live bridge: writes agent-drawn annotations into the
-// shared MarketView store so the desktop MarketView chat panel (which uses
-// this engine for both flash and PTC) renders them live. Harmless on the
-// standalone /chat page — the store simply has no chart consumer there.
 
 // --- Module scope extracted to session/types + utils (W1) ---
 import type {
@@ -76,7 +71,6 @@ export function useChatMessages(
   updateTodoListCard: ((todoData: Record<string, unknown>, isNew?: boolean) => void) | null = null,
   updateSubagentCard: ((agentId: string, data: Record<string, unknown>) => void) | null = null,
   finalizePendingTodos: (() => void) | null = null,
-  onOnboardingRelatedToolComplete: (() => void) | null = null,
   onFileArtifact: ((event: SSEEvent) => void) | null = null,
   onPreviewUrl: ((data: PreviewData) => void) | null = null,
   agentMode: string = 'ptc',
@@ -382,11 +376,6 @@ export function useChatMessages(
   // Track reconnection state for UI indicator
   const [isReconnecting, setIsReconnecting] = useState(false);
 
-  // Market-watch chip lifecycle: seed on thread load/switch + refetch on turn
-  // completion. Live mid-turn overwrites arrive via `market_watch_update` SSE
-  // events, which forward `setMarketWatch` (see processEvent below).
-  const { marketWatch, setMarketWatch } = useMarketWatch(threadId, isLoading, threadIdRef);
-
   // Track if this is a new conversation (for todo list card management)
   const isNewConversationRef = useRef(false);
 
@@ -488,7 +477,6 @@ export function useChatMessages(
     setIsReconnecting,
     onFileArtifact,
     onPreviewUrl,
-    onOnboardingRelatedToolComplete,
     // setters (stable)
     setMessages,
     setIsLoading,
@@ -1240,11 +1228,11 @@ export function useChatMessages(
    * badge) and switch subsequent events to the standard stream processor so the
    * new turn renders normally.
    */
-  const handleSendSteering = async (message: string, planMode: boolean = false, additionalContext: Record<string, unknown>[] | null = null, attachmentMeta: Record<string, unknown>[] | null = null, { widgetSnapshots, chartSelections }: ModelOptions = {}) => {
+  const handleSendSteering = async (message: string, planMode: boolean = false, additionalContext: Record<string, unknown>[] | null = null, attachmentMeta: Record<string, unknown>[] | null = null, { widgetSnapshots }: ModelOptions = {}) => {
     // Show user message in chat with steering indicator. Preserve any inline
-    // context cards (widget snapshots / chart selections) so a message queued
-    // during compaction keeps them when the flush routes through steering.
-    const userMsg = createUserMessage(message, attachmentMeta as AttachmentMeta[] | null, widgetSnapshots ?? null, chartSelections ?? null);
+    // context cards so a message queued during compaction keeps them when the
+    // flush routes through steering.
+    const userMsg = createUserMessage(message, attachmentMeta as AttachmentMeta[] | null, widgetSnapshots ?? null);
     const userMessage: MessageRecord = { ...userMsg, steering: true };
     recentlySentTrackerRef.current.track(message.trim(), userMessage.timestamp, userMessage.id);
     setMessages((prev) => appendMessage(prev,userMessage));
@@ -1451,7 +1439,7 @@ export function useChatMessages(
     }
   };
 
-  const handleSendMessage = async (message: string, planMode: boolean = false, additionalContext: Record<string, unknown>[] | null = null, attachmentMeta: Record<string, unknown>[] | null = null, { model, reasoningEffort, fastMode, widgetSnapshots, chartSelections }: ModelOptions = {}) => {
+  const handleSendMessage = async (message: string, planMode: boolean = false, additionalContext: Record<string, unknown>[] | null = null, attachmentMeta: Record<string, unknown>[] | null = null, { model, reasoningEffort, fastMode, widgetSnapshots }: ModelOptions = {}) => {
     const hasContent = message.trim() || (additionalContext && additionalContext.length > 0);
     if (!workspaceId || !hasContent) {
       return;
@@ -1478,7 +1466,6 @@ export function useChatMessages(
         message,
         attachmentMeta as AttachmentMeta[] | null,
         widgetSnapshots ?? null,
-        chartSelections ?? null,
       );
       const queuedMessage: MessageRecord = { ...queuedMsg, queued: true };
       queuedSendRef.current = {
@@ -1486,7 +1473,7 @@ export function useChatMessages(
         planMode,
         additionalContext,
         attachmentMeta,
-        modelOptions: { model, reasoningEffort, fastMode, widgetSnapshots, chartSelections },
+        modelOptions: { model, reasoningEffort, fastMode, widgetSnapshots },
         messageId: queuedMessage.id as string,
       };
       setMessages((prev) => {
@@ -1499,7 +1486,7 @@ export function useChatMessages(
 
     // If agent is already streaming, send as steering message
     if (isLoading) {
-      return handleSendSteering(message, planMode, additionalContext, attachmentMeta, { widgetSnapshots, chartSelections });
+      return handleSendSteering(message, planMode, additionalContext, attachmentMeta, { widgetSnapshots });
     }
 
     // Store planMode so HITL interrupt handler can access it
@@ -1532,7 +1519,6 @@ export function useChatMessages(
       message,
       attachmentMeta as AttachmentMeta[] | null,
       widgetSnapshots ?? null,
-      chartSelections ?? null,
     );
     recentlySentTrackerRef.current.track(message.trim(), userMessage.timestamp, userMessage.id);
 
@@ -2565,7 +2551,6 @@ export function useChatMessages(
     loadConversationHistory,
     releaseStreamOwnership,
     attachSubagentMux,
-    setMarketWatch,
   };
 
   /** Composition-level callbacks for the recovery/ownership lifecycle; direct
@@ -2590,7 +2575,6 @@ export function useChatMessages(
     threadModels,
     lastThreadModel,
     isLoading,
-    marketWatch,
     hasActiveSubagents,
     awaitingReportBack,
     workspaceStarting,

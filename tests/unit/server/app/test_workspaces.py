@@ -509,6 +509,42 @@ async def test_start_workspace_invalid_state(client):
 
 
 @pytest.mark.asyncio
+async def test_start_workspace_recovers_stale_creating_workspace(client):
+    """An abandoned creation with no sandbox is claimed and provisioned."""
+    ws = _ws(status="creating", sandbox_id=None)
+    reclaimed_ws = _ws(
+        workspace_id=ws["workspace_id"],
+        status="stopped",
+        sandbox_id=None,
+    )
+    with (
+        patch(
+            "src.server.app.workspaces.db_get_workspace",
+            new_callable=AsyncMock,
+            return_value=ws,
+        ),
+        patch("src.server.app.workspaces.WorkspaceManager") as MockWM,
+    ):
+        manager = AsyncMock()
+        manager.reclaim_stale_workspace_creation = AsyncMock(
+            return_value=reclaimed_ws
+        )
+        MockWM.get_instance.return_value = manager
+
+        resp = await client.post(
+            f"/api/v1/workspaces/{ws['workspace_id']}/start"
+        )
+
+    assert resp.status_code == 200
+    manager.reclaim_stale_workspace_creation.assert_awaited_once_with(
+        ws["workspace_id"]
+    )
+    manager.get_session_for_workspace.assert_awaited_once_with(
+        ws["workspace_id"], user_id=ws["user_id"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_start_workspace_not_found(client):
     with (
         patch(

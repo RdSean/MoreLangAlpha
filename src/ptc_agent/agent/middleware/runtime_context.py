@@ -26,9 +26,6 @@ class RuntimeContextMiddleware(AgentMiddleware):
     Args:
         current_time: Pre-formatted current time string.
         user_profile: Optional user profile dict with name, timezone, locale, etc.
-        user_data_counts: Optional dict with portfolio/watchlist/preference
-            counts for the ``<user_profile>`` awareness block. Snapshot at
-            agent-creation time.
         sandbox_enabled: Whether the agent has a sandbox/filesystem. Gates
             filesystem-dependent steering in the shared user_profile component
             (e.g. HTML-report output) — true for PTC, false for Flash.
@@ -39,18 +36,16 @@ class RuntimeContextMiddleware(AgentMiddleware):
         *,
         current_time: str,
         user_profile: dict[str, Any] | None = None,
-        user_data_counts: dict[str, Any] | None = None,
         sandbox_enabled: bool = False,
     ) -> None:
         self._context_block = self._build_context_block(
-            current_time, user_profile, user_data_counts, sandbox_enabled
+            current_time, user_profile, sandbox_enabled
         )
 
     @staticmethod
     def _build_context_block(
         current_time: str,
         user_profile: dict[str, Any] | None,
-        user_data_counts: dict[str, Any] | None,
         sandbox_enabled: bool = False,
     ) -> str:
         loader = get_loader()
@@ -62,14 +57,10 @@ class RuntimeContextMiddleware(AgentMiddleware):
         )
         parts.append(f"<time_awareness>\n{time_content}\n</time_awareness>")
 
-        # Render the profile block when either the user profile dict OR the
-        # counts dict has content. Empty counts (no holdings + no watchlists +
-        # no prefs) skip the counts line via the template's conditional.
-        if user_profile or user_data_counts:
+        if user_profile:
             profile_content = loader.render(
                 "components/user_profile.md.j2",
                 user_profile=user_profile or {},
-                user_data_counts=user_data_counts,
                 sandbox_enabled=sandbox_enabled,
             )
             parts.append(f"<user_profile>\n{profile_content}\n</user_profile>")

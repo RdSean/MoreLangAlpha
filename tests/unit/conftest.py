@@ -6,6 +6,8 @@ socket creation turns that failure mode into a loud error. AF_UNIX stays
 allowed: asyncio's event loop self-pipe is a unix socketpair.
 """
 
+from unittest.mock import AsyncMock
+
 import pytest
 import pytest_socket
 
@@ -39,3 +41,15 @@ def _reader_pool_follows_cache_client(monkeypatch):
         return getattr(cache, "client", None)
 
     monkeypatch.setattr(stream_pool, "get_stream_reader_client", _reader)
+
+
+@pytest.fixture(autouse=True)
+def _default_education_membership(monkeypatch):
+    """Keep synthetic unit-test users outside a household unless a test opts in."""
+    from src.server.services import education_access
+
+    monkeypatch.setattr(
+        education_access,
+        "get_membership_for_user",
+        AsyncMock(return_value=None),
+    )

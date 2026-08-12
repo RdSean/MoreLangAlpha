@@ -1,14 +1,14 @@
 /* Branded loading state — the research terminal warming up: a dim full-bleed
- * quote wall with an ember scan band sweeping through it. Pure CSS; no
+ * activity wall with an accent scan band sweeping through it. Pure CSS; no
  * canvas, no JS animation.
  *
  * The scan is two synchronized layers: a clipping window that travels down
- * the component, and an ember copy of the wall inside it counter-translating
+ * the component, and an accent copy of the wall inside it counter-translating
  * by the same amount, so the lit text stays registered over the dim text.
  * Both animate in cqh (the component is a size container), which keeps the
  * sweep spanning the actual component height in both variants.
  *
- * The ember derives from the global accent token so the loader can never
+ * The scan color derives from the global accent token so the loader can never
  * drift from the login surface's material when the palette moves. */
 
 .page-loading {

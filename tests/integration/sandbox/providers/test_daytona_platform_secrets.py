@@ -1,10 +1,9 @@
 """Live Daytona Secret tests: placeholder mount, egress substitution, host restriction, rotation.
 
-FMP is the substitution oracle: a request via the ``apikey`` header returns
-200 only if Daytona substituted the placeholder at egress; an unsubstituted
-placeholder always yields 401. Substitution happens ONLY in HTTPS request
-headers (never query strings), and echo services such as httpbin.org are
-substitution dead zones — never use them to canary substitution.
+The test uses an explicitly configured HTTPS endpoint that authenticates the
+provided test secret. A placeholder must fail there, while Daytona's egress
+substitution allows the configured secret to succeed. Echo services are not
+suitable because substitution only happens in request headers.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ import json
 import os
 import shlex
 import uuid
+from urllib.parse import urlparse
 
 import pytest
 
@@ -41,14 +41,26 @@ pytestmark = [
     ),
 ]
 
-FMP_HOST = "financialmodelingprep.com"
-
-
 def _required_env(name: str) -> str:
     value = os.getenv(name, "")
     if not value:
         pytest.skip(f"{name} is required for the live Daytona Secret test")
     return value
+
+
+def _probe_config() -> tuple[str, str, str, int]:
+    """Return the endpoint contract for an approved live substitution probe."""
+    endpoint = _required_env("PLATFORM_SECRET_PROBE_URL")
+    header = os.getenv("PLATFORM_SECRET_PROBE_HEADER", "Authorization")
+    try:
+        success_status = int(os.getenv("PLATFORM_SECRET_PROBE_SUCCESS_STATUS", "200"))
+    except ValueError as exc:
+        raise RuntimeError("PLATFORM_SECRET_PROBE_SUCCESS_STATUS must be an integer") from exc
+
+    parsed = urlparse(endpoint)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise RuntimeError("PLATFORM_SECRET_PROBE_URL must be an absolute HTTPS URL")
+    return endpoint, header, parsed.hostname, success_status
 
 
 def _resolved(
@@ -68,8 +80,10 @@ def _resolved(
     return (ResolvedPlatformSecret(definition=definition, name=name, value=value),)
 
 
-def _fmp_probe_command(env_var: str) -> str:
-    """In-sandbox FMP quote request with the key in the `apikey` header.
+def _probe_command(
+    env_var: str, *, endpoint: str, header: str, success_status: int
+) -> str:
+    """Issue the configured request with the secret in its approved header.
 
     Emits only booleans and the HTTP status — never the key or placeholder.
     """
@@ -77,16 +91,17 @@ def _fmp_probe_command(env_var: str) -> str:
 import json, os, urllib.error, urllib.request
 key = os.environ[{env_var!r}]
 request = urllib.request.Request(
-    'https://{FMP_HOST}/stable/quote?symbol=AAPL',
-    headers={{'apikey': key}},
+    {endpoint!r},
+    headers={{{header!r}: key}},
 )
 try:
     with urllib.request.urlopen(request, timeout=30) as response:
         status = response.status
-        ok = isinstance(json.loads(response.read()), list)
 except urllib.error.HTTPError as e:
     status = e.code
-    ok = False
+except urllib.error.URLError:
+    status = 0
+ok = status == {success_status}
 print(json.dumps({{'placeholder': key.startswith('dtn_secret_'), 'status': status, 'ok': ok}}))
 """
     return f"python3 -c {shlex.quote(code)}"
@@ -100,18 +115,28 @@ def _provider() -> DaytonaProvider:
     )
 
 
-async def _probe(runtime, env_var: str) -> dict:
-    result = await runtime.exec(_fmp_probe_command(env_var))
+async def _probe(runtime, env_var: str, probe: tuple[str, str, str, int]) -> dict:
+    endpoint, header, _, success_status = probe
+    result = await runtime.exec(
+        _probe_command(
+            env_var,
+            endpoint=endpoint,
+            header=header,
+            success_status=success_status,
+        )
+    )
     return json.loads(result.stdout)
 
 
-async def test_substitution_and_rotation_through_fmp():
-    """Junk value -> 401; rotate to the real key -> 200 without sandbox recreation.
+async def test_substitution_and_rotation_through_configured_probe():
+    """A placeholder fails; the rotated configured key succeeds without recreation.
 
-    The 401 -> 200 transition proves substitution AND rotation in one signal:
-    an unsubstituted placeholder can never produce 200.
+    The failure -> success transition proves substitution and rotation in one
+    signal: an unsubstituted placeholder cannot authenticate the request.
     """
-    fmp_key = _required_env("FMP_API_KEY")
+    platform_key = _required_env("PLATFORM_SECRET_API_KEY")
+    probe = _probe_config()
+    _, _, probe_host, success_status = probe
     provider = _provider()
     runtime = None
     identity = None
@@ -121,29 +146,29 @@ async def test_substitution_and_rotation_through_fmp():
         identity = (
             await provider.reconcile_platform_secrets(
                 _resolved(
-                    env_var="FMP_API_KEY", name=name, value=junk, hosts=(FMP_HOST,)
+                    env_var="PLATFORM_SECRET_API_KEY", name=name, value=junk, hosts=(probe_host,)
                 )
             )
         )[0]
-        runtime = await provider.create(platform_secret_bindings={"FMP_API_KEY": name})
+        runtime = await provider.create(platform_secret_bindings={"PLATFORM_SECRET_API_KEY": name})
 
         env_result = await runtime.exec(
-            "python3 -c 'import os; print(os.environ[\"FMP_API_KEY\"])'"
+            "python3 -c 'import os; print(os.environ[\"PLATFORM_SECRET_API_KEY\"])'"
         )
         placeholder = env_result.stdout.strip()
         assert placeholder == identity.placeholder
         assert placeholder.startswith("dtn_secret_")
         assert placeholder != junk
-        assert placeholder != fmp_key
+        assert placeholder != platform_key
 
-        before = await _probe(runtime, "FMP_API_KEY")
+        before = await _probe(runtime, "PLATFORM_SECRET_API_KEY", probe)
         assert before["placeholder"] is True
-        assert before["status"] == 401
+        assert before["ok"] is False
 
         rotated_identity = (
             await provider.reconcile_platform_secrets(
                 _resolved(
-                    env_var="FMP_API_KEY", name=name, value=fmp_key, hosts=(FMP_HOST,)
+                    env_var="PLATFORM_SECRET_API_KEY", name=name, value=platform_key, hosts=(probe_host,)
                 )
             )
         )[0]
@@ -153,11 +178,11 @@ async def test_substitution_and_rotation_through_fmp():
         # (~30s observed live), so allow a 90s window.
         after = None
         for _ in range(30):
-            after = await _probe(runtime, "FMP_API_KEY")
-            if after["status"] == 200:
+            after = await _probe(runtime, "PLATFORM_SECRET_API_KEY", probe)
+            if after["status"] == success_status:
                 break
             await asyncio.sleep(3)
-        assert after == {"placeholder": True, "status": 200, "ok": True}
+        assert after == {"placeholder": True, "status": success_status, "ok": True}
     finally:
         try:
             if runtime is not None:
@@ -175,7 +200,7 @@ async def test_hot_identity_swap_reaches_new_processes_without_restart():
 
     The restart-free half of convergence: after ``update_secrets`` a fresh
     exec process sees the NEW placeholder immediately, and egress substitutes
-    it (junk-bound baseline 401 -> real-key secret 200). This is the
+    it (a failing placeholder baseline -> a successful configured secret). This is the
     assumption the request-path hot resync and the sweep's certified-behind
     branch stand on (probe run 2026-07-23 measured 0s to first 200).
     """
@@ -185,7 +210,9 @@ async def test_hot_identity_swap_reaches_new_processes_without_restart():
         remount_platform_secret_bindings,
     )
 
-    fmp_key = _required_env("FMP_API_KEY")
+    platform_key = _required_env("PLATFORM_SECRET_API_KEY")
+    probe = _probe_config()
+    _, _, probe_host, success_status = probe
     provider = _provider()
     runtime = None
     identity_a = identity_b = None
@@ -197,52 +224,52 @@ async def test_hot_identity_swap_reaches_new_processes_without_restart():
         identity_a = (
             await provider.reconcile_platform_secrets(
                 _resolved(
-                    env_var="FMP_API_KEY", name=name_a, value=junk, hosts=(FMP_HOST,)
+                    env_var="PLATFORM_SECRET_API_KEY", name=name_a, value=junk, hosts=(probe_host,)
                 )
             )
         )[0]
         identity_b = (
             await provider.reconcile_platform_secrets(
                 _resolved(
-                    env_var="FMP_API_KEY",
+                    env_var="PLATFORM_SECRET_API_KEY",
                     name=name_b,
-                    value=fmp_key,
-                    hosts=(FMP_HOST,),
+                    value=platform_key,
+                    hosts=(probe_host,),
                 )
             )
         )[0]
         assert identity_a.placeholder != identity_b.placeholder
         runtime = await provider.create(
-            platform_secret_bindings={"FMP_API_KEY": name_a}
+            platform_secret_bindings={"PLATFORM_SECRET_API_KEY": name_a}
         )
 
-        before = await _probe(runtime, "FMP_API_KEY")
+        before = await _probe(runtime, "PLATFORM_SECRET_API_KEY", probe)
         assert before["placeholder"] is True
-        assert before["status"] == 401
+        assert before["ok"] is False
 
         # Hot swap A -> B on the running sandbox; no stop/start anywhere.
         await remount_platform_secret_bindings(
             runtime,
             expected={
-                "FMP_API_KEY": hashlib.sha256(
+                "PLATFORM_SECRET_API_KEY": hashlib.sha256(
                     identity_b.placeholder.encode()
                 ).hexdigest()
             },
-            bindings={"FMP_API_KEY": name_b},
+            bindings={"PLATFORM_SECRET_API_KEY": name_b},
         )
 
         env_result = await runtime.exec(
-            "python3 -c 'import os; print(os.environ[\"FMP_API_KEY\"])'"
+            "python3 -c 'import os; print(os.environ[\"PLATFORM_SECRET_API_KEY\"])'"
         )
         assert env_result.stdout.strip() == identity_b.placeholder
 
         after = None
         for _ in range(30):
-            after = await _probe(runtime, "FMP_API_KEY")
-            if after["status"] == 200:
+            after = await _probe(runtime, "PLATFORM_SECRET_API_KEY", probe)
+            if after["status"] == success_status:
                 break
             await asyncio.sleep(3)
-        assert after == {"placeholder": True, "status": 200, "ok": True}
+        assert after == {"placeholder": True, "status": success_status, "ok": True}
     finally:
         try:
             if runtime is not None:
@@ -259,12 +286,13 @@ async def test_hot_identity_swap_reaches_new_processes_without_restart():
 
 
 async def test_host_restriction_blocks_substitution():
-    """A Secret allowed only for another host must NOT be substituted toward FMP.
+    """A Secret allowed only for another host must not be substituted.
 
     Uses the real key as the value so a restriction failure is observable as
-    an improper 200; the value can only ever reach FMP's own servers.
+    an improper successful response; the value can only reach approved hosts.
     """
-    fmp_key = _required_env("FMP_API_KEY")
+    platform_key = _required_env("PLATFORM_SECRET_API_KEY")
+    probe = _probe_config()
     provider = _provider()
     runtime = None
     identity = None
@@ -273,18 +301,17 @@ async def test_host_restriction_blocks_substitution():
         identity = (
             await provider.reconcile_platform_secrets(
                 _resolved(
-                    env_var="FMP_API_KEY",
+                    env_var="PLATFORM_SECRET_API_KEY",
                     name=name,
-                    value=fmp_key,
-                    hosts=("example.com",),
+                    value=platform_key,
+                    hosts=("unapproved.invalid",),
                 )
             )
         )[0]
-        runtime = await provider.create(platform_secret_bindings={"FMP_API_KEY": name})
+        runtime = await provider.create(platform_secret_bindings={"PLATFORM_SECRET_API_KEY": name})
 
-        result = await _probe(runtime, "FMP_API_KEY")
+        result = await _probe(runtime, "PLATFORM_SECRET_API_KEY", probe)
         assert result["placeholder"] is True
-        assert result["status"] == 401
         assert result["ok"] is False
     finally:
         try:

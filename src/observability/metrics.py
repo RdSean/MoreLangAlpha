@@ -224,34 +224,6 @@ def replay_size_bucket(n_bytes: int) -> str:
             return name
     return "huge"
 
-# MarketView WebSocket lifecycle. The `/ws/v1/market-data/aggregates/{market}`
-# endpoint isn't covered by FastAPIInstrumentor (it does HTTP only) — these
-# fill that gap.
-ws_connections_active = meter.create_up_down_counter(
-    "langalpha.ws.connections.active",
-    description="Active MarketView WebSocket connections by market + interval.",
-    unit="{connection}",
-)
-
-ws_connection_duration_seconds = meter.create_histogram(
-    "langalpha.ws.connection.duration_seconds",
-    description="MarketView WebSocket connection lifetime.",
-    unit="s",
-)
-
-ws_messages_sent = meter.create_counter(
-    "langalpha.ws.messages_sent",
-    description="MarketView WebSocket frames sent to the client.",
-    unit="{message}",
-)
-
-ws_disconnects = meter.create_counter(
-    "langalpha.ws.disconnects",
-    description="MarketView WebSocket disconnects by reason (client_close | server_error | shutdown).",
-    unit="{disconnect}",
-)
-
-
 # Event-loop scheduling delay, sampled by a fixed-interval heartbeat. Redis
 # read timeouts and SSE stalls are indistinguishable from server-side faults
 # without this: a blocked loop starves the socket reader, and redis-py reports

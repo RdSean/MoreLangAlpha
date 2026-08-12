@@ -3,7 +3,7 @@ import { render, screen, act, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ContextOverflowPill } from '../ContextOverflowPill';
 import { ChatInputRegistry, ContextBus } from '@/lib/contextBus';
-import type { WidgetContextSnapshot } from '@/pages/Dashboard/widgets/framework/contextSnapshot';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
 
 const SNAP: WidgetContextSnapshot = {
   widget_type: 'markets.chart',

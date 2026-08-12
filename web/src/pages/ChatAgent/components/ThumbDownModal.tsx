@@ -11,7 +11,7 @@ import {
 
 const ISSUE_CATEGORIES = [
   'Incorrect data or numbers',
-  'Wrong ticker or company',
+  'Wrong subject or source',
   'Outdated information',
   'Flawed analysis',
   'Missing risk factors',

@@ -302,6 +302,59 @@ async def test_update_workspace_status_running(ws_mock_db, mock_cursor):
 
 
 @pytest.mark.asyncio
+async def test_try_reclaim_stale_workspace_creation(
+    ws_mock_db, mock_cursor, monkeypatch
+):
+    """Only an old, no-sandbox creation row may be atomically reclaimed."""
+    from src.server.database import workspace as workspace_db
+
+    reclaim = getattr(workspace_db, "try_reclaim_stale_workspace_creation", None)
+    assert reclaim is not None
+
+    row = _workspace_row(status="stopped", sandbox_id=None)
+    mock_cursor.fetchone.return_value = row
+    publish = AsyncMock()
+    monkeypatch.setattr(workspace_db, "publish_status_change", publish)
+    stale_before = datetime.now(timezone.utc)
+
+    result = await reclaim("ws-1", stale_before)
+
+    assert result == row
+    sql, params = mock_cursor.execute.call_args.args
+    assert "status = 'creating'" in sql
+    assert "sandbox_id IS NULL" in sql
+    assert "updated_at <= %s" in sql
+    assert params == (stale_before, "ws-1")
+    publish.assert_awaited_once_with("ws-1", "stopped")
+
+
+@pytest.mark.asyncio
+async def test_try_abandon_workspace_creation_only_stops_unprovisioned_row(
+    ws_mock_db, mock_cursor, monkeypatch
+):
+    """Cancellation may only release the original no-sandbox creation row."""
+    from src.server.database import workspace as workspace_db
+
+    abandon = getattr(workspace_db, "try_abandon_workspace_creation", None)
+    assert abandon is not None
+
+    row = _workspace_row(status="stopped", sandbox_id=None)
+    mock_cursor.fetchone.return_value = row
+    publish = AsyncMock()
+    monkeypatch.setattr(workspace_db, "publish_status_change", publish)
+
+    result = await abandon("ws-1")
+
+    assert result == row
+    sql, params = mock_cursor.execute.call_args.args
+    assert "status = 'creating'" in sql
+    assert "sandbox_id IS NULL" in sql
+    assert "workspace_id = %s" in sql
+    assert params == ("ws-1",)
+    publish.assert_awaited_once_with("ws-1", "stopped")
+
+
+@pytest.mark.asyncio
 async def test_delete_workspace_soft(ws_mock_db, mock_cursor):
     """delete_workspace (soft) updates status to 'deleted'."""
     from src.server.database.workspace import delete_workspace

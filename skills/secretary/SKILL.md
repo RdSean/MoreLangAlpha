@@ -25,7 +25,7 @@ These run immediately (no approval):
 
 ### ptc_agent dispatch
 
-`ptc_agent` is **asynchronous** — it dispatches the question and returns immediately. The PTC agent runs in the background with full code execution, charts, and financial data tools.
+`ptc_agent` is **asynchronous** — it dispatches the question and returns immediately. The PTC agent runs in the background with code execution, workspace access, and enabled general-purpose tools.
 
 Return: `{ success, workspace_id, thread_id, status: "dispatched", report_back }`
 

@@ -16,7 +16,13 @@ FROM ubuntu:24.04
 ARG NODE_VERSION=24.14.1
 
 # ---------- System packages ----------
-RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections \
+RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.ustc.edu.cn/ubuntu-ports|g' /etc/apt/sources.list.d/ubuntu.sources \
+    && printf '%s\n' \
+        'Acquire::http::No-Cache "true";' \
+        'Acquire::http::Pipeline-Depth "0";' \
+        'Acquire::Retries "10";' \
+        > /etc/apt/apt.conf.d/99langalpha-http \
+    && echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections \
     && apt-get update \
     && apt-get install -y \
         python3 python3-pip python3-venv \
@@ -51,13 +57,6 @@ RUN apt-get update \
     && tar -xzf /tmp/gh.tar.gz -C /tmp \
     && mv "/tmp/gh_2.87.3_linux_${GH_ARCH}/bin/gh" /usr/local/bin/gh \
     && rm -rf /tmp/gh.tar.gz "/tmp/gh_2.87.3_linux_${GH_ARCH}" \
-    # -- Polymarket CLI (prediction-market data; multi-arch x86_64 / aarch64) --
-    && POLY_ARCH=$(uname -m) \
-    && curl -fsSL "https://github.com/Polymarket/polymarket-cli/releases/download/v0.1.4/polymarket-v0.1.4-${POLY_ARCH}-unknown-linux-gnu.tar.gz" \
-        -o /tmp/polymarket.tar.gz \
-    && tar -xzf /tmp/polymarket.tar.gz -C /tmp \
-    && mv /tmp/polymarket /usr/local/bin/polymarket \
-    && rm -rf /tmp/polymarket.tar.gz \
     # -- Docker Engine (for interactive-dashboard complex tier) --
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
@@ -87,15 +86,10 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/usr/local/ms-playwright
 # ---------- Python packages ----------
 # Mirrors DEFAULT_DEPENDENCIES in src/ptc_agent/core/sandbox/_defaults.py
 # (the list the Daytona snapshot installs). Keep both in sync.
-# Override curl_cffi cap: yfinance pins <0.14 but works fine with 0.14+
-# (tested). scrapling[all] requires >=0.14. Override resolves the conflict.
-RUN echo 'curl_cffi>=0.14' > /tmp/overrides.txt \
-    && uv pip install --system \
-    --override /tmp/overrides.txt \
+RUN uv pip install --system \
     mcp==1.29.0 fastmcp fastapi \
     pandas requests aiohttp "httpx[http2]" \
     numpy scipy scikit-learn statsmodels \
-    yfinance \
     matplotlib seaborn plotly \
     pillow opencv-python-headless scikit-image \
     openpyxl xlrd python-docx pypdf \
@@ -103,8 +97,7 @@ RUN echo 'curl_cffi>=0.14' > /tmp/overrides.txt \
     defusedxml pdfplumber reportlab "markitdown[pptx]" \
     "scrapling[all]" html-to-markdown trafilatura youtube-transcript-api \
     playwright \
-    tqdm tabulate \
-    && rm /tmp/overrides.txt
+    tqdm tabulate
 
 # ---------- Scrapling browser setup ----------
 # scrapling install needs root for `playwright install-deps` (apt packages).

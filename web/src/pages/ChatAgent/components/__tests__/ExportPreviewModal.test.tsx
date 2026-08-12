@@ -70,10 +70,10 @@ function renderModal(overrides: Partial<typeof defaultProps> = {}) {
 // ---------------------------------------------------------------------------
 
 describe('Exported constants', () => {
-  it('PRINT_PRESETS has 4 presets (Equity Research, Academic, Technical, General)', () => {
+  it('PRINT_PRESETS has 4 presets (Report, Academic, Technical, General)', () => {
     expect(PRINT_PRESETS).toHaveLength(4);
     const labels = PRINT_PRESETS.map((p) => p.label);
-    expect(labels).toEqual(['Equity Research', 'Academic', 'Technical', 'General']);
+    expect(labels).toEqual(['Report', 'Academic', 'Technical', 'General']);
   });
 
   it('PRINT_FONTS has 12 fonts across 3 groups (Sans-serif, Serif, Mono)', () => {
@@ -129,13 +129,13 @@ describe('ExportPreviewModal', () => {
     });
   });
 
-  it('shows default preset selection (Equity Research: font Inter, size 11, height 1.4)', () => {
+  it('shows default preset selection (Report: font Inter, size 11, height 1.4)', () => {
     renderModal();
 
     // Style (preset) select
     const selects = screen.getAllByRole('combobox');
     const presetSelect = selects[0];
-    expect(presetSelect).toHaveValue('Equity Research');
+    expect(presetSelect).toHaveValue('Report');
 
     // Font select
     const fontSelect = selects[1];
@@ -353,7 +353,7 @@ describe('ExportPreviewModal', () => {
     const fontSelect = selects[1];
     const presetSelect = selects[0];
 
-    // Change font to Merriweather (not part of default Equity Research preset)
+    // Change font to Merriweather (not part of the default Report preset)
     fireEvent.change(fontSelect, { target: { value: '"Merriweather", serif' } });
 
     // Preset should now show Custom

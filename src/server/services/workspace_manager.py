@@ -4,14 +4,12 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-import httpx
 
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.mcp_sanitize import is_user_server
@@ -40,7 +38,9 @@ from src.server.database.workspace import (
     delete_workspace as db_delete_workspace,
     get_workspace as db_get_workspace,
     get_workspaces_by_status,
+    try_abandon_workspace_creation,
     try_claim_workspace_for_start,
+    try_reclaim_stale_workspace_creation,
     update_workspace_activity,
     update_workspace_status,
 )
@@ -96,6 +96,11 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         # Track workspaces that used lazy init and still need skills/assets synced
         # Once sandbox is ready and sync completes, workspace is removed from this set
         self._pending_lazy_sync: set[str] = set()
+
+        # Initial provisioning does not cache its Session until the sandbox is
+        # initialized. Keep a local liveness marker so the stale-row reaper
+        # cannot reclaim a legitimately slow image build on this worker.
+        self._pending_creations: set[str] = set()
 
         # Elevated-tier workspaces restarted this request, owed an entitlement
         # re-check in Phase 2 (lazy spec reclaim). Marked in _restart_workspace
@@ -334,38 +339,6 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             f"[vault] Pushed {len(secrets)} secret(s) to sandbox",
             extra={"workspace_id": workspace_id},
         )
-
-    @staticmethod
-    async def _mint_sandbox_tokens(user_id: str, workspace_id: str) -> dict:
-        """Mint scoped OAuth2 tokens for sandbox ginlix-data access.
-
-        Returns token dict on success, empty dict on failure (graceful degradation).
-        When empty, the sandbox runs in FMP-only mode.
-        """
-        auth_url = os.getenv("AUTH_SERVICE_URL", "")
-        service_token = os.getenv("INTERNAL_SERVICE_TOKEN", "")
-        ginlix_data_url = os.getenv("GINLIX_DATA_URL", "")
-
-        # Skip entire token chain if ginlix-data is not configured
-        if not ginlix_data_url or not auth_url or not service_token:
-            return {}
-
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{auth_url}/api/auth/data-tokens",
-                    json={"user_id": user_id, "workspace_id": workspace_id},
-                    headers={"X-Service-Token": service_token},
-                    timeout=10,
-                )
-                resp.raise_for_status()
-                return resp.json()
-        except Exception as e:
-            logger.warning(
-                f"Failed to mint sandbox tokens — ginlix-data features disabled: {e}",
-                extra={"workspace_id": workspace_id},
-            )
-            return {}
 
     # ── Per-workspace MCP resolution + composite caching ────────────────
     #
@@ -627,16 +600,15 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         if not sandbox:
             return
 
-        # Unified asset sync (skills + tools + data_client + tokens)
+        # Unified asset sync (Skills, MCP wrappers, and internal packages).
         skill_dirs = (
             self.config.skills.local_skill_dirs_with_sandbox()
             if self.config.skills.enabled
             else None
         )
 
-        # All sync tasks run in parallel. Token minting and user data fetching
-        # are bundled with the manifest sync so their results feed into the
-        # unified hash comparison — only upload if content actually changed.
+        # All sync tasks run in parallel. The manifest keeps uploads content-based,
+        # so unchanged assets are not sent to a running sandbox.
         _sync_t0 = time.time()
         _sync_times: dict[str, float] = {}
 
@@ -647,20 +619,13 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             finally:
                 _sync_times[name] = (time.time() - t0) * 1000
 
-        async def _mint_and_sync_assets() -> Any:
-            tokens = {}
-            if reusing_sandbox and user_id:
-                tokens = await self._mint_sandbox_tokens(user_id, workspace_id)
-
+        async def _sync_assets() -> Any:
             return await sandbox.sync_sandbox_assets(
                 skill_dirs=skill_dirs,
                 reusing_sandbox=reusing_sandbox,
-                tokens=tokens or None,
-                user_id=user_id,
-                workspace_id=workspace_id,
             )
 
-        tasks: list[Any] = [_timed("mint+manifest", _mint_and_sync_assets())]
+        tasks: list[Any] = [_timed("manifest", _sync_assets())]
 
         # Vault secrets — piggyback on existing parallel gather so
         # secrets are available after stop/start and sandbox recovery.
@@ -767,13 +732,9 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         if core_config is None:
             core_config = self.config.to_core_config()
 
-        sandbox_tokens = await self._mint_sandbox_tokens(user_id or "", workspace_id)
         session = SessionManager.get_session(workspace_id, core_config)
         try:
             await session.initialize(
-                sandbox_tokens=sandbox_tokens,
-                user_id=user_id,
-                workspace_id=workspace_id,
                 tier=tier,
                 auto_stop_minutes=auto_stop_minutes,
             )
@@ -832,6 +793,18 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
 
             self._record_sync(workspace_id)
             return session, workspace
+        except asyncio.CancelledError:
+            # Cancellation is a BaseException. Complete the same identity-
+            # guarded teardown as ordinary provision failures before allowing
+            # the outer create path to release its no-sandbox row.
+            cleanup = asyncio.create_task(
+                self._clear_session(workspace_id, evict_session=session)
+            )
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                pass
+            raise
         except Exception:
             # Unwind a half-built provision: cancel discovery, drop the broken
             # cached session (identity-guarded), and destroy the Daytona sandbox
@@ -1116,6 +1089,9 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         Returns:
             Created workspace record
         """
+        from src.server.services.education_access import require_nonstudent_agent_features
+
+        await require_nonstudent_agent_features(user_id)
         # 1. Create DB record (no lock needed — DB generates unique ID)
         workspace = await db_create_workspace(
             user_id=user_id,
@@ -1130,6 +1106,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         async with self._observed_lock(
             workspace_id, "workspace.create", user_id=_obs_hash_id(user_id)
         ):
+            self._pending_creations.add(workspace_id)
             try:
                 # A brand-new workspace has zero MCP rows → builtins-only identity
                 # (ws_version=0, no discovery to kick). Seed a default agent.md as
@@ -1157,6 +1134,24 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                 safe_add(workspace_created, 1)
                 return workspace
 
+            except asyncio.CancelledError:
+                # A cancellation during first provision used to bypass the
+                # Exception handler below, leaving a no-sandbox row in
+                # ``creating`` indefinitely. The guarded update never changes
+                # a row that already recorded a sandbox identity.
+                release = asyncio.create_task(
+                    try_abandon_workspace_creation(workspace_id)
+                )
+                try:
+                    await asyncio.shield(release)
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception(
+                        "Failed to release cancelled workspace creation %s",
+                        workspace_id,
+                    )
+                raise
             except Exception as e:
                 # The provisioning spine already tore down any half-built sandbox;
                 # mark the row error so it stops claiming 'creating'/'running'.
@@ -1168,6 +1163,17 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                     status="error",
                 )
                 raise
+            finally:
+                self._pending_creations.discard(workspace_id)
+
+    async def reclaim_stale_workspace_creation(
+        self, workspace_id: str
+    ) -> Dict[str, Any] | None:
+        """Claim a dead creator's no-sandbox row after the recovery window."""
+        stale_before = datetime.now(timezone.utc) - timedelta(
+            seconds=self.reap_stuck_after
+        )
+        return await try_reclaim_stale_workspace_creation(workspace_id, stale_before)
 
     def has_ready_session(self, workspace_id: str) -> bool:
         """Check if a ready session exists in cache (no I/O).
@@ -1296,6 +1302,19 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             ValueError: If workspace not found
             RuntimeError: If workspace is in error/deleted state
         """
+        if user_id:
+            from src.server.services.education_access import (
+                is_student_account,
+                require_student_flash_workspace,
+            )
+
+            # The common parent path must retain the cache-only warm acquire.
+            # Only student requests need a workspace record to enforce the
+            # Flash-only boundary.
+            if await is_student_account(user_id):
+                workspace_for_policy = await db_get_workspace(workspace_id)
+                await require_student_flash_workspace(user_id, workspace_for_policy)
+
         _t0 = time.time()
         _session_phases: dict[str, float] = {}
 
@@ -1405,6 +1424,21 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
 
             # No usable cached session — handle based on status
             if session is None:
+                if status == "creating":
+                    # A crashed process can leave the initial DB row behind
+                    # before a sandbox exists. Claim only an old no-sandbox row
+                    # so a still-live creator cannot be raced.
+                    reclaimed = await self.reclaim_stale_workspace_creation(
+                        workspace_id
+                    )
+                    if reclaimed is None:
+                        raise RuntimeError(
+                            f"Workspace {workspace_id} is still being created. "
+                            "Please wait and try again."
+                        )
+                    workspace = reclaimed
+                    status = "stopped"
+
                 if status in ("stopped", "starting"):
                     # Cross-worker mutex: only one worker may transition
                     # stopped → starting at a time. Try the claim HERE (a fast
@@ -1438,12 +1472,6 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                     if not did_init:
                         # Session was already initialized — refresh via Phase 2 sync.
                         needs_sync = True
-
-                elif status == "creating":
-                    raise RuntimeError(
-                        f"Workspace {workspace_id} is still being created. "
-                        "Please wait and try again."
-                    )
 
                 elif status == "stopping":
                     logger.info(
@@ -2197,6 +2225,16 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
 
         try:
             logger.info(f"Restarting workspace {workspace_id} (claimed for start)")
+            if not claimed.get("sandbox_id"):
+                logger.warning(
+                    "Workspace %s was reclaimed without a sandbox; provisioning it",
+                    workspace_id,
+                )
+                return await self._recover_sandbox(
+                    workspace_id,
+                    workspace_user_id,
+                    self.config.to_core_config(),
+                )
             return await self._restart_workspace(
                 claimed,
                 user_id=workspace_user_id,
@@ -2723,7 +2761,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         return stopped_count
 
     async def reap_stuck_starting_workspaces(self) -> int:
-        """Revert workspaces wedged in 'starting' back to 'stopped'.
+        """Recover stale ``starting`` rows and abandoned ``creating`` rows.
 
         Backstop for the cross-worker start mutex: if a claim winner's Phase 2
         dies without reverting (worker crash, event-loop teardown that beats the
@@ -2787,8 +2825,45 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                     f"Error reaping stuck-starting workspace {workspace_id}: {e}"
                 )
 
+        creating_workspaces = await get_workspaces_by_status("creating", limit=1000)
+        if len(creating_workspaces) == 1000:
+            logger.warning(
+                "reap_stuck_creating hit the 1000-row scan cap; more stuck "
+                "rows may remain and will be reaped on the next cycle"
+            )
+        for workspace in creating_workspaces:
+            # A row with a recorded sandbox may still be provisioned or require
+            # provider-specific recovery; this path is only for an unambiguous
+            # crash before sandbox creation.
+            if workspace.get("sandbox_id"):
+                continue
+            updated_at = workspace.get("updated_at")
+            if not updated_at:
+                continue
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            if (now - updated_at).total_seconds() <= self.reap_stuck_after:
+                continue
+
+            workspace_id = str(workspace["workspace_id"])
+            if workspace_id in self._pending_creations:
+                # A first provision on this worker has no cached Session until
+                # initialization succeeds, which can legitimately exceed the
+                # stale threshold while building the local sandbox image.
+                continue
+            if workspace_id in self._sessions:
+                continue
+            try:
+                reclaimed = await self.reclaim_stale_workspace_creation(workspace_id)
+                if reclaimed is not None:
+                    reverted += 1
+            except Exception as e:
+                logger.error(
+                    f"Error reaping stuck-creating workspace {workspace_id}: {e}"
+                )
+
         if reverted > 0:
-            logger.info(f"Reaped {reverted} workspaces stuck in 'starting'")
+            logger.info(f"Reaped {reverted} stale workspace lifecycle rows")
 
         return reverted
 

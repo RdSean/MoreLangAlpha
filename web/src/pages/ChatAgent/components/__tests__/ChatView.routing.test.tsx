@@ -11,13 +11,12 @@ import { computeAgentArtifactRouting } from '../../utils/agentPaths';
 
 describe('computeAgentArtifactRouting — per-kind routing', () => {
   it('routes user memory entry → Memory tab + tier user + clears workspace id', () => {
-    const r = computeAgentArtifactRouting('.agents/user/memory/risk-preferences.md');
+    const r = computeAgentArtifactRouting('.agents/user/memory/learning-preferences.md');
     expect(r).toEqual({
       targetFile: null,
-      targetMemoryKey: 'risk-preferences.md',
+      targetMemoryKey: 'learning-preferences.md',
       targetMemoryTier: 'user',
       targetMemoKey: null,
-      targetUserProfile: null,
       clearWorkspaceId: true,
       setWorkspaceId: null,
     });
@@ -42,7 +41,6 @@ describe('computeAgentArtifactRouting — per-kind routing', () => {
       targetMemoryKey: null,
       targetMemoryTier: null,
       targetMemoKey: 'my-report.pdf',
-      targetUserProfile: null,
       clearWorkspaceId: true,
       setWorkspaceId: null,
     });

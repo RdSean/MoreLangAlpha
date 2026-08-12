@@ -514,6 +514,21 @@ function ThreadGallery({ workspaceId, onBack, onThreadSelect }: ThreadGalleryPro
     }
   }, [showFilePanel, clampPanelWidth]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('panel') !== 'files') return;
+
+    params.delete('panel');
+    navigate(
+      { pathname: location.pathname, search: params.toString() ? `?${params}` : '' },
+      { replace: true, state: location.state },
+    );
+    if (!isFlash) {
+      setFilePanelWidth(clampPanelWidth(850));
+      setShowFilePanel(true);
+    }
+  }, [clampPanelWidth, isFlash, location.pathname, location.search, location.state, navigate]);
+
   /**
    * Handle drag panel width
    */

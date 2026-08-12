@@ -76,31 +76,6 @@ function appendNotificationSegmentOnce(
 
 
 /**
- * Checks if a tool result indicates an onboarding-related success.
- * Onboarding tools: update_user_data for risk_preference, watchlist_item, portfolio_holding.
- * @param {string|object} resultContent - Raw result content (JSON string or parsed object)
- * @returns {boolean}
- */
-function isOnboardingRelatedToolSuccess(resultContent: unknown): boolean {
-  if (resultContent == null) return false;
-  let parsed;
-  if (typeof resultContent === 'string') {
-    try {
-      parsed = JSON.parse(resultContent);
-    } catch {
-      return false;
-    }
-  } else if (typeof resultContent === 'object') {
-    parsed = resultContent;
-  } else {
-    return false;
-  }
-  if (!parsed || parsed.success !== true) return false;
-  return !!(parsed.risk_preference || parsed.watchlist_item || parsed.portfolio_holding);
-}
-
-
-/**
  * Marks incomplete todos as 'stale' in todoListProcesses of assistant messages.
  * Used when the agent stream ends without completing all todos.
  * @param messages - Current messages array
@@ -180,4 +155,4 @@ export function mapToolCallIdToAgentId(
   return rest;
 }
 
-export { collectRenderedInterruptIds, buildModelFallbackSegment, appendNotificationSegmentOnce, isOnboardingRelatedToolSuccess };
+export { collectRenderedInterruptIds, buildModelFallbackSegment, appendNotificationSegmentOnce };

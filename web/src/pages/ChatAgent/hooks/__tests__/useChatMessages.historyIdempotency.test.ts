@@ -33,7 +33,6 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));
 
-vi.mock('@/lib/supabase', () => ({ supabase: null }));
 
 vi.mock('../utils/threadStorage', () => ({
   // Pretend the workspace already has a stored thread so the hook initializes

@@ -127,7 +127,6 @@ export interface StreamRuntime {
   onWorkspaceCreated: ((info: { workspaceId: string; question: string }) => void) | null;
   onFileArtifact: ((event: SSEEvent) => void) | null;
   onPreviewUrl: ((data: PreviewData) => void) | null;
-  onOnboardingRelatedToolComplete: (() => void) | null;
   // stable (setters)
   setMessages: SetMessages;
   setIsLoading: React.Dispatch<React.SetStateAction<boolean>>;

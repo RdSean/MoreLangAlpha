@@ -5,7 +5,7 @@ description: "Search X (Twitter) posts, pull user profiles, fetch specific tweet
 
 # X (Twitter) API
 
-Read-only access to X content via five MCP tools. Use for sentiment on tickers, exec announcements, launches, event tracking, and qualitative research alongside SEC/market data.
+Read-only access to X content via five MCP tools. Use for public discussion research, announcements, launches, event tracking, and qualitative research.
 
 > **Not for single-post URL lookups.** If the user hands you a specific X post URL and just wants its text or context, use `web_fetch` on the URL — no vault, no auth, no rate limit. Reach for this skill when the task is **search, aggregation, or thread traversal**.
 
@@ -34,11 +34,11 @@ The primary use case is **search** — the first two tools are what you'll reach
 
 ## Examples
 
-### Recent sentiment on a ticker
+### Recent discussion about a topic
 
 ```python
 res = search_posts(
-    query="$NVDA -is:retweet lang:en",
+    query="#projectbasedlearning -is:retweet lang:en",
     bearer_token=token,
     max_results=100,
 )
@@ -52,7 +52,7 @@ for p in posts[:10]:
 
 ```python
 res = search_all_posts(
-    query="$TSLA earnings -is:retweet lang:en",
+    query="project-based learning -is:retweet lang:en",
     bearer_token=token,
     max_results=500,
     start_time="2020-03-13T00:00:00Z",
@@ -78,7 +78,7 @@ all_posts = [root["post"], *thread["posts"]]
 posts, next_tok = [], None
 while len(posts) < 500:
     res = search_posts(
-        query="from:FedSpeakers",
+    query="from:NASA",
         bearer_token=token,
         max_results=100,
         next_token=next_tok,
@@ -99,7 +99,7 @@ Full per-tool response schemas (including user shape and error variants): [refer
 
 ## Query syntax
 
-`$TSLA` (cashtag), `#hashtag`, `from:elonmusk`, `to:@SEC_News`, `-is:retweet`, `is:verified`, `has:links`, `has:media`, `lang:en`, `"exact phrase"`, parentheses + `OR` for alternation. Full list: https://docs.x.com/x-api/posts/search/introduction.
+`#hashtag`, `from:elonmusk`, `to:@NASA`, `-is:retweet`, `is:verified`, `has:links`, `has:media`, `lang:en`, `"exact phrase"`, parentheses + `OR` for alternation. Full list: https://docs.x.com/x-api/posts/search/introduction.
 
 ## Errors
 
@@ -108,14 +108,12 @@ Every tool returns `{"error": "...", ...}` on failure — they never raise. Alwa
 ## Do / Don't
 
 - **Do** read `token = get("X_BEARER_TOKEN")` once and reuse it across calls.
-- **Do** cross-reference with `get_daily_prices` and `get_sec_filing` when investigating price moves or disclosures.
+- **Do** cross-reference public X content with primary sources and web search when claims need verification.
 - **Don't** hardcode tokens. Ever.
 - **Don't** cache `next_token` across sessions — cursors can expire.
 - **Don't** assume every author is resolved — check for `{unresolved: true}` before reading `username`.
 
 ## Related
 
-- `get_daily_prices` — cross-reference X sentiment with price action
-- `get_sec_filing` — pair chatter with official disclosures
 - `scrapling` `get` / `fetch` — fallback for public pages when the API is blocked
 - `web_search` — broader news search that also indexes X posts

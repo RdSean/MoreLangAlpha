@@ -11,7 +11,7 @@ import pytest
 from ptc_agent.agent.prompts import get_loader, reset_loader
 
 HTML_BLOCK_MARKER = "Output Format: Styled HTML"
-SKILL_REFS = (".agents/skills/html-report/SKILL.md", ".agents/skills/ui-design/SKILL.md")
+SKILL_REFS = (".agents/skills/html-report/SKILL.md",)
 
 
 def _render(agent_preference, sandbox_enabled=True):
@@ -29,7 +29,6 @@ def _render(agent_preference, sandbox_enabled=True):
     return loader.render(
         "components/user_profile.md.j2",
         user_profile=profile,
-        user_data_counts=None,
         sandbox_enabled=sandbox_enabled,
     )
 
@@ -111,7 +110,7 @@ class TestGenericLoop:
         # excluded key must not leave a dangling "- " bullet behind.
         out = _render({"output_format": "html"})
         assert HTML_BLOCK_MARKER in out
-        prefs_section = out.split("## Agent Preferences", 1)[1].split("## Financial Context", 1)[0]
+        prefs_section = out.split("## Agent Preferences", 1)[1]
         for line in prefs_section.splitlines():
             assert line.strip() != "-"
             assert line.strip() != "- **"

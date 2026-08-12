@@ -12,7 +12,7 @@ from src.tools.web.inhouse.scrapling_crawler import (
     _MAX_FULL_PAGE_CHARS,
     ScraplingCrawler,
     _extract_title,
-    _financial_figures,
+    _numeric_figures,
     _html_to_markdown,
     _needs_browser,
     _needs_stealth,
@@ -134,13 +134,13 @@ def _mock_converters(traf_return, full_return=None, full_raises=False):
         yield
 
 
-class TestFinancialFigures:
+class TestNumericFigures:
     def test_extracts_dollars_percents_and_bignums(self):
-        figs = _financial_figures("up 85% to $81.62 billion and index at 66,588.12")
+        figs = _numeric_figures("up 85% to $81.62 billion and index at 66,588.12")
         assert figs == {"85%", "$81.62billion", "66,588.12"}
 
     def test_empty_text_has_no_figures(self):
-        assert _financial_figures("purely qualitative prose, no numbers") == set()
+        assert _numeric_figures("purely qualitative prose, no numbers") == set()
 
 
 class TestHtmlToMarkdownDecision:

@@ -39,19 +39,19 @@ describe('provenanceMcpKey', () => {
   });
 
   it('includes the args fingerprint', () => {
-    expect(provenanceMcpKey(rec('mcp_tool', 'srv:get_prices', { sha256: 'abc' }))).toBe(
+    expect(provenanceMcpKey(rec('mcp_tool', 'docs:get_document', { sha256: 'abc' }))).toBe(
       '{"sha256":"abc"}#',
     );
   });
 
   it('includes the result hash, so same-args calls returning different data differ', () => {
-    // Live market data: identical query seconds apart returns a different
-    // snapshot. The result hash must keep them distinct.
+    // A repeated query can return a different result; the result hash must
+    // keep those accesses distinct.
     const a = provenanceMcpKey(
-      rec('mcp_tool', 'price_data:get_stock_data', { sha256: 'aapl' }, 'r1'),
+      rec('mcp_tool', 'docs:get_document', { sha256: 'chapter-a' }, 'r1'),
     );
     const b = provenanceMcpKey(
-      rec('mcp_tool', 'price_data:get_stock_data', { sha256: 'aapl' }, 'r2'),
+      rec('mcp_tool', 'docs:get_document', { sha256: 'chapter-a' }, 'r2'),
     );
     expect(a).not.toBe(b);
   });
@@ -72,8 +72,8 @@ describe('provenanceMcpKey', () => {
     // A tool called with no arguments (e.g. a list/status call) has an empty
     // fingerprint, so the result hash is the only discriminator: same bytes
     // collapse, different bytes stay apart.
-    const r1 = provenanceMcpKey(rec('mcp_tool', 'srv:list_holdings', undefined, 'r1'));
-    const r2 = provenanceMcpKey(rec('mcp_tool', 'srv:list_holdings', undefined, 'r2'));
+    const r1 = provenanceMcpKey(rec('mcp_tool', 'docs:list_resources', undefined, 'r1'));
+    const r2 = provenanceMcpKey(rec('mcp_tool', 'docs:list_resources', undefined, 'r2'));
     expect(r1).toBe('#r1');
     expect(r1).not.toBe(r2);
   });
@@ -90,16 +90,16 @@ describe('provenanceDisplayKey', () => {
     expect(provenanceDisplayKey({} as ProvenanceRecord)).toBe(' ');
   });
 
-  it('separates two calls to one mcp_tool by args (the AAPL-vs-NVDA bug)', () => {
-    // Both share identifier "price_data:get_stock_data" — only args differ. The
+  it('separates two calls to one mcp_tool by args', () => {
+    // Both share an identifier — only args differ. The
     // key must distinguish them or the second call overwrites the first.
-    const aapl = provenanceDisplayKey(
-      rec('mcp_tool', 'price_data:get_stock_data', { sha256: 'aapl' }),
+    const chapterA = provenanceDisplayKey(
+      rec('mcp_tool', 'docs:get_document', { sha256: 'chapter-a' }),
     );
-    const nvda = provenanceDisplayKey(
-      rec('mcp_tool', 'price_data:get_stock_data', { sha256: 'nvda' }),
+    const chapterB = provenanceDisplayKey(
+      rec('mcp_tool', 'docs:get_document', { sha256: 'chapter-b' }),
     );
-    expect(aapl).not.toBe(nvda);
+    expect(chapterA).not.toBe(chapterB);
   });
 });
 
@@ -113,11 +113,11 @@ describe('countDedupedSources', () => {
     const records = {
       a: { ...rec('web_fetch', 'https://example.com/p'), result_sha256: 'sha-1' },
       b: { ...rec('web_fetch', 'https://example.com/p'), result_sha256: 'sha-2' },
-      c: rec('mcp_tool', 'srv:get_prices'),
+      c: rec('mcp_tool', 'docs:list_resources'),
     };
     // Two distinct display keys: the duplicated URL collapses despite differing
     // shas (web sources intentionally omit sha from the key). mcp_tool keeps sha
-    // (see below), but here srv:get_prices has no args/sha so it's its own row.
+    // (see below), but here docs:list_resources has no args/sha so it is its own row.
     expect(countDedupedSources(records)).toBe(2);
   });
 
@@ -130,33 +130,32 @@ describe('countDedupedSources', () => {
   });
 
   it('counts two same-tool mcp calls with different args as two sources', () => {
-    // Regression: get_stock_data(AAPL) and get_stock_data(NVDA) in one
+    // Two document reads in one
     // execute_code/bash block share source_type + identifier; only the args
     // fingerprint differs. Both must be counted.
     const records = {
-      a: rec('mcp_tool', 'price_data:get_stock_data', { sha256: 'aapl' }),
-      b: rec('mcp_tool', 'price_data:get_stock_data', { sha256: 'nvda' }),
+      a: rec('mcp_tool', 'docs:get_document', { sha256: 'chapter-a' }),
+      b: rec('mcp_tool', 'docs:get_document', { sha256: 'chapter-b' }),
     };
     expect(countDedupedSources(records)).toBe(2);
   });
 
-  it('counts same-tool SAME-ticker calls with different args as two sources', () => {
-    // Same tool AND same ticker, but different args (e.g. a different date
-    // range or interval) → distinct args_fingerprint → distinct sources. The
-    // fingerprint is over the WHOLE arg set, not just the symbol.
+  it('counts same-tool calls with different arguments as two sources', () => {
+    // The fingerprint is over the whole argument set, so different document
+    // sections remain distinct sources.
     const records = {
-      jun: rec('mcp_tool', 'price_data:get_stock_data', { sha256: 'aapl-jun-1day' }),
-      jan: rec('mcp_tool', 'price_data:get_stock_data', { sha256: 'aapl-jan-1day' }),
+      first: rec('mcp_tool', 'docs:get_document', { sha256: 'chapter-a-intro' }),
+      second: rec('mcp_tool', 'docs:get_document', { sha256: 'chapter-a-notes' }),
     };
     expect(countDedupedSources(records)).toBe(2);
   });
 
-  it('counts same-args mcp calls that returned different data as two snapshots', () => {
-    // Time-varying market data: identical args, different result. The earlier
-    // snapshot must not be silently overwritten by the later one.
+  it('counts same-args mcp calls that returned different data as two sources', () => {
+    // Identical arguments can still produce different results. Neither access
+    // may be silently overwritten.
     const records = {
-      morning: rec('mcp_tool', 'price_data:get_stock_data', { sha256: 'aapl' }, 'open-quote'),
-      close: rec('mcp_tool', 'price_data:get_stock_data', { sha256: 'aapl' }, 'close-quote'),
+      first: rec('mcp_tool', 'docs:get_document', { sha256: 'chapter-a' }, 'revision-1'),
+      second: rec('mcp_tool', 'docs:get_document', { sha256: 'chapter-a' }, 'revision-2'),
     };
     expect(countDedupedSources(records)).toBe(2);
   });
@@ -165,8 +164,8 @@ describe('countDedupedSources', () => {
     // A re-delivered/replayed event for the same access — identical args AND
     // identical result hash — is one source, not two.
     const records = {
-      a: rec('mcp_tool', 'price_data:get_stock_data', { sha256: 'aapl' }, 'same-bytes'),
-      b: rec('mcp_tool', 'price_data:get_stock_data', { sha256: 'aapl' }, 'same-bytes'),
+      a: rec('mcp_tool', 'docs:get_document', { sha256: 'chapter-a' }, 'same-bytes'),
+      b: rec('mcp_tool', 'docs:get_document', { sha256: 'chapter-a' }, 'same-bytes'),
     };
     expect(countDedupedSources(records)).toBe(1);
   });
@@ -176,20 +175,20 @@ describe('countDedupedSources', () => {
     // but the display key omits it — identical identifier+args+result collapse to
     // one card. The same statement read in two execute_code blocks shows once.
     const records = {
-      a: rec('mcp_tool', 'fundamentals:get_financial_statements', { sha256: 'inc' }, 'bytes'),
-      b: rec('mcp_tool', 'fundamentals:get_financial_statements', { sha256: 'inc' }, 'bytes'),
+      a: rec('mcp_tool', 'docs:get_outline', { sha256: 'guide' }, 'bytes'),
+      b: rec('mcp_tool', 'docs:get_outline', { sha256: 'guide' }, 'bytes'),
     };
     expect(countDedupedSources(records)).toBe(1);
   });
 
   it('counts a no-arg mcp tool by its result hash', () => {
     const distinct = {
-      a: rec('mcp_tool', 'srv:list_holdings', undefined, 'r1'),
-      b: rec('mcp_tool', 'srv:list_holdings', undefined, 'r2'),
+      a: rec('mcp_tool', 'docs:list_resources', undefined, 'r1'),
+      b: rec('mcp_tool', 'docs:list_resources', undefined, 'r2'),
     };
     const same = {
-      a: rec('mcp_tool', 'srv:list_holdings', undefined, 'r1'),
-      b: rec('mcp_tool', 'srv:list_holdings', undefined, 'r1'),
+      a: rec('mcp_tool', 'docs:list_resources', undefined, 'r1'),
+      b: rec('mcp_tool', 'docs:list_resources', undefined, 'r1'),
     };
     expect(countDedupedSources(distinct)).toBe(2);
     expect(countDedupedSources(same)).toBe(1);
@@ -213,37 +212,37 @@ describe('provenanceRecordKey', () => {
     // The root-cause case: both in-sandbox MCP calls inherit the outer
     // execute_code/bash tool_call_id AND the same "server:tool" identifier, so
     // the discriminator is the only thing keeping them from colliding.
-    const aapl = provenanceRecordKey({
+    const chapterA = provenanceRecordKey({
       tool_call_id: 'bash-1',
       source_type: 'mcp_tool',
-      identifier: 'price_data:get_stock_data',
-      args_fingerprint: { sha256: 'aapl' },
+      identifier: 'docs:get_document',
+      args_fingerprint: { sha256: 'chapter-a' },
     });
-    const nvda = provenanceRecordKey({
+    const chapterB = provenanceRecordKey({
       tool_call_id: 'bash-1',
       source_type: 'mcp_tool',
-      identifier: 'price_data:get_stock_data',
-      args_fingerprint: { sha256: 'nvda' },
+      identifier: 'docs:get_document',
+      args_fingerprint: { sha256: 'chapter-b' },
     });
-    expect(aapl).not.toBe(nvda);
+    expect(chapterA).not.toBe(chapterB);
   });
 
   it('keeps same-args calls distinct when the result differs (time-varying data)', () => {
-    const morning = provenanceRecordKey({
+    const first = provenanceRecordKey({
       tool_call_id: 'bash-1',
       source_type: 'mcp_tool',
-      identifier: 'price_data:get_stock_data',
-      args_fingerprint: { sha256: 'aapl' },
-      result_sha256: 'open-quote',
+      identifier: 'docs:get_document',
+      args_fingerprint: { sha256: 'chapter-a' },
+      result_sha256: 'revision-1',
     });
-    const close = provenanceRecordKey({
+    const second = provenanceRecordKey({
       tool_call_id: 'bash-1',
       source_type: 'mcp_tool',
-      identifier: 'price_data:get_stock_data',
-      args_fingerprint: { sha256: 'aapl' },
-      result_sha256: 'close-quote',
+      identifier: 'docs:get_document',
+      args_fingerprint: { sha256: 'chapter-a' },
+      result_sha256: 'revision-2',
     });
-    expect(morning).not.toBe(close);
+    expect(first).not.toBe(second);
   });
 
   it('collapses a byte-identical duplicate within one code block to one storage key', () => {
@@ -253,8 +252,8 @@ describe('provenanceRecordKey', () => {
     const call = {
       tool_call_id: 'bash-1',
       source_type: 'mcp_tool',
-      identifier: 'price_data:get_stock_data',
-      args_fingerprint: { sha256: 'aapl' },
+      identifier: 'docs:get_document',
+      args_fingerprint: { sha256: 'chapter-a' },
       result_sha256: 'bytes',
     };
     expect(provenanceRecordKey(call)).toBe(provenanceRecordKey({ ...call }));
@@ -266,8 +265,8 @@ describe('provenanceRecordKey', () => {
     // collapses them; see countDedupedSources). This divergence is intentional.
     const common = {
       source_type: 'mcp_tool' as const,
-      identifier: 'price_data:get_stock_data',
-      args_fingerprint: { sha256: 'aapl' },
+      identifier: 'docs:get_document',
+      args_fingerprint: { sha256: 'chapter-a' },
       result_sha256: 'bytes',
     };
     expect(provenanceRecordKey({ ...common, tool_call_id: 'bash-1' })).not.toBe(
@@ -275,31 +274,4 @@ describe('provenanceRecordKey', () => {
     );
   });
 
-  it('keeps each market-watch stamp refresh under its own storage key', () => {
-    // Stamps carry no tool_call_id, so without the sha discriminator every
-    // refresh of a symbol would collide and the accumulator would keep only
-    // the latest snapshot.
-    const common = {
-      source_type: 'market_data',
-      identifier: 'NVDA',
-      detail: 'market_watch',
-    };
-    const first = provenanceRecordKey({ ...common, result_sha256: 'stamp-1' });
-    const second = provenanceRecordKey({ ...common, result_sha256: 'stamp-2' });
-    expect(first).not.toBe(second);
-    // A throttled replay of the byte-identical stamp still collapses.
-    expect(provenanceRecordKey({ ...common, result_sha256: 'stamp-1' })).toBe(first);
-  });
-
-  it('leaves non-market-watch market_data records on the bare key', () => {
-    // Direct market tools carry a tool_call_id; their key shape is unchanged.
-    const key = provenanceRecordKey({
-      tool_call_id: 'call-1',
-      source_type: 'market_data',
-      identifier: 'NVDA',
-      detail: 'quote',
-      result_sha256: 'r',
-    });
-    expect(key).toBe('call-1:market_data:NVDA');
-  });
 });

@@ -307,44 +307,7 @@ case $llm in
 esac
 
 # ---------------------------------------------------------------------------
-# 2. Financial Data
-# ---------------------------------------------------------------------------
-header "Financial Data"
-printf "  ${BOLD}1${NC}) Yahoo Finance — free, no API key needed\n"
-printf "  ${BOLD}2${NC}) FMP (Financial Modeling Prep) — high-quality data (free tier available)\n"
-printf "  ${BOLD}3${NC}) Both — FMP + Yahoo Finance MCP servers\n"
-printf "\n"
-info "See README > Data Provider Fallback Chain for details."
-printf "\n"
-data=$(prompt_choice "Choice" "1")
-
-case $data in
-    1)
-        for s in price_data fundamentals macro options; do toggle_mcp "$s" "false"; done
-        for s in yf_price yf_fundamentals yf_analysis yf_market; do toggle_mcp "$s" "true"; done
-        success "Yahoo Finance MCP servers enabled (free data, no API key)"
-        ;;
-    2)
-        key=$(prompt_secret "FMP_API_KEY")
-        [ -n "$key" ] && set_env "FMP_API_KEY" "$key"
-        for s in price_data fundamentals macro options; do toggle_mcp "$s" "true"; done
-        for s in yf_price yf_fundamentals yf_analysis yf_market; do toggle_mcp "$s" "false"; done
-        success "FMP configured — full financial data MCP servers enabled"
-        ;;
-    3)
-        key=$(prompt_secret "FMP_API_KEY")
-        [ -n "$key" ] && set_env "FMP_API_KEY" "$key"
-        for s in price_data fundamentals macro options; do toggle_mcp "$s" "true"; done
-        for s in yf_price yf_fundamentals yf_analysis yf_market; do toggle_mcp "$s" "true"; done
-        success "FMP + Yahoo Finance — all financial data MCP servers enabled"
-        ;;
-    *)
-        info "Skipping data config."
-        ;;
-esac
-
-# ---------------------------------------------------------------------------
-# 3. Sandbox
+# 2. Sandbox
 # ---------------------------------------------------------------------------
 header "Sandbox (Code Execution)"
 printf "  ${BOLD}1${NC}) Docker — local containers, no signup needed\n"
@@ -383,7 +346,7 @@ case $sandbox in
 esac
 
 # ---------------------------------------------------------------------------
-# 4. Web Search
+# 3. Web Search
 # ---------------------------------------------------------------------------
 header "Web Search (optional)"
 
@@ -410,11 +373,11 @@ if [ "$search" -ge 2 ] 2>/dev/null && [ "$search" -le $((${#_wsp[@]} + 1)) ]; th
     set_search_api "${_wsp[$s_idx]}"
     success "${_wsp_names[$s_idx]} configured"
 else
-    info "No web search configured — agent will rely on financial data tools only."
+    info "No web search configured — you can add a provider later in agent_config.yaml."
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Web Fetch (optional)
+# 4. Web Fetch (optional)
 # ---------------------------------------------------------------------------
 header "Web Fetch (optional)"
 printf "  WebFetch works out of the box with the built-in crawler.\n"

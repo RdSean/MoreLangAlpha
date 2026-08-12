@@ -342,28 +342,6 @@ class ToolCallProcessor:
                 logger.debug(f"Tool output is not JSON: {tool_name}")
                 pass
 
-        # Parse technical_analyze_stock_with_indicators output
-        if tool_name == 'technical_analyze_stock_with_indicators':
-            try:
-                parsed = json.loads(content)
-                if isinstance(parsed, dict):
-                    metadata = {}
-
-                    # Extract chart files
-                    if 'chart_files' in parsed:
-                        metadata['chart_files'] = parsed['chart_files']
-
-                    # Extract upload status
-                    if 'oss_upload' in parsed:
-                        oss_upload = parsed['oss_upload']
-                        if isinstance(oss_upload, dict):
-                            metadata['charts_generated'] = oss_upload.get('uploaded_count', 0)
-                            metadata['upload_status'] = oss_upload.get('status')
-
-                    return False, metadata  # Tool doesn't error
-            except (json.JSONDecodeError, ValueError):
-                pass
-
         content_lower = content.lower()
 
         # Python exceptions

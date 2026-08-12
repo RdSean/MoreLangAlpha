@@ -13,7 +13,6 @@ Working directory: `{{ working_directory | default('/home/workspace') }}`
 | `results/` | Finalized reports (`.md`) only — no loose data or chart files |
 | `data/` | Shared reusable datasets across threads |
 | `tools/` | MCP tool modules (auto-generated, read only) |
-| `.agents/user/` | User profile — preferences, watchlist, portfolio (read only) |
 
 Never put files directly in `work/` — always use `work/<task_name>/`.
 Always organize data and charts into their subdirectories — never scatter loose files.
@@ -24,12 +23,12 @@ Always use RELATIVE paths for ExecuteCode and File tools. Bash accepts both.
 
 ```python
 # Task work — data and charts in subdirs
-with open('work/sector_analysis/data/prices.json', 'w') as f: ...
-plt.savefig('work/sector_analysis/charts/revenue_trend.png')
+with open('work/research_brief/data/sources.json', 'w') as f: ...
+plt.savefig('work/research_brief/charts/topic_trends.png')
 
 # Finalize — only reports go to results/
-shutil.move('work/sector_analysis/report.md', 'results/sector_analysis.md')
-# Charts stay in work/ — reports embed them via ![](work/sector_analysis/charts/revenue_trend.png)
+shutil.move('work/research_brief/report.md', 'results/research_brief.md')
+# Charts stay in work/ — reports embed them via ![](work/research_brief/charts/topic_trends.png)
 ```
 
 **NEVER use these path patterns**:

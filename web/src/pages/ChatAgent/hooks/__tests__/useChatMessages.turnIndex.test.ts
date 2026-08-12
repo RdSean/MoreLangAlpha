@@ -18,7 +18,6 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));
 
-vi.mock('@/lib/supabase', () => ({ supabase: null }));
 
 // Mount with the thread already known (the production shape) so the history
 // loader records its load key up front. Otherwise the sync mock stream commits

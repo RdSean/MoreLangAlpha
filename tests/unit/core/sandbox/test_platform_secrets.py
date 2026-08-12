@@ -27,12 +27,12 @@ from ptc_agent.core.sandbox.platform_secrets import (
 )
 
 
-_FMP_DEFINITION = PlatformSecretDefinition(
-    source_env_var="FMP_API_KEY",
-    sandbox_env_var="FMP_API_KEY",
-    name_suffix="platform-fmp-api-key",
-    description="Platform FMP API key",
-    hosts=("financialmodelingprep.com",),
+_PLATFORM_SECRET_DEFINITION = PlatformSecretDefinition(
+    source_env_var="PLATFORM_SECRET_API_KEY",
+    sandbox_env_var="PLATFORM_SECRET_API_KEY",
+    name_suffix="platform-secret",
+    description="Platform API key",
+    hosts=("example.invalid",),
 )
 
 
@@ -40,7 +40,7 @@ def _config(
     *,
     provider: str = "daytona",
     namespace: str = "prod",
-    platform_secrets: tuple[PlatformSecretDefinition, ...] = (_FMP_DEFINITION,),
+    platform_secrets: tuple[PlatformSecretDefinition, ...] = (_PLATFORM_SECRET_DEFINITION,),
 ) -> CoreConfig:
     return CoreConfig(
         sandbox=SandboxConfig(
@@ -56,8 +56,8 @@ def _config(
         mcp=MCPConfig(
             servers=[
                 MCPServerConfig(
-                    name="price_data",
-                    env={"FMP_API_KEY": "${FMP_API_KEY}"},
+                    name="platform_tools",
+                    env={"PLATFORM_SECRET_API_KEY": "${PLATFORM_SECRET_API_KEY}"},
                 )
             ]
         ),
@@ -69,23 +69,23 @@ def _config(
 def test_resolve_hosted_platform_secret(monkeypatch):
     monkeypatch.setattr("src.config.env.HOST_MODE", "platform")
     resolved = resolve_platform_secrets(
-        _config(), environ={"FMP_API_KEY": "real-fmp-value"}
+        _config(), environ={"PLATFORM_SECRET_API_KEY": "real-platform-value"}
     )
 
     assert len(resolved) == 1
-    assert resolved[0].name == "prod-platform-fmp-api-key"
-    assert resolved[0].definition.hosts == ("financialmodelingprep.com",)
+    assert resolved[0].name == "prod-platform-secret"
+    assert resolved[0].definition.hosts == ("example.invalid",)
     assert build_platform_secret_bindings(
-        _config(), environ={"FMP_API_KEY": "real-fmp-value"}
-    ) == {"FMP_API_KEY": "prod-platform-fmp-api-key"}
+        _config(), environ={"PLATFORM_SECRET_API_KEY": "real-platform-value"}
+    ) == {"PLATFORM_SECRET_API_KEY": "prod-platform-secret"}
 
 
 @pytest.mark.parametrize(
     ("namespace", "environ", "missing_name"),
     [
-        ("", {"FMP_API_KEY": "value"}, "DAYTONA_SECRET_NAMESPACE"),
-        ("bad namespace", {"FMP_API_KEY": "value"}, "must match"),
-        ("prod", {}, "FMP_API_KEY"),
+        ("", {"PLATFORM_SECRET_API_KEY": "value"}, "DAYTONA_SECRET_NAMESPACE"),
+        ("bad namespace", {"PLATFORM_SECRET_API_KEY": "value"}, "must match"),
+        ("prod", {}, "PLATFORM_SECRET_API_KEY"),
     ],
 )
 def test_resolve_hosted_configuration_fails_closed(
@@ -104,7 +104,7 @@ def test_resolve_hosted_empty_catalog_fails_closed():
     ):
         resolve_platform_secrets(
             _config(platform_secrets=()),
-            environ={"FMP_API_KEY": "value"},
+            environ={"PLATFORM_SECRET_API_KEY": "value"},
             host_mode="platform",
         )
 
@@ -113,16 +113,16 @@ def test_resolve_rejects_an_overlong_derived_name():
     # that pushes the derived name past it fails closed at resolution, matching
     # the invariant the module comment claims.
     definition = PlatformSecretDefinition(
-        source_env_var="FMP_API_KEY",
-        sandbox_env_var="FMP_API_KEY",
+        source_env_var="PLATFORM_SECRET_API_KEY",
+        sandbox_env_var="PLATFORM_SECRET_API_KEY",
         name_suffix="x" * 62,
-        description="Platform FMP API key",
-        hosts=("financialmodelingprep.com",),
+        description="Platform API key",
+        hosts=("example.invalid",),
     )
     with pytest.raises(PlatformSecretConfigurationError, match="Derived Secret name"):
         resolve_platform_secrets(
             _config(namespace="prod", platform_secrets=(definition,)),
-            environ={"FMP_API_KEY": "real-fmp-value"},
+            environ={"PLATFORM_SECRET_API_KEY": "real-platform-value"},
         )
 
 
@@ -131,10 +131,10 @@ def test_oss_daytona_with_catalog_opts_in(monkeypatch):
     # in OSS mode too, no HOST_MODE=platform required.
     monkeypatch.setattr("src.config.env.HOST_MODE", "oss")
     resolved = resolve_platform_secrets(
-        _config(), environ={"FMP_API_KEY": "real-fmp-value"}
+        _config(), environ={"PLATFORM_SECRET_API_KEY": "real-platform-value"}
     )
     assert len(resolved) == 1
-    assert resolved[0].name == "prod-platform-fmp-api-key"
+    assert resolved[0].name == "prod-platform-secret"
 
 
 def test_empty_catalog_is_the_opt_out(monkeypatch):
@@ -230,17 +230,17 @@ async def test_probe_hashes_the_whole_set_in_one_exec():
     )
 
     class _TwoVarRuntime(_FakeRuntime):
-        env = {"FMP_API_KEY": "value-a", "OTHER_KEY": ""}
+        env = {"PLATFORM_SECRET_API_KEY": "value-a", "OTHER_KEY": ""}
 
         def _env_lookup(self, name):
             return self.env.get(name, "")
 
     runtime = _TwoVarRuntime(env_value="")
     observed = await probe_runtime_platform_secrets(
-        runtime, env_vars=["FMP_API_KEY", "OTHER_KEY"]
+        runtime, env_vars=["PLATFORM_SECRET_API_KEY", "OTHER_KEY"]
     )
 
-    assert observed == {"FMP_API_KEY": _hash("value-a"), "OTHER_KEY": ""}
+    assert observed == {"PLATFORM_SECRET_API_KEY": _hash("value-a"), "OTHER_KEY": ""}
     assert [call[0] for call in runtime.calls] == ["exec"]
 
 
@@ -252,7 +252,7 @@ async def test_probe_rejects_invalid_env_var_name():
 
     with pytest.raises(PlatformSecretConfigurationError, match="env var"):
         await probe_runtime_platform_secrets(
-            _FakeRuntime(env_value="x"), env_vars=['FMP"; rm -rf /']
+            _FakeRuntime(env_value="x"), env_vars=['PLATFORM_SECRET"; rm -rf /']
         )
 
 
@@ -270,7 +270,7 @@ async def test_probe_raises_on_nonzero_exit():
 
     with pytest.raises(PlatformSecretVerificationError, match="exit_code=127"):
         await probe_runtime_platform_secrets(
-            _BrokenExecRuntime(env_value=""), env_vars=["FMP_API_KEY"]
+            _BrokenExecRuntime(env_value=""), env_vars=["PLATFORM_SECRET_API_KEY"]
         )
 
 
@@ -288,7 +288,7 @@ async def test_probe_rejects_malformed_output():
 
     with pytest.raises(PlatformSecretVerificationError, match="malformed"):
         await probe_runtime_platform_secrets(
-            _GarbageRuntime(env_value="x"), env_vars=["FMP_API_KEY"]
+            _GarbageRuntime(env_value="x"), env_vars=["PLATFORM_SECRET_API_KEY"]
         )
 
 
@@ -336,8 +336,8 @@ async def test_converge_scrubs_unconditionally_in_order():
     )
     await converge_sandbox_platform_secrets(
         runtime,
-        expected={"FMP_API_KEY": _hash("dtn_secret_new")},
-        bindings={"FMP_API_KEY": "prod-platform-fmp-api-key"},
+        expected={"PLATFORM_SECRET_API_KEY": _hash("dtn_secret_new")},
+        bindings={"PLATFORM_SECRET_API_KEY": "prod-platform-secret"},
     )
 
     assert [call[0] for call in runtime.calls] == [
@@ -347,10 +347,10 @@ async def test_converge_scrubs_unconditionally_in_order():
         "start",
         "exec",  # verify
     ]
-    assert runtime.calls[0] == ("update_env", {}, ("FMP_API_KEY",))
+    assert runtime.calls[0] == ("update_env", {}, ("PLATFORM_SECRET_API_KEY",))
     assert runtime.calls[1] == (
         "update_secrets",
-        {"FMP_API_KEY": "prod-platform-fmp-api-key"},
+        {"PLATFORM_SECRET_API_KEY": "prod-platform-secret"},
     )
     assert runtime.calls[2] == ("stop", True)
 
@@ -366,8 +366,8 @@ async def test_converge_raises_when_verification_fails():
     with pytest.raises(PlatformSecretVerificationError):
         await converge_sandbox_platform_secrets(
             runtime,
-            expected={"FMP_API_KEY": _hash("dtn_secret_new")},
-            bindings={"FMP_API_KEY": "prod-platform-fmp-api-key"},
+            expected={"PLATFORM_SECRET_API_KEY": _hash("dtn_secret_new")},
+            bindings={"PLATFORM_SECRET_API_KEY": "prod-platform-secret"},
         )
 
 
@@ -390,7 +390,7 @@ def test_hosted_daytona_env_excludes_plaintext_and_mounts_secret(monkeypatch):
     from ptc_agent.core.sandbox.ptc_sandbox import PTCSandbox
 
     monkeypatch.setattr("src.config.env.HOST_MODE", "platform")
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     with patch(
         "ptc_agent.core.sandbox.ptc_sandbox.create_provider",
         return_value=MagicMock(),
@@ -400,16 +400,16 @@ def test_hosted_daytona_env_excludes_plaintext_and_mounts_secret(monkeypatch):
     bindings = build_platform_secret_bindings(sandbox.config)
     env_vars = sandbox._build_sandbox_env_vars(bindings)
 
-    assert bindings == {"FMP_API_KEY": "prod-platform-fmp-api-key"}
-    assert "FMP_API_KEY" not in env_vars
+    assert bindings == {"PLATFORM_SECRET_API_KEY": "prod-platform-secret"}
+    assert "PLATFORM_SECRET_API_KEY" not in env_vars
 
 
 @pytest.mark.parametrize(
     ("host_mode", "provider", "platform_secrets"),
     [
         # Incapable providers can't substitute placeholders — a catalog is inert.
-        ("platform", "docker", (_FMP_DEFINITION,)),
-        ("platform", "memory", (_FMP_DEFINITION,)),
+        ("platform", "docker", (_PLATFORM_SECRET_DEFINITION,)),
+        ("platform", "memory", (_PLATFORM_SECRET_DEFINITION,)),
         # Daytona with no catalog is the opt-out — stays on plaintext env.
         ("oss", "daytona", ()),
     ],
@@ -420,7 +420,7 @@ def test_ungated_modes_keep_current_plaintext_behavior(
     from ptc_agent.core.sandbox.ptc_sandbox import PTCSandbox
 
     monkeypatch.setattr("src.config.env.HOST_MODE", host_mode)
-    monkeypatch.setenv("FMP_API_KEY", "real-fmp-value")
+    monkeypatch.setenv("PLATFORM_SECRET_API_KEY", "real-platform-value")
     with patch(
         "ptc_agent.core.sandbox.ptc_sandbox.create_provider",
         return_value=MagicMock(),
@@ -433,4 +433,4 @@ def test_ungated_modes_keep_current_plaintext_behavior(
     env_vars = sandbox._build_sandbox_env_vars(bindings)
 
     assert bindings == {}
-    assert env_vars["FMP_API_KEY"] == "real-fmp-value"
+    assert env_vars["PLATFORM_SECRET_API_KEY"] == "real-platform-value"

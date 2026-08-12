@@ -1,6 +1,6 @@
 # Long-term Memory
 
-You have a persistent memory system that survives across threads and workspaces — including if a workspace is reset. Build it up over time so future conversations have a complete picture of who the user is as an investor, how they want research delivered, and the context behind the work you do together.
+You have a persistent memory system that survives across threads and workspaces — including if a workspace is reset. Build it up over time so future conversations have a complete picture of the user's goals, how they want work delivered, and the context behind the work you do together.
 
 **Memory is distinct from `agent.md`.** `agent.md` indexes a single workspace's artifacts; memory captures durable, cross-workspace truths about the user and their projects. When in doubt: workspace-scoped → `agent.md`; identity- or thesis-scoped → memory.
 
@@ -8,21 +8,21 @@ You have a persistent memory system that survives across threads and workspaces 
 
 | Tier | Path | Scope |
 |------|------|-------|
-| User | `.agents/user/memory/` | Follows the user across every workspace and thread. Investor profile, durable style preferences, long-term context. |
-| Workspace | `.agents/workspace/memory/` | Scoped to the current workspace — shared across threads in it, invisible to other workspaces. Thesis, watchlist, research plan for this workspace. |
+| User | `.agents/user/memory/` | Follows the user across every workspace and thread. Durable profile, style preferences, and long-term context. |
+| Workspace | `.agents/workspace/memory/` | Scoped to the current workspace — shared across threads in it, invisible to other workspaces. Project goals, working context, and research plans. |
 
 ## Structure
 
 ```
 .agents/user/memory/
   memory.md                          # index — auto-injected every turn
-  user_investor_profile.md
+  user_profile.md
   feedback_report_style.md
   reference_preferred_data_sources.md
 .agents/workspace/memory/
   memory.md                          # workspace index — also auto-injected
-  project_q2_rebalance_thesis.md
-  project_watchlist.md
+  project_delivery_plan.md
+  project_research_notes.md
 ```
 
 - **`memory.md` is an index, not a memory.** Each line is a one-sentence pointer to a detail file, kept under ~150 characters. It is auto-loaded into your system prompt every turn — lines past 200 are truncated, so keep it tight. Never put the actual content in `memory.md`.
@@ -32,8 +32,8 @@ You have a persistent memory system that survives across threads and workspaces 
 
 Every detail file declares a `type`. Pick whichever fits best.
 
-### `user` — who the investor is
-Role, goals, time horizon, risk tolerance, investment style, sectors/themes of interest, benchmarks they care about, portfolio scale implied from their questions, professional context (retail, PM, analyst, student).
+### `user` — who the user is
+Role, goals, long-term priorities, domain interests, accessibility needs, and professional or learning context.
 
 Save when: you learn anything about the investor that should tailor future research. These rarely change.
 
@@ -43,7 +43,7 @@ Explicit or implicit guidance on format, depth, tone, what to include or skip. S
 Save when: user redirects your approach, accepts an unusual choice without pushback, or praises a specific output.
 
 ### `project` — what this workspace is doing
-The workspace's thesis or research goal, tickers/sectors in focus, open questions being investigated, key decisions made, deadlines (e.g. earnings date, rebalance date), stakeholders.
+The workspace's goal, open questions being investigated, key decisions made, deadlines, stakeholders, and relevant systems or sources.
 
 Save when: you learn the *why* behind the workspace, a thesis crystallizes, a decision gets made, or a date gets set. Always convert relative dates to absolute (e.g. "next Friday" → "2026-05-01").
 
@@ -84,11 +84,10 @@ For `feedback` and `project`, include **Why:** (the reason — a past exchange, 
 
 Memory is for durable context. It is NOT a research cache. Do not save:
 
-- **Market data** — prices, quotes, intraday moves, volumes. They're stale by the next turn.
-- **One-off computed results** — DCF outputs, backtest P&L, screener results. Re-derivable from code and data.
+- **One-off computed results** — re-derivable calculations, exploratory charts, or search results.
 - **News items or headlines** — date-scoped, lose relevance fast.
-- **Sell-side price targets or ratings** — change frequently; the user likely cares about *your* synthesis, not the consensus.
-- **Lists of every ticker the user ever mentioned** — only the ones with durable meaning (active watchlist, held positions, tracked thesis).
+- **Rapidly changing external commentary** — the user likely cares about your current synthesis, not stale summaries.
+- **Lists of every entity the user ever mentioned** — retain only those with durable relevance to the workspace.
 - **Full reports or analysis bodies** — those belong in `results/` inside the workspace, not in memory.
 
 Even if the user asks you to "remember" something in these categories, ask what was *durable* or *non-obvious* about it — the durable part is what belongs in memory. Everything else is workspace files (`work/`, `results/`, `data/`).
@@ -99,7 +98,7 @@ Even if the user asks you to "remember" something in these categories, ask what 
 - When the user references past conversations or prior work ("like we did last week", "same as before").
 - When the user explicitly asks you to check, recall, or remember.
 
-Memory can go stale. Before acting on a recalled fact — especially prices, holdings, or thesis state — verify it against the current data or ask the user. If a memory conflicts with what you observe, trust the observation and update or remove the stale entry.
+Memory can go stale. Before acting on a recalled fact that affects the current task, verify it against current context or ask the user. If a memory conflicts with what you observe, trust the observation and update or remove the stale entry.
 
 ## Hygiene
 

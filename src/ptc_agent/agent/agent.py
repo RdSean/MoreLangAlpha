@@ -51,7 +51,6 @@ from ptc_agent.agent.middleware import (
     CompactionMiddleware,
     resolve_compaction_client,
     LargeResultEvictionMiddleware,
-    MarketWatchMiddleware,
     SteeringMiddleware,
     SubagentSteeringMiddleware,
     WorkspaceContextMiddleware,
@@ -67,13 +66,11 @@ from ptc_agent.core.paths import (
     MEMORY_INDEX_FILENAME,
     MEMORY_USER_DIR,
     MEMORY_WORKSPACE_DIR,
-    USER_PROFILE_DATA_DIR,
     WORKFLOW_DIR,
 )
 from ptc_agent.agent.middleware.background_subagent.workflow.prebuilt import (
     get_prebuilt_workflows,
 )
-from ptc_agent.agent.backends.user_data import UserDataBackend
 from ptc_agent.agent.middleware.image_capture import ImageCaptureMiddleware
 from ptc_agent.agent.middleware.openai_prompt_caching import OpenAIPromptCachingMiddleware
 from ptc_agent.agent.middleware.runtime_context import RuntimeContextMiddleware
@@ -107,16 +104,6 @@ from ptc_agent.agent.tools import (
 from src.tools.web.search import get_web_search_tool
 from src.tools.web.fetch import web_fetch_tool
 from src.tools.web.crawl import create_crawl_tools
-from src.tools.sec.tool import get_sec_filing
-from src.tools.market_data.tool import (
-    get_daily_prices,
-    get_company_overview,
-    get_market_overview,
-    get_options_chain,
-    get_quote,
-    screen_stocks,
-)
-from src.tools.market_watch import watch_market
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.mcp_registry import MCPRegistry
 from ptc_agent.core.sandbox import PTCSandbox
@@ -156,7 +143,6 @@ class _IdentityGates:
     user_memory: bool
     workspace_memory: bool
     memo: bool
-    user_data: bool
     workflow: bool
     workflow_fs: bool
     workflow_tool: bool
@@ -181,10 +167,6 @@ def _resolve_identity_gates(
         user_memory=identified,
         workspace_memory=identified and bool(workspace_id),
         memo=identified,
-        # Independent of `store`: the user-profile data backend (portfolio +
-        # watchlist + preferences) talks to the application DB tables, not the
-        # LangGraph store.
-        user_data=bool(user_id),
         workflow=workflow,
         workflow_fs=workflow and identified,
         # RunWorkflow dispatches subagents, so it drops with the recursion
@@ -235,7 +217,6 @@ class PTCAgent:
             working_directory=self.config.filesystem.working_directory,
             memory_enabled=memory_enabled,
             memo_enabled=memo_enabled,
-            market_watch_enabled=self.config.feature_enabled("market_watch"),
             crawl_enabled=crawl_enabled,
         )
 
@@ -281,7 +262,7 @@ class PTCAgent:
         (memory.md, the memo count block) — one list because they share that
         position.
         """
-        if not (gates.memory or gates.memo or gates.user_data or gates.workflow):
+        if not (gates.memory or gates.memo or gates.workflow):
             return backend, []
 
         # One cache per agent (≈ per request). Shared by every memory/memo
@@ -390,15 +371,6 @@ class PTCAgent:
             else:
                 routes.append(prebuilt_route)
 
-        if gates.user_data:
-            routes.append(
-                UserDataBackend(
-                    user_id=user_id,
-                    sandbox_backend=backend,
-                    root_prefix=f"{sandbox_root}/{USER_PROFILE_DATA_DIR}/",
-                )
-            )
-
         if not routes:
             return backend, []
 
@@ -454,7 +426,6 @@ class PTCAgent:
         on_signed_url: Any | None = None,
         vault_secrets: dict[str, str] | None = None,
         user_id: str | None = None,
-        user_data_counts: dict[str, Any] | None = None,
         tool_summary: str | None = None,
         disable_subagents: bool = False,
     ) -> Any:
@@ -572,19 +543,6 @@ class PTCAgent:
         if self.config.feature_enabled("site_crawl"):
             crawl_tools = create_crawl_tools(filesystem_backend)
             tools.extend(crawl_tools)
-
-        finance_tools = [
-            get_sec_filing,  # SEC filing extraction (10-K, 10-Q, 8-K)
-            get_quote,  # Real-time quotes (cheap — price freshness)
-            get_daily_prices,  # Stock OHLCV price data
-            get_company_overview,  # Company investment analysis (includes real-time quote)
-            get_market_overview,  # Single-day market snapshot (indices + US sectors)
-            get_options_chain,  # Options contracts chain with snapshot pricing
-            screen_stocks,  # Stock screener with filters
-        ]
-        if self.config.feature_enabled("market_watch"):
-            finance_tools.append(watch_market)  # Market watch start/stop (live price injection)
-        tools.extend(finance_tools)
 
         if subagent_names is None:
             subagent_names = self.config.subagents.enabled
@@ -706,7 +664,6 @@ class PTCAgent:
             "bash": [bash_tool],
             "filesystem": list(filesystem_tools) if filesystem_tools else [],
             "web_search": [web_search_tool, web_fetch_tool],
-            "finance": finance_tools,
             "think": [think_tool],
             "todo": [TodoWrite],
         }
@@ -831,7 +788,6 @@ class PTCAgent:
             RuntimeContextMiddleware(
                 current_time=current_time,
                 user_profile=user_profile,
-                user_data_counts=user_data_counts,
                 sandbox_enabled=True,
             )
         ]
@@ -909,16 +865,6 @@ class PTCAgent:
                 multimodal,
                 AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
                 OpenAIPromptCachingMiddleware(),
-                # Market watch (main agent only): appends the ephemeral
-                # <market-watch> price stamp. Inside model_resilience so it
-                # sees the post-fallback model — its provider-specific cache
-                # breakpoints (Anthropic cache_control / OpenAI
-                # prompt_cache_breakpoint) must never reach another provider.
-                *(
-                    [MarketWatchMiddleware()]
-                    if self.config.feature_enabled("market_watch")
-                    else []
-                ),
                 EmptyToolCallRetryMiddleware(),
                 PatchToolCallsMiddleware(),
                 *workspace_context_middleware,

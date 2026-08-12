@@ -2,7 +2,7 @@
  * Shared rate-limit error builder.
  *
  * Constructs a structured error from a 429 response's `rateLimitInfo`
- * so both ChatAgent and MarketView produce identical messages and,
+ * so every agent surface produces identical messages and,
  * when the account portal URL is configured, a deep-link to the Plans
  * page (which hosts both plan upgrades and credit top-up).
  */

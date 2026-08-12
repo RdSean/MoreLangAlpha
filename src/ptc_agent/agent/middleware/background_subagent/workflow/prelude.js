@@ -65,8 +65,8 @@
   // and by then the children are dispatched — invoking is impossible, and
   // treating the slot as an error would silently null a healthy child. Await
   // those instead. Anything else is the script's bug and says so: a slot of
-  // plain values (`parallel(args.tickers)`) would otherwise resolve to the
-  // tickers having dispatched nothing — an answer indistinguishable from work.
+  // plain values (`parallel(args.items)`) would otherwise resolve without
+  // dispatching work — an answer indistinguishable from completed work.
   const awaited = (value, where) => {
     const thenable =
       value !== null && typeof value === "object" && typeof value.then === "function";

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Search, Pin, Settings2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Select } from '@/components/ui/select';
-import { getUserApiKeys } from '@/pages/Dashboard/utils/api';
+import { getUserApiKeys } from '@/api/model';
 import { useUser } from '@/hooks/useUser';
 import { usePreferences } from '@/hooks/usePreferences';
 import { useUpdatePreferences } from '@/hooks/useUpdatePreferences';

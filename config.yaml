@@ -39,10 +39,7 @@ langsmith_tracing: false
 #                plan    — requires a platform plan with access tier >=
 #                          min_tier (OSS deployments bypass plan gates)
 #   min_tier:  plan gate only — minimum platform access tier
-features:
-  market_watch:
-    enabled: true
-    gate: opt_in
+features: {}
 
 # SSE Event Logging
 sse_event_log_enabled: false
@@ -57,13 +54,6 @@ module_log_levels:
   # Grouped library settings (use group: prefix for predefined groups)
   group:third_party_libraries: WARNING
   group:langchain_libraries: WARNING
-
-  # yfinance logs a normal no-data soft-miss at ERROR (and never raises), but the
-  # provider chain treats an empty result as a designed fallthrough — so every
-  # symbol Yahoo can't serve (bare CN/HK codes, fund codes, ^ index aliases) spams
-  # the ERROR stream from the last-resort fallback. CRITICAL (not WARNING) is
-  # required: the "possibly delisted" line is emitted at ERROR.
-  yfinance: CRITICAL
 
   # Application modules (hierarchical - parent loggers affect all children)
   src.tools: INFO
@@ -143,82 +133,24 @@ redis:
   ttl:
     results_list: 300  # Results list cache TTL (5 minutes)
     result_detail: 900  # Result detail cache TTL (15 minutes)
-    metadata: 900  # Metadata tags/tickers cache TTL (15 minutes)
+    metadata: 900  # Metadata cache TTL (15 minutes)
     metadata_summary: 600  # Metadata summary cache TTL (10 minutes)
     workflow_events: 86400  # Workflow event buffer TTL (24 hours)
     workflow_status: 3600   # Completed/cancelled workflow status key TTL (1 hour)
     cancel_flag: 300        # Workflow cancel flag TTL (5 minutes)
     steering: 3600          # Steering message key TTL (1 hour)
-    market_watch: 21600     # Market watch list TTL (6 hours)
     memo_metadata_inflight: 300  # Cross-worker visibility of in-flight memo metadata tasks (5 minutes)
     memo_metadata_cancel: 60     # Cooperative cross-worker cancel flag for memo metadata (1 minute)
-
-    # Per-interval OHLCV cache TTLs (≈ interval_seconds × 1.5)
-    # SWR soft threshold stays at 50% of these values
-    ohlcv:
-      "1min": 90
-      "5min": 360
-      "15min": 1080
-      "30min": 2100
-      "1hour": 4200
-      "4hour": 16200
-      "1day": 86400
 
   # Cache Invalidation
   cache_invalidate_on_write: true  # Invalidate cache on writes
 
   # Stale-While-Revalidate (SWR) Configuration
-  # SWR returns stale data immediately while refreshing in background
+  # SWR returns stale data immediately while refreshing in the background
   swr:
     enabled: true  # Enable SWR for cache reads
-    soft_ttl_ratio: 0.6  # Used by OHLCV cache envelope _needs_refresh()
+    soft_ttl_ratio: 0.6
     warm_after_invalidation: true  # Pre-populate cache after invalidation
-
-
-# =============================================================================
-# MARKET DATA CONFIGURATION
-# =============================================================================
-# Ordered provider chain — requests try each provider in order.
-# Each provider declares which markets it covers, optionally overridden per
-# capability (intraday_markets / daily_markets / snapshot_markets).
-# "all" matches any market; "non-us" matches everything except us.
-# A provider may appear twice to hold different chain positions per
-# capability — its entries share one underlying client and are only tried
-# once per request.
-market_data:
-  providers:
-    - name: ginlix-data
-      markets: [us]          # US equities only
-    - name: yfinance
-      markets: []                 # priority slot: non-US intraday only —
-      intraday_markets: [non-us]  # native session anchors incl. lunch gaps
-    - name: fmp
-      markets: [all]         # FMP — global coverage, catch-all fallback
-    - name: yfinance
-      markets: [all]         # Free fallback — no API key required
-
-# Ordered news provider chain — sequential fallback (no market routing).
-news_data:
-  providers:
-    - name: ginlix-data
-    - name: fmp
-    - name: yfinance
-
-# News refresh poller — keeps the GLOBAL feeds (curated "Top" + Market general)
-# warm by fetching the latest page every interval and delta-merging new articles
-# (by id) into a rolling buffer stored in the same Redis key the /news endpoint
-# reads. Per-ticker feeds are unbounded and stay on the on-demand cache. One
-# worker polls per tick (Redis-lock leader election); the buffer self-heals via
-# the cache TTL if the poller stops.
-news_poll:
-  enabled: true
-  interval_seconds: 60     # How often to fetch the latest page
-  max_items: 100           # Rolling-buffer cap per feed
-  feeds:
-    - provider: tickertick # Curated "Top" feed (news:tickertick:general:<limit>)
-      limit: 50
-    - provider: null       # Provider-chain general feed / Market tab (news:general:<limit>)
-      limit: 50
 
 # RunWorkflow programmatic subagent orchestration
 workflow:
@@ -237,38 +169,6 @@ workflow:
   max_summary_bytes: 98304       # Run summary handed to the model + archived for TaskOutput (bytes); result.json keeps the rest. A clipped JSON result is unparseable, so overflow costs a re-read of the file on top of the clipped copy — sized to absorb ordinary overflow, not merely to bound it
   max_prompt_chars: 400000       # Per-dispatch prompt length cap (~100K tokens)
   max_script_bytes: 204800       # Workflow script size cap (bytes)
-
-
-# =============================================================================
-# MARKET WATCH CONFIGURATION
-# =============================================================================
-# Market watch mode (live price injection via <market-watch> message stamping).
-# Tuning only — the on/off switch is features.market_watch above.
-market_watch:
-  min_interval_seconds: 25
-  max_symbols: 10
-  # The stamp is ephemeral (overrides each model request only; never enters
-  # checkpoints or history), so pin a provider cache breakpoint (Anthropic
-  # cache_control / OpenAI prompt_cache_breakpoint) on the last durable
-  # message so the ephemeral stamp doesn't break incremental caching.
-  cache_breakpoint_pin: true
-
-
-# =============================================================================
-# MARKET INSIGHT CONFIGURATION
-# =============================================================================
-market_insight:
-  enabled: true
-  timezone: "America/New_York"
-  generation_timeout: 600         # Seconds before background generation times out
-  max_symbols_context: 20         # Max symbols in personalized prompt context
-  dedup_window_minutes: 5         # Dedup window for per-user insights
-  schedule:
-    pre_market: "09:00"           # Overnight news (8 PM yesterday → 9 AM today)
-    post_market: "20:30"          # Daily recap (full day summary)
-    market_update_start: "10:00"  # Hourly updates start
-    market_update_end: "20:00"    # Hourly updates end (inclusive)
-    market_update_interval: 60    # Minutes between updates
 
 
 # =============================================================================

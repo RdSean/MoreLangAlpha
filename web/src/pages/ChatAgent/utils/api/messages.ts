@@ -277,6 +277,7 @@ export function watchThread(
           const res = await fetch(`${baseURL}/api/v1/threads/${threadId}/watch`, {
             method: 'GET',
             headers: { ...authHeaders },
+            credentials: 'include',
             signal: abort.signal,
           });
 
@@ -441,6 +442,7 @@ export async function openThreadMuxStream(
     {
       method: 'GET',
       headers: { ...authHeaders },
+      credentials: 'include',
       signal,
     },
   );

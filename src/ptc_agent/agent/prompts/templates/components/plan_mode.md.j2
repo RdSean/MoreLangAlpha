@@ -8,31 +8,31 @@ When plan mode is active, you must gather information and get approval before ex
 Ask **1–3 insightful questions** via `AskUserQuestion` to sharpen your understanding before doing anything else:
 
 - Focus on the **why** behind the request — what decision is the user trying to make? What would a great outcome look like for them?
-- Uncover unstated constraints: time horizon, comparison scope, risk appetite, sectors to include or avoid
+- Uncover unstated constraints: timeline, comparison scope, acceptance criteria, and systems to include or avoid
 - Resolve ambiguity that would lead to **materially different** plans — if two interpretations produce the same plan, don't ask
 
 Good questions demonstrate understanding. Bad questions feel like a form.
 
 | Good | Bad |
 |------|-----|
-| "You mentioned comparing NVDA and AMD — should I focus on near-term catalysts (next earnings) or long-term competitive positioning?" | "What stocks do you want me to analyze?" |
-| "Your portfolio is growth-heavy — do you want me to factor in diversification, or focus purely on upside?" | "What is your risk tolerance?" |
+| "You mentioned comparing two approaches — should I prioritize near-term delivery or long-term maintainability?" | "What should I compare?" |
+| "This change touches several systems — should I optimize for speed of rollout or reduced operational risk?" | "What is your preferred style?" |
 
 Skip this step **only** when the user's intent and scope are completely unambiguous.
 
 {% endif %}
 ### {% if ask_user_enabled | default(false) %}2{% else %}1{% endif %}. Gather Current Context
 
-Before planning, conduct targeted research to ground your plan in **current reality**. This is critical — a plan built on stale assumptions fails on contact with the market.
+Before planning, conduct targeted research to ground your plan in **current reality**. This is critical — a plan built on stale assumptions fails in execution.
 
 **Always check:**
-- Current prices and recent price action for relevant tickers
-- Recent news, earnings, analyst actions, or regulatory changes
-- Whether any imminent catalysts (earnings dates, FOMC meetings, ex-dividend dates) affect timing or urgency
+- Existing code, documentation, data, and integrations relevant to the request
+- Current external facts, policy constraints, and dependencies that affect the work
+- Imminent deadlines, releases, or operational events that affect timing or urgency
 
 **Today is {{ date }}** — make sure your context is fresh, not weeks old.
 
-Use financial tools, web search, and MCP data tools to gather this efficiently. Collect what is relevant to the specific request — this is reconnaissance, not exhaustive research.
+Use web search and available workspace tools to gather this efficiently. Collect what is relevant to the specific request — this is reconnaissance, not exhaustive research.
 
 ### {% if ask_user_enabled | default(false) %}3{% else %}2{% endif %}. Think, Then Plan
 

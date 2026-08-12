@@ -3,30 +3,22 @@
 import asyncio
 import logging
 import re
-from datetime import datetime
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi import File, UploadFile
-from pydantic import BaseModel
 from src.utils.storage import get_public_url, upload_bytes
 
-from src.server.auth.jwt_bearer import get_current_auth_info, AuthInfo
 from src.server.database.user import (
     create_user as db_create_user,
-    create_user_from_auth,
     delete_user_preferences as db_delete_user_preferences,
-    find_user_by_email,
     get_user as db_get_user,
     get_user_preferences as db_get_user_preferences,
     get_user_with_preferences,
     invalidate_user_prefs_cache,
-    migrate_user_id,
     update_user as db_update_user,
     upsert_user_preferences,
 )
 from ptc_agent.agent.graph import invalidate_user_profile_cache
-from src.server.services.onboarding import maybe_complete_onboarding
 from src.server.models.user import (
     UserBase,
     UserPreferencesResponse,
@@ -42,96 +34,6 @@ logger = logging.getLogger(__name__)
 _VALID_MODALITIES = frozenset({"text", "image", "pdf"})
 
 router = APIRouter(prefix="/api/v1", tags=["Users"])
-
-
-# ==================== Auth Sync ====================
-
-
-class AuthSyncRequest(BaseModel):
-    email: Optional[str] = None
-    name: Optional[str] = None
-    avatar_url: Optional[str] = None
-    timezone: Optional[str] = None
-    locale: Optional[str] = None
-
-
-@router.post("/auth/sync", response_model=UserWithPreferencesResponse)
-@handle_api_exceptions("sync user", logger)
-async def sync_user(
-    body: AuthSyncRequest,
-    auth_info: AuthInfo = Depends(get_current_auth_info),
-):
-    """
-    Sync Supabase user to backend after OAuth/email login.
-
-    Three cases: existing UUID match (backfill auth_provider/timezone), legacy
-    email match (migrate PK to UUID), or new user (create with auth_provider).
-    ``locale`` is never backfilled here — NULL means "no explicit preference".
-    """
-    user_id = auth_info.user_id
-    auth_provider = auth_info.auth_provider
-
-    # 1. Already exists by UUID?
-    existing = await db_get_user(user_id)
-    if existing:
-        updates = {}
-
-        # Lazy-backfill NULL fields. Deliberately skip `locale` — that column
-        # encodes the user's explicit Settings preference. A NULL row means
-        # "no preference; use browser locale via the frontend detector".
-        if auth_provider and not existing.get("auth_provider"):
-            updates["auth_provider"] = auth_provider
-        if body.timezone and not existing.get("timezone"):
-            updates["timezone"] = body.timezone
-
-        # Throttle last_login_at writes — only update if stale (>1 hour)
-        last_login = existing.get("last_login_at")
-        now = datetime.now(tz=last_login.tzinfo if last_login else None)
-        if not last_login or (now - last_login).total_seconds() > 3600:
-            updates["last_login_at"] = now
-
-        if updates:
-            await db_update_user(user_id=user_id, **updates)
-
-        result = await get_user_with_preferences(user_id)
-        if not result:
-            raise_not_found("User")
-        user_resp = UserResponse.model_validate(result["user"])
-        pref_resp = None
-        if result.get("preferences"):
-            pref_resp = UserPreferencesResponse.model_validate(result["preferences"])
-        return UserWithPreferencesResponse(user=user_resp, preferences=pref_resp)
-
-    # 2. Legacy email-based user?
-    if body.email:
-        legacy = await find_user_by_email(body.email)
-        if legacy:
-            migrated = await migrate_user_id(legacy["user_id"], user_id)
-            if migrated:
-                logger.info(f"Migrated legacy user {legacy['user_id']} -> {user_id}")
-                result = await get_user_with_preferences(user_id)
-                if not result:
-                    raise_not_found("User")
-                user_resp = UserResponse.model_validate(result["user"])
-                pref_resp = None
-                if result.get("preferences"):
-                    pref_resp = UserPreferencesResponse.model_validate(result["preferences"])
-                return UserWithPreferencesResponse(user=user_resp, preferences=pref_resp)
-
-    # 3. Brand-new user. `locale` is left NULL — only set when the user
-    # explicitly picks a language in Settings. The frontend detector handles
-    # browser-locale and English-fallback at render time.
-    user = await create_user_from_auth(
-        user_id=user_id,
-        email=body.email,
-        name=body.name,
-        avatar_url=body.avatar_url,
-        auth_provider=auth_provider,
-        timezone=body.timezone,
-        locale=None,
-    )
-    user_resp = UserResponse.model_validate(user)
-    return UserWithPreferencesResponse(user=user_resp, preferences=None)
 
 
 # ==================== User CRUD ====================
@@ -420,8 +322,6 @@ async def update_preferences(
     # Use exclude_unset=True (not exclude_none=True) so explicitly-sent null
     # values are preserved — _split_updates_and_deletes uses None to signal
     # key deletion from the JSONB column.
-    risk_pref = request.risk_preference.model_dump(exclude_unset=True) if request.risk_preference else None
-    investment_pref = request.investment_preference.model_dump(exclude_unset=True) if request.investment_preference else None
     agent_pref = request.agent_preference.model_dump(exclude_unset=True) if request.agent_preference else None
     other_pref = request.other_preference.model_dump(exclude_unset=True) if request.other_preference else None
 
@@ -489,8 +389,6 @@ async def update_preferences(
 
     preferences = await upsert_user_preferences(
         user_id=user_id,
-        risk_preference=risk_pref,
-        investment_preference=investment_pref,
         agent_preference=agent_pref,
         other_preference=other_pref,
     )
@@ -498,7 +396,6 @@ async def update_preferences(
     await invalidate_user_prefs_cache(user_id)
     await invalidate_user_profile_cache(user_id)
 
-    await maybe_complete_onboarding(user_id)
 
     logger.info(f"Updated preferences for user {user_id}")
     return UserPreferencesResponse.model_validate(preferences)
@@ -506,7 +403,7 @@ async def update_preferences(
 @router.delete("/users/me/preferences", status_code=200)
 @handle_api_exceptions("delete preferences", logger)
 async def delete_preferences(user_id: CurrentUserId):
-    """Delete all user preferences and reset onboarding_completed to false."""
+    """Delete all user preferences."""
     user = await db_get_user(user_id)
     if not user:
         raise_not_found("User")
@@ -514,9 +411,7 @@ async def delete_preferences(user_id: CurrentUserId):
     await db_delete_user_preferences(user_id)
     await invalidate_user_prefs_cache(user_id)
     await invalidate_user_profile_cache(user_id)
-    await db_update_user(user_id=user_id, onboarding_completed=False)
-
-    logger.info(f"Cleared preferences and reset onboarding for user {user_id}")
+    logger.info(f"Cleared preferences for user {user_id}")
     return {"success": True, "message": "Preferences cleared"}
 
 

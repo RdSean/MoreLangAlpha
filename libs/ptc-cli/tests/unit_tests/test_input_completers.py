@@ -123,7 +123,7 @@ class TestSandboxFileCompleter:
         completer = SandboxFileCompleter()
         completer.set_files([
             "test.py",
-            "_internal/src/data_client/fmp/fmp_client.py",
+            "_internal/src/platform/tools/client.py",
         ])
 
         doc = Document("@", cursor_position=len("@"))
@@ -136,14 +136,14 @@ class TestSandboxFileCompleter:
         completer = SandboxFileCompleter()
         completer.set_files([
             "test.py",
-            "_internal/src/data_client/fmp/fmp_client.py",
+            "_internal/src/platform/tools/client.py",
         ])
 
         doc = Document("@_internal/", cursor_position=len("@_internal/"))
         event = Mock()
 
         completions = list(completer.get_completions(doc, event))
-        assert any("_internal/src/data_client/fmp/fmp_client.py" == c.text for c in completions)
+        assert any("_internal/src/platform/tools/client.py" == c.text for c in completions)
 
     def test_hides_init_pycache_and_pyc(self):
         completer = SandboxFileCompleter()

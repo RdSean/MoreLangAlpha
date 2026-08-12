@@ -28,7 +28,7 @@ make up       # build + start the full stack
 ```
 
 - **Backend API** → http://localhost:8000 (hot-reload; `./src` is mounted)
-- **Frontend** → http://localhost:5173 (hot-reload)
+- **Frontend** → http://localhost:5177 (hot-reload, LAN-accessible)
 - **PostgreSQL + Redis** — managed by Compose
 
 Verify the backend is healthy:
@@ -39,9 +39,9 @@ curl http://localhost:8000/health   # → {"status": "healthy"}
 
 Stop the stack with `make down` (or `make clean` to also reclaim Docker disk).
 
-No keys are strictly required — see [Data Provider Fallback Chain](README.md#data-provider-fallback-chain).
-For the full experience, set `DAYTONA_API_KEY` and `FMP_API_KEY` in `.env`; for
-LLM access, set an API key or connect via OAuth in the UI.
+No keys are strictly required. For sandbox-backed execution, set
+`DAYTONA_API_KEY` in `.env`; for LLM access, set an API key or connect via OAuth
+in the UI.
 
 <details>
 <summary>Running on your host instead of Docker</summary>
@@ -50,7 +50,7 @@ LLM access, set an API key or connect via OAuth in the UI.
 make install    # backend (uv) + frontend (pnpm) dependencies
 make setup-db   # PostgreSQL + Redis in Docker + initialize tables
 make dev        # backend on :8000 (hot-reload)
-make dev-web    # frontend on :5173 (run in a separate terminal)
+make dev-web    # frontend on :5177 (run in a separate terminal)
 ```
 
 For web crawling on the host, install the browser dependencies (already bundled

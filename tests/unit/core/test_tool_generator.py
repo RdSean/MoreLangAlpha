@@ -17,12 +17,12 @@ def _make_tool(
     schema = input_schema or {
         "type": "object",
         "properties": {
-            "symbol": {
+            "topic": {
                 "type": "string",
-                "description": "Ticker symbol",
+                "description": "Research topic",
             },
         },
-        "required": ["symbol"],
+        "required": ["topic"],
     }
     return MCPToolInfo(
         name=name,

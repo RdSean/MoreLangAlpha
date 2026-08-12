@@ -89,7 +89,7 @@ function DetailPanel({ toolCallProcess, planData, onClose, onOpenFile, onOpenSub
 
   return (
     <div
-      className={isMobile && artifact?.type !== 'sec_filing' ? '' : 'h-full flex flex-col'}
+      className={isMobile ? '' : 'h-full flex flex-col'}
       style={{
         backgroundColor: 'transparent',
         ...(!isMobile && { borderLeft: '1px solid var(--color-border-muted)' }),

@@ -43,14 +43,14 @@ class TestSecretDiscovery:
     """Verify that secrets are correctly discovered from MCP config."""
 
     def test_resolves_placeholder_secrets(self):
-        server = _make_server(env={"FMP_API_KEY": "${FMP_API_KEY}"})
+        server = _make_server(env={"PLATFORM_SECRET_API_KEY": "${PLATFORM_SECRET_API_KEY}"})
         with (
-            patch.dict(os.environ, {"FMP_API_KEY": "fmp_secret_12345"}, clear=False),
+            patch.dict(os.environ, {"PLATFORM_SECRET_API_KEY": "platform_secret_12345"}, clear=False),
             patch(_GNC, side_effect=_disable_github),
         ):
             mw = LeakDetectionMiddleware(mcp_servers=[server])
         assert len(mw._secrets) == 1
-        assert mw._secrets[0][0] == "FMP_API_KEY"
+        assert mw._secrets[0][0] == "PLATFORM_SECRET_API_KEY"
 
     def test_skips_short_values(self):
         """Values shorter than 8 chars are ignored to avoid false positives."""
@@ -162,19 +162,19 @@ class TestScan:
         return mw
 
     def test_redacts_single_secret(self):
-        mw = self._make_mw({"FMP_API_KEY": "fmp_secret_12345"})
-        result = mw._scan("API key is fmp_secret_12345 here")
-        assert result == "API key is [REDACTED:FMP_API_KEY] here"
+        mw = self._make_mw({"PLATFORM_SECRET_API_KEY": "platform_secret_12345"})
+        result = mw._scan("API key is platform_secret_12345 here")
+        assert result == "API key is [REDACTED:PLATFORM_SECRET_API_KEY] here"
 
     def test_redacts_multiple_secrets(self):
         mw = self._make_mw({
-            "FMP_API_KEY": "fmp_secret_12345",
+            "PLATFORM_SECRET_API_KEY": "platform_secret_12345",
             "GITHUB_TOKEN": "ghp_abcdef1234567",
         })
-        result = mw._scan("keys: fmp_secret_12345 and ghp_abcdef1234567")
-        assert "[REDACTED:FMP_API_KEY]" in result
+        result = mw._scan("keys: platform_secret_12345 and ghp_abcdef1234567")
+        assert "[REDACTED:PLATFORM_SECRET_API_KEY]" in result
         assert "[REDACTED:GITHUB_TOKEN]" in result
-        assert "fmp_secret_12345" not in result
+        assert "platform_secret_12345" not in result
         assert "ghp_abcdef1234567" not in result
 
     def test_redacts_repeated_occurrences(self):

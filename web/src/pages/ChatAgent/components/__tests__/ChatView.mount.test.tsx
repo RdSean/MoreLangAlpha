@@ -47,7 +47,6 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
-vi.mock('@/lib/supabase', () => ({ supabase: null }));
 vi.mock('@/hooks/useUser', () => ({ useUser: () => ({ user: null }) }));
 vi.mock('@/contexts/ThemeContext', () => ({
   useTheme: () => ({ theme: 'light', setTheme: () => {} }),
@@ -111,7 +110,6 @@ const baseChatState = () => ({
   threadId: 'thread-mount-1',
   threadModels: [] as string[],
   lastThreadModel: null,
-  marketWatch: null,
   isShared: false,
   insertNotification: vi.fn(),
   handleEditMessage: vi.fn(),

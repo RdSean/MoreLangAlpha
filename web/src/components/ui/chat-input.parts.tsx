@@ -5,8 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { Loader } from '@/components/ui/loader';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { cn } from '@/lib/utils';
-import type { WidgetContextSnapshot } from '@/pages/Dashboard/widgets/framework/contextSnapshot';
-import { WidgetContextDeck } from '@/pages/Dashboard/widgets/framework/WidgetContextDeck';
+import type { WidgetContextSnapshot } from '@/types/widgetContext';
+import { WidgetContextDeck } from '@/components/ui/WidgetContextDeck';
 import { getSlashCommandIcon } from './chat-input.helpers';
 import type { FileAttachment, SlashCommand } from './chat-input.types';
 

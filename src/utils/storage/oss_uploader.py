@@ -430,7 +430,7 @@ def upload_image(
 
 
 def upload_chart(file_path: str, custom_name: str | None = None) -> str | None:
-    """Upload a chart/graph image to the financial_charts directory.
+    """Upload a chart or graph image to the configured chart directory.
 
     Args:
         file_path: Path to the local chart image
@@ -440,9 +440,9 @@ def upload_chart(file_path: str, custom_name: str | None = None) -> str | None:
         str: Public URL of uploaded chart, or None if upload fails
 
     Example:
-        >>> url = upload_chart("/path/to/stock_chart.png")
+        >>> url = upload_chart("/path/to/research_chart.png")
         >>> print(url)  # noqa: T201
-        'https://${OSS_BUCKET_NAME}.${OSS_ENDPOINT}/charts/stock_chart_20250118_143022.png'
+        'https://${OSS_BUCKET_NAME}.${OSS_ENDPOINT}/charts/research_chart_20250118_143022.png'
     """
     return upload_image(
         file_path,

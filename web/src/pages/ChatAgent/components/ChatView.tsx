@@ -9,10 +9,8 @@ import { useNarrowContainer } from '@/hooks/useNarrowContainer';
 import { ScrollArea } from '../../../components/ui/scroll-area';
 import { usePreferences } from '@/hooks/usePreferences';
 import { useUpdatePreferences } from '@/hooks/useUpdatePreferences';
-import { useFeatureEnabled } from '@/hooks/useFeatures';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
-import { updateCurrentUser } from '../../Dashboard/utils/api';
 import { getWorkspace, summarizeThread, offloadThread, getThreadShareStatus, updateThreadSharing, cancelSubagentTask } from '../utils/api';
 import { buildSharedServeUrl, buildWsfilesUrl } from './viewers/html/wsfilesUrl';
 import ShareReportLinkModal from './ShareReportLinkModal';
@@ -52,7 +50,6 @@ import ShareButton from './ShareButton';
 import { WorkspaceProvider } from '../contexts/WorkspaceContext';
 import SubagentStatusBar from './SubagentStatusBar';
 import TodoDrawer from './TodoDrawer';
-import MarketWatchChip from './MarketWatchChip';
 import { Loader } from '@/components/ui/loader';
 import { ErrorBanner } from '@/components/ui/error-banner';
 import { motion, AnimatePresence, type PanInfo } from 'framer-motion';
@@ -89,7 +86,6 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   const navigate = useNavigate();
   const { preferences } = usePreferences();
   const { mutateAsync: updatePreferencesAsync } = useUpdatePreferences();
-  const marketWatchEnabled = useFeatureEnabled('market_watch');
   const queryClient = useQueryClient();
   const initialMessageSentRef = useRef(false);
   // Determine agent mode: flash workspaces use flash mode, otherwise ptc
@@ -174,16 +170,6 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     finalizePendingTodos,
     clearSubagentCards,
   } = useCardState();
-
-  // Sync onboarding_completed via PUT when ChatAgent completes onboarding (risk_preference + stocks)
-  const handleOnboardingRelatedToolComplete = useCallback(async () => {
-    try {
-      await updateCurrentUser({ onboarding_completed: true });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
-    } catch (e) {
-      console.warn('[ChatView] Failed to sync onboarding_completed:', e);
-    }
-  }, [queryClient]);
 
   // Navigate to a newly created workspace with an optional starter question
   // Always PTC mode — start_question creates a sandbox-backed workspace
@@ -275,7 +261,6 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     threadId: currentThreadId,
     threadModels,
     lastThreadModel,
-    marketWatch,
     isShared: threadIsShared,
     insertNotification,
     handleEditMessage,
@@ -288,7 +273,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     getSubagentHistory,
     resolveSubagentIdToAgentId,
     hydrateTaskTranscript,
-  } = useChatMessages(workspaceId, threadId, updateTodoListCard as (todoData: Record<string, unknown>) => void, updateSubagentCard, finalizePendingTodos, handleOnboardingRelatedToolComplete, handleFileArtifact, handleOpenPreviewFromStream, agentMode, clearSubagentCards, handleWorkspaceCreated, 'web');
+  } = useChatMessages(workspaceId, threadId, updateTodoListCard as (todoData: Record<string, unknown>) => void, updateSubagentCard, finalizePendingTodos, handleFileArtifact, handleOpenPreviewFromStream, agentMode, clearSubagentCards, handleWorkspaceCreated, 'web');
 
   // Fallback-suggestion pill action: adopt the model that actually answered —
   // immediately for this thread's next send (chat input selection) and
@@ -328,7 +313,6 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   // Status-row visibility, hoisted so the wrapper condition and its two children
   // share one source of truth. The chip self-hides on empty symbols; the tail
   // shows when the main turn ended but a dispatched subagent is still running.
-  const showWatchChip = (marketWatch?.symbols?.length ?? 0) > 0;
   const showBackgroundTail = hasActiveSubagents && !isLoading;
 
   // Restore steering text to input when agent finishes without consuming it
@@ -628,18 +612,6 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
       }
     }
 
-    // Watch toggle activates the market-watch skill (re-sent every turn while
-    // on, like MarketView's chart-annotation). Dedup against a manually-typed
-    // /market-watch pill added by the loop above (SkillsMiddleware also dedups
-    // the body, but this keeps the context list clean).
-    if (modelOptions.marketWatch && marketWatchEnabled && !contexts.some((c) => c.type === 'skills' && c.name === 'market-watch')) {
-      contexts.push({
-        type: 'skills',
-        name: 'market-watch',
-        instruction: 'Market watch mode is on for this message. If the central tickers are not yet registered, register them with watch_market.',
-      });
-    }
-
     // Widget context snapshots from the deck rail. Each snapshot becomes one
     // `{type:"widget"}` item plus an optional sibling `{type:"image"}` item
     // (the existing MultimodalContext channel handles vision-vs-text-only
@@ -652,7 +624,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
 
     const additionalContext = contexts.length > 0 ? contexts : null;
     stableSendMessage(message, planMode, additionalContext, attachmentMeta, modelOptions);
-  }, [marketWatchEnabled, stableSendMessage]);
+  }, [stableSendMessage]);
 
   // Handle action-type slash commands (e.g. /compact, /compaction, /offload)
   const handleAction = useCallback((cmd: ActionCommand) => {
@@ -810,7 +782,6 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     popPanelHistory,
     handleOpenFileFromChat,
     handleOpenSourcesFromChat,
-    handleOpenStatusFromChat,
     handleOpenDirFromChat,
     handleToolCallDetailClick,
     handlePlanDetailClick,
@@ -1068,50 +1039,9 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
       return;
     }
 
-    // Handle personalization / onboarding flow (isPersonalizing is the new flag;
-    // isOnboarding is kept for backward compatibility)
-    if ((location.state?.isPersonalizing || location.state?.isOnboarding) && !initialMessageSentRef.current && !isLoading && !isLoadingHistory) {
-      initialMessageSentRef.current = true;
-      // Clear navigation state to prevent re-sending on re-renders
-      navigate(location.pathname, { replace: true, state: {} });
-      // Small delay to ensure component is fully mounted
-      setTimeout(() => {
-        const personalizationMessage = "I'd like to set up my investment profile";
-        const additionalContext = [
-          {
-            type: "skills",
-            name: "onboarding",
-            instruction: "Help the user set up their investment profile — watchlists, risk preferences, and alerts.",
-          }
-        ];
-        handleSendMessage(personalizationMessage, false, additionalContext);
-      }, 100);
-      return;
-    }
-
-    // Handle modify preferences flow (from settings panel)
-    if (location.state?.isModifyingPreferences && !initialMessageSentRef.current && !isLoading && !isLoadingHistory) {
-      initialMessageSentRef.current = true;
-      navigate(location.pathname, { replace: true, state: {} });
-      setTimeout(() => {
-        const modifyMessage = "I'd like to review and update my preferences.";
-        const additionalContext = [
-          {
-            type: "skills",
-            name: "user-profile",
-            instruction: "The user wants to review and update their existing preferences. Start by fetching their current preferences with get_user_data(entity='preferences'), show them what's currently set, then ask what they'd like to change. Use AskUserQuestion to offer options. Only update the fields they want to change.",
-          }
-        ];
-        handleSendMessage(modifyMessage, false, additionalContext);
-      }, 100);
-      return;
-    }
-
     // Handle regular message flow
     if (location.state?.initialMessage && !initialMessageSentRef.current) {
-      // Merge state.skills (names) into additionalContext as skill entries,
-      // so hidden skills preloaded upstream (e.g. chart-annotation from
-      // MarketView) stay active on the PTC side.
+      // Merge state.skills (names) into additionalContext as skill entries.
       const mergeSkills = (
         context: Record<string, unknown>[] | null | undefined,
         skills: unknown,
@@ -1133,26 +1063,26 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
         // New thread - send immediately
         initialMessageSentRef.current = true;
         // Capture state values before clearing (navigate may update location ref)
-        const { initialMessage, planMode, additionalContext, attachmentMeta, model, reasoningEffort, widgetSnapshots, chartSelections, skills } = location.state;
+        const { initialMessage, planMode, additionalContext, attachmentMeta, model, reasoningEffort, widgetSnapshots, skills } = location.state;
         const mergedContext = mergeSkills(additionalContext, skills);
         // Clear navigation state to prevent re-sending on re-renders
         navigate(location.pathname, { replace: true, state: {} });
         // Small delay to ensure component is fully mounted
         setTimeout(() => {
-          handleSendMessage(initialMessage, planMode || false, mergedContext, attachmentMeta || null, { model, reasoningEffort, widgetSnapshots, chartSelections });
+          handleSendMessage(initialMessage, planMode || false, mergedContext, attachmentMeta || null, { model, reasoningEffort, widgetSnapshots });
         }, 100);
       } else if (!isLoadingHistory && !isLoading) {
         // Existing thread - wait for history to load, then send
         // This ensures we don't send duplicate messages
         initialMessageSentRef.current = true;
         // Capture state values before clearing (navigate may update location ref)
-        const { initialMessage, planMode, additionalContext, attachmentMeta, model, reasoningEffort, widgetSnapshots, chartSelections, skills } = location.state;
+        const { initialMessage, planMode, additionalContext, attachmentMeta, model, reasoningEffort, widgetSnapshots, skills } = location.state;
         const mergedContext = mergeSkills(additionalContext, skills);
         // Clear navigation state to prevent re-sending on re-renders
         navigate(location.pathname, { replace: true, state: {} });
         // Small delay to ensure component is fully mounted
         setTimeout(() => {
-          handleSendMessage(initialMessage, planMode || false, mergedContext, attachmentMeta || null, { model, reasoningEffort, widgetSnapshots, chartSelections });
+          handleSendMessage(initialMessage, planMode || false, mergedContext, attachmentMeta || null, { model, reasoningEffort, widgetSnapshots });
         }, 100);
       }
     }
@@ -1595,23 +1525,14 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
                 {activeAgentId === 'main' ? (
                   <>
                     <TodoDrawer todoData={cards['todo-list-card']?.todoData ?? null} />
-                    {/* Watch chip + background-tasks notice share one line, chip
-                        first. Both are presentational; either may be absent (the
-                        chip self-hides when the watch list is empty). Matched pill
-                        height (py-1) keeps them vertically aligned. */}
-                    {(showWatchChip || showBackgroundTail) && (
+                    {showBackgroundTail && (
                       <div className="flex items-center gap-2 flex-wrap">
-                        <MarketWatchChip symbols={marketWatch?.symbols} lastUpdate={marketWatch?.timestamp} onClick={handleOpenStatusFromChat} />
-                        {/* Tail mode: main turn finished but a dispatched subagent is
-                            still running in the backend. Independent of stop. */}
-                        {showBackgroundTail && (
-                          <div className="flex items-center gap-2 px-3 py-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                            <span aria-hidden="true" className="flex-shrink-0">
-                              <Loader size={12} className="text-[color:var(--color-accent-primary)]" />
-                            </span>
-                            {t('chat.backgroundTasksRunning')}
-                          </div>
-                        )}
+                        <div className="flex items-center gap-2 px-3 py-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                          <span aria-hidden="true" className="flex-shrink-0">
+                            <Loader size={12} className="text-[color:var(--color-accent-primary)]" />
+                          </span>
+                          {t('chat.backgroundTasksRunning')}
+                        </div>
                       </div>
                     )}
                     {pendingRejection && (
@@ -1823,7 +1744,6 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
                   onTargetMemoHandled={handleTargetMemoHandled}
                   sourcesRecords={sourcesRecords}
                   allSourcesRecords={allSourcesRecords}
-                  marketWatch={marketWatch}
                   onOpenFile={handleOpenFileFromChat}
                   files={workspaceFiles}
                   filesLoading={filesLoading}
@@ -1882,7 +1802,6 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
                       onTargetMemoHandled={handleTargetMemoHandled}
                       sourcesRecords={sourcesRecords}
                       allSourcesRecords={allSourcesRecords}
-                      marketWatch={marketWatch}
                       onOpenFile={handleOpenFileFromChat}
                       files={workspaceFiles}
                       filesLoading={filesLoading}
