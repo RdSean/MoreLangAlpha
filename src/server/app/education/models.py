@@ -73,3 +73,82 @@ class EducationReviewResponse(BaseModel):
     feedback_text: str
     reviewed_by_user_id: str | None = None
     created_at: datetime | None = None
+
+
+class CreateTextbookRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("title is required")
+        return normalized
+
+
+class StartTextbookProcessingRequest(BaseModel):
+    source_asset_ids: list[UUID] = Field(min_length=1, max_length=20)
+
+
+class AssignTextbookPublicationRequest(BaseModel):
+    student_user_id: str = Field(min_length=1, max_length=255)
+
+
+class UpdateLearningProgressRequest(BaseModel):
+    status: Literal["learning", "read", "check_completed", "review_recommended"]
+
+
+class AnswerLearningQuestionRequest(BaseModel):
+    selected_option: str = Field(min_length=1, max_length=32)
+
+
+class TextbookResponse(BaseModel):
+    textbook_id: str
+    household_id: str
+    title: str
+    slug: str
+    created_by_user_id: str | None = None
+    created_at: datetime | None = None
+
+
+class TextbookProcessingResponse(BaseModel):
+    job_id: str
+    version_id: str
+    status: str
+    attempt_count: int | None = None
+    created_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class TextbookPublicationResponse(BaseModel):
+    publication_id: str
+    version_id: str
+    published_by_user_id: str | None = None
+    created_at: datetime | None = None
+
+
+class TextbookAssignmentResponse(BaseModel):
+    assignment_id: str
+    publication_id: str
+    student_user_id: str
+    assigned_by_user_id: str | None = None
+    created_at: datetime | None = None
+
+
+class LearningProgressResponse(BaseModel):
+    assignment_id: str
+    chapter_id: str
+    status: str
+    last_read_at: datetime | None = None
+    completed_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class LearningAnswerResponse(BaseModel):
+    answer_id: str
+    assignment_id: str
+    question_id: str
+    selected_option: str
+    is_correct: bool
+    answered_at: datetime | None = None

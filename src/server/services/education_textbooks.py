@@ -4,12 +4,23 @@ from typing import Any
 
 from src.server.database.education_tasks import get_household_context_for_parent
 from src.server.database.education_textbooks import (
+    assign_textbook_publication,
     claim_textbook_processing_job,
     complete_textbook_processing_job,
     create_textbook_record,
     fail_textbook_processing_job,
+    get_processing_job_for_parent,
+    get_student_learning as get_student_learning_record,
+    get_textbook_for_parent,
+    list_student_assignments,
+    list_student_learning_records,
+    list_textbooks_for_parent,
+    publish_textbook_version,
     queue_textbook_processing,
+    submit_student_answer,
+    update_student_progress,
 )
+from src.server.database.education_members import get_membership_for_user
 from src.server.services.education_textbook_storage import write_textbook_bundle
 
 
@@ -175,3 +186,141 @@ async def process_textbook_job(*, job_id: str) -> dict[str, Any]:
         if isinstance(exc, TextbookError):
             raise
         raise TextbookProcessingError("Local textbook processing failed") from exc
+
+
+async def list_parent_textbooks(*, parent_user_id: str) -> list[dict[str, Any]]:
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can manage family textbooks")
+    return await list_textbooks_for_parent(parent_user_id)
+
+
+async def get_parent_textbook(
+    *, parent_user_id: str, textbook_id: str
+) -> dict[str, Any]:
+    textbook = await get_textbook_for_parent(
+        parent_user_id=parent_user_id, textbook_id=textbook_id
+    )
+    if not textbook:
+        raise TextbookNotFoundError("Textbook not found")
+    return textbook
+
+
+async def run_processing_for_parent(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any]:
+    job = await get_processing_job_for_parent(
+        parent_user_id=parent_user_id, job_id=job_id
+    )
+    if not job:
+        raise TextbookNotFoundError("Textbook processing job not found")
+    if job["status"] != "queued":
+        raise TextbookTransitionError(
+            f"Textbook processing job cannot run from {job['status']}"
+        )
+    return await process_textbook_job(job_id=job_id)
+
+
+async def publish_version(
+    *, parent_user_id: str, textbook_id: str, version_id: str
+) -> dict[str, Any]:
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can publish textbook versions")
+    try:
+        publication = await publish_textbook_version(
+            parent_user_id=parent_user_id,
+            textbook_id=textbook_id,
+            version_id=version_id,
+        )
+    except ValueError as exc:
+        raise TextbookTransitionError(str(exc)) from exc
+    if not publication:
+        raise TextbookNotFoundError("Textbook version not found")
+    return publication
+
+
+async def assign_publication(
+    *, parent_user_id: str, publication_id: str, student_user_id: str
+) -> dict[str, Any]:
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can assign textbook publications")
+    assignment = await assign_textbook_publication(
+        parent_user_id=parent_user_id,
+        publication_id=publication_id,
+        student_user_id=student_user_id,
+    )
+    if not assignment:
+        raise TextbookNotFoundError("Publication or household student not found")
+    return assignment
+
+
+async def list_learning_assignments(*, student_user_id: str) -> list[dict[str, Any]]:
+    membership = await get_membership_for_user(student_user_id)
+    if not membership or membership["role"] != "student":
+        raise TextbookPermissionError("Only a student can access learning assignments")
+    return await list_student_assignments(student_user_id)
+
+
+async def get_student_learning(
+    *, student_user_id: str, assignment_id: str
+) -> dict[str, Any]:
+    membership = await get_membership_for_user(student_user_id)
+    if not membership or membership["role"] != "student":
+        raise TextbookPermissionError("Only a student can access learning assignments")
+    learning = await get_student_learning_record(
+        student_user_id=student_user_id, assignment_id=assignment_id
+    )
+    if not learning:
+        raise TextbookNotFoundError("Learning assignment not found")
+    return learning
+
+
+async def record_learning_progress(
+    *, student_user_id: str, assignment_id: str, chapter_id: str, status: str
+) -> dict[str, Any]:
+    if status not in {"learning", "read", "check_completed", "review_recommended"}:
+        raise TextbookError("Learning progress status is invalid")
+    membership = await get_membership_for_user(student_user_id)
+    if not membership or membership["role"] != "student":
+        raise TextbookPermissionError("Only a student can record learning progress")
+    progress = await update_student_progress(
+        student_user_id=student_user_id,
+        assignment_id=assignment_id,
+        chapter_id=chapter_id,
+        status=status,
+    )
+    if not progress:
+        raise TextbookNotFoundError("Learning chapter not found")
+    return progress
+
+
+async def answer_learning_question(
+    *, student_user_id: str, assignment_id: str, question_id: str, selected_option: str
+) -> dict[str, Any]:
+    option = selected_option.strip().upper()
+    if not option or len(option) > 32:
+        raise TextbookError("A valid answer option is required")
+    membership = await get_membership_for_user(student_user_id)
+    if not membership or membership["role"] != "student":
+        raise TextbookPermissionError("Only a student can answer learning questions")
+    answer = await submit_student_answer(
+        student_user_id=student_user_id,
+        assignment_id=assignment_id,
+        question_id=question_id,
+        selected_option=option,
+    )
+    if not answer:
+        raise TextbookNotFoundError("Learning question not found")
+    return answer
+
+
+async def get_parent_learning_records(
+    *, parent_user_id: str, assignment_id: str
+) -> dict[str, Any]:
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can read learning records")
+    records = await list_student_learning_records(
+        parent_user_id=parent_user_id, assignment_id=assignment_id
+    )
+    if not records:
+        raise TextbookNotFoundError("Learning assignment not found")
+    return records
