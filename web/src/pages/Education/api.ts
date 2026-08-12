@@ -45,6 +45,16 @@ export async function uploadEducationAsset(file: File): Promise<EducationAsset> 
   return data;
 }
 
+export async function listEducationAssets(): Promise<EducationAsset[]> {
+  const { data } = await api.get<EducationAsset[]>('/api/v1/education/assets');
+  return data;
+}
+
+export async function getEducationAssetDownloadUrl(assetId: string): Promise<string> {
+  const { data } = await api.get<{ url: string }>(`/api/v1/education/assets/${assetId}/download`);
+  return data.url;
+}
+
 export async function listTextbooks(): Promise<TextbookLibraryItem[]> {
   const { data } = await api.get<TextbookLibraryItem[]>('/api/v1/education/textbooks');
   return data;

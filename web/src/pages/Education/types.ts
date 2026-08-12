@@ -41,6 +41,7 @@ export interface EducationAsset {
   original_filename: string;
   content_type: string;
   size_bytes: number;
+  created_at?: string;
 }
 
 export type TextbookVersionStatus = 'draft' | 'processing' | 'review' | 'published' | 'failed';
@@ -75,6 +76,8 @@ export interface TextbookChapter {
   position: number;
   slug: string;
   title: string;
+  page_start?: number | null;
+  page_end?: number | null;
   markdown: string;
   teaching_material: string;
   progress_status?: 'not_started' | 'learning' | 'read' | 'check_completed' | 'review_recommended';
@@ -86,6 +89,13 @@ export interface TextbookAssignmentSummary {
   student_user_id: string;
   student_name?: string;
   created_at?: string;
+}
+
+export interface TextbookSource {
+  asset_id: string;
+  original_filename: string;
+  content_type: string;
+  size_bytes: number;
 }
 
 export interface TextbookVersion {
@@ -101,6 +111,7 @@ export interface TextbookVersion {
   chapter_count: number;
   is_published: boolean;
   publication_id?: string | null;
+  sources: TextbookSource[];
   chapters: TextbookChapter[];
   assignments: TextbookAssignmentSummary[];
 }

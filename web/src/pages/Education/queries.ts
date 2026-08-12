@@ -10,6 +10,14 @@ export function useEducationTasks() {
   });
 }
 
+export function useEducationAssets() {
+  return useQuery({
+    queryKey: queryKeys.education.assets(),
+    queryFn: educationApi.listEducationAssets,
+    staleTime: 15_000,
+  });
+}
+
 export function useEducationMembers(enabled: boolean) {
   return useQuery({
     queryKey: [...queryKeys.education.all, 'members'],
