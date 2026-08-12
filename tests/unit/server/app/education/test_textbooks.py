@@ -1,6 +1,7 @@
 """Role-safe HTTP contracts for versioned family textbook routes."""
 
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -56,7 +57,7 @@ async def test_parent_creates_textbook_and_starts_explicit_processing(client):
     app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
     job = {
         "job_id": "6eebf7fb-9579-4c5d-825a-2e595b7f1b18",
-        "version_id": "version-1",
+        "version_id": "65f47c8c-f452-47bd-8619-58ccd2a1f10c",
         "status": "queued",
     }
     with (
@@ -83,6 +84,116 @@ async def test_parent_creates_textbook_and_starts_explicit_processing(client):
     assert start.await_args.kwargs["source_asset_ids"] == [
         "bc5734a8-8a30-459f-a1f3-8551feb4c169"
     ]
+
+
+@pytest.mark.asyncio
+async def test_parent_create_serializes_uuid_identifiers_from_database(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    textbook_id = uuid4()
+    household_id = uuid4()
+    textbook = {
+        "textbook_id": textbook_id,
+        "household_id": household_id,
+        "title": "英语第二册",
+        "slug": "english-2",
+        "created_by_user_id": "parent-1",
+    }
+    with patch(
+        "src.server.app.education.textbooks.create_textbook",
+        new=AsyncMock(return_value=textbook),
+    ):
+        response = await client.post(
+            "/api/v1/education/textbooks", json={"title": "英语第二册"}
+        )
+
+    assert response.status_code == 201
+    assert response.json()["textbook_id"] == str(textbook_id)
+    assert response.json()["household_id"] == str(household_id)
+
+
+@pytest.mark.asyncio
+async def test_textbook_mutations_serialize_uuid_identifiers_from_database(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    textbook_id = uuid4()
+    version_id = uuid4()
+    job_id = uuid4()
+    publication_id = uuid4()
+    assignment_id = uuid4()
+    chapter_id = uuid4()
+    question_id = uuid4()
+    answer_id = uuid4()
+    job = {"job_id": job_id, "version_id": version_id, "status": "queued"}
+    publication = {"publication_id": publication_id, "version_id": version_id}
+    assignment = {
+        "assignment_id": assignment_id,
+        "publication_id": publication_id,
+        "student_user_id": "student-1",
+    }
+    progress = {
+        "assignment_id": assignment_id,
+        "chapter_id": chapter_id,
+        "status": "learning",
+    }
+    answer = {
+        "answer_id": answer_id,
+        "assignment_id": assignment_id,
+        "question_id": question_id,
+        "selected_option": "A",
+        "is_correct": True,
+    }
+    with (
+        patch(
+            "src.server.app.education.textbooks.start_processing",
+            new=AsyncMock(return_value=job),
+        ),
+        patch(
+            "src.server.app.education.textbooks.publish_version",
+            new=AsyncMock(return_value=publication),
+        ),
+        patch(
+            "src.server.app.education.textbooks.assign_publication",
+            new=AsyncMock(return_value=assignment),
+        ),
+        patch(
+            "src.server.app.education.textbooks.record_learning_progress",
+            new=AsyncMock(return_value=progress),
+        ),
+        patch(
+            "src.server.app.education.textbooks.answer_learning_question",
+            new=AsyncMock(return_value=answer),
+        ),
+    ):
+        queued = await client.post(
+            f"/api/v1/education/textbooks/{textbook_id}/processing",
+            json={"source_asset_ids": [str(uuid4())]},
+        )
+        published = await client.post(
+            f"/api/v1/education/textbooks/{textbook_id}/versions/{version_id}/publish"
+        )
+        assigned = await client.post(
+            f"/api/v1/education/textbook-publications/{publication_id}/assignments",
+            json={"student_user_id": "student-1"},
+        )
+        recorded = await client.post(
+            f"/api/v1/education/learning/{assignment_id}/chapters/{chapter_id}/progress",
+            json={"status": "learning"},
+        )
+        answered = await client.post(
+            f"/api/v1/education/learning/{assignment_id}/questions/{question_id}/answers",
+            json={"selected_option": "A"},
+        )
+
+    for response, identifier in (
+        (queued, job_id),
+        (published, publication_id),
+        (assigned, assignment_id),
+        (recorded, assignment_id),
+        (answered, answer_id),
+    ):
+        assert response.status_code in {200, 201, 202}
+        assert str(identifier) in response.text
 
 
 @pytest.mark.asyncio
@@ -124,7 +235,7 @@ async def test_parent_can_requeue_only_a_failed_processing_job(client):
     job_id = "6eebf7fb-9579-4c5d-825a-2e595b7f1b18"
     response_job = {
         "job_id": job_id,
-        "version_id": "version-1",
+        "version_id": "65f47c8c-f452-47bd-8619-58ccd2a1f10c",
         "status": "queued",
         "attempt_count": 2,
     }

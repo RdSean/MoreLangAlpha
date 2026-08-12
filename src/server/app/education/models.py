@@ -104,8 +104,8 @@ class AnswerLearningQuestionRequest(BaseModel):
 
 
 class TextbookResponse(BaseModel):
-    textbook_id: str
-    household_id: str
+    textbook_id: UUID
+    household_id: UUID
     title: str
     slug: str
     created_by_user_id: str | None = None
@@ -113,8 +113,8 @@ class TextbookResponse(BaseModel):
 
 
 class TextbookProcessingResponse(BaseModel):
-    job_id: str
-    version_id: str
+    job_id: UUID
+    version_id: UUID
     status: str
     attempt_count: int | None = None
     created_at: datetime | None = None
@@ -122,23 +122,23 @@ class TextbookProcessingResponse(BaseModel):
 
 
 class TextbookPublicationResponse(BaseModel):
-    publication_id: str
-    version_id: str
+    publication_id: UUID
+    version_id: UUID
     published_by_user_id: str | None = None
     created_at: datetime | None = None
 
 
 class TextbookAssignmentResponse(BaseModel):
-    assignment_id: str
-    publication_id: str
+    assignment_id: UUID
+    publication_id: UUID
     student_user_id: str
     assigned_by_user_id: str | None = None
     created_at: datetime | None = None
 
 
 class LearningProgressResponse(BaseModel):
-    assignment_id: str
-    chapter_id: str
+    assignment_id: UUID
+    chapter_id: UUID
     status: str
     last_read_at: datetime | None = None
     completed_at: datetime | None = None
@@ -146,9 +146,9 @@ class LearningProgressResponse(BaseModel):
 
 
 class LearningAnswerResponse(BaseModel):
-    answer_id: str
-    assignment_id: str
-    question_id: str
+    answer_id: UUID
+    assignment_id: UUID
+    question_id: UUID
     selected_option: str
     is_correct: bool
     answered_at: datetime | None = None
