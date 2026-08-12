@@ -197,6 +197,87 @@ async def test_textbook_mutations_serialize_uuid_identifiers_from_database(clien
 
 
 @pytest.mark.asyncio
+async def test_parent_detail_exposes_safe_review_sources_and_page_mappings(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    version_id = uuid4()
+    source_id = uuid4()
+    chapter_id = uuid4()
+    question_id = uuid4()
+    detail = {
+        **TEXTBOOK,
+        "versions": [
+            {
+                "version_id": version_id,
+                "sequence": 1,
+                "status": "review",
+                "extractor_name": "local_pypdf",
+                "extractor_version": "1",
+                "processing_error": None,
+                "processing_job_id": None,
+                "processing_job_status": None,
+                "processing_attempt_count": None,
+                "chapter_count": 1,
+                "is_published": False,
+                "publication_id": None,
+                "sources": [
+                    {
+                        "asset_id": source_id,
+                        "original_filename": "body.pdf",
+                        "content_type": "application/pdf",
+                        "size_bytes": 12,
+                        "storage_key": "education/private/body.pdf",
+                    }
+                ],
+                "chapters": [
+                    {
+                        "chapter_id": chapter_id,
+                        "position": 1,
+                        "slug": "01-introduction",
+                        "title": "导读",
+                        "page_start": 1,
+                        "page_end": 10,
+                        "markdown": "# 教材正文",
+                        "teaching_material": "# 学习材料",
+                        "questions": [
+                            {
+                                "question_id": question_id,
+                                "position": 1,
+                                "prompt": "下一步做什么？",
+                                "options": {"A": "完成知识检查"},
+                                "correct_option": "A",
+                                "explanation": "形成学习证据。",
+                                "knowledge_point": "学习证据",
+                            }
+                        ],
+                    }
+                ],
+                "assignments": [],
+            }
+        ],
+    }
+    with patch(
+        "src.server.app.education.textbooks.get_parent_textbook",
+        new=AsyncMock(return_value=detail),
+    ):
+        response = await client.get(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["versions"][0]["sources"] == [
+        {
+            "asset_id": str(source_id),
+            "original_filename": "body.pdf",
+            "content_type": "application/pdf",
+            "size_bytes": 12,
+        }
+    ]
+    assert response.json()["versions"][0]["chapters"][0]["page_start"] == 1
+    assert "storage_key" not in response.text
+
+
+@pytest.mark.asyncio
 async def test_student_reader_returns_only_assigned_published_content(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "student-1"

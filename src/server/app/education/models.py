@@ -112,6 +112,64 @@ class TextbookResponse(BaseModel):
     created_at: datetime | None = None
 
 
+class TextbookSourceResponse(BaseModel):
+    asset_id: UUID
+    original_filename: str
+    content_type: str
+    size_bytes: int
+
+
+class TextbookQuestionResponse(BaseModel):
+    question_id: UUID
+    position: int
+    prompt: str
+    options: dict[str, str]
+    correct_option: str
+    explanation: str
+    knowledge_point: str
+
+
+class TextbookChapterResponse(BaseModel):
+    chapter_id: UUID
+    position: int
+    slug: str
+    title: str
+    page_start: int | None = None
+    page_end: int | None = None
+    markdown: str
+    teaching_material: str
+    questions: list[TextbookQuestionResponse]
+
+
+class TextbookAssignmentSummaryResponse(BaseModel):
+    assignment_id: UUID
+    student_user_id: str
+    student_name: str | None = None
+    created_at: datetime | None = None
+
+
+class TextbookVersionResponse(BaseModel):
+    version_id: UUID
+    sequence: int
+    status: str
+    extractor_name: str | None = None
+    extractor_version: str | None = None
+    processing_error: str | None = None
+    processing_job_id: str | None = None
+    processing_job_status: str | None = None
+    processing_attempt_count: int | None = None
+    chapter_count: int
+    is_published: bool
+    publication_id: UUID | None = None
+    sources: list[TextbookSourceResponse]
+    chapters: list[TextbookChapterResponse]
+    assignments: list[TextbookAssignmentSummaryResponse]
+
+
+class TextbookDetailResponse(TextbookResponse):
+    versions: list[TextbookVersionResponse]
+
+
 class TextbookProcessingResponse(BaseModel):
     job_id: UUID
     version_id: UUID

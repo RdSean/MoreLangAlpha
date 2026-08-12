@@ -576,6 +576,18 @@ async def get_textbook_for_parent(
             for version in versions:
                 await cur.execute(
                     """
+                    SELECT assets.asset_id, assets.original_filename,
+                           assets.content_type, assets.size_bytes
+                    FROM education_textbook_sources AS sources
+                    JOIN education_assets AS assets ON assets.asset_id = sources.asset_id
+                    WHERE sources.version_id = %s
+                    ORDER BY sources.position
+                    """,
+                    (version["version_id"],),
+                )
+                version["sources"] = [dict(row) for row in await cur.fetchall()]
+                await cur.execute(
+                    """
                     SELECT chapters.chapter_id, chapters.position, chapters.slug, chapters.title,
                            chapters.page_start, chapters.page_end, chapters.markdown, chapters.teaching_material
                     FROM education_textbook_chapters AS chapters

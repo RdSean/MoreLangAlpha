@@ -12,6 +12,7 @@ from src.server.app.education.models import (
     LearningProgressResponse,
     StartTextbookProcessingRequest,
     TextbookAssignmentResponse,
+    TextbookDetailResponse,
     TextbookProcessingResponse,
     TextbookPublicationResponse,
     TextbookResponse,
@@ -75,7 +76,7 @@ async def create_family_textbook(body: CreateTextbookRequest, user_id: CurrentUs
         raise _textbook_http_error(exc) from exc
 
 
-@router.get("/textbooks/{textbook_id}", response_model=dict)
+@router.get("/textbooks/{textbook_id}", response_model=TextbookDetailResponse)
 async def get_family_textbook(textbook_id: UUID, user_id: CurrentUserId):
     try:
         return await get_parent_textbook(
