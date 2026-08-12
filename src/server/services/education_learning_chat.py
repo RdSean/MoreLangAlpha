@@ -57,7 +57,7 @@ async def attach_learning_chat_context(
     chapter_id: str | None,
     additional_context: list[Any] | None,
 ) -> list[Any] | None:
-    """Resolve published chapter material server-side and append one Flash directive."""
+    """Resolve published chapter material into the sole learning-chat directive."""
     if assignment_id is None and chapter_id is None:
         return additional_context
     if not assignment_id or not chapter_id:
@@ -74,7 +74,7 @@ async def attach_learning_chat_context(
         raise EducationLearningChatContextError(
             "Learning chapter is unavailable"
         ) from exc
-    return [
-        *(additional_context or []),
-        {"type": "directive", "content": context["content"]},
-    ]
+    # Learning threads are deterministic published-material conversations.
+    # Discard client context so it cannot change or dilute the assigned chapter.
+    del additional_context
+    return [{"type": "directive", "content": context["content"]}]
