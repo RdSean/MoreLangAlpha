@@ -33,8 +33,10 @@
 教学加工创建一个由系统管理的 PTC workspace 和隐藏 thread。该 thread 只接受
 服务端生成的固定任务说明，不能由家长作为普通聊天打开、追问或追加指令。
 
-教育任务保存产品层状态、版本关系、授权与产物校验结果；PTC 任务账本保存每次
-尝试的 `task_run`、checkpoint、SSE 事件、心跳、取消、worker 丢失和恢复链。
+教育任务保存产品层状态、版本关系、授权与产物校验结果；隐藏受管 thread 的既有
+PTC 根运行账本保存每次尝试的 `conversation_response_id`、checkpoint、SSE 事件、
+心跳、取消、worker 丢失和恢复链。这里不伪造一个父 Agent 来启动无业务价值的
+`task_run` 子任务，直接复用平台已经成熟的根运行生命周期。
 
 产品状态为：
 
