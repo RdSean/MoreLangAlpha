@@ -610,12 +610,15 @@ async def get_textbook_for_parent(
                     await cur.execute(
                         """
                         SELECT assignments.assignment_id, assignments.student_user_id, assignments.created_at,
-                               accounts.display_name AS student_name
+                               student_memberships.display_name AS student_name
                         FROM education_textbook_assignments AS assignments
-                        LEFT JOIN auth_accounts AS accounts ON accounts.user_id = assignments.student_user_id
+                        JOIN education_memberships AS student_memberships
+                          ON student_memberships.user_id = assignments.student_user_id
+                         AND student_memberships.household_id = %s
+                         AND student_memberships.role = 'student'
                         WHERE assignments.publication_id = %s ORDER BY assignments.created_at
                         """,
-                        (version["publication_id"],),
+                        (textbook["household_id"], version["publication_id"]),
                     )
                     version["assignments"] = [dict(row) for row in await cur.fetchall()]
                 else:
