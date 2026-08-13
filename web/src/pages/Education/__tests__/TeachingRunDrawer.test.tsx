@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 
 import TeachingRunDrawer from '../TeachingRunDrawer';
@@ -55,5 +56,36 @@ describe('TeachingRunDrawer', () => {
     );
 
     expect(screen.queryByText(/storage_key|\/managed\/|minio/i)).not.toBeInTheDocument();
+  });
+
+  it('links model configuration guidance without exposing runtime details', () => {
+    render(
+      <MemoryRouter>
+        <TeachingRunDrawer
+          open
+          onOpenChange={() => undefined}
+          job={{
+            job_id: 'job-1',
+            teaching_package_id: 'package-1',
+            content_version_id: 'version-1',
+            status: 'failed',
+            phase: 'failed',
+            attempt_count: 1,
+            completed_chapter_count: 0,
+            total_chapter_count: 1,
+            actions: ['resume'],
+            error_message: '教材教学加工需要先配置模型服务，再继续运行。',
+            events: [],
+            attempts: [],
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: '配置模型服务' })).toHaveAttribute(
+      'href',
+      '/setup/method',
+    );
+    expect(screen.queryByText(/api[_ -]?key|deepseek|zai/i)).not.toBeInTheDocument();
   });
 });

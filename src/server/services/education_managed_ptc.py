@@ -167,6 +167,15 @@ async def launch_teaching_attempt(
         agent_config = await resolve_managed_teaching_agent_config(
             parent_user_id=parent_user_id
         )
+    except BaseException:
+        await fail_preparing_teaching_attempt(
+            attempt_id=attempt_id,
+            error_code="managed_model_unavailable",
+            error_message="教材教学加工需要先配置模型服务，再继续运行。",
+        )
+        raise
+
+    try:
         session = await WorkspaceManager.get_instance().provision_managed_textbook_session(
             workspace_id=workspace_id, policy=policy
         )

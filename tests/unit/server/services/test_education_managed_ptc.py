@@ -180,6 +180,80 @@ async def test_launches_authorized_job_with_managed_session_before_staging(monke
 
 
 @pytest.mark.asyncio
+async def test_launch_records_model_configuration_guidance_before_sandbox_provisioning(
+    monkeypatch,
+):
+    education_managed_ptc = import_module("src.server.services.education_managed_ptc")
+    job = {
+        "job_id": JOB_ID,
+        "job_status": "queued",
+        "chapters": [{"content_chapter_id": "chapter-1"}],
+    }
+    failed = AsyncMock(return_value={"attempt_id": "attempt-1", "status": "failed"})
+    provision = AsyncMock()
+
+    monkeypatch.setattr(
+        education_managed_ptc,
+        "get_teaching_job_for_parent",
+        AsyncMock(return_value=job),
+    )
+    monkeypatch.setattr(
+        education_managed_ptc,
+        "create_managed_workspace",
+        AsyncMock(return_value={"workspace_id": "workspace-1"}),
+    )
+    monkeypatch.setattr(
+        education_managed_ptc,
+        "create_managed_thread",
+        AsyncMock(return_value={"conversation_thread_id": "thread-1"}),
+    )
+    monkeypatch.setattr(
+        education_managed_ptc,
+        "create_teaching_attempt",
+        AsyncMock(return_value={"attempt_id": "attempt-1"}),
+    )
+    monkeypatch.setattr(
+        education_managed_ptc,
+        "fail_preparing_teaching_attempt",
+        failed,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        education_managed_ptc,
+        "resolve_managed_teaching_agent_config",
+        AsyncMock(side_effect=ValueError("provider secret must not reach the parent API")),
+    )
+    monkeypatch.setattr(
+        education_managed_ptc,
+        "WorkspaceManager",
+        type(
+            "WorkspaceManager",
+            (),
+            {
+                "get_instance": staticmethod(
+                    lambda: type(
+                        "Manager",
+                        (), {"provision_managed_textbook_session": provision},
+                    )()
+                )
+            },
+        ),
+    )
+
+    with pytest.raises(ValueError, match="provider secret"):
+        await education_managed_ptc.launch_teaching_attempt(
+            parent_user_id="parent-1", job_id=JOB_ID
+        )
+
+    provision.assert_not_awaited()
+    failed.assert_awaited_once_with(
+        attempt_id="attempt-1",
+        error_code="managed_model_unavailable",
+        error_message="教材教学加工需要先配置模型服务，再继续运行。",
+    )
+
+
+@pytest.mark.asyncio
 async def test_launch_marks_reserved_attempt_failed_when_sandbox_provisioning_fails(monkeypatch):
     education_managed_ptc = import_module("src.server.services.education_managed_ptc")
     job = {"job_id": JOB_ID, "job_status": "queued", "chapters": [{"content_chapter_id": "chapter-1"}]}

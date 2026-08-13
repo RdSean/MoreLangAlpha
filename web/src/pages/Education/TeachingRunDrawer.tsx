@@ -1,4 +1,5 @@
 import { Activity, CircleCheck, Clock3, RefreshCcw, XCircle } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -48,6 +49,7 @@ export default function TeachingRunDrawer({
 }: Props) {
   const canCancel = job.actions.includes('cancel') && onCancel;
   const canResume = job.actions.includes('resume') && onResume;
+  const needsModelConfiguration = job.error_message === '教材教学加工需要先配置模型服务，再继续运行。';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -66,6 +68,7 @@ export default function TeachingRunDrawer({
             已完成 {job.completed_chapter_count} / {job.total_chapter_count} 章
           </p>
           {job.error_message && <p className="mt-3 text-sm" role="alert" style={{ color: 'var(--color-danger)' }}>{job.error_message}</p>}
+          {needsModelConfiguration && <Link to="/setup/method" className="mt-3 inline-flex text-sm underline" style={{ color: 'var(--color-accent-primary)' }}>配置模型服务</Link>}
         </section>
 
         <section aria-label="运行阶段" className="grid gap-3">
