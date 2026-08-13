@@ -45,7 +45,7 @@ export async function mockAPI(page, overrides = {}) {
     );
 
     await page.route(
-      (url) => pathRegex.test(url.pathname.replace('/api/v1', '')),
+      (url) => url.origin === MOCK_SERVER && pathRegex.test(url.pathname.replace('/api/v1', '')),
       async (route) => {
         const reqMethod = route.request().method();
         if (method !== '*' && reqMethod !== method) {

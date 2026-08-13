@@ -192,10 +192,11 @@ test.describe('Family education roles', () => {
     await expect(page.getByText('回答正确')).toBeVisible();
   });
 
-  test('a parent creates, publishes, assigns, and reviews a student textbook record', async ({ page }) => {
+  test('mock: a parent generates a managed teaching package before publication', async ({ page }) => {
     let actingStudent = false;
     let created = false;
     let processingState = 'none';
+    let teachingState = 'none';
     let assigned = false;
     let answered = false;
     const assignment = {
@@ -240,6 +241,15 @@ test.describe('Family education roles', () => {
         chapter_count: processingState === 'queued' ? 0 : 1,
         is_published: processingState === 'published',
         publication_id: processingState === 'published' ? 'publication-1' : null,
+        teaching_packages: teachingState === 'none' ? [] : [{
+          teaching_package_id: 'teaching-package-1',
+          job_id: 'teaching-job-1',
+          sequence: 1,
+          status: teachingState === 'review' || teachingState === 'published' ? 'review' : 'generating_teaching',
+          job_status: teachingState === 'review' || teachingState === 'published' ? 'completed' : 'running',
+          chapter_count: teachingState === 'review' || teachingState === 'published' ? 1 : 0,
+          question_count: teachingState === 'review' || teachingState === 'published' ? 1 : 0,
+        }],
         sources: [{ asset_id: 'asset-1', original_filename: 'family-reader.pdf', content_type: 'application/pdf', size_bytes: 2048 }],
         chapters: processingState === 'queued' ? [] : [chapter],
         assignments: assigned ? [{ assignment_id: assignment.assignment_id, student_user_id: student.user_id, student_name: student.name }] : [],
@@ -276,6 +286,23 @@ test.describe('Family education roles', () => {
         processingState = 'review';
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ job_id: 'job-1', version_id: 'version-1', status: 'completed' }) });
       },
+      'POST /education/textbook-versions/version-1/teaching-packages': async (route) => {
+        teachingState = 'running';
+        await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({
+          job_id: 'teaching-job-1', teaching_package_id: 'teaching-package-1', content_version_id: 'version-1',
+          status: 'running', phase: 'generating_teaching', attempt_count: 1, completed_chapter_count: 0,
+          total_chapter_count: 1, actions: ['cancel'], events: [], attempts: [],
+        }) });
+      },
+      'GET /education/teaching-jobs/teaching-job-1': (route) => fulfillJSON(route, {
+        job_id: 'teaching-job-1', teaching_package_id: 'teaching-package-1', content_version_id: 'version-1',
+        status: teachingState === 'review' ? 'completed' : 'running',
+        phase: teachingState === 'review' ? 'review' : 'generating_teaching',
+        attempt_count: 1, completed_chapter_count: teachingState === 'review' ? 1 : 0, total_chapter_count: 1,
+        actions: teachingState === 'review' ? [] : ['cancel'],
+        events: teachingState === 'review' ? [{ sequence: 1, phase: 'generating_teaching', summary: '已完成第 1 章教学材料生成' }] : [],
+        attempts: [{ attempt_id: 'attempt-1', root_run_id: 'root-run-1', status: teachingState === 'review' ? 'completed' : 'running' }],
+      }),
       'POST /education/textbooks/textbook-1/versions/version-1/publish': async (route) => {
         processingState = 'published';
         await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ publication_id: 'publication-1', version_id: 'version-1' }) });
@@ -306,6 +333,15 @@ test.describe('Family education roles', () => {
     await page.getByRole('checkbox', { name: 'family-reader.pdf' }).check();
     await page.getByRole('button', { name: '创建加工任务' }).click();
     await page.getByRole('button', { name: '执行本地加工' }).click();
+    await page.getByRole('button', { name: '生成教学包' }).click();
+    await expect(page.getByText('教学包正在加工')).toBeVisible();
+    await expect(page.getByRole('dialog', { name: '教材教学包运行' })).toBeVisible();
+    await expect(page.getByText('生成教学材料')).toBeVisible();
+    await expect(page.getByRole('textbox')).toHaveCount(0);
+    await expect(page.locator('body')).not.toContainText(/storage_key|\/managed\/|minio/i);
+    await page.getByRole('button', { name: 'Close' }).click();
+    teachingState = 'review';
+    await page.reload();
     await page.getByRole('button', { name: '发布版本' }).click();
     await page.getByRole('button', { name: '分配学生' }).click();
     await page.getByLabel('学生').selectOption(student.user_id);
