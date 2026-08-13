@@ -239,7 +239,7 @@ async def dispatch_managed_root_run(
         thread_id=thread_id,
         run_id=run_id,
         msg_type="ptc",
-        request_key=f"education-teaching:{attempt_id}:{run_id}",
+        request_key=run_id,
         workspace_id=workspace_id,
         user_id=None,
         query=QuerySpec(

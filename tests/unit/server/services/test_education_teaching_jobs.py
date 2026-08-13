@@ -4,6 +4,7 @@ from importlib import import_module
 from importlib.util import find_spec
 from pathlib import Path
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 
@@ -45,11 +46,15 @@ async def test_dispatch_persists_root_run_before_registering_managed_executor(mo
         "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
     )
     calls: list[str] = []
+    run_id = "4ef3ea6b-33f3-4b12-91c9-1b31a168ad13"
+    query_id = "1048d8c7-4696-44cd-837e-f92fbd68dbb7"
 
     class Coordinator:
         async def start_run(self, **kwargs):
             calls.append("start")
             assert kwargs["user_id"] is None
+            assert kwargs["request_key"] == run_id
+            assert UUID(kwargs["request_key"]).version == 4
             assert kwargs["run_metadata"]["managed_execution"]["kind"] == "education_teaching"
             return type("Handle", (), {"turn_index": 3, "checkpointer": object()})()
 
@@ -79,7 +84,8 @@ async def test_dispatch_persists_root_run_before_registering_managed_executor(mo
         raising=False,
     )
     monkeypatch.setattr(education_teaching_jobs, "RunSSEProducer", _FakeProducer, raising=False)
-    monkeypatch.setattr(education_teaching_jobs, "uuid4", lambda: "run-1", raising=False)
+    generated_ids = iter([run_id, query_id])
+    monkeypatch.setattr(education_teaching_jobs, "uuid4", lambda: next(generated_ids), raising=False)
     monkeypatch.setattr(
         education_teaching_jobs,
         "settle_teaching_attempt",
@@ -98,10 +104,10 @@ async def test_dispatch_persists_root_run_before_registering_managed_executor(mo
         skill_contexts=[{"name": "book-to-skill", "instruction": "--managed-textbook"}],
     )
 
-    assert dispatched == {"root_run_id": "run-1"}
+    assert dispatched == {"root_run_id": run_id}
     assert calls == ["start", "executor"]
     education_teaching_jobs.settle_teaching_attempt.assert_awaited_once_with(
-        attempt_id="attempt-1", root_run_id="run-1", status="running"
+        attempt_id="attempt-1", root_run_id=run_id, status="running"
     )
 
 
