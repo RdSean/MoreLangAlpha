@@ -339,6 +339,133 @@ async def test_parent_can_requeue_only_a_failed_processing_job(client):
 
 
 @pytest.mark.asyncio
+async def test_parent_starts_a_managed_teaching_package_for_own_reviewed_content(
+    client,
+):
+    """The route delegates only the parent identity and immutable content version."""
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    content_version_id = uuid4()
+    job_id = uuid4()
+    teaching_package_id = uuid4()
+    projected_job = {
+        "job_id": job_id,
+        "teaching_package_id": teaching_package_id,
+        "content_version_id": content_version_id,
+        "status": "running",
+        "phase": "preparing",
+        "attempt_count": 1,
+        "completed_chapter_count": 0,
+        "total_chapter_count": 2,
+        "actions": ["cancel"],
+        "events": [],
+        "attempts": [],
+    }
+    with patch(
+        "src.server.app.education.textbooks.queue_teaching_package_for_parent",
+        new=AsyncMock(return_value=projected_job),
+        create=True,
+    ) as start:
+        response = await client.post(
+            f"/api/v1/education/textbook-versions/{content_version_id}/teaching-packages"
+        )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "running"
+    start.assert_awaited_once_with(
+        parent_user_id="parent-1", content_version_id=str(content_version_id)
+    )
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_read_or_cancel_a_managed_teaching_job(client):
+    """Teaching runs are parent-only even when the job id is known."""
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "student-1"
+    job_id = uuid4()
+    denied = TextbookPermissionError("Only a parent can manage teaching jobs")
+    with (
+        patch(
+            "src.server.app.education.textbooks.get_teaching_job_projection",
+            new=AsyncMock(side_effect=denied),
+            create=True,
+        ),
+        patch(
+            "src.server.app.education.textbooks.cancel_teaching_job_for_parent",
+            new=AsyncMock(side_effect=denied),
+            create=True,
+        ),
+    ):
+        read = await client.get(f"/api/v1/education/teaching-jobs/{job_id}")
+        cancelled = await client.post(
+            f"/api/v1/education/teaching-jobs/{job_id}/cancel"
+        )
+
+    assert read.status_code == 403
+    assert cancelled.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_teaching_job_response_whitelists_the_safe_progress_projection(client):
+    """The public job contract must not forward storage or managed-run details."""
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    job_id = uuid4()
+    response_job = {
+        "job_id": job_id,
+        "teaching_package_id": uuid4(),
+        "content_version_id": uuid4(),
+        "status": "generating_teaching",
+        "phase": "generating_teaching",
+        "attempt_count": 2,
+        "completed_chapter_count": 1,
+        "total_chapter_count": 3,
+        "actions": ["cancel"],
+        "events": [
+            {
+                "sequence": 2,
+                "phase": "generating_teaching",
+                "summary": "已完成第 1 章教学材料生成",
+                "storage_key": "education/private/source.pdf",
+                "raw_sse": "data: secret",
+            }
+        ],
+        "attempts": [
+            {
+                "attempt_id": uuid4(),
+                "root_run_id": uuid4(),
+                "status": "running",
+                "managed_workspace_id": uuid4(),
+                "managed_path": "/managed/textbook-job/private",
+            }
+        ],
+        "storage_key": "education/private/package",
+        "minio_url": "http://minio.invalid/private",
+        "managed_path": "/managed/textbook-job/private",
+    }
+    with patch(
+        "src.server.app.education.textbooks.get_teaching_job_projection",
+        new=AsyncMock(return_value=response_job),
+        create=True,
+    ):
+        response = await client.get(f"/api/v1/education/teaching-jobs/{job_id}")
+
+    assert response.status_code == 200
+    assert response.json()["events"] == [
+        {
+            "sequence": 2,
+            "phase": "generating_teaching",
+            "summary": "已完成第 1 章教学材料生成",
+            "chapter_id": None,
+            "created_at": None,
+        }
+    ]
+    assert "storage_key" not in response.text
+    assert "minio" not in response.text.lower()
+    assert "/managed/" not in response.text
+
+
+@pytest.mark.asyncio
 async def test_student_chapter_context_requires_their_published_assignment(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "student-1"

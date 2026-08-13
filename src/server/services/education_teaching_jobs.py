@@ -35,7 +35,7 @@ _PROGRESS_PHASES = frozenset({"building_skill", "generating_teaching"})
 _PROGRESS_RE = re.compile(r"EDUCATION_PROGRESS\s+(\{[^\r\n]+\})")
 
 
-def _managed_prompt(job_id: str) -> str:
+def managed_teaching_prompt(job_id: str) -> str:
     """Return the only instruction accepted by the service-owned root run."""
     return (
         "这是服务托管的家庭教材教学包任务，不是与用户的对话。"
@@ -194,7 +194,7 @@ async def build_managed_teaching_graph(
         "run_id": run_handle.run_id,
     }
     input_state = {
-        "messages": [{"role": "user", "content": _managed_prompt(job_id)}],
+        "messages": [{"role": "user", "content": managed_teaching_prompt(job_id)}],
         "current_agent": "ptc",
     }
     return graph, input_state, graph_config
@@ -244,7 +244,7 @@ async def dispatch_managed_root_run(
         user_id=None,
         query=QuerySpec(
             query_id=str(uuid4()),
-            content=_managed_prompt(job_id),
+            content=managed_teaching_prompt(job_id),
             query_type="managed_education",
             metadata={"managed_execution": {"kind": _MANAGED_KIND, "job_id": job_id}},
             created_at=datetime.now(),

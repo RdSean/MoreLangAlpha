@@ -192,6 +192,172 @@ async def test_parent_retry_requeues_only_a_failed_frozen_job(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_managed_teaching_queue_freezes_input_and_skill_contracts_before_launch(
+    monkeypatch,
+):
+    """A parent request persists exact inputs before the long-running PTC root starts."""
+    content_version_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
+    job_id = "7bc1e58d-5a34-49d6-8c5c-70703e989bd4"
+    frozen = {
+        "content_version_id": content_version_id,
+        "content_version_sequence": 1,
+        "household_id": "household-1",
+        "slug": "english-2",
+        "title": "英语第二册",
+        "chapters": [
+            {
+                "content_chapter_id": "8a77d086-0b23-4a1e-89d0-f163fa23d5d1",
+                "position": 1,
+                "slug": "overview",
+                "title": "导读",
+                "markdown": "# 导读\n\n教材正文。",
+            }
+        ],
+    }
+    queued = AsyncMock(
+        return_value={
+            "job_id": job_id,
+            "teaching_package_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+            "content_version_id": content_version_id,
+            "status": "queued",
+        }
+    )
+    launched = AsyncMock(return_value={"root_run_id": "root-1"})
+    projected = {
+        "job_id": job_id,
+        "teaching_package_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+        "content_version_id": content_version_id,
+        "status": "running",
+        "phase": "preparing",
+        "attempt_count": 1,
+        "completed_chapter_count": 0,
+        "total_chapter_count": 1,
+        "events": [],
+        "attempts": [],
+    }
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_teaching_input_for_parent",
+        AsyncMock(return_value=frozen),
+    )
+    monkeypatch.setattr(education_textbooks, "queue_teaching_package", queued)
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_teaching_job_projection",
+        AsyncMock(return_value=projected),
+    )
+    monkeypatch.setattr(education_textbooks, "uuid4", lambda: job_id)
+    monkeypatch.setattr(
+        education_textbooks,
+        "_managed_skill_hash",
+        lambda skill: {"book-to-skill": "a" * 64, "the-knowledge-guy": "b" * 64}[skill],
+    )
+    from src.server.services import education_managed_ptc
+
+    monkeypatch.setattr(education_managed_ptc, "launch_teaching_attempt", launched)
+
+    result = await education_textbooks.queue_teaching_package_for_parent(
+        parent_user_id="parent-1", content_version_id=content_version_id
+    )
+
+    assert result == projected
+    queued.assert_awaited_once()
+    queue_args = queued.await_args.kwargs
+    assert queue_args["parent_user_id"] == "parent-1"
+    assert queue_args["content_version_id"] == content_version_id
+    assert queue_args["job_id"] == job_id
+    assert queue_args["hashes"].input_manifest_sha256
+    assert queue_args["hashes"].book_to_skill_sha256 == "a" * 64
+    assert queue_args["hashes"].knowledge_guy_sha256 == "b" * 64
+    assert queue_args["hashes"].adapter_prompt_sha256
+    launched.assert_awaited_once_with(parent_user_id="parent-1", job_id=job_id)
+
+
+@pytest.mark.asyncio
+async def test_parent_can_cancel_and_resume_only_via_the_managed_job_state_machine(
+    monkeypatch,
+):
+    """Public controls delegate to the existing durable cancellation and retry paths."""
+    projection = {
+        "job_id": "job-1",
+        "teaching_package_id": "package-1",
+        "content_version_id": "version-1",
+        "status": "cancelled",
+        "phase": "cancelled",
+        "attempt_count": 1,
+        "completed_chapter_count": 0,
+        "total_chapter_count": 1,
+        "events": [],
+        "attempts": [],
+    }
+    get_projection = AsyncMock(return_value=projection)
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    monkeypatch.setattr(education_textbooks, "get_teaching_job_projection", get_projection)
+    from src.server.services import education_managed_ptc, education_teaching_jobs
+
+    cancel = AsyncMock()
+    resume = AsyncMock(return_value={"root_run_id": "root-2"})
+    monkeypatch.setattr(education_teaching_jobs, "cancel_teaching_job", cancel)
+    monkeypatch.setattr(education_managed_ptc, "resume_teaching_job", resume)
+
+    cancelled = await education_textbooks.cancel_teaching_job_for_parent(
+        parent_user_id="parent-1", job_id="job-1"
+    )
+    resumed = await education_textbooks.resume_teaching_job_for_parent(
+        parent_user_id="parent-1", job_id="job-1"
+    )
+
+    assert cancelled == projection
+    assert resumed == projection
+    cancel.assert_awaited_once_with(parent_user_id="parent-1", job_id="job-1")
+    resume.assert_awaited_once_with(parent_user_id="parent-1", job_id="job-1")
+
+
+def test_safe_teaching_projection_never_relays_managed_runtime_fields():
+    job = {
+        "job_id": "job-1",
+        "teaching_package_id": "package-1",
+        "content_version_id": "version-1",
+        "status": "running",
+        "phase": "generating_teaching",
+        "attempt_count": 1,
+        "completed_chapter_count": 1,
+        "total_chapter_count": 2,
+        "storage_key": "education/private/key",
+        "events": [
+            {
+                "sequence": 1,
+                "phase": "generating_teaching",
+                "summary": "已完成第 1 章教学材料生成",
+                "managed_path": "/managed/private",
+            }
+        ],
+        "attempts": [
+            {
+                "attempt_id": "attempt-1",
+                "status": "running",
+                "managed_workspace_id": "workspace-1",
+            }
+        ],
+    }
+
+    projected = education_textbooks._safe_teaching_projection(job)
+
+    assert projected["actions"] == ["cancel"]
+    assert "storage_key" not in repr(projected)
+    assert "/managed/" not in repr(projected)
+
+
+@pytest.mark.asyncio
 async def test_local_processor_makes_stable_chapters_from_extractable_pdf_pages(monkeypatch):
     class Page:
         def extract_text(self):

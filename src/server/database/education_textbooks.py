@@ -229,10 +229,11 @@ async def queue_teaching_package(
     parent_user_id: str,
     content_version_id: str,
     hashes: TeachingInputHashes,
+    job_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Freeze one parent-owned reviewable content version into a queued package."""
     package_id = str(uuid4())
-    job_id = str(uuid4())
+    generated_job_id = str(UUID(job_id)) if job_id else str(uuid4())
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
@@ -292,11 +293,133 @@ async def queue_teaching_package(
                     VALUES (%s, %s, 'queued')
                     RETURNING job_id, teaching_package_id, status
                     """,
-                    (job_id, package_id),
+                    (generated_job_id, package_id),
                 )
                 job = dict(await cur.fetchone())
     package["job_id"] = job["job_id"]
     return package
+
+
+async def get_teaching_input_for_parent(
+    *, parent_user_id: str, content_version_id: str
+) -> dict[str, Any] | None:
+    """Read only reviewable frozen Markdown for deterministic job provenance."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT versions.version_id AS content_version_id,
+                       versions.sequence AS content_version_sequence,
+                       textbooks.household_id, textbooks.slug, textbooks.title
+                FROM education_textbook_versions AS versions
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                WHERE versions.version_id = %s
+                  AND versions.status = 'review'
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (content_version_id, parent_user_id),
+            )
+            version = await cur.fetchone()
+            if not version:
+                return None
+            result = dict(version)
+            await cur.execute(
+                """
+                SELECT chapter_id AS content_chapter_id, position, slug, title, markdown
+                FROM education_textbook_chapters
+                WHERE version_id = %s
+                ORDER BY position
+                """,
+                (content_version_id,),
+            )
+            result["chapters"] = [dict(row) for row in await cur.fetchall()]
+    return result
+
+
+async def get_teaching_job_projection_for_parent(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any] | None:
+    """Read the whitelisted product projection for one household parent only."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT jobs.job_id, jobs.teaching_package_id, packages.content_version_id,
+                       jobs.status, packages.status AS phase, jobs.attempt_count,
+                       jobs.latest_attempt_id,
+                       jobs.error_message, packages.error_message AS package_error_message,
+                       jobs.created_at, jobs.completed_at,
+                       attempts.heartbeat_at AS last_heartbeat_at,
+                       COALESCE((
+                           SELECT COUNT(*)
+                           FROM education_textbook_chapters AS chapters
+                           WHERE chapters.version_id = packages.content_version_id
+                       ), 0) AS total_chapter_count,
+                       CASE
+                           WHEN packages.status IN ('validating', 'review') THEN COALESCE((
+                               SELECT COUNT(*)
+                               FROM education_textbook_chapters AS chapters
+                               WHERE chapters.version_id = packages.content_version_id
+                           ), 0)
+                           WHEN packages.status IN ('building_skill', 'generating_teaching') THEN COALESCE((
+                               SELECT COUNT(DISTINCT events.chapter_id)
+                               FROM education_teaching_events AS events
+                               WHERE events.attempt_id = jobs.latest_attempt_id
+                                 AND events.phase = packages.status
+                           ), 0)
+                           ELSE 0
+                       END AS completed_chapter_count
+                FROM education_teaching_jobs AS jobs
+                JOIN education_teaching_packages AS packages
+                  ON packages.teaching_package_id = jobs.teaching_package_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = packages.content_version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                LEFT JOIN education_teaching_attempts AS attempts
+                  ON attempts.attempt_id = jobs.latest_attempt_id
+                WHERE jobs.job_id = %s
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (job_id, parent_user_id),
+            )
+            job = await cur.fetchone()
+            if not job:
+                return None
+            result = dict(job)
+            latest_attempt_id = result.get("latest_attempt_id")
+            if latest_attempt_id:
+                await cur.execute(
+                    """
+                    SELECT sequence, phase, summary, chapter_id, created_at
+                    FROM education_teaching_events
+                    WHERE attempt_id = %s
+                    ORDER BY sequence
+                    """,
+                    (latest_attempt_id,),
+                )
+                result["events"] = [dict(row) for row in await cur.fetchall()]
+            else:
+                result["events"] = []
+            await cur.execute(
+                """
+                SELECT attempt_id, root_run_id, previous_attempt_id, status,
+                       started_at, heartbeat_at, completed_at
+                FROM education_teaching_attempts
+                WHERE job_id = %s
+                ORDER BY started_at DESC
+                """,
+                (job_id,),
+            )
+            result["attempts"] = [dict(row) for row in await cur.fetchall()]
+    return result
 
 
 async def create_teaching_attempt(
@@ -1456,7 +1579,8 @@ async def get_textbook_for_parent(
                 version["chapters"] = chapters
                 await cur.execute(
                     """
-                    SELECT packages.teaching_package_id, packages.sequence, packages.status,
+                    SELECT packages.teaching_package_id, jobs.job_id, packages.sequence,
+                           packages.status, jobs.status AS job_status,
                            COALESCE((
                                SELECT COUNT(*)
                                FROM education_teaching_package_chapters AS package_chapters
@@ -1470,12 +1594,69 @@ async def get_textbook_for_parent(
                                WHERE package_chapters.teaching_package_id = packages.teaching_package_id
                            ), 0) AS question_count
                     FROM education_teaching_packages AS packages
+                    JOIN education_teaching_jobs AS jobs
+                      ON jobs.teaching_package_id = packages.teaching_package_id
                     WHERE packages.content_version_id = %s
                     ORDER BY packages.sequence DESC
                     """,
                     (version["version_id"],),
                 )
                 version["teaching_packages"] = [dict(row) for row in await cur.fetchall()]
+                reviewable_package = next(
+                    (
+                        package
+                        for package in version["teaching_packages"]
+                        if package["status"] == "review"
+                    ),
+                    None,
+                )
+                if reviewable_package:
+                    await cur.execute(
+                        """
+                        SELECT package_chapters.content_chapter_id,
+                               package_chapters.teaching_material,
+                               package_questions.question_id, package_questions.position,
+                               package_questions.prompt, package_questions.options,
+                               package_questions.correct_option,
+                               package_questions.explanation,
+                               package_questions.knowledge_point
+                        FROM education_teaching_package_chapters AS package_chapters
+                        LEFT JOIN education_teaching_package_questions AS package_questions
+                          ON package_questions.package_chapter_id = package_chapters.package_chapter_id
+                        WHERE package_chapters.teaching_package_id = %s
+                        ORDER BY package_chapters.position, package_questions.position
+                        """,
+                        (reviewable_package["teaching_package_id"],),
+                    )
+                    package_rows = [dict(row) for row in await cur.fetchall()]
+                    teaching_by_chapter: dict[Any, dict[str, Any]] = {}
+                    for row in package_rows:
+                        teaching = teaching_by_chapter.setdefault(
+                            row["content_chapter_id"],
+                            {
+                                "teaching_material": row["teaching_material"],
+                                "questions": [],
+                            },
+                        )
+                        if row["question_id"] is not None:
+                            teaching["questions"].append(
+                                {
+                                    key: row[key]
+                                    for key in (
+                                        "question_id",
+                                        "position",
+                                        "prompt",
+                                        "options",
+                                        "correct_option",
+                                        "explanation",
+                                        "knowledge_point",
+                                    )
+                                }
+                            )
+                    for chapter in chapters:
+                        teaching = teaching_by_chapter.get(chapter["chapter_id"])
+                        if teaching:
+                            chapter.update(teaching)
                 if version["publication_id"]:
                     await cur.execute(
                         """

@@ -154,10 +154,48 @@ class TextbookAssignmentSummaryResponse(BaseModel):
 
 class TeachingPackageSummaryResponse(BaseModel):
     teaching_package_id: UUID
+    job_id: UUID
     sequence: int
     status: str
+    job_status: str
     chapter_count: int
     question_count: int
+
+
+class TeachingJobEventResponse(BaseModel):
+    sequence: int
+    phase: str
+    summary: str
+    chapter_id: UUID | None = None
+    created_at: datetime | None = None
+
+
+class TeachingJobAttemptResponse(BaseModel):
+    attempt_id: UUID
+    root_run_id: UUID | None = None
+    previous_attempt_id: UUID | None = None
+    status: str
+    started_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class TeachingJobResponse(BaseModel):
+    job_id: UUID
+    teaching_package_id: UUID
+    content_version_id: UUID
+    status: str
+    phase: str
+    attempt_count: int
+    completed_chapter_count: int
+    total_chapter_count: int
+    last_heartbeat_at: datetime | None = None
+    error_message: str | None = None
+    created_at: datetime | None = None
+    completed_at: datetime | None = None
+    actions: list[Literal["cancel", "resume"]] = Field(default_factory=list)
+    events: list[TeachingJobEventResponse] = Field(default_factory=list)
+    attempts: list[TeachingJobAttemptResponse] = Field(default_factory=list)
 
 
 class TextbookVersionResponse(BaseModel):

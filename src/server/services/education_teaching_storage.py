@@ -63,7 +63,8 @@ def managed_job_root(job_id: str) -> str:
     return f"/managed/textbook-job/{UUID(str(job_id))}"
 
 
-def _frozen_input(job: Mapping[str, Any]) -> dict[str, Any]:
+def freeze_teaching_input(job: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize the service-authorized content used by every managed attempt."""
     job_id = str(UUID(str(job["job_id"])))
     chapters = job.get("chapters")
     if not isinstance(chapters, list) or not chapters:
@@ -104,12 +105,9 @@ def _frozen_input(job: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-async def stage_teaching_inputs(
-    job: Mapping[str, Any], sandbox: ManagedTeachingSandbox
-) -> dict[str, Any]:
-    """Upload only frozen Markdown and a scrubbed manifest into one job root."""
-    frozen = _frozen_input(job)
-    root = managed_job_root(frozen["job_id"])
+def build_staged_teaching_input(job: Mapping[str, Any]) -> dict[str, Any]:
+    """Build the exact safe manifest and hash before it enters a sandbox."""
+    frozen = freeze_teaching_input(job)
     manifest = {
         "format": frozen["format"],
         "job_id": frozen["job_id"],
@@ -131,14 +129,10 @@ async def stage_teaching_inputs(
     manifest_bytes = json.dumps(
         manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
-    files: list[tuple[str, bytes]] = [(f"{root}/inputs/manifest.json", manifest_bytes)]
-    files.extend(
-        (f"{root}/inputs/{chapter['path']}", chapter["markdown"].encode("utf-8"))
-        for chapter in frozen["chapters"]
-    )
-    await sandbox.aupload_files(files)
     return {
+        "frozen": frozen,
         "manifest": manifest,
+        "manifest_bytes": manifest_bytes,
         "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
         "chapters": [
             {
@@ -154,6 +148,24 @@ async def stage_teaching_inputs(
             for chapter in frozen["chapters"]
         ],
     }
+
+
+async def stage_teaching_inputs(
+    job: Mapping[str, Any], sandbox: ManagedTeachingSandbox
+) -> dict[str, Any]:
+    """Upload only frozen Markdown and a scrubbed manifest into one job root."""
+    staged = build_staged_teaching_input(job)
+    frozen = staged["frozen"]
+    root = managed_job_root(frozen["job_id"])
+    files: list[tuple[str, bytes]] = [
+        (f"{root}/inputs/manifest.json", staged["manifest_bytes"])
+    ]
+    files.extend(
+        (f"{root}/inputs/{chapter['path']}", chapter["markdown"].encode("utf-8"))
+        for chapter in frozen["chapters"]
+    )
+    await sandbox.aupload_files(files)
+    return {key: staged[key] for key in ("manifest", "manifest_sha256", "chapters")}
 
 
 async def download_teaching_output(
@@ -201,7 +213,7 @@ async def write_teaching_package_bundle(
 ) -> str:
     """Archive a previously validated candidate under service-generated keys only."""
     prefix = teaching_package_bundle_prefix(job)
-    frozen = _frozen_input(job)
+    frozen = freeze_teaching_input(job)
     chapters_by_id = {
         chapter["content_chapter_id"]: chapter for chapter in frozen["chapters"]
     }

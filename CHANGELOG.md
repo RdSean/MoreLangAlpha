@@ -4,6 +4,9 @@
 
 ### 受管教材 PTC 加工与恢复
 
+- 家长教材 API 现提供受管教学包的创建、状态读取、取消和恢复控制；创建时会在启动 PTC 根运行前固定内容 manifest、两份内置 Skill 正文和固定服务指令的 SHA-256。浏览器只能获取阶段、章节进度、脱敏事件、尝试/root run 标识与允许操作，不能获取对象键、MinIO 地址、sandbox 路径、原始 SSE 或模型文本。
+- 教材详情的教学包摘要新增安全的任务标识和状态，刷新后仍可继续查看运行详情；待审教学包的教学材料和题集从独立教学包快照读取，内容提取版本与教学资产保持分层，历史 `legacy-local-v1` 包仍兼容发布与学生学习。
+
 - 教学包任务现以服务拥有的隐藏 PTC 根运行执行 `book-to-skill` 与 `the-knowledge-guy`：根运行先进入既有 RunCoordinator 账本，再由 LocalRunExecutor、检查点和 Redis SSE 驱动；不再借用聊天 HTTP 入口或伪造子 Agent 任务。
 - 受管 sandbox 仅创建本次教材任务根目录，注入两份内置 Skill 契约与冻结 Markdown；禁止 MCP、Vault、网页、预览、用户记忆、普通工作区同步、用户 Skill 和子代理。Skill 正文只从当前服务端工作树的受控内置目录加载，sandbox 内副本仅供受管运行使用。
 - 教学包、任务与 attempt 的状态现按 `queued → preparing → building_skill / generating_teaching → validating → review` 原子投影；候选输出只在验证阶段从固定路径回收、校验、归档到私有 `education/` 前缀后才写入审阅数据。取消会先持久化产品状态，阻止晚到完成回调发布候选包。

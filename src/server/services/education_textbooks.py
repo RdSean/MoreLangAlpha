@@ -1,7 +1,9 @@
 """Versioning, explicit local processing, and authorization for family textbooks."""
 
 import asyncio
+import hashlib
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -13,6 +15,8 @@ from src.server.database.education_textbooks import (
     create_textbook_record,
     fail_textbook_processing_job,
     get_processing_job_for_parent,
+    get_teaching_input_for_parent,
+    get_teaching_job_projection_for_parent,
     get_student_chapter_context_record,
     get_student_learning as get_student_learning_record,
     get_textbook_for_parent,
@@ -20,6 +24,7 @@ from src.server.database.education_textbooks import (
     list_student_learning_records,
     list_textbooks_for_parent,
     publish_textbook_version,
+    queue_teaching_package,
     queue_textbook_processing,
     retry_textbook_processing_job,
     submit_student_answer,
@@ -27,6 +32,7 @@ from src.server.database.education_textbooks import (
 )
 from src.server.database.education_members import get_membership_for_user
 from src.server.services.education_textbook_storage import write_textbook_content_bundle
+from src.server.services.education_teaching_storage import build_staged_teaching_input
 from src.utils.storage import get_bytes
 
 
@@ -255,6 +261,156 @@ async def get_parent_textbook(
     if not textbook:
         raise TextbookNotFoundError("Textbook not found")
     return textbook
+
+
+def _managed_skill_hash(skill_name: str) -> str:
+    source = Path(__file__).resolve().parents[3] / "skills" / skill_name / "SKILL.md"
+    try:
+        return hashlib.sha256(source.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise TextbookError("教材教学加工能力当前不可用") from exc
+
+
+def _teaching_actions(*, status: str) -> list[str]:
+    if status in {"queued", "preparing", "running", "validating"}:
+        return ["cancel"]
+    if status in {"failed", "cancelled"}:
+        return ["resume"]
+    return []
+
+
+def _safe_teaching_projection(job: dict[str, Any]) -> dict[str, Any]:
+    """Keep the API shape intentionally independent from PTC runtime records."""
+    status = str(job["status"])
+    return {
+        "job_id": job["job_id"],
+        "teaching_package_id": job["teaching_package_id"],
+        "content_version_id": job["content_version_id"],
+        "status": status,
+        "phase": job["phase"],
+        "attempt_count": int(job["attempt_count"]),
+        "completed_chapter_count": int(job["completed_chapter_count"]),
+        "total_chapter_count": int(job["total_chapter_count"]),
+        "last_heartbeat_at": job.get("last_heartbeat_at"),
+        "error_message": job.get("error_message") or job.get("package_error_message"),
+        "created_at": job.get("created_at"),
+        "completed_at": job.get("completed_at"),
+        "actions": _teaching_actions(status=status),
+        "events": [
+            {
+                "sequence": event["sequence"],
+                "phase": event["phase"],
+                "summary": event["summary"],
+                "chapter_id": event.get("chapter_id"),
+                "created_at": event.get("created_at"),
+            }
+            for event in job.get("events", [])
+        ],
+        "attempts": [
+            {
+                "attempt_id": attempt["attempt_id"],
+                "root_run_id": attempt.get("root_run_id"),
+                "previous_attempt_id": attempt.get("previous_attempt_id"),
+                "status": attempt["status"],
+                "started_at": attempt.get("started_at"),
+                "heartbeat_at": attempt.get("heartbeat_at"),
+                "completed_at": attempt.get("completed_at"),
+            }
+            for attempt in job.get("attempts", [])
+        ],
+    }
+
+
+async def get_teaching_job_projection(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any]:
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can manage teaching jobs")
+    job = await get_teaching_job_projection_for_parent(
+        parent_user_id=parent_user_id, job_id=job_id
+    )
+    if not job:
+        raise TextbookNotFoundError("Teaching job not found")
+    return _safe_teaching_projection(job)
+
+
+async def queue_teaching_package_for_parent(
+    *, parent_user_id: str, content_version_id: str
+) -> dict[str, Any]:
+    """Freeze a reviewed content version and immediately register its root PTC run."""
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can create teaching packages")
+    frozen_input = await get_teaching_input_for_parent(
+        parent_user_id=parent_user_id, content_version_id=content_version_id
+    )
+    if not frozen_input:
+        raise TextbookNotFoundError("Reviewable textbook content version not found")
+
+    job_id = str(uuid4())
+    frozen_input["job_id"] = job_id
+    staged = build_staged_teaching_input(frozen_input)
+    from src.server.database.education_textbooks import TeachingInputHashes
+    from src.server.services.education_teaching_jobs import managed_teaching_prompt
+
+    hashes = TeachingInputHashes(
+        input_manifest_sha256=staged["manifest_sha256"],
+        book_to_skill_sha256=_managed_skill_hash("book-to-skill"),
+        knowledge_guy_sha256=_managed_skill_hash("the-knowledge-guy"),
+        adapter_prompt_sha256=hashlib.sha256(
+            managed_teaching_prompt(job_id).encode("utf-8")
+        ).hexdigest(),
+    )
+    package = await queue_teaching_package(
+        parent_user_id=parent_user_id,
+        content_version_id=content_version_id,
+        hashes=hashes,
+        job_id=job_id,
+    )
+    if not package:
+        raise TextbookNotFoundError("Reviewable textbook content version not found")
+
+    from src.server.services.education_managed_ptc import launch_teaching_attempt
+
+    try:
+        await launch_teaching_attempt(parent_user_id=parent_user_id, job_id=job_id)
+    except Exception:
+        projection = await get_teaching_job_projection_for_parent(
+            parent_user_id=parent_user_id, job_id=job_id
+        )
+        if projection and projection["status"] in {"failed", "cancelled"}:
+            return _safe_teaching_projection(projection)
+        raise TextbookError("教材教学加工无法启动，请稍后重试。")
+    return await get_teaching_job_projection(
+        parent_user_id=parent_user_id, job_id=job_id
+    )
+
+
+async def cancel_teaching_job_for_parent(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any]:
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can manage teaching jobs")
+    from src.server.services.education_teaching_jobs import cancel_teaching_job
+
+    try:
+        await cancel_teaching_job(parent_user_id=parent_user_id, job_id=job_id)
+    except LookupError as exc:
+        raise TextbookNotFoundError("Teaching job not found") from exc
+    return await get_teaching_job_projection(parent_user_id=parent_user_id, job_id=job_id)
+
+
+async def resume_teaching_job_for_parent(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any]:
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can manage teaching jobs")
+    from src.server.services.education_managed_ptc import resume_teaching_job
+
+    try:
+        await resume_teaching_job(parent_user_id=parent_user_id, job_id=job_id)
+    except LookupError as exc:
+        raise TextbookTransitionError("Teaching job cannot be resumed") from exc
+    return await get_teaching_job_projection(parent_user_id=parent_user_id, job_id=job_id)
 
 
 async def run_processing_for_parent(

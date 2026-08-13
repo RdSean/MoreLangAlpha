@@ -166,7 +166,6 @@ async def test_recording_generation_progress_advances_the_package_phase(
         summary="已完成第 1 章教学材料生成",
     )
 
-    statements = [call.args[0] for call in mock_cursor.execute.call_args_list]
     package_update = next(
         call
         for call in mock_cursor.execute.call_args_list
@@ -340,12 +339,15 @@ async def test_parent_detail_selects_safe_teaching_package_projection(
         [
             {
                 "teaching_package_id": "package-1",
+                "job_id": "job-1",
                 "sequence": 1,
                 "status": "review",
+                "job_status": "completed",
                 "chapter_count": 1,
                 "question_count": 1,
             }
         ],
+        [],
     ]
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
 
@@ -357,15 +359,115 @@ async def test_parent_detail_selects_safe_teaching_package_projection(
     assert detail["versions"][0]["teaching_packages"] == [
         {
             "teaching_package_id": "package-1",
+            "job_id": "job-1",
             "sequence": 1,
             "status": "review",
+            "job_status": "completed",
             "chapter_count": 1,
             "question_count": 1,
         }
     ]
-    package_select_sql = mock_cursor.execute.call_args_list[-1].args[0]
+    package_select_sql = next(
+        call.args[0]
+        for call in mock_cursor.execute.call_args_list
+        if "FROM education_teaching_packages" in call.args[0]
+    )
     assert "storage_key" not in package_select_sql
     assert "education_teaching_packages" in package_select_sql
+    assert "education_teaching_jobs" in package_select_sql
+
+
+@pytest.mark.asyncio
+async def test_parent_detail_reads_reviewed_teaching_material_from_the_selected_package(
+    mock_connection, mock_cursor, monkeypatch
+):
+    """New packages stay separate from content but remain reviewable in detail."""
+
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    mock_cursor.fetchone.side_effect = [
+        {
+            "textbook_id": "textbook-1",
+            "household_id": "household-1",
+            "title": "英语第二册",
+            "slug": "english-2",
+        }
+    ]
+    mock_cursor.fetchall.side_effect = [
+        [
+            {
+                "version_id": "version-1",
+                "sequence": 1,
+                "status": "review",
+                "chapter_count": 1,
+                "publication_id": None,
+                "teaching_package_id": None,
+                "is_published": False,
+            }
+        ],
+        [],
+        [
+            {
+                "chapter_id": "chapter-1",
+                "position": 1,
+                "slug": "overview",
+                "title": "导读",
+                "markdown": "# 内容",
+                "teaching_material": None,
+            }
+        ],
+        [],
+        [
+            {
+                "teaching_package_id": "package-1",
+                "job_id": "job-1",
+                "sequence": 1,
+                "status": "review",
+                "job_status": "completed",
+                "chapter_count": 1,
+                "question_count": 1,
+            }
+        ],
+        [
+            {
+                "package_chapter_id": "package-chapter-1",
+                "content_chapter_id": "chapter-1",
+                "teaching_material": "# 教学材料",
+                "question_id": "question-1",
+                "position": 1,
+                "prompt": "题目",
+                "options": {"A": "对", "B": "错"},
+                "correct_option": "A",
+                "explanation": "解释",
+                "knowledge_point": "知识点",
+            }
+        ],
+    ]
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+
+    detail = await education_textbooks.get_textbook_for_parent(
+        parent_user_id="parent-1", textbook_id="textbook-1"
+    )
+
+    assert detail is not None
+    chapter = detail["versions"][0]["chapters"][0]
+    assert chapter["teaching_material"] == "# 教学材料"
+    assert chapter["questions"] == [
+        {
+            "question_id": "question-1",
+            "position": 1,
+            "prompt": "题目",
+            "options": {"A": "对", "B": "错"},
+            "correct_option": "A",
+            "explanation": "解释",
+            "knowledge_point": "知识点",
+        }
+    ]
+    statements = [call.args[0] for call in mock_cursor.execute.call_args_list]
+    assert any("education_teaching_package_chapters" in sql for sql in statements)
+    assert all("storage_key" not in sql for sql in statements)
 
 
 @pytest.mark.asyncio

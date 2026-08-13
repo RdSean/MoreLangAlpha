@@ -17,6 +17,7 @@ from src.server.app.education.models import (
     TextbookProcessingResponse,
     TextbookPublicationResponse,
     TextbookResponse,
+    TeachingJobResponse,
     UpdateLearningProgressRequest,
 )
 from src.server.services.education_textbooks import (
@@ -26,17 +27,21 @@ from src.server.services.education_textbooks import (
     TextbookTransitionError,
     answer_learning_question,
     assign_publication,
+    cancel_teaching_job_for_parent,
     create_textbook,
     get_parent_learning_records,
     get_parent_textbook,
+    get_teaching_job_projection,
     get_student_chapter_context,
     get_student_learning,
     list_learning_assignments,
     list_parent_textbooks,
     publish_version,
+    queue_teaching_package_for_parent,
     record_learning_progress,
     retry_processing_for_parent,
     run_processing_for_parent,
+    resume_teaching_job_for_parent,
     start_processing,
 )
 from src.server.services.education_learning_chat import get_learning_chat_space
@@ -82,6 +87,56 @@ async def get_family_textbook(textbook_id: UUID, user_id: CurrentUserId):
     try:
         return await get_parent_textbook(
             parent_user_id=user_id, textbook_id=str(textbook_id)
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/textbook-versions/{content_version_id}/teaching-packages",
+    response_model=TeachingJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def queue_family_teaching_package(content_version_id: UUID, user_id: CurrentUserId):
+    try:
+        return await queue_teaching_package_for_parent(
+            parent_user_id=user_id, content_version_id=str(content_version_id)
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get("/teaching-jobs/{job_id}", response_model=TeachingJobResponse)
+async def get_family_teaching_job(job_id: UUID, user_id: CurrentUserId):
+    try:
+        return await get_teaching_job_projection(
+            parent_user_id=user_id, job_id=str(job_id)
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/teaching-jobs/{job_id}/cancel", response_model=TeachingJobResponse
+)
+async def cancel_family_teaching_job(job_id: UUID, user_id: CurrentUserId):
+    try:
+        return await cancel_teaching_job_for_parent(
+            parent_user_id=user_id, job_id=str(job_id)
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/teaching-jobs/{job_id}/resume",
+    response_model=TeachingJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def resume_family_teaching_job(job_id: UUID, user_id: CurrentUserId):
+    try:
+        return await resume_teaching_job_for_parent(
+            parent_user_id=user_id, job_id=str(job_id)
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
