@@ -89,6 +89,7 @@ export const queryKeys = {
     assets: () => [...queryKeys.education.all, 'assets'],
     textbooks: () => [...queryKeys.education.all, 'textbooks'],
     textbook: (id: string) => [...queryKeys.education.textbooks(), id],
+    teachingJob: (id: string) => [...queryKeys.education.all, 'teaching-jobs', id],
     learning: () => [...queryKeys.education.all, 'learning'],
     assignment: (id: string) => [...queryKeys.education.learning(), id],
   },

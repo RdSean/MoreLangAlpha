@@ -1,5 +1,5 @@
 import { api } from '@/api/client';
-import type { CreateEducationTaskInput, EducationAsset, EducationMember, EducationTask, LearningAnswer, LearningAssignment, LearningChatSpace, ParentLearningRecords, ParentLearningTranscript, StudentLearning, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookPublication } from './types';
+import type { CreateEducationTaskInput, EducationAsset, EducationMember, EducationTask, LearningAnswer, LearningAssignment, LearningChatSpace, ParentLearningRecords, ParentLearningTranscript, StudentLearning, SubmitEducationTaskInput, TeachingJob, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookPublication } from './types';
 
 export async function listEducationTasks(): Promise<EducationTask[]> {
   const { data } = await api.get<EducationTask[]>('/api/v1/education/tasks');
@@ -82,6 +82,26 @@ export async function runTextbookProcessing(jobId: string): Promise<TextbookProc
 
 export async function retryTextbookProcessing(jobId: string): Promise<TextbookProcessingJob> {
   const { data } = await api.post<TextbookProcessingJob>(`/api/v1/education/textbook-processing/${jobId}/retry`);
+  return data;
+}
+
+export async function createTeachingPackage(contentVersionId: string): Promise<TeachingJob> {
+  const { data } = await api.post<TeachingJob>(`/api/v1/education/textbook-versions/${contentVersionId}/teaching-packages`);
+  return data;
+}
+
+export async function getTeachingJob(jobId: string): Promise<TeachingJob> {
+  const { data } = await api.get<TeachingJob>(`/api/v1/education/teaching-jobs/${jobId}`);
+  return data;
+}
+
+export async function cancelTeachingJob(jobId: string): Promise<TeachingJob> {
+  const { data } = await api.post<TeachingJob>(`/api/v1/education/teaching-jobs/${jobId}/cancel`);
+  return data;
+}
+
+export async function resumeTeachingJob(jobId: string): Promise<TeachingJob> {
+  const { data } = await api.post<TeachingJob>(`/api/v1/education/teaching-jobs/${jobId}/resume`);
   return data;
 }
 

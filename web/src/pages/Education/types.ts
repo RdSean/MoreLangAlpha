@@ -93,10 +93,51 @@ export interface TextbookAssignmentSummary {
 
 export interface TeachingPackageSummary {
   teaching_package_id: string;
+  job_id: string;
   sequence: number;
   status: 'queued' | 'preparing' | 'building_skill' | 'generating_teaching' | 'validating' | 'review' | 'failed' | 'cancelled';
+  job_status: 'queued' | 'preparing' | 'running' | 'validating' | 'completed' | 'failed' | 'cancelled';
   chapter_count: number;
   question_count: number;
+}
+
+export type TeachingJobAction = 'cancel' | 'resume';
+export type TeachingJobPhase = TeachingPackageSummary['status'];
+
+export interface TeachingJobEvent {
+  sequence: number;
+  phase: TeachingJobPhase;
+  summary: string;
+  chapter_id?: string | null;
+  created_at?: string | null;
+}
+
+export interface TeachingJobAttempt {
+  attempt_id: string;
+  root_run_id?: string | null;
+  previous_attempt_id?: string | null;
+  status: string;
+  started_at?: string | null;
+  heartbeat_at?: string | null;
+  completed_at?: string | null;
+}
+
+export interface TeachingJob {
+  job_id: string;
+  teaching_package_id: string;
+  content_version_id: string;
+  status: 'queued' | 'preparing' | 'running' | 'validating' | 'completed' | 'failed' | 'cancelled';
+  phase: TeachingJobPhase;
+  attempt_count: number;
+  completed_chapter_count: number;
+  total_chapter_count: number;
+  last_heartbeat_at?: string | null;
+  error_message?: string | null;
+  created_at?: string | null;
+  completed_at?: string | null;
+  actions: TeachingJobAction[];
+  events: TeachingJobEvent[];
+  attempts: TeachingJobAttempt[];
 }
 
 export interface TextbookSource {

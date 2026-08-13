@@ -11,6 +11,10 @@ const state = vi.hoisted(() => ({
   start: vi.fn(),
   run: vi.fn(),
   retry: vi.fn(),
+  createTeaching: vi.fn(),
+  cancelTeaching: vi.fn(),
+  resumeTeaching: vi.fn(),
+  teachingJob: null as Record<string, unknown> | null,
   publish: vi.fn(),
   assign: vi.fn(),
 }));
@@ -25,10 +29,14 @@ vi.mock('../queries', () => ({
   useParentLearningRecords: () => ({ data: { records: [] }, isLoading: false }),
   useParentLearningTranscript: () => ({ data: { messages: [] }, isLoading: false }),
   useTextbook: () => ({ data: state.textbook, isLoading: false }),
+  useTeachingJob: () => ({ data: state.teachingJob }),
   useTextbookMutations: () => ({
     start: { mutateAsync: state.start, isPending: false },
     run: { mutateAsync: state.run, isPending: false },
     retry: { mutateAsync: state.retry, isPending: false },
+    createTeaching: { mutateAsync: state.createTeaching, isPending: false },
+    cancelTeaching: { mutateAsync: state.cancelTeaching, isPending: false },
+    resumeTeaching: { mutateAsync: state.resumeTeaching, isPending: false },
     publish: { mutateAsync: state.publish, isPending: false },
     assign: { mutateAsync: state.assign, isPending: false },
   }),
@@ -50,6 +58,10 @@ beforeEach(() => {
   state.start.mockReset().mockResolvedValue({ job_id: 'job-1' });
   state.run.mockReset();
   state.retry.mockReset();
+  state.createTeaching.mockReset();
+  state.cancelTeaching.mockReset();
+  state.resumeTeaching.mockReset();
+  state.teachingJob = null;
   state.publish.mockReset();
   state.assign.mockReset();
 });
@@ -125,5 +137,36 @@ describe('TextbookDetailPage', () => {
     fireEvent.click(screen.getByRole('tab', { name: '教学' }));
     expect(screen.getByText(/完成阅读。/)).toBeInTheDocument();
     expect(screen.getByText(/完成阅读后做什么？/)).toBeInTheDocument();
+  });
+
+  it('starts a teaching package only after content extraction is reviewable', async () => {
+    state.textbook = {
+      textbook_id: 'textbook-1',
+      household_id: 'household-1',
+      title: '英语第二册',
+      slug: 'english-2',
+      versions: [{
+        version_id: 'version-1',
+        sequence: 1,
+        status: 'review',
+        chapter_count: 1,
+        is_published: false,
+        sources: [],
+        assignments: [],
+        teaching_packages: [],
+        chapters: [{ chapter_id: 'chapter-1', position: 1, slug: 'overview', title: '导读', markdown: '# 导读', questions: [] }],
+      }],
+    };
+    state.createTeaching.mockResolvedValue({ job_id: 'teaching-job-1' });
+
+    render(
+      <MemoryRouter initialEntries={['/education/textbooks/textbook-1']}>
+        <Routes><Route path="/education/textbooks/:textbookId" element={<TextbookDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '生成教学包' }));
+
+    await waitFor(() => expect(state.createTeaching).toHaveBeenCalledWith('version-1'));
   });
 });
