@@ -28,6 +28,9 @@ from src.server.services.education_teaching_storage import (
     stage_teaching_inputs,
     write_teaching_package_bundle,
 )
+from src.server.services.education_teaching_jobs import (
+    resolve_managed_teaching_agent_config,
+)
 from src.server.services.education_teaching_validation import validate_teaching_package
 from src.server.utils.error_sanitization import sanitize_error_text
 
@@ -84,6 +87,7 @@ async def prepare_and_dispatch_teaching_attempt(
     attempt_id: str | None = None,
     workspace_id: str | None = None,
     thread_id: str | None = None,
+    agent_config: Any | None = None,
 ) -> dict[str, str]:
     """Create hidden ownership rows, stage frozen inputs, then start the root run."""
     job_id = str(job["job_id"])
@@ -112,6 +116,7 @@ async def prepare_and_dispatch_teaching_attempt(
         thread_id=thread_id,
         staged=staged,
         policy=policy,
+        agent_config=agent_config,
         skill_contexts=[
             {"name": "book-to-skill", "instruction": f"--managed-textbook {job_id}"},
             {"name": "the-knowledge-guy", "instruction": f"--managed-textbook {job_id}"},
@@ -159,6 +164,9 @@ async def launch_teaching_attempt(
         raise RuntimeError("Teaching job was claimed before its managed attempt started")
     attempt_id = str(attempt["attempt_id"])
     try:
+        agent_config = await resolve_managed_teaching_agent_config(
+            parent_user_id=parent_user_id
+        )
         session = await WorkspaceManager.get_instance().provision_managed_textbook_session(
             workspace_id=workspace_id, policy=policy
         )
@@ -169,6 +177,7 @@ async def launch_teaching_attempt(
             attempt_id=attempt_id,
             workspace_id=workspace_id,
             thread_id=thread_id,
+            agent_config=agent_config,
         )
     except BaseException:
         await fail_preparing_teaching_attempt(

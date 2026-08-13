@@ -80,6 +80,7 @@ async def test_launcher_creates_hidden_workspace_thread_then_stages_before_dispa
 
     async def dispatch(**kwargs):
         calls.append("dispatch")
+        assert kwargs["agent_config"] is agent_config
         assert kwargs["skill_contexts"] == [
             {
                 "name": "book-to-skill",
@@ -97,6 +98,7 @@ async def test_launcher_creates_hidden_workspace_thread_then_stages_before_dispa
         assert policy.enable_vault is False
         return {"root_run_id": "run-1"}
 
+    agent_config = MagicMock()
     monkeypatch.setattr(education_managed_ptc, "create_managed_workspace", workspace)
     monkeypatch.setattr(education_managed_ptc, "create_managed_thread", thread)
     monkeypatch.setattr(education_managed_ptc, "stage_managed_teaching_skills", AsyncMock())
@@ -107,6 +109,7 @@ async def test_launcher_creates_hidden_workspace_thread_then_stages_before_dispa
         parent_user_id="parent-1",
         job={"job_id": JOB_ID, "chapters": [{"content_chapter_id": "chapter-1"}]},
         sandbox=object(),
+        agent_config=agent_config,
     )
 
     assert launched == {
@@ -146,13 +149,21 @@ async def test_launches_authorized_job_with_managed_session_before_staging(monke
         calls.append("stage-and-dispatch")
         assert kwargs["attempt_id"] == "attempt-1"
         assert kwargs["session"].sandbox is not None
+        assert kwargs["agent_config"] is agent_config
         return {"root_run_id": "run-1"}
 
+    agent_config = object()
     monkeypatch.setattr(education_managed_ptc, "get_teaching_job_for_parent", AsyncMock(return_value=job), raising=False)
     monkeypatch.setattr(education_managed_ptc, "create_managed_workspace", AsyncMock(return_value={"workspace_id": "workspace-1"}))
     monkeypatch.setattr(education_managed_ptc, "create_managed_thread", AsyncMock(return_value={"conversation_thread_id": "thread-1"}))
     monkeypatch.setattr(education_managed_ptc, "create_teaching_attempt", create_attempt, raising=False)
     monkeypatch.setattr(education_managed_ptc, "prepare_and_dispatch_teaching_attempt", prepare, raising=False)
+    monkeypatch.setattr(
+        education_managed_ptc,
+        "resolve_managed_teaching_agent_config",
+        AsyncMock(return_value=agent_config),
+        raising=False,
+    )
     monkeypatch.setattr(
         education_managed_ptc,
         "WorkspaceManager",
@@ -183,6 +194,11 @@ async def test_launch_marks_reserved_attempt_failed_when_sandbox_provisioning_fa
     monkeypatch.setattr(education_managed_ptc, "create_managed_thread", AsyncMock(return_value={"conversation_thread_id": "thread-1"}))
     monkeypatch.setattr(education_managed_ptc, "create_teaching_attempt", AsyncMock(return_value={"attempt_id": "attempt-1"}))
     monkeypatch.setattr(education_managed_ptc, "fail_preparing_teaching_attempt", failed, raising=False)
+    monkeypatch.setattr(
+        education_managed_ptc,
+        "resolve_managed_teaching_agent_config",
+        AsyncMock(return_value=MagicMock()),
+    )
     monkeypatch.setattr(education_managed_ptc, "WorkspaceManager", type("WorkspaceManager", (), {"get_instance": staticmethod(lambda: Manager())}))
 
     with pytest.raises(RuntimeError, match="sandbox unavailable"):

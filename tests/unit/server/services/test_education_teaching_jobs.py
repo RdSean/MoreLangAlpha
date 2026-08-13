@@ -3,7 +3,7 @@
 from importlib import import_module
 from importlib.util import find_spec
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
 import pytest
@@ -161,6 +161,7 @@ async def test_managed_graph_reads_skill_bodies_from_server_controlled_project_s
     policy = import_module("ptc_agent.agent.managed_execution").education_teaching_policy(
         "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
     )
+    agent_config = object()
     monkeypatch.setattr(setup, "agent_config", object())
     monkeypatch.setattr(
         education_teaching_jobs,
@@ -175,7 +176,44 @@ async def test_managed_graph_reads_skill_bodies_from_server_controlled_project_s
         run_handle=handle,
         policy=policy,
         skill_contexts=[{"name": "book-to-skill", "instruction": "--managed-textbook"}],
+        agent_config=agent_config,
     )
 
     expected = str(Path(education_teaching_jobs.__file__).resolve().parents[3] / "skills")
     assert config["configurable"]["skill_dirs"] == [expected]
+    graph_call = education_teaching_jobs.build_ptc_graph_with_session.await_args
+    assert graph_call.kwargs["config"] is agent_config
+    assert graph_call.kwargs["user_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_managed_graph_resolves_parent_credentials_before_sandbox_execution(monkeypatch):
+    """Managed work uses the parent's model credentials without giving it parent identity."""
+    education_teaching_jobs = import_module("src.server.services.education_teaching_jobs")
+    setup = import_module("src.server.app.setup")
+    base_config = object()
+    resolved_config = MagicMock()
+    resolve = AsyncMock(return_value=resolved_config)
+
+    monkeypatch.setattr(setup, "agent_config", base_config)
+    monkeypatch.setattr(
+        "src.server.database.api_keys.is_byok_active", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        "src.server.services.llm.config.resolve_llm_config", resolve
+    )
+
+    result = await education_teaching_jobs.resolve_managed_teaching_agent_config(
+        parent_user_id="parent-1"
+    )
+
+    assert result is resolved_config
+    resolved_config.get_llm_client.assert_called_once_with()
+    resolve.assert_awaited_once_with(
+        base_config=base_config,
+        user_id="parent-1",
+        request_model=None,
+        is_byok=True,
+        mode="ptc",
+        enabled_subagents=[],
+    )

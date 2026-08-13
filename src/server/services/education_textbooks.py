@@ -410,6 +410,13 @@ async def resume_teaching_job_for_parent(
         await resume_teaching_job(parent_user_id=parent_user_id, job_id=job_id)
     except LookupError as exc:
         raise TextbookTransitionError("Teaching job cannot be resumed") from exc
+    except Exception as exc:
+        projection = await get_teaching_job_projection_for_parent(
+            parent_user_id=parent_user_id, job_id=job_id
+        )
+        if projection and projection["status"] in {"failed", "cancelled"}:
+            return _safe_teaching_projection(projection)
+        raise TextbookError("教材教学加工无法启动，请稍后重试。") from exc
     return await get_teaching_job_projection(parent_user_id=parent_user_id, job_id=job_id)
 
 

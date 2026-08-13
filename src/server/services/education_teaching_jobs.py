@@ -143,6 +143,7 @@ async def build_managed_teaching_graph(
     run_handle: Any,
     policy: ManagedExecutionPolicy,
     skill_contexts: list[dict[str, str]],
+    agent_config: Any | None = None,
 ) -> tuple[Any, dict[str, Any], dict[str, Any]]:
     """Build the constrained graph and its fixed input/configuration.
 
@@ -153,12 +154,13 @@ async def build_managed_teaching_graph(
     """
     from src.server.app import setup
 
-    if setup.agent_config is None:
+    config = agent_config or setup.agent_config
+    if config is None:
         raise RuntimeError("PTC Agent is not initialized")
     job_id = str(UUID(policy.filesystem_root.rsplit("/", 1)[-1]))
     graph = await build_ptc_graph_with_session(
         session=session,
-        config=setup.agent_config,
+        config=config,
         subagent_names=[],
         disable_subagents=True,
         checkpointer=run_handle.checkpointer,
@@ -200,6 +202,26 @@ async def build_managed_teaching_graph(
     return graph, input_state, graph_config
 
 
+async def resolve_managed_teaching_agent_config(*, parent_user_id: str) -> Any:
+    """Resolve model credentials without admitting parent runtime capabilities."""
+    from src.server.app import setup
+    from src.server.database.api_keys import is_byok_active
+    from src.server.services.llm.config import resolve_llm_config
+
+    if setup.agent_config is None:
+        raise RuntimeError("PTC Agent is not initialized")
+    config = await resolve_llm_config(
+        base_config=setup.agent_config,
+        user_id=parent_user_id,
+        request_model=None,
+        is_byok=await is_byok_active(parent_user_id),
+        mode="ptc",
+        enabled_subagents=[],
+    )
+    config.get_llm_client()
+    return config
+
+
 async def request_root_run_cancel(*, thread_id: str, run_id: str) -> None:
     """Use the shared durable PTC cancellation mechanism for a root run."""
     from src.server.services.cancel_dispatch import cancel_workflow
@@ -230,6 +252,7 @@ async def dispatch_managed_root_run(
     staged: Mapping[str, Any],
     policy: ManagedExecutionPolicy,
     skill_contexts: list[dict[str, str]],
+    agent_config: Any | None = None,
     **_ignored: Any,
 ) -> dict[str, str]:
     """Persist and start one service-owned root run through the shared spine."""
@@ -261,6 +284,7 @@ async def dispatch_managed_root_run(
             run_handle=run_handle,
             policy=policy,
             skill_contexts=skill_contexts,
+            agent_config=agent_config,
         )
         attempt = await settle_teaching_attempt(
             attempt_id=attempt_id, root_run_id=run_id, status="running"

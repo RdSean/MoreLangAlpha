@@ -322,6 +322,49 @@ async def test_parent_can_cancel_and_resume_only_via_the_managed_job_state_machi
     resume.assert_awaited_once_with(parent_user_id="parent-1", job_id="job-1")
 
 
+@pytest.mark.asyncio
+async def test_parent_resume_returns_failed_safe_projection_when_managed_launch_fails(
+    monkeypatch,
+):
+    projection = {
+        "job_id": "job-1",
+        "teaching_package_id": "package-1",
+        "content_version_id": "version-1",
+        "status": "failed",
+        "phase": "failed",
+        "attempt_count": 2,
+        "completed_chapter_count": 0,
+        "total_chapter_count": 1,
+        "actions": ["resume"],
+        "events": [],
+        "attempts": [],
+    }
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_teaching_job_projection_for_parent",
+        AsyncMock(return_value=projection),
+    )
+    from src.server.services import education_managed_ptc
+
+    monkeypatch.setattr(
+        education_managed_ptc,
+        "resume_teaching_job",
+        AsyncMock(side_effect=RuntimeError("no credential available")),
+    )
+
+    resumed = await education_textbooks.resume_teaching_job_for_parent(
+        parent_user_id="parent-1", job_id="job-1"
+    )
+
+    assert resumed["status"] == "failed"
+    assert resumed["actions"] == ["resume"]
+
+
 def test_safe_teaching_projection_never_relays_managed_runtime_fields():
     job = {
         "job_id": "job-1",
