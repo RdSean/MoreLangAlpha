@@ -55,6 +55,17 @@ beforeEach(() => {
 });
 
 describe('TextbookDetailPage', () => {
+  it('shows the first source and processing action for a newly created draft', () => {
+    render(
+      <MemoryRouter initialEntries={['/education/textbooks/textbook-1']}>
+        <Routes><Route path="/education/textbooks/:textbookId" element={<TextbookDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('heading', { name: '下一步：添加教材资料' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '开始加工' })).toBeInTheDocument();
+  });
+
   it('submits the selected existing sources explicitly', async () => {
     render(
       <MemoryRouter initialEntries={['/education/textbooks/textbook-1']}>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BookOpenCheck, ChevronRight, Plus } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -14,11 +14,13 @@ const statusLabels: Record<TextbookVersionStatus, string> = {
 function CreateTextbookDialog() {
   const [title, setTitle] = useState('');
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
   const mutations = useTextbookMutations();
   const create = async () => {
-    await mutations.create.mutateAsync({ title });
+    const textbook = await mutations.create.mutateAsync({ title });
     setTitle('');
     setOpen(false);
+    navigate(`/education/textbooks/${textbook.textbook_id}`);
   };
   return <Dialog open={open} onOpenChange={setOpen}>
     <DialogTrigger asChild><Button><Plus className="mr-2 size-4" aria-hidden="true" />新建教材</Button></DialogTrigger>

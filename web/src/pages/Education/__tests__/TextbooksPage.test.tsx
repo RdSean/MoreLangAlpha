@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TextbooksPage from '../TextbooksPage';
@@ -49,7 +49,10 @@ beforeEach(() => {
 
 describe('TextbooksPage', () => {
   it('lets a parent create a reusable family textbook from the library', async () => {
-    render(<MemoryRouter><TextbooksPage /></MemoryRouter>);
+    function LocationProbe() {
+      return <output data-testid="location">{useLocation().pathname}</output>;
+    }
+    render(<MemoryRouter initialEntries={['/education/textbooks']}><Routes><Route path="/education/textbooks" element={<TextbooksPage />} /><Route path="*" element={<LocationProbe />} /></Routes></MemoryRouter>);
 
     expect(screen.getByRole('heading', { name: '家庭教材库' })).toBeInTheDocument();
     expect(screen.getByText('英语第二册')).toBeInTheDocument();
@@ -59,6 +62,7 @@ describe('TextbooksPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建教材' }));
 
     await waitFor(() => expect(state.create).toHaveBeenCalledWith({ title: '语文上册' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/education/textbooks/textbook-2'));
   });
 
   it('uses a compact table that exposes the current version state', () => {
