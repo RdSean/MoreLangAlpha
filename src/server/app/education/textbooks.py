@@ -10,6 +10,7 @@ from src.server.app.education.models import (
     CreateTextbookRequest,
     LearningAnswerResponse,
     LearningProgressResponse,
+    PublishTextbookVersionRequest,
     StartTextbookProcessingRequest,
     TextbookAssignmentResponse,
     TextbookDetailResponse,
@@ -136,13 +137,17 @@ async def retry_family_textbook_processing(job_id: UUID, user_id: CurrentUserId)
     status_code=status.HTTP_201_CREATED,
 )
 async def publish_family_textbook_version(
-    textbook_id: UUID, version_id: UUID, user_id: CurrentUserId
+    textbook_id: UUID,
+    version_id: UUID,
+    body: PublishTextbookVersionRequest,
+    user_id: CurrentUserId,
 ):
     try:
         return await publish_version(
             parent_user_id=user_id,
             textbook_id=str(textbook_id),
             version_id=str(version_id),
+            teaching_package_id=str(body.teaching_package_id),
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc

@@ -118,3 +118,65 @@ async def write_textbook_bundle(job: dict[str, Any], package: dict[str, Any]) ->
         "application/json",
     )
     return prefix
+
+
+async def write_textbook_content_bundle(job: dict[str, Any], package: dict[str, Any]) -> str:
+    """Persist extracted content only; teaching packages are stored separately."""
+    prefix = textbook_bundle_prefix(job)
+    source_entries: list[dict[str, str]] = []
+    chapter_entries: list[dict[str, Any]] = []
+    for chapter in package["chapters"]:
+        relative_path = f"chapters/{chapter['slug']}.md"
+        await _put(
+            chapter["markdown_key"],
+            chapter["markdown"].encode(),
+            "text/markdown; charset=utf-8",
+        )
+        chapter_entries.append(
+            {
+                "position": chapter["position"],
+                "slug": chapter["slug"],
+                "title": chapter["title"],
+                "page_start": chapter.get("page_start"),
+                "page_end": chapter.get("page_end"),
+                "path": relative_path,
+                "sha256": hashlib.sha256(chapter["markdown"].encode()).hexdigest(),
+            }
+        )
+    for source in job["sources"]:
+        filename = _safe_component(source["original_filename"], "source")
+        relative_path = f"sources/{source['asset_id']}-{filename}"
+        source_bytes = await asyncio.to_thread(get_bytes, source["storage_key"])
+        if source_bytes is None:
+            raise TextbookBundleStorageError(
+                "A frozen textbook source is no longer available"
+            )
+        await _put(
+            f"{prefix}/{relative_path}", source_bytes, source["content_type"]
+        )
+        source_entries.append(
+            {
+                "asset_id": str(source["asset_id"]),
+                "filename": source["original_filename"],
+                "path": relative_path,
+                "sha256": hashlib.sha256(source_bytes).hexdigest(),
+            }
+        )
+    readme = "# {}\n\n版本：v{}\n\n本目录保存冻结教材内容。面向学生的教学材料和题集由单独、可审阅的教学包生成。\n".format(
+        job["title"], job["version_sequence"]
+    )
+    manifest = {
+        "format": "langalpha-family-textbook-content/v1",
+        "title": job["title"],
+        "version": job["version_sequence"],
+        "extractor": package["extractor"],
+        "sources": source_entries,
+        "chapters": chapter_entries,
+    }
+    await _put(f"{prefix}/README.md", readme.encode(), "text/markdown; charset=utf-8")
+    await _put(
+        f"{prefix}/manifest.json",
+        json.dumps(manifest, ensure_ascii=False, indent=2).encode(),
+        "application/json",
+    )
+    return prefix

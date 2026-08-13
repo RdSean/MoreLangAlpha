@@ -79,7 +79,7 @@ def upgrade() -> None:
             heartbeat_at TIMESTAMPTZ,
             completed_at TIMESTAMPTZ,
             error_code VARCHAR(64),
-            error_message TEXT,
+            error_message TEXT
         )
     """)
     # PostgreSQL considers NULL values distinct in a unique constraint.  These
@@ -199,6 +199,18 @@ def upgrade() -> None:
         JOIN education_teaching_package_chapters AS chapters
           ON chapters.content_chapter_id = questions.chapter_id
     """)
+    # Legacy package questions retain their original UUIDs, preserving every
+    # historical answer while changing future learning queries to the package.
+    op.execute("""
+        ALTER TABLE education_learning_answers
+        DROP CONSTRAINT IF EXISTS education_learning_answers_question_id_fkey
+    """)
+    op.execute("""
+        ALTER TABLE education_learning_answers
+        ADD CONSTRAINT fk_education_learning_answers_teaching_question
+        FOREIGN KEY (question_id)
+        REFERENCES education_teaching_package_questions(question_id) ON DELETE RESTRICT
+    """)
 
     op.execute("""
         ALTER TABLE education_textbook_publications
@@ -249,6 +261,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("""
+        ALTER TABLE education_learning_answers
+        DROP CONSTRAINT IF EXISTS fk_education_learning_answers_teaching_question
+    """)
+    op.execute("""
+        ALTER TABLE education_learning_answers
+        ADD CONSTRAINT education_learning_answers_question_id_fkey
+        FOREIGN KEY (question_id)
+        REFERENCES education_chapter_questions(question_id) ON DELETE RESTRICT
+    """)
     op.execute("""
         ALTER TABLE education_textbook_chapters
         ALTER COLUMN teaching_material SET NOT NULL,

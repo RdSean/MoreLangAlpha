@@ -79,7 +79,7 @@ export interface TextbookChapter {
   page_start?: number | null;
   page_end?: number | null;
   markdown: string;
-  teaching_material: string;
+  teaching_material?: string | null;
   progress_status?: 'not_started' | 'learning' | 'read' | 'check_completed' | 'review_recommended';
   questions: TextbookQuestion[];
 }
@@ -89,6 +89,14 @@ export interface TextbookAssignmentSummary {
   student_user_id: string;
   student_name?: string;
   created_at?: string;
+}
+
+export interface TeachingPackageSummary {
+  teaching_package_id: string;
+  sequence: number;
+  status: 'queued' | 'preparing' | 'building_skill' | 'generating_teaching' | 'validating' | 'review' | 'failed' | 'cancelled';
+  chapter_count: number;
+  question_count: number;
 }
 
 export interface TextbookSource {
@@ -113,6 +121,7 @@ export interface TextbookVersion {
   publication_id?: string | null;
   sources: TextbookSource[];
   chapters: TextbookChapter[];
+  teaching_packages: TeachingPackageSummary[];
   assignments: TextbookAssignmentSummary[];
 }
 
@@ -135,6 +144,7 @@ export interface TextbookProcessingJob {
 export interface TextbookPublication {
   publication_id: string;
   version_id: string;
+  teaching_package_id: string;
   created_at?: string;
 }
 

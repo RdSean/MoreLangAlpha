@@ -26,7 +26,7 @@ from src.server.database.education_textbooks import (
     update_student_progress,
 )
 from src.server.database.education_members import get_membership_for_user
-from src.server.services.education_textbook_storage import write_textbook_bundle
+from src.server.services.education_textbook_storage import write_textbook_content_bundle
 from src.utils.storage import get_bytes
 
 
@@ -133,7 +133,6 @@ def build_local_fixture_package(job: dict[str, Any]) -> dict[str, Any]:
     chapter_slug = "01-overview"
     source_names = "、".join(source["original_filename"] for source in job["sources"])
     markdown_key = f"education/{job['household_id']}/{_slug(job['slug'])}/v{job['version_sequence']}/chapters/{chapter_slug}.md"
-    teaching_key = f"education/{job['household_id']}/{_slug(job['slug'])}/v{job['version_sequence']}/teaching/{chapter_slug}-material.md"
     title = f"{job['title']}：导读"
     return {
         "extractor": {"name": "local_fixture", "version": "1"},
@@ -145,24 +144,7 @@ def build_local_fixture_package(job: dict[str, Any]) -> dict[str, Any]:
                 "page_start": None,
                 "page_end": None,
                 "markdown_key": markdown_key,
-                "teaching_material_key": teaching_key,
                 "markdown": f"# {title}\n\n本章基于已冻结资料：{source_names}。\n\n请先阅读资料，再用自己的话说明本章的学习目标。\n",
-                "teaching_material": f"# {title} 学习材料\n\n## 学习目标\n\n- 能识别本教材的已冻结资料来源。\n- 能完成本章的基础知识检查。\n\n## 学习建议\n\n阅读后完成右侧知识检查；答错时回到本章材料复习。\n",
-                "questions": [
-                    {
-                        "position": 1,
-                        "prompt": "完成本章学习后，下一步应该做什么？",
-                        "options": {
-                            "A": "完成知识检查",
-                            "B": "跳过所有材料",
-                            "C": "修改已发布版本",
-                            "D": "删除原始资料",
-                        },
-                        "correct_option": "A",
-                        "explanation": "知识检查用于形成可追溯的学习证据。",
-                        "knowledge_point": "学习证据",
-                    }
-                ],
             }
         ],
     }
@@ -216,29 +198,7 @@ async def build_local_pdf_package(job: dict[str, Any]) -> dict[str, Any]:
                     "page_start": page_start,
                     "page_end": page_end,
                     "markdown_key": f"{prefix}/chapters/{slug}.md",
-                    "teaching_material_key": f"{prefix}/teaching/{slug}-material.md",
                     "markdown": f"# {title}\n\n" + "\n\n".join(selected_pages),
-                    "teaching_material": (
-                        f"# {title} 学习材料\n\n## 学习目标\n\n"
-                        "- 阅读并概括本节教材的关键信息。\n"
-                        "- 根据原文完成基础知识检查。\n\n"
-                        "## 学习建议\n\n先阅读教材正文，再完成知识检查。"
-                    ),
-                    "questions": [
-                        {
-                            "position": 1,
-                            "prompt": "完成本节阅读后，下一步应该做什么？",
-                            "options": {
-                                "A": "完成知识检查",
-                                "B": "修改已发布版本",
-                                "C": "删除原始资料",
-                                "D": "跳过本节内容",
-                            },
-                            "correct_option": "A",
-                            "explanation": "知识检查用于形成可追溯的学习证据。",
-                            "knowledge_point": "学习证据",
-                        }
-                    ],
                 }
             )
             position += 1
@@ -256,7 +216,7 @@ async def process_textbook_job(*, job_id: str) -> dict[str, Any]:
         raise TextbookNotFoundError("Textbook processing job is not queued")
     try:
         package = await build_local_pdf_package(job)
-        prefix = await write_textbook_bundle(job, package)
+        prefix = await write_textbook_content_bundle(job, package)
         completed = await complete_textbook_processing_job(
             job_id=str(job["job_id"]),
             version_id=str(job["version_id"]),
@@ -326,7 +286,11 @@ async def retry_processing_for_parent(
 
 
 async def publish_version(
-    *, parent_user_id: str, textbook_id: str, version_id: str
+    *,
+    parent_user_id: str,
+    textbook_id: str,
+    version_id: str,
+    teaching_package_id: str,
 ) -> dict[str, Any]:
     if not await get_household_context_for_parent(parent_user_id):
         raise TextbookPermissionError("Only a parent can publish textbook versions")
@@ -335,6 +299,7 @@ async def publish_version(
             parent_user_id=parent_user_id,
             textbook_id=textbook_id,
             version_id=version_id,
+            teaching_package_id=teaching_package_id,
         )
     except ValueError as exc:
         raise TextbookTransitionError(str(exc)) from exc

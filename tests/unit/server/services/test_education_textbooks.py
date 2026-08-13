@@ -106,7 +106,9 @@ async def test_processing_job_writes_a_bundle_before_making_a_version_reviewable
     )
     bundle = AsyncMock(return_value="education/household-1/english-2/v1")
     complete = AsyncMock(return_value={"job_id": "job-1", "status": "completed"})
-    monkeypatch.setattr(education_textbooks, "write_textbook_bundle", bundle)
+    monkeypatch.setattr(
+        education_textbooks, "write_textbook_content_bundle", bundle, raising=False
+    )
     monkeypatch.setattr(
         education_textbooks, "complete_textbook_processing_job", complete
     )
@@ -123,6 +125,55 @@ async def test_processing_job_writes_a_bundle_before_making_a_version_reviewable
         "name": "local_fixture",
         "version": "1",
     }
+
+
+def test_local_fixture_processing_creates_content_without_teaching_material():
+    package = education_textbooks.build_local_fixture_package(
+        {
+            "household_id": "household-1",
+            "title": "英语第二册",
+            "slug": "english-2",
+            "version_sequence": 1,
+            "sources": [{"original_filename": "book.pdf"}],
+        }
+    )
+
+    chapter = package["chapters"][0]
+    assert "teaching_material" not in chapter
+    assert "teaching_material_key" not in chapter
+    assert "questions" not in chapter
+
+
+@pytest.mark.asyncio
+async def test_content_bundle_uses_the_frozen_chapter_object_keys(monkeypatch):
+    from src.server.services import education_textbook_storage
+
+    uploads: list[str] = []
+
+    async def put(key: str, _content: bytes, _content_type: str) -> None:
+        uploads.append(key)
+
+    monkeypatch.setattr(education_textbook_storage, "_put", put)
+    monkeypatch.setattr(education_textbook_storage, "get_bytes", lambda _key: b"pdf")
+    job = {
+        "household_id": "household-1",
+        "title": "英语第二册",
+        "slug": "english-2",
+        "version_sequence": 1,
+        "sources": [
+            {
+                "asset_id": "asset-1",
+                "original_filename": "book.pdf",
+                "storage_key": "education/household-1/asset-1.pdf",
+                "content_type": "application/pdf",
+            }
+        ],
+    }
+    package = education_textbooks.build_local_fixture_package(job)
+
+    await education_textbook_storage.write_textbook_content_bundle(job, package)
+
+    assert package["chapters"][0]["markdown_key"] in uploads
 
 
 @pytest.mark.asyncio
@@ -161,3 +212,5 @@ async def test_local_processor_makes_stable_chapters_from_extractable_pdf_pages(
     assert package["extractor"] == {"name": "local_pypdf", "version": "1"}
     assert package["knowledge_foundations"] == ["book-to-skill", "the-knowledge-guy"]
     assert package["chapters"][0]["markdown"].endswith("教材正文\n\n教材正文")
+    assert "teaching_material" not in package["chapters"][0]
+    assert "questions" not in package["chapters"][0]

@@ -85,8 +85,8 @@ export async function retryTextbookProcessing(jobId: string): Promise<TextbookPr
   return data;
 }
 
-export async function publishTextbookVersion(textbookId: string, versionId: string): Promise<TextbookPublication> {
-  const { data } = await api.post<TextbookPublication>(`/api/v1/education/textbooks/${textbookId}/versions/${versionId}/publish`);
+export async function publishTextbookVersion(textbookId: string, versionId: string, teachingPackageId: string): Promise<TextbookPublication> {
+  const { data } = await api.post<TextbookPublication>(`/api/v1/education/textbooks/${textbookId}/versions/${versionId}/publish`, { teaching_package_id: teachingPackageId });
   return data;
 }
 

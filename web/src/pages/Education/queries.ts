@@ -108,7 +108,7 @@ export function useTextbookMutations() {
     start: useMutation({ mutationFn: ({ textbookId, sourceAssetIds }: { textbookId: string; sourceAssetIds: string[] }) => educationApi.startTextbookProcessing(textbookId, sourceAssetIds), onSuccess: invalidate }),
     run: useMutation({ mutationFn: educationApi.runTextbookProcessing, onSuccess: invalidate }),
     retry: useMutation({ mutationFn: educationApi.retryTextbookProcessing, onSuccess: invalidate }),
-    publish: useMutation({ mutationFn: ({ textbookId, versionId }: { textbookId: string; versionId: string }) => educationApi.publishTextbookVersion(textbookId, versionId), onSuccess: invalidate }),
+    publish: useMutation({ mutationFn: ({ textbookId, versionId, teachingPackageId }: { textbookId: string; versionId: string; teachingPackageId: string }) => educationApi.publishTextbookVersion(textbookId, versionId, teachingPackageId), onSuccess: invalidate }),
     assign: useMutation({ mutationFn: ({ publicationId, studentUserId }: { publicationId: string; studentUserId: string }) => educationApi.assignTextbookPublication(publicationId, studentUserId), onSuccess: invalidate }),
     progress: useMutation({ mutationFn: ({ assignmentId, chapterId, status }: { assignmentId: string; chapterId: string; status: 'learning' | 'read' | 'check_completed' | 'review_recommended' }) => educationApi.updateLearningProgress(assignmentId, chapterId, status), onSuccess: invalidate }),
     answer: useMutation({ mutationFn: ({ assignmentId, questionId, selectedOption }: { assignmentId: string; questionId: string; selectedOption: string }) => educationApi.answerLearningQuestion(assignmentId, questionId, selectedOption), onSuccess: invalidate }),

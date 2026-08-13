@@ -123,9 +123,14 @@ async def test_textbook_mutations_serialize_uuid_identifiers_from_database(clien
     assignment_id = uuid4()
     chapter_id = uuid4()
     question_id = uuid4()
+    teaching_package_id = uuid4()
     answer_id = uuid4()
     job = {"job_id": job_id, "version_id": version_id, "status": "queued"}
-    publication = {"publication_id": publication_id, "version_id": version_id}
+    publication = {
+        "publication_id": publication_id,
+        "version_id": version_id,
+        "teaching_package_id": teaching_package_id,
+    }
     assignment = {
         "assignment_id": assignment_id,
         "publication_id": publication_id,
@@ -170,7 +175,8 @@ async def test_textbook_mutations_serialize_uuid_identifiers_from_database(clien
             json={"source_asset_ids": [str(uuid4())]},
         )
         published = await client.post(
-            f"/api/v1/education/textbooks/{textbook_id}/versions/{version_id}/publish"
+            f"/api/v1/education/textbooks/{textbook_id}/versions/{version_id}/publish",
+            json={"teaching_package_id": str(teaching_package_id)},
         )
         assigned = await client.post(
             f"/api/v1/education/textbook-publications/{publication_id}/assignments",

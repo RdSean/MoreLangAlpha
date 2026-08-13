@@ -91,6 +91,10 @@ class StartTextbookProcessingRequest(BaseModel):
     source_asset_ids: list[UUID] = Field(min_length=1, max_length=20)
 
 
+class PublishTextbookVersionRequest(BaseModel):
+    teaching_package_id: UUID
+
+
 class AssignTextbookPublicationRequest(BaseModel):
     student_user_id: str = Field(min_length=1, max_length=255)
 
@@ -137,7 +141,7 @@ class TextbookChapterResponse(BaseModel):
     page_start: int | None = None
     page_end: int | None = None
     markdown: str
-    teaching_material: str
+    teaching_material: str | None = None
     questions: list[TextbookQuestionResponse]
 
 
@@ -191,6 +195,7 @@ class TextbookProcessingResponse(BaseModel):
 class TextbookPublicationResponse(BaseModel):
     publication_id: UUID
     version_id: UUID
+    teaching_package_id: UUID
     published_by_user_id: str | None = None
     created_at: datetime | None = None
 

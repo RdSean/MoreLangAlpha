@@ -8,6 +8,87 @@ from src.server.database import education_textbooks
 
 
 @pytest.mark.asyncio
+async def test_publishing_freezes_a_reviewed_teaching_package_for_its_content_version(
+    mock_connection, mock_cursor, monkeypatch
+):
+    """A content version cannot publish arbitrary or unfinished teaching material."""
+
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"version_id": "version-1"},
+        {"status": "review"},
+        {"count": 1},
+        {"teaching_package_id": "package-1", "chapter_count": 1, "question_count": 1},
+        {
+            "publication_id": "publication-1",
+            "version_id": "version-1",
+            "teaching_package_id": "package-1",
+            "published_by_user_id": "parent-1",
+        },
+    ]
+
+    publication = await education_textbooks.publish_textbook_version(
+        parent_user_id="parent-1",
+        textbook_id="textbook-1",
+        version_id="version-1",
+        teaching_package_id="package-1",
+    )
+
+    assert publication["teaching_package_id"] == "package-1"
+    package_lookup_sql = mock_cursor.execute.call_args_list[3].args[0]
+    assert "packages.status = 'review'" in package_lookup_sql
+    assert "packages.content_version_id = %s" in package_lookup_sql
+
+
+@pytest.mark.asyncio
+async def test_student_learning_reads_material_and_questions_from_publication_package(
+    mock_connection, mock_cursor, monkeypatch
+):
+    """Student learning must use the immutable package selected by publication."""
+
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {
+        "assignment_id": "assignment-1",
+        "publication_id": "publication-1",
+        "textbook_title": "英语第二册",
+        "textbook_slug": "english-2",
+        "version_sequence": 1,
+    }
+    mock_cursor.fetchall.side_effect = [
+        [
+            {
+                "chapter_id": "chapter-1",
+                "position": 1,
+                "slug": "01-overview",
+                "title": "导读",
+                "markdown": "# 内容",
+                "teaching_material": "# 教学包",
+                "progress_status": "not_started",
+            }
+        ],
+        [],
+    ]
+
+    learning = await education_textbooks.get_student_learning(
+        student_user_id="student-1", assignment_id="assignment-1"
+    )
+
+    assert learning is not None
+    chapter_sql = mock_cursor.execute.call_args_list[1].args[0]
+    question_sql = mock_cursor.execute.call_args_list[2].args[0]
+    assert "education_teaching_package_chapters" in chapter_sql
+    assert "education_teaching_package_questions" in question_sql
+
+
+@pytest.mark.asyncio
 async def test_retry_reclaims_only_an_expired_processing_lease(
     mock_connection, mock_cursor, monkeypatch
 ):

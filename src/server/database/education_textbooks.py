@@ -610,12 +610,12 @@ async def complete_textbook_processing_job(
                             chapter.get("page_start"),
                             chapter.get("page_end"),
                             chapter["markdown"],
-                            chapter["teaching_material"],
+                            chapter.get("teaching_material"),
                             chapter["markdown_key"],
-                            chapter["teaching_material_key"],
+                            chapter.get("teaching_material_key"),
                         ),
                     )
-                    for question in chapter["questions"]:
+                    for question in chapter.get("questions", []):
                         await cur.execute(
                             """
                             INSERT INTO education_chapter_questions (
@@ -902,7 +902,11 @@ async def get_processing_job_for_parent(
 
 
 async def publish_textbook_version(
-    *, parent_user_id: str, textbook_id: str, version_id: str
+    *,
+    parent_user_id: str,
+    textbook_id: str,
+    version_id: str,
+    teaching_package_id: str,
 ) -> dict[str, Any] | None:
     publication_id = str(uuid4())
     async with get_db_connection() as conn:
@@ -939,11 +943,40 @@ async def publish_textbook_version(
                     raise ValueError("Textbook version has no reviewable chapters")
                 await cur.execute(
                     """
-                    INSERT INTO education_textbook_publications (publication_id, version_id, published_by_user_id)
-                    VALUES (%s, %s, %s)
-                    RETURNING publication_id, version_id, published_by_user_id, created_at
+                    SELECT packages.teaching_package_id
+                    FROM education_teaching_packages AS packages
+                    WHERE packages.teaching_package_id = %s
+                      AND packages.content_version_id = %s
+                      AND packages.status = 'review'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM education_textbook_chapters AS content_chapters
+                          WHERE content_chapters.version_id = %s
+                            AND NOT EXISTS (
+                                SELECT 1
+                                FROM education_teaching_package_chapters AS package_chapters
+                                JOIN education_teaching_package_questions AS package_questions
+                                  ON package_questions.package_chapter_id = package_chapters.package_chapter_id
+                                WHERE package_chapters.teaching_package_id = packages.teaching_package_id
+                                  AND package_chapters.content_chapter_id = content_chapters.chapter_id
+                            )
+                      )
+                    FOR UPDATE
                     """,
-                    (publication_id, version_id, parent_user_id),
+                    (teaching_package_id, version_id, version_id),
+                )
+                if not await cur.fetchone():
+                    raise ValueError(
+                        "Textbook version requires a reviewed teaching package with every chapter and question set"
+                    )
+                await cur.execute(
+                    """
+                    INSERT INTO education_textbook_publications (
+                        publication_id, version_id, teaching_package_id, published_by_user_id
+                    ) VALUES (%s, %s, %s, %s)
+                    RETURNING publication_id, version_id, teaching_package_id, published_by_user_id, created_at
+                    """,
+                    (publication_id, version_id, teaching_package_id, parent_user_id),
                 )
                 publication = dict(await cur.fetchone())
                 await cur.execute(
@@ -998,7 +1031,8 @@ async def list_student_assignments(student_user_id: str) -> list[dict[str, Any]]
                 SELECT assignments.assignment_id, assignments.publication_id, assignments.created_at,
                        textbooks.title AS textbook_title, textbooks.slug AS textbook_slug,
                        versions.sequence AS version_sequence,
-                       COALESCE((SELECT COUNT(*) FROM education_textbook_chapters WHERE version_id = versions.version_id), 0) AS chapter_count,
+                       COALESCE((SELECT COUNT(*) FROM education_teaching_package_chapters
+                                 WHERE teaching_package_id = publications.teaching_package_id), 0) AS chapter_count,
                        COALESCE((SELECT COUNT(*) FROM education_learning_progress AS progress
                                  WHERE progress.assignment_id = assignments.assignment_id
                                    AND progress.status IN ('read', 'check_completed')), 0) AS completed_chapter_count
@@ -1043,15 +1077,20 @@ async def get_student_learning(
                 return None
             await cur.execute(
                 """
-                SELECT chapters.chapter_id, chapters.position, chapters.slug, chapters.title, chapters.markdown,
-                       chapters.teaching_material, COALESCE(progress.status, 'not_started') AS progress_status,
+                SELECT content_chapters.chapter_id, content_chapters.position, content_chapters.slug,
+                       content_chapters.title, content_chapters.markdown,
+                       package_chapters.teaching_material,
+                       COALESCE(progress.status, 'not_started') AS progress_status,
                        progress.last_read_at, progress.completed_at
-                FROM education_textbook_chapters AS chapters
+                FROM education_textbook_publications AS publications
+                JOIN education_teaching_package_chapters AS package_chapters
+                  ON package_chapters.teaching_package_id = publications.teaching_package_id
+                JOIN education_textbook_chapters AS content_chapters
+                  ON content_chapters.chapter_id = package_chapters.content_chapter_id
                 LEFT JOIN education_learning_progress AS progress
-                  ON progress.chapter_id = chapters.chapter_id AND progress.assignment_id = %s
-                JOIN education_textbook_publications AS publications ON publications.version_id = chapters.version_id
+                  ON progress.chapter_id = content_chapters.chapter_id AND progress.assignment_id = %s
                 WHERE publications.publication_id = %s
-                ORDER BY chapters.position
+                ORDER BY package_chapters.position
                 """,
                 (assignment_id, assignment["publication_id"]),
             )
@@ -1062,12 +1101,20 @@ async def get_student_learning(
                     SELECT questions.question_id, questions.position, questions.prompt, questions.options,
                            questions.explanation, questions.knowledge_point, answers.selected_option,
                            answers.is_correct, answers.answered_at
-                    FROM education_chapter_questions AS questions
+                    FROM education_teaching_package_questions AS questions
                     LEFT JOIN education_learning_answers AS answers
                       ON answers.question_id = questions.question_id AND answers.assignment_id = %s
-                    WHERE questions.chapter_id = %s ORDER BY questions.position
+                    JOIN education_teaching_package_chapters AS package_chapters
+                      ON package_chapters.package_chapter_id = questions.package_chapter_id
+                    WHERE package_chapters.content_chapter_id = %s
+                      AND package_chapters.teaching_package_id = (
+                          SELECT teaching_package_id
+                          FROM education_textbook_publications
+                          WHERE publication_id = %s
+                      )
+                    ORDER BY questions.position
                     """,
-                    (assignment_id, chapter["chapter_id"]),
+                    (assignment_id, chapter["chapter_id"], assignment["publication_id"]),
                 )
                 chapter["questions"] = [dict(row) for row in await cur.fetchall()]
     result = dict(assignment)
@@ -1083,18 +1130,22 @@ async def get_student_chapter_context_record(
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
-                SELECT assignments.assignment_id, chapters.chapter_id, textbooks.title AS textbook_title,
-                       chapters.title AS chapter_title, chapters.markdown, chapters.teaching_material
+                SELECT assignments.assignment_id, content_chapters.chapter_id,
+                       textbooks.title AS textbook_title, content_chapters.title AS chapter_title,
+                       content_chapters.markdown, package_chapters.teaching_material
                 FROM education_textbook_assignments AS assignments
                 JOIN education_textbook_publications AS publications ON publications.publication_id = assignments.publication_id
                 JOIN education_textbook_versions AS versions ON versions.version_id = publications.version_id
                 JOIN education_textbooks AS textbooks ON textbooks.textbook_id = versions.textbook_id
-                JOIN education_textbook_chapters AS chapters ON chapters.version_id = versions.version_id
+                JOIN education_teaching_package_chapters AS package_chapters
+                  ON package_chapters.teaching_package_id = publications.teaching_package_id
+                JOIN education_textbook_chapters AS content_chapters
+                  ON content_chapters.chapter_id = package_chapters.content_chapter_id
                 JOIN education_memberships AS memberships
                   ON memberships.user_id = assignments.student_user_id
                  AND memberships.household_id = textbooks.household_id
                 WHERE assignments.assignment_id = %s AND assignments.student_user_id = %s
-                  AND chapters.chapter_id = %s AND memberships.role = 'student'
+                  AND content_chapters.chapter_id = %s AND memberships.role = 'student'
                 """,
                 (assignment_id, student_user_id, chapter_id),
             )
@@ -1116,7 +1167,10 @@ async def update_student_progress(
                 JOIN education_textbook_publications AS publications ON publications.publication_id = assignments.publication_id
                 JOIN education_textbook_versions AS versions ON versions.version_id = publications.version_id
                 JOIN education_textbooks AS textbooks ON textbooks.textbook_id = versions.textbook_id
-                JOIN education_textbook_chapters AS chapters ON chapters.version_id = publications.version_id
+                JOIN education_teaching_package_chapters AS package_chapters
+                  ON package_chapters.teaching_package_id = publications.teaching_package_id
+                JOIN education_textbook_chapters AS chapters
+                  ON chapters.chapter_id = package_chapters.content_chapter_id
                 JOIN education_memberships AS memberships
                   ON memberships.user_id = assignments.student_user_id
                  AND memberships.household_id = textbooks.household_id
@@ -1143,13 +1197,16 @@ async def submit_student_answer(
             async with conn.cursor(row_factory=dict_row) as cur:
                 await cur.execute(
                     """
-                    SELECT questions.question_id, questions.chapter_id, questions.correct_option
+                SELECT questions.question_id, package_chapters.content_chapter_id AS chapter_id,
+                       questions.correct_option
                 FROM education_textbook_assignments AS assignments
                 JOIN education_textbook_publications AS publications ON publications.publication_id = assignments.publication_id
                 JOIN education_textbook_versions AS versions ON versions.version_id = publications.version_id
                 JOIN education_textbooks AS textbooks ON textbooks.textbook_id = versions.textbook_id
-                JOIN education_textbook_chapters AS chapters ON chapters.version_id = publications.version_id
-                JOIN education_chapter_questions AS questions ON questions.chapter_id = chapters.chapter_id
+                JOIN education_teaching_package_chapters AS package_chapters
+                  ON package_chapters.teaching_package_id = publications.teaching_package_id
+                JOIN education_teaching_package_questions AS questions
+                  ON questions.package_chapter_id = package_chapters.package_chapter_id
                 JOIN education_memberships AS memberships
                   ON memberships.user_id = assignments.student_user_id
                  AND memberships.household_id = textbooks.household_id
@@ -1221,17 +1278,29 @@ async def list_student_learning_records(
                 return None
             await cur.execute(
                 """
-                SELECT progress.chapter_id, chapters.title AS chapter_title, progress.status, progress.last_read_at,
+                    SELECT progress.chapter_id, content_chapters.title AS chapter_title, progress.status, progress.last_read_at,
                        progress.completed_at, COALESCE(answer_counts.correct_count, 0) AS correct_count,
                        COALESCE(answer_counts.answer_count, 0) AS answer_count
                 FROM education_learning_progress AS progress
-                JOIN education_textbook_chapters AS chapters ON chapters.chapter_id = progress.chapter_id
+                JOIN education_textbook_assignments AS assignments
+                  ON assignments.assignment_id = progress.assignment_id
+                JOIN education_textbook_publications AS publications
+                  ON publications.publication_id = assignments.publication_id
+                JOIN education_teaching_package_chapters AS package_chapters
+                  ON package_chapters.teaching_package_id = publications.teaching_package_id
+                 AND package_chapters.content_chapter_id = progress.chapter_id
+                JOIN education_textbook_chapters AS content_chapters
+                  ON content_chapters.chapter_id = progress.chapter_id
                 LEFT JOIN LATERAL (
                     SELECT COUNT(*) FILTER (WHERE is_correct) AS correct_count, COUNT(*) AS answer_count
                     FROM education_learning_answers WHERE assignment_id = progress.assignment_id
-                      AND question_id IN (SELECT question_id FROM education_chapter_questions WHERE chapter_id = progress.chapter_id)
+                      AND question_id IN (
+                          SELECT questions.question_id
+                          FROM education_teaching_package_questions AS questions
+                          WHERE questions.package_chapter_id = package_chapters.package_chapter_id
+                      )
                 ) AS answer_counts ON TRUE
-                WHERE progress.assignment_id = %s ORDER BY chapters.position
+                WHERE progress.assignment_id = %s ORDER BY package_chapters.position
                 """,
                 (assignment_id,),
             )
