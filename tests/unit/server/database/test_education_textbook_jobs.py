@@ -156,6 +156,7 @@ async def test_published_textbook_detail_reads_assignment_names_from_household_m
         ],
         [],
         [],
+        [],
         [
             {
                 "assignment_id": "assignment-1",

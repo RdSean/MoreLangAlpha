@@ -148,6 +148,14 @@ class TextbookAssignmentSummaryResponse(BaseModel):
     created_at: datetime | None = None
 
 
+class TeachingPackageSummaryResponse(BaseModel):
+    teaching_package_id: UUID
+    sequence: int
+    status: str
+    chapter_count: int
+    question_count: int
+
+
 class TextbookVersionResponse(BaseModel):
     version_id: UUID
     sequence: int
@@ -163,6 +171,7 @@ class TextbookVersionResponse(BaseModel):
     publication_id: UUID | None = None
     sources: list[TextbookSourceResponse]
     chapters: list[TextbookChapterResponse]
+    teaching_packages: list[TeachingPackageSummaryResponse] = Field(default_factory=list)
     assignments: list[TextbookAssignmentSummaryResponse]
 
 
