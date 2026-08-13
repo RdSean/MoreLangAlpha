@@ -34,6 +34,36 @@ effort: high
 
 # Book-to-Skill Converter
 
+## Managed textbook mode
+
+When the invocation includes `--managed-textbook <job>`, run this mode before
+every normal conversion step. It is a service-owned, non-interactive stage;
+the regular source-ingest, cost confirmation and generated workspace skill
+flows do not apply.
+
+1. Treat `<job>` as a UUID and use only
+   `/managed/textbook-job/<job>/inputs/manifest.json` plus the staged Markdown
+   under `/managed/textbook-job/<job>/inputs/chapters/`. Do not read a binary source,
+   object store, home directory, normal workspace file or any path outside
+   `/managed/textbook-job/<job>/`.
+2. Do not solicit input or confirmation, do not launch a user-directed
+   conversion, and do not write a generated `.agents/skills/` directory,
+   memory or an HTML presentation file.
+3. Read [the managed contract](reference/managed-textbook-contract.md), derive
+   a chapter-wise knowledge representation from every frozen Markdown chapter,
+   and write it only to
+   `/managed/textbook-job/<job>/work/knowledge-skill/`.
+4. Write exactly one machine-readable summary to
+   `/managed/textbook-job/<job>/outputs/book-skill-manifest.json`. It includes
+   the SHA-256 of `inputs/manifest.json`, every `content_chapter_id` and
+   `content_sha256`, and the generation version. It must not contain a storage
+   key, URL, credential or untrusted output path.
+5. Emit concise stdout progress lines prefixed `EDUCATION_PROGRESS ` with JSON
+   `{ "phase": "building_skill", "content_chapter_id": "..." }` after each
+   chapter. Return control for the next service-owned stage.
+
+## Philosophy
+
 > **Empty-args guard (read first).** This guard fires **only** when the
 > user invoked `/book-to-skill` with no positional argument at all
 > (i.e. `$book_path` is the empty string or unset). In that one case,

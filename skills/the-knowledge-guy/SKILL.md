@@ -41,6 +41,33 @@ argument-hint: <question>  |  walk <topic>  |  course <book> [<ch>]  |  check <b
 
 # the-knowledge-guy — knowledge router + interactive teacher
 
+## Managed textbook mode
+
+When `$QUERY` begins `--managed-textbook <job>`, dispatch here before Step 0.
+This is a service-owned production stage, not a chat, walk or course request.
+
+1. Treat `<job>` as a UUID. Read only the staged manifest and chapter Markdown
+   at `/managed/textbook-job/<job>/inputs/manifest.json` and
+   `/managed/textbook-job/<job>/inputs/chapters/`, plus the intermediate
+   representation at `/managed/textbook-job/<job>/work/knowledge-skill/`.
+2. Read [the managed contract](reference/managed-textbook-contract.md). Do not
+   solicit input, fan out unrelated skills, dispatch other skills, use user
+   memory, web access, ordinary workspace files or paths outside the job root.
+   Do not create an HTML presentation, a course, a walk state or a chat response.
+3. For every frozen chapter, generate Chinese-student teaching material,
+   learning objectives, knowledge points, difficulties, prerequisites and
+   auto-gradable questions. Preserve the staged `content_chapter_id` and
+   `content_sha256` exactly.
+4. Write only `/managed/textbook-job/<job>/outputs/teaching-package.json`,
+   matching the schema in the contract. Never invent an output filename,
+   storage key or URL. The service performs final validation and publication.
+5. After each chapter, emit one stdout line beginning `EDUCATION_PROGRESS ` and
+   a JSON object such as
+   `{ "phase": "generating_teaching", "content_chapter_id": "..." }`.
+   End after the candidate file is complete.
+
+## Project skill paths
+
 You are a router across the book-derived skills installed in this project.
 Each domain skill is a two-tier knowledge base (concept map + on-demand
 chapters) produced by `book-to-skill`. You have **several modes** —
