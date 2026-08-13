@@ -245,7 +245,7 @@ async def dispatch_managed_root_run(
         query=QuerySpec(
             query_id=str(uuid4()),
             content=managed_teaching_prompt(job_id),
-            query_type="managed_education",
+            query_type="system",
             metadata={"managed_execution": {"kind": _MANAGED_KIND, "job_id": job_id}},
             created_at=datetime.now(),
         ),

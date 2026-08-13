@@ -55,6 +55,11 @@ async def test_dispatch_persists_root_run_before_registering_managed_executor(mo
             assert kwargs["user_id"] is None
             assert kwargs["request_key"] == run_id
             assert UUID(kwargs["request_key"]).version == 4
+            assert kwargs["query"].query_type == "system"
+            assert (
+                kwargs["query"].metadata["managed_execution"]["kind"]
+                == "education_teaching"
+            )
             assert kwargs["run_metadata"]["managed_execution"]["kind"] == "education_teaching"
             return type("Handle", (), {"turn_index": 3, "checkpointer": object()})()
 
