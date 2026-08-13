@@ -74,6 +74,51 @@ async def test_scan_survives_a_failing_sweep():
         assert await RecoveryScanner().scan_once(assume_dead=True) == 0
 
 
+@pytest.mark.asyncio
+async def test_recovery_projects_managed_textbook_root_without_accessing_its_sandbox(monkeypatch):
+    """A recovered service-owned root gets a retriable product failure projection."""
+    recovery = __import__("src.server.services.runs.recovery", fromlist=["RecoveryScanner"])
+    managed_ptc = __import__("src.server.services.education_managed_ptc", fromlist=["x"])
+    project = AsyncMock(return_value={"attempt_id": "attempt-1", "status": "failed"})
+    monkeypatch.setattr(managed_ptc, "settle_recovered_teaching_root_run", project, raising=False)
+
+    await RecoveryScanner()._project_managed_terminal(
+        {
+            "metadata": {
+                "managed_execution": {
+                    "kind": "education_teaching",
+                    "job_id": "8a77d086-0b23-4a1e-89d0-f163fa23d5d1",
+                }
+            }
+        },
+        root_run_id="run-1",
+        terminal_status="error",
+    )
+
+    project.assert_awaited_once_with(
+        root_run_id="run-1",
+        status="failed",
+        error_code="managed_worker_lost",
+        error_message="教材教学加工进程中断，请重新运行。",
+    )
+
+
+@pytest.mark.asyncio
+async def test_scan_reconciles_terminal_managed_teaching_roots_when_no_runs_are_open(monkeypatch):
+    """A transient immediate projection failure is repaired on a later idle scan."""
+    managed_ptc = __import__("src.server.services.education_managed_ptc", fromlist=["x"])
+    reconcile = AsyncMock(return_value=1)
+    monkeypatch.setattr(managed_ptc, "reconcile_terminal_teaching_root_runs", reconcile, raising=False)
+    open_runs, open_task_runs = _idle_ledger()
+
+    with open_runs, open_task_runs, patch.object(
+        RecoveryScanner, "heal_task_chains", new=AsyncMock(return_value={})
+    ):
+        assert await RecoveryScanner().scan_once(assume_dead=True) == 0
+
+    reconcile.assert_awaited_once()
+
+
 _ORPHAN_RUN = {
     "task_run_id": "run-9",
     "thread_id": "t-1",

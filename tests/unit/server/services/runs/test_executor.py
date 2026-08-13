@@ -1665,6 +1665,43 @@ class TestStartWorkflowHandoffCancelIntent:
 
 
 # ---------------------------------------------------------------------------
+# Managed terminal callback
+# ---------------------------------------------------------------------------
+
+
+class TestTerminalCallback:
+    @pytest.mark.asyncio
+    async def test_terminal_callback_runs_for_a_won_failed_finalize(self):
+        """Product workflows need cleanup after error/cancel as well as success."""
+        from types import SimpleNamespace
+
+        btm = _make_btm()
+        task_info = _make_task_info(thread_id="managed-thread", run_id="managed-run")
+        task_info.metadata = {"run_handle": MagicMock(), "started_at": 1.0}
+        callback = AsyncMock()
+        task_info.terminal_callback = callback
+        btm.executions[(task_info.thread_id, task_info.run_id)] = task_info
+
+        coordinator = MagicMock()
+        coordinator.finalize_run = AsyncMock(
+            return_value=SimpleNamespace(applied=True, run={"status": "error"})
+        )
+
+        fin = "src.server.services.runs.finalization"
+        with patch(f"{fin}.get_token_usage_from_callback", return_value=(None, [])), \
+             patch(f"{fin}.get_tool_usage_from_handler", return_value={}), \
+             patch(f"{fin}.get_sse_events_from_handler", return_value=[]), \
+             patch(f"{fin}.calculate_execution_time", return_value=1.0), \
+             patch("src.server.services.runs.executor.release_burst_slot", new_callable=AsyncMock), \
+             patch("src.server.services.runs.executor.LocalRunExecutor.append_run_end_event", new_callable=AsyncMock), \
+             patch("src.server.services.runs.coordinator.RunCoordinator") as coordinator_cls:
+            coordinator_cls.get_instance.return_value = coordinator
+            await btm._finalize_run("managed-thread", "managed-run", kind="failed", error="boom")
+
+        callback.assert_awaited_once_with(task_info, "error")
+
+
+# ---------------------------------------------------------------------------
 # Compaction admission guard
 # ---------------------------------------------------------------------------
 

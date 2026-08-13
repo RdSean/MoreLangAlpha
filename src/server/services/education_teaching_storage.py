@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import re
+from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, Protocol
 from uuid import UUID
@@ -25,6 +26,31 @@ class ManagedTeachingSandbox(Protocol):
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> object: ...
 
     async def adownload_file_bytes(self, path: str) -> bytes | None: ...
+
+
+_MANAGED_SKILL_FILES: tuple[tuple[str, str], ...] = (
+    ("book-to-skill", "SKILL.md"),
+    ("book-to-skill", "reference/managed-textbook-contract.md"),
+    ("the-knowledge-guy", "SKILL.md"),
+    ("the-knowledge-guy", "reference/managed-textbook-contract.md"),
+)
+
+
+async def stage_managed_teaching_skills(
+    job_id: str, sandbox: ManagedTeachingSandbox
+) -> None:
+    """Upload the two built-in managed contracts, and no workspace skills."""
+    root = managed_job_root(job_id)
+    repo_root = Path(__file__).resolve().parents[3]
+    files: list[tuple[str, bytes]] = []
+    for skill_name, relative_path in _MANAGED_SKILL_FILES:
+        source = repo_root / "skills" / skill_name / relative_path
+        try:
+            content = source.read_bytes()
+        except OSError as exc:
+            raise TeachingPackageStorageError("Managed teaching skill is unavailable") from exc
+        files.append((f"{root}/.agents/skills/{skill_name}/{relative_path}", content))
+    await sandbox.aupload_files(files)
 
 
 def _safe_component(value: object, fallback: str) -> str:

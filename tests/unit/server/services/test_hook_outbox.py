@@ -58,6 +58,24 @@ def _types(jobs):
 
 
 class TestBuildFinalizeJobs:
+    def test_managed_ptc_suppresses_chat_lifecycle_hooks(self):
+        """A hidden textbook run has no user-facing chat lifecycle to report."""
+        factory = build_finalize_jobs_from_run_row(
+            {
+                "conversation_response_id": "run-managed",
+                "conversation_thread_id": "thread-managed",
+                "metadata": {
+                    "msg_type": "ptc",
+                    "suppress_lifecycle_hooks": True,
+                    "managed_execution": {"kind": "education_teaching"},
+                },
+            }
+        )
+
+        assert factory("completed") == []
+        assert factory("interrupted") == []
+        assert factory("error") == []
+
     def test_completed_ptc_gets_burst_release_and_report_back(self):
         jobs = _jobs("completed")
         assert _types(jobs) == ["burst_release", "report_back", "user_feed"]

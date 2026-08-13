@@ -173,18 +173,20 @@ def handle_api_exceptions(
 
 async def require_thread_owner(thread_id: str, user_id: str) -> None:
     """Verify the user owns the thread (via workspace). Raises 404 or 403."""
-    from src.server.database.conversation import get_thread_owner_id
+    from src.server.database.conversation import get_thread_auth_meta
 
-    owner_id = await get_thread_owner_id(thread_id)
-    if owner_id is None:
+    meta = await get_thread_auth_meta(thread_id)
+    if meta is None or meta.get("managed_execution"):
         raise HTTPException(status_code=404, detail="Thread not found")
-    if owner_id != user_id:
+    if meta["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
 def require_workspace_owner(workspace: dict | None, *, user_id: str) -> None:
     """Verify workspace exists and belongs to user. Raises 404 or 403."""
     if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if (workspace.get("config") or {}).get("managed_execution"):
         raise HTTPException(status_code=404, detail="Workspace not found")
     if workspace.get("user_id") != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")

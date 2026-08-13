@@ -814,6 +814,34 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             await self._clear_session(workspace_id, evict_session=session)
             raise
 
+    async def provision_managed_textbook_session(self, *, workspace_id: str, policy) -> Session:
+        """Provision a service-owned textbook sandbox without workspace hydration.
+
+        Managed education work must not reuse the user-workspace provisioning
+        spine: that path applies MCP/Vault config, restores files and syncs
+        assets. Here the policy strips the CoreConfig, Session creates only the
+        empty managed sandbox, and the education service stages its fixed
+        inputs and Skill contracts afterwards.
+        """
+        from ptc_agent.agent.managed_execution import managed_core_config
+
+        core_config = managed_core_config(self.config.to_core_config(), policy)
+        session = SessionManager.get_session(workspace_id, core_config)
+        try:
+            await session.initialize_managed_textbook(policy)
+            sandbox = session.sandbox
+            sandbox_id = getattr(sandbox, "sandbox_id", None) if sandbox else None
+            if not sandbox_id:
+                raise RuntimeError("Managed textbook sandbox is missing its runtime identity")
+            self._sessions[workspace_id] = session
+            await update_workspace_status(
+                workspace_id=workspace_id, status="running", sandbox_id=sandbox_id
+            )
+            return session
+        except Exception:
+            await self._clear_session(workspace_id, evict_session=session)
+            raise
+
     async def _recover_sandbox(
         self,
         workspace_id: str,

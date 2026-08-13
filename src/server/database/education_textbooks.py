@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
@@ -312,14 +312,26 @@ async def create_teaching_attempt(
                     SELECT jobs.job_id, jobs.teaching_package_id, jobs.attempt_count,
                            jobs.latest_attempt_id AS previous_attempt_id
                     FROM education_teaching_jobs AS jobs
-                    WHERE jobs.job_id = %s AND jobs.status = 'queued'
-                    FOR UPDATE
+                    JOIN education_teaching_packages AS packages
+                      ON packages.teaching_package_id = jobs.teaching_package_id
+                    WHERE jobs.job_id = %s
+                      AND jobs.status = 'queued'
+                      AND packages.status = 'queued'
+                    FOR UPDATE OF jobs, packages
                     """,
                     (job_id,),
                 )
                 job = await cur.fetchone()
                 if not job:
                     return None
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_packages
+                    SET status = 'preparing', error_code = NULL, error_message = NULL
+                    WHERE teaching_package_id = %s AND status = 'queued'
+                    """,
+                    (job["teaching_package_id"],),
+                )
                 await cur.execute(
                     """
                     INSERT INTO education_teaching_attempts (
@@ -357,11 +369,45 @@ async def record_teaching_event(
     summary: str,
     chapter_id: str | None = None,
 ) -> None:
-    """Append a safe product event; raw PTC payloads never enter this table."""
+    """Append one whitelisted progress event for the active frozen attempt only."""
+    if phase not in {"building_skill", "generating_teaching"}:
+        raise ValueError("Invalid teaching progress phase")
+    try:
+        UUID(str(chapter_id))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Teaching progress chapter is invalid") from exc
+
     event_id = str(uuid4())
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
+                allowed_package_statuses = (
+                    ("preparing", "building_skill")
+                    if phase == "building_skill"
+                    else ("preparing", "building_skill", "generating_teaching")
+                )
+                await cur.execute(
+                    """
+                    SELECT attempts.job_id, chapters.position
+                    FROM education_teaching_attempts AS attempts
+                    JOIN education_teaching_jobs AS jobs ON jobs.job_id = attempts.job_id
+                    JOIN education_teaching_packages AS packages
+                      ON packages.teaching_package_id = jobs.teaching_package_id
+                    JOIN education_textbook_chapters AS chapters
+                      ON chapters.version_id = packages.content_version_id
+                     AND chapters.chapter_id = %s
+                    WHERE attempts.attempt_id = %s
+                      AND attempts.status = 'running'
+                      AND jobs.latest_attempt_id = attempts.attempt_id
+                      AND jobs.status = 'running'
+                      AND packages.status = ANY(%s::varchar[])
+                    FOR UPDATE OF attempts, jobs, packages
+                    """,
+                    (chapter_id, attempt_id, list(allowed_package_statuses)),
+                )
+                active = await cur.fetchone()
+                if not active:
+                    return
                 await cur.execute(
                     """
                     SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
@@ -372,13 +418,38 @@ async def record_teaching_event(
                     (attempt_id,),
                 )
                 sequence = (await cur.fetchone())["sequence"]
+                # The caller passes a precomposed product label for tests and
+                # diagnostics, but only this fixed local projection reaches DB.
+                del summary
+                safe_summary = (
+                    f"已完成第 {active['position']} 章知识整理"
+                    if phase == "building_skill"
+                    else f"已完成第 {active['position']} 章教学材料生成"
+                )
                 await cur.execute(
                     """
                     INSERT INTO education_teaching_events (
                         event_id, attempt_id, sequence, phase, chapter_id, summary
                     ) VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (event_id, attempt_id, sequence, phase, chapter_id, summary[:2_000]),
+                    (event_id, attempt_id, sequence, phase, chapter_id, safe_summary),
+                )
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_packages AS packages
+                    SET status = %s, error_code = NULL, error_message = NULL
+                    FROM education_teaching_jobs AS jobs
+                    WHERE jobs.job_id = %s
+                      AND jobs.latest_attempt_id = %s
+                      AND jobs.teaching_package_id = packages.teaching_package_id
+                      AND packages.status = ANY(%s::varchar[])
+                    """,
+                    (
+                        phase,
+                        active["job_id"],
+                        attempt_id,
+                        list(allowed_package_statuses),
+                    ),
                 )
 
 
@@ -431,7 +502,7 @@ async def settle_teaching_attempt(
                     SET status = %s, completed_at = CASE WHEN %s IN ('completed', 'failed', 'cancelled')
                                                          THEN NOW() ELSE completed_at END,
                         error_code = %s, error_message = %s, updated_at = NOW()
-                    WHERE job_id = %s
+                    WHERE job_id = %s AND latest_attempt_id = %s
                     """,
                     (
                         job_status,
@@ -439,9 +510,555 @@ async def settle_teaching_attempt(
                         error_code,
                         error_message[:10_000] if error_message else None,
                         attempt["job_id"],
+                        attempt_id,
                     ),
                 )
+                if status in {"failed", "cancelled", "worker_lost"}:
+                    package_status = "cancelled" if status == "cancelled" else "failed"
+                    await cur.execute(
+                        """
+                        UPDATE education_teaching_packages AS packages
+                        SET status = %s, error_code = %s, error_message = %s
+                        FROM education_teaching_jobs AS jobs
+                        WHERE jobs.job_id = %s
+                          AND jobs.latest_attempt_id = %s
+                          AND jobs.teaching_package_id = packages.teaching_package_id
+                          AND packages.status IN ('preparing', 'building_skill',
+                                                  'generating_teaching', 'validating')
+                        """,
+                        (
+                            package_status,
+                            error_code,
+                            error_message[:10_000] if error_message else None,
+                            attempt["job_id"],
+                            attempt_id,
+                        ),
+                    )
     return dict(attempt)
+
+
+async def begin_teaching_validation(
+    *, attempt_id: str, root_run_id: str
+) -> dict[str, Any] | None:
+    """Claim the short candidate-validation phase before reading sandbox output.
+
+    This is the cancellation race boundary: a parent cancellation that wins
+    before this transition prevents any candidate download, archive or review
+    projection by the terminal callback.
+    """
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_attempts AS attempts
+                    SET heartbeat_at = NOW()
+                    FROM education_teaching_jobs AS jobs
+                    JOIN education_teaching_packages AS packages
+                      ON packages.teaching_package_id = jobs.teaching_package_id
+                    WHERE attempts.attempt_id = %s
+                      AND attempts.root_run_id = %s
+                      AND attempts.status = 'running'
+                      AND jobs.job_id = attempts.job_id
+                      AND jobs.latest_attempt_id = attempts.attempt_id
+                      AND jobs.status = 'running'
+                      AND packages.status IN ('preparing', 'building_skill',
+                                              'generating_teaching')
+                    RETURNING attempts.attempt_id, attempts.job_id
+                    """,
+                    (attempt_id, root_run_id),
+                )
+                attempt = await cur.fetchone()
+                if not attempt:
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_jobs
+                    SET status = 'validating', updated_at = NOW()
+                    WHERE job_id = %s AND latest_attempt_id = %s AND status = 'running'
+                    """,
+                    (attempt["job_id"], attempt_id),
+                )
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_packages AS packages
+                    SET status = 'validating'
+                    FROM education_teaching_jobs AS jobs
+                    WHERE jobs.job_id = %s
+                      AND jobs.latest_attempt_id = %s
+                      AND jobs.teaching_package_id = packages.teaching_package_id
+                      AND packages.status IN ('preparing', 'building_skill',
+                                              'generating_teaching')
+                    """,
+                    (attempt["job_id"], attempt_id),
+                )
+    return dict(attempt)
+
+
+async def complete_teaching_attempt(
+    *,
+    job_id: str,
+    attempt_id: str,
+    root_run_id: str,
+    bundle_prefix: str,
+    package: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Atomically persist a validated candidate and make its package reviewable.
+
+    ``package`` is already normalized by the service validator. The database
+    still pins it to the active attempt and its package, so a late completion
+    cannot overwrite a cancelled/retried job or create a review projection for
+    a different root run.
+    """
+    chapters = package.get("chapters")
+    if not isinstance(chapters, list) or not chapters:
+        raise ValueError("Validated teaching package must contain chapters")
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT attempts.attempt_id, attempts.job_id,
+                           attempts.root_run_id, jobs.teaching_package_id
+                    FROM education_teaching_attempts AS attempts
+                    JOIN education_teaching_jobs AS jobs ON jobs.job_id = attempts.job_id
+                    JOIN education_teaching_packages AS packages
+                      ON packages.teaching_package_id = jobs.teaching_package_id
+                    WHERE attempts.attempt_id = %s
+                      AND attempts.job_id = %s
+                      AND attempts.root_run_id = %s
+                      AND attempts.status = 'running'
+                      AND jobs.status IN ('running', 'validating')
+                      AND packages.status IN ('preparing', 'building_skill',
+                                              'generating_teaching', 'validating')
+                    FOR UPDATE OF attempts, jobs, packages
+                    """,
+                    (attempt_id, job_id, root_run_id),
+                )
+                attempt = await cur.fetchone()
+                if not attempt:
+                    return None
+                teaching_package_id = str(attempt["teaching_package_id"])
+                for chapter in chapters:
+                    if not isinstance(chapter, dict):
+                        raise ValueError("Validated teaching chapter is invalid")
+                    await cur.execute(
+                        """
+                        INSERT INTO education_teaching_package_chapters (
+                            package_chapter_id, teaching_package_id,
+                            content_chapter_id, position, learning_objectives,
+                            knowledge_points, key_difficulties, prerequisites,
+                            teaching_material
+                        ) VALUES (
+                            %s, %s, %s,
+                            (SELECT position FROM education_textbook_chapters
+                             WHERE chapter_id = %s),
+                            %s, %s, %s, %s, %s
+                        )
+                        RETURNING package_chapter_id
+                        """,
+                        (
+                            str(uuid4()),
+                            teaching_package_id,
+                            chapter["content_chapter_id"],
+                            chapter["content_chapter_id"],
+                            Json(chapter["learning_objectives"]),
+                            Json(chapter["knowledge_points"]),
+                            Json(chapter["key_difficulties"]),
+                            Json(chapter["prerequisites"]),
+                            chapter["teaching_material"],
+                        ),
+                    )
+                    package_chapter = await cur.fetchone()
+                    if not package_chapter:
+                        raise ValueError("Validated content chapter is unavailable")
+                    package_chapter_id = str(package_chapter["package_chapter_id"])
+                    for question in chapter.get("questions", []):
+                        await cur.execute(
+                            """
+                            INSERT INTO education_teaching_package_questions (
+                                question_id, package_chapter_id, position, prompt,
+                                options, correct_option, explanation, knowledge_point
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                str(uuid4()),
+                                package_chapter_id,
+                                question["position"],
+                                question["prompt"],
+                                Json(question["options"]),
+                                question["correct_option"],
+                                question["explanation"],
+                                question["knowledge_point"],
+                            ),
+                        )
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_packages
+                    SET status = 'review', bundle_prefix = %s, reviewed_at = NOW(),
+                        error_code = NULL, error_message = NULL
+                    WHERE teaching_package_id = %s
+                    """,
+                    (bundle_prefix, teaching_package_id),
+                )
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_attempts
+                    SET status = 'completed', heartbeat_at = NOW(), completed_at = NOW(),
+                        error_code = NULL, error_message = NULL
+                    WHERE attempt_id = %s AND status = 'running'
+                    RETURNING attempt_id, status
+                    """,
+                    (attempt_id,),
+                )
+                completed = await cur.fetchone()
+                if not completed:
+                    raise ValueError("Teaching attempt completion was lost")
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_jobs
+                    SET status = 'completed', completed_at = NOW(), updated_at = NOW(),
+                        error_code = NULL, error_message = NULL
+                    WHERE job_id = %s AND latest_attempt_id = %s
+                    """,
+                    (job_id, attempt_id),
+                )
+    return dict(completed)
+
+
+async def get_teaching_job_for_parent(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any] | None:
+    """Return one parent-owned job and its frozen, database-authorized chapters.
+
+    This internal read model intentionally returns Markdown only to the teaching
+    service. It never projects object-store keys to an API response.
+    """
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT jobs.job_id, jobs.status AS job_status, jobs.attempt_count,
+                       packages.teaching_package_id, packages.sequence AS teaching_package_sequence,
+                       packages.content_version_id, packages.created_by_user_id,
+                       versions.sequence AS content_version_sequence,
+                       textbooks.household_id, textbooks.slug, textbooks.title
+                FROM education_teaching_jobs AS jobs
+                JOIN education_teaching_packages AS packages
+                  ON packages.teaching_package_id = jobs.teaching_package_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = packages.content_version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                WHERE jobs.job_id = %s
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (job_id, parent_user_id),
+            )
+            job = await cur.fetchone()
+            if not job:
+                return None
+            result = dict(job)
+            await cur.execute(
+                """
+                SELECT chapter_id AS content_chapter_id, position, slug, title, markdown
+                FROM education_textbook_chapters
+                WHERE version_id = %s
+                ORDER BY position
+                """,
+                (result["content_version_id"],),
+            )
+            result["chapters"] = [dict(row) for row in await cur.fetchall()]
+    return result
+
+
+async def mark_teaching_job_cancel_requested(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any] | None:
+    """Durably record cancellation before signalling the PTC root execution."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_jobs AS jobs
+                    SET status = 'cancelled', cancel_requested_at = COALESCE(cancel_requested_at, NOW()),
+                        completed_at = NOW(), error_code = NULL, error_message = NULL,
+                        updated_at = NOW()
+                    FROM education_teaching_packages AS packages
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = packages.content_version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE jobs.job_id = %s
+                      AND jobs.teaching_package_id = packages.teaching_package_id
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                      AND jobs.status IN ('queued', 'preparing', 'running', 'validating')
+                    RETURNING jobs.job_id, jobs.status, jobs.latest_attempt_id,
+                              jobs.teaching_package_id
+                    """,
+                    (job_id, parent_user_id),
+                )
+                job = await cur.fetchone()
+                if not job:
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_packages
+                    SET status = 'cancelled', error_code = NULL, error_message = NULL
+                    WHERE teaching_package_id = %s
+                      AND status IN ('queued', 'preparing', 'building_skill',
+                                     'generating_teaching', 'validating')
+                    """,
+                    (job["teaching_package_id"],),
+                )
+                if job["latest_attempt_id"] is None:
+                    return dict(job)
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_attempts
+                    SET status = 'cancelled', heartbeat_at = NOW(), completed_at = NOW(),
+                        error_code = NULL, error_message = NULL
+                    WHERE attempt_id = %s AND status IN ('preparing', 'running')
+                    RETURNING managed_thread_id, root_run_id
+                    """,
+                    (job["latest_attempt_id"],),
+                )
+                attempt = await cur.fetchone()
+    result = dict(job)
+    if attempt:
+        result.update(dict(attempt))
+    return result
+
+
+async def requeue_teaching_job(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any] | None:
+    """Make a failed/cancelled frozen job eligible for exactly one new attempt."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_jobs AS jobs
+                    SET status = 'queued', cancel_requested_at = NULL,
+                        error_code = NULL, error_message = NULL, completed_at = NULL,
+                        claimed_at = NULL, updated_at = NOW()
+                    FROM education_teaching_packages AS packages
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = packages.content_version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE jobs.job_id = %s
+                      AND jobs.teaching_package_id = packages.teaching_package_id
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                      AND jobs.status IN ('failed', 'cancelled')
+                      AND packages.status IN ('failed', 'cancelled')
+                    RETURNING jobs.job_id, jobs.status, jobs.latest_attempt_id,
+                              jobs.teaching_package_id
+                    """,
+                    (job_id, parent_user_id),
+                )
+                job = await cur.fetchone()
+                if not job:
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_packages
+                    SET status = 'queued', error_code = NULL, error_message = NULL
+                    WHERE teaching_package_id = %s
+                      AND status IN ('failed', 'cancelled')
+                    """,
+                    (job["teaching_package_id"],),
+                )
+    result = dict(job)
+    result.pop("teaching_package_id", None)
+    return result
+
+
+async def fail_preparing_teaching_attempt(
+    *, attempt_id: str, error_code: str, error_message: str
+) -> dict[str, Any] | None:
+    """Terminally settle a pre-root provisioning failure without minting a run id."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_attempts
+                    SET status = 'failed', heartbeat_at = NOW(), completed_at = NOW(),
+                        error_code = %s, error_message = %s
+                    WHERE attempt_id = %s AND status = 'preparing'
+                    RETURNING attempt_id, job_id, status
+                    """,
+                    (error_code, error_message[:10_000], attempt_id),
+                )
+                attempt = await cur.fetchone()
+                if not attempt:
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_jobs
+                    SET status = 'failed', completed_at = NOW(), error_code = %s,
+                        error_message = %s, updated_at = NOW()
+                    WHERE job_id = %s AND latest_attempt_id = %s
+                    """,
+                    (error_code, error_message[:10_000], attempt["job_id"], attempt_id),
+                )
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_packages AS packages
+                    SET status = 'failed', error_code = %s, error_message = %s
+                    FROM education_teaching_jobs AS jobs
+                    WHERE jobs.job_id = %s
+                      AND jobs.latest_attempt_id = %s
+                      AND jobs.teaching_package_id = packages.teaching_package_id
+                      AND packages.status = 'preparing'
+                    """,
+                    (error_code, error_message[:10_000], attempt["job_id"], attempt_id),
+                )
+    return {"attempt_id": str(attempt["attempt_id"]), "status": str(attempt["status"])}
+
+
+async def settle_recovered_teaching_root_run(
+    *, root_run_id: str, status: str, error_code: str, error_message: str
+) -> dict[str, Any] | None:
+    """Project a scanner-finalized managed root to a retriable product failure.
+
+    The recovery scanner owns the root-run CAS but cannot invoke the dead
+    executor's callback. This operation is deliberately keyed solely by the
+    already durable root id, so it cannot discover or access a sandbox, and it
+    loses cleanly to a parent cancellation or a newer retry attempt.
+    """
+    if status not in {"failed", "cancelled"}:
+        raise ValueError("Invalid recovered teaching status")
+    package_status = "cancelled" if status == "cancelled" else "failed"
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_attempts AS attempts
+                    SET status = %s, heartbeat_at = NOW(), completed_at = NOW(),
+                        error_code = %s, error_message = %s
+                    FROM education_teaching_jobs AS jobs
+                    JOIN education_teaching_packages AS packages
+                      ON packages.teaching_package_id = jobs.teaching_package_id
+                    WHERE attempts.root_run_id = %s
+                      AND attempts.status = 'running'
+                      AND jobs.job_id = attempts.job_id
+                      AND jobs.latest_attempt_id = attempts.attempt_id
+                      AND jobs.status IN ('running', 'validating')
+                      AND packages.status IN ('preparing', 'building_skill',
+                                              'generating_teaching', 'validating')
+                    RETURNING attempts.attempt_id, attempts.job_id, attempts.status
+                    """,
+                    (status, error_code, error_message[:10_000], root_run_id),
+                )
+                attempt = await cur.fetchone()
+                if not attempt:
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_jobs
+                    SET status = %s, completed_at = NOW(), error_code = %s,
+                        error_message = %s, updated_at = NOW()
+                    WHERE job_id = %s AND latest_attempt_id = %s
+                    """,
+                    (
+                        status,
+                        error_code,
+                        error_message[:10_000],
+                        attempt["job_id"],
+                        attempt["attempt_id"],
+                    ),
+                )
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_packages AS packages
+                    SET status = %s, error_code = %s, error_message = %s
+                    FROM education_teaching_jobs AS jobs
+                    WHERE jobs.job_id = %s
+                      AND jobs.latest_attempt_id = %s
+                      AND jobs.teaching_package_id = packages.teaching_package_id
+                      AND packages.status IN ('preparing', 'building_skill',
+                                              'generating_teaching', 'validating')
+                    """,
+                    (
+                        package_status,
+                        error_code,
+                        error_message[:10_000],
+                        attempt["job_id"],
+                        attempt["attempt_id"],
+                    ),
+                )
+    return {"attempt_id": str(attempt["attempt_id"]), "status": str(attempt["status"])}
+
+
+async def reconcile_terminal_teaching_root_runs(*, limit: int = 100) -> int:
+    """Repair product attempts whose already-terminal root missed its callback.
+
+    The query is deliberately bounded and reads no sandbox or object-store
+    state. Each row then goes through the same root-id keyed conditional
+    settlement used by recovery, so a concurrent cancellation or retry simply
+    wins and this reconciliation becomes a no-op.
+    """
+    if limit <= 0 or limit > 1_000:
+        raise ValueError("Teaching root reconciliation limit is invalid")
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT attempts.root_run_id, roots.status AS root_status
+                FROM education_teaching_attempts AS attempts
+                JOIN education_teaching_jobs AS jobs ON jobs.job_id = attempts.job_id
+                JOIN education_teaching_packages AS packages
+                  ON packages.teaching_package_id = jobs.teaching_package_id
+                JOIN conversation_responses AS roots
+                  ON roots.conversation_response_id = attempts.root_run_id
+                WHERE attempts.status = 'running'
+                  AND jobs.latest_attempt_id = attempts.attempt_id
+                  AND jobs.status IN ('running', 'validating')
+                  AND packages.status IN ('preparing', 'building_skill',
+                                          'generating_teaching', 'validating')
+                  AND roots.status != 'in_progress'
+                ORDER BY roots.created_at
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            roots = [dict(row) for row in await cur.fetchall()]
+
+    repaired = 0
+    for root in roots:
+        terminal_status = str(root.get("root_status") or "")
+        status = "cancelled" if terminal_status == "cancelled" else "failed"
+        result = await settle_recovered_teaching_root_run(
+            root_run_id=str(root["root_run_id"]),
+            status=status,
+            error_code=(
+                "managed_cancelled"
+                if status == "cancelled"
+                else "managed_terminal_unprojected"
+            ),
+            error_message=(
+                "教材教学加工已取消。"
+                if status == "cancelled"
+                else "教材教学加工进程中断，请重新运行。"
+            ),
+        )
+        if result is not None:
+            repaired += 1
+    return repaired
 
 
 async def queue_textbook_processing(

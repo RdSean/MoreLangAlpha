@@ -2,6 +2,14 @@
 
 ## 2026-08-13
 
+### 受管教材 PTC 加工与恢复
+
+- 教学包任务现以服务拥有的隐藏 PTC 根运行执行 `book-to-skill` 与 `the-knowledge-guy`：根运行先进入既有 RunCoordinator 账本，再由 LocalRunExecutor、检查点和 Redis SSE 驱动；不再借用聊天 HTTP 入口或伪造子 Agent 任务。
+- 受管 sandbox 仅创建本次教材任务根目录，注入两份内置 Skill 契约与冻结 Markdown；禁止 MCP、Vault、网页、预览、用户记忆、普通工作区同步、用户 Skill 和子代理。Skill 正文只从当前服务端工作树的受控内置目录加载，sandbox 内副本仅供受管运行使用。
+- 教学包、任务与 attempt 的状态现按 `queued → preparing → building_skill / generating_teaching → validating → review` 原子投影；候选输出只在验证阶段从固定路径回收、校验、归档到私有 `education/` 前缀后才写入审阅数据。取消会先持久化产品状态，阻止晚到完成回调发布候选包。
+- 失败、取消、sandbox 初始化失败和 worker 丢失均保留脱敏错误并允许使用同一冻结输入创建新的 attempt/root run。恢复扫描器会投影失联根运行，并在空闲扫描时对账已终态但尚未投影的任务，不读取死 sandbox 或对象存储。
+- 服务拥有的教材加工 workspace/thread 已从普通工作区、线程列表、生命周期订阅、详情、消息和共享入口隐藏；家长只能经教材 API 查看安全的阶段投影，不能获取 sandbox 路径、对象键或凭据。
+
 ### 家庭教材教学包持久化
 
 - 新增冻结内容版本之下可重试的教学包、任务、受管 PTC 根运行尝试、脱敏阶段事件、教学章节和题集关系模型；每次尝试保留根运行标识与线性重试链，不伪造子 Agent 任务。

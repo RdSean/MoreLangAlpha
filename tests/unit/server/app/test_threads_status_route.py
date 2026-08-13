@@ -78,3 +78,17 @@ async def test_status_404_for_missing_thread(threads_client):
     with patch("src.server.database.conversation.get_thread_auth_meta", meta):
         resp = await threads_client.get(f"/api/v1/threads/{TID}/status")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_status_hides_managed_education_thread_from_its_owner(threads_client):
+    meta = AsyncMock(
+        return_value={
+            "user_id": CALLER,
+            "is_shared": False,
+            "managed_execution": {"kind": "education_teaching"},
+        }
+    )
+    with patch("src.server.database.conversation.get_thread_auth_meta", meta):
+        resp = await threads_client.get(f"/api/v1/threads/{TID}/status")
+    assert resp.status_code == 404

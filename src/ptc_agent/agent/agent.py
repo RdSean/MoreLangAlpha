@@ -77,6 +77,7 @@ from ptc_agent.agent.middleware.runtime_context import RuntimeContextMiddleware
 from ptc_agent.agent.middleware.background_subagent.registry import (
     BackgroundTaskRegistry,
 )
+from ptc_agent.agent.managed_execution import ManagedExecutionPolicy, managed_skill_root
 from ptc_agent.agent.middleware.skills.discovery import SkillMetadata
 from ptc_agent.agent.middleware.skills.registry import get_skill_registry
 from ptc_agent.agent.prompts import (
@@ -428,6 +429,7 @@ class PTCAgent:
         user_id: str | None = None,
         tool_summary: str | None = None,
         disable_subagents: bool = False,
+        managed_policy: ManagedExecutionPolicy | None = None,
     ) -> Any:
         """Create a deepagent with PTC pattern capabilities.
 
@@ -449,6 +451,19 @@ class PTCAgent:
         Returns:
             Configured BackgroundSubagentOrchestrator wrapping the deepagent.
         """
+        if managed_policy is not None:
+            # The managed graph is service-owned rather than a variant of a
+            # parent's chat. Defend this lower boundary too because PTCAgent is
+            # also used directly by internal runners.
+            disable_subagents = True
+            plan_mode = False
+            namespace_owner = None
+            store = None
+            user_id = None
+            user_profile = None
+            on_signed_url = None
+            vault_secrets = None
+
         model = llm if llm is not None else self.llm
 
         # Freeze current time for this request (refreshes on each new query)
@@ -459,7 +474,15 @@ class PTCAgent:
         # Compute short thread ID for thread-scoped storage
         short_thread_id = thread_id[:8] if thread_id else ""
 
-        backend = SandboxBackend(sandbox, operation_callback=operation_callback)
+        if managed_policy is not None:
+            disable_subagents = True
+            backend = SandboxBackend(
+                sandbox,
+                root_dir=managed_policy.filesystem_root,
+                operation_callback=operation_callback,
+            )
+        else:
+            backend = SandboxBackend(sandbox, operation_callback=operation_callback)
 
         # Memory is opt-in: disabled entirely when identity is missing rather
         # than falling back to a shared namespace that would cross-pollinate
@@ -491,23 +514,41 @@ class PTCAgent:
         )
 
         # Create the execute_code tool for MCP invocation
-        execute_code_tool = create_execute_code_tool(
-            backend, mcp_registry, thread_id=short_thread_id
-        )
+        execute_code_tool = None
+        bash_output_tool = None
+        preview_url_tool = None
+        show_widget_tool = None
+        if managed_policy is None:
+            execute_code_tool = create_execute_code_tool(
+                backend, mcp_registry, thread_id=short_thread_id
+            )
+            bash_tool = create_execute_bash_tool(backend, thread_id=short_thread_id)
+            bash_output_tool = create_bash_output_tool(backend)
+            workspace_id = getattr(session, "conversation_id", "") if session else ""
+            preview_url_tool = create_preview_url_tool(
+                backend, workspace_id=workspace_id, on_signed_url=on_signed_url
+            )
+            show_widget_tool = create_show_widget_tool(backend)
+            tools: list[Any] = [
+                execute_code_tool,
+                bash_tool,
+                bash_output_tool,
+                preview_url_tool,
+                show_widget_tool,
+                TodoWrite,
+            ]
+        else:
+            from ptc_agent.agent.managed_execution import validate_managed_bash_command
 
-        # Create the Bash tool for shell command execution
-        bash_tool = create_execute_bash_tool(backend, thread_id=short_thread_id)
-        bash_output_tool = create_bash_output_tool(backend)
-
-        # Create the preview URL tool for sandbox service previews
-        workspace_id = getattr(session, "conversation_id", "") if session else ""
-        preview_url_tool = create_preview_url_tool(backend, workspace_id=workspace_id, on_signed_url=on_signed_url)
-
-        # Create the show widget tool for inline HTML visualizations
-        show_widget_tool = create_show_widget_tool(backend)
-
-        # Start with base tools
-        tools: list[Any] = [execute_code_tool, bash_tool, bash_output_tool, preview_url_tool, show_widget_tool, TodoWrite]
+            bash_tool = create_execute_bash_tool(
+                backend,
+                thread_id=short_thread_id,
+                command_validator=lambda command: validate_managed_bash_command(
+                    command, managed_policy
+                ),
+                fixed_working_dir=managed_policy.filesystem_root,
+            )
+            tools = [bash_tool, TodoWrite]
 
         # Create custom filesystem tools (override deepagents middleware tools).
         # `filesystem_backend` is the composite when a store is wired; otherwise
@@ -526,21 +567,23 @@ class PTCAgent:
         ]
         tools.extend(filesystem_tools)
 
-        web_search_tool = get_web_search_tool(
-            max_search_results=10,
-            time_range=None,
-            verbose=False,
-            provider=self.config.search_api,
-            depth=self.config.search_depth,
-        )
-        tools.append(web_search_tool)
-        tools.append(web_fetch_tool)
+        web_search_tool = None
+        if managed_policy is None or managed_policy.enable_web:
+            web_search_tool = get_web_search_tool(
+                max_search_results=10,
+                time_range=None,
+                verbose=False,
+                provider=self.config.search_api,
+                depth=self.config.search_depth,
+            )
+            tools.append(web_search_tool)
+            tools.append(web_fetch_tool)
 
         # Site-crawl tools (PTC-only): experimental opt-in feature, further
         # tier-gated at resolve time. The factory returns [] when the crawl
         # provider's API key is unset.
         crawl_tools: list[Any] = []
-        if self.config.feature_enabled("site_crawl"):
+        if managed_policy is None and self.config.feature_enabled("site_crawl"):
             crawl_tools = create_crawl_tools(filesystem_backend)
             tools.extend(crawl_tools)
 
@@ -551,8 +594,8 @@ class PTCAgent:
         shared_middleware: list[Any] = []
 
         leak_detection = LeakDetectionMiddleware(
-            mcp_servers=self.config.mcp.servers,
-            vault_secrets=vault_secrets,
+            mcp_servers=self.config.mcp.servers if managed_policy is None else [],
+            vault_secrets=vault_secrets if managed_policy is None else None,
         )
         shared_middleware.extend(
             [
@@ -580,7 +623,9 @@ class PTCAgent:
         shared_middleware.append(TodoWriteMiddleware())
 
         skill_sources = (
-            [f"{self.config.skills.sandbox_skills_base}/"]
+            [managed_skill_root(managed_policy)]
+            if managed_policy is not None
+            else [f"{self.config.skills.sandbox_skills_base}/"]
             if self.config.skills.enabled
             else []
         )
@@ -598,6 +643,12 @@ class PTCAgent:
         skill_registry = get_skill_registry(
             "ptc", feature_resolver=self.config.feature_enabled
         )
+        if managed_policy is not None:
+            skill_registry = {
+                name: definition
+                for name, definition in skill_registry.items()
+                if name in managed_policy.allowed_skill_names
+            }
         # RunWorkflow is skill-gated: the run-workflow skill hides the tool from
         # model requests until the agent reads its SKILL.md. Drop the skill on
         # any build that registers no tool for it to gate.
@@ -619,7 +670,8 @@ class PTCAgent:
         main_only_middleware: list[Any] = []
 
         # Must be first: steering context must be visible before any other middleware.
-        main_only_middleware.append(SteeringMiddleware())
+        if managed_policy is None:
+            main_only_middleware.append(SteeringMiddleware())
 
         _bg_registry = background_registry or BackgroundTaskRegistry()
         event_capture_middleware = SubagentEventCaptureMiddleware(registry=_bg_registry)
@@ -635,7 +687,7 @@ class PTCAgent:
         if not disable_subagents:
             tools.extend(background_middleware.tools)
 
-        if HumanInTheLoopMiddleware is not None:
+        if managed_policy is None and HumanInTheLoopMiddleware is not None:
             interrupt_config: Any = create_plan_mode_interrupt_config()
             hitl_middleware = HumanInTheLoopMiddleware(interrupt_on=interrupt_config)
             main_only_middleware.append(hitl_middleware)
@@ -646,9 +698,10 @@ class PTCAgent:
                 main_only_middleware.append(plan_middleware)
                 tools.extend(plan_middleware.tools)
 
-        ask_user_middleware = AskUserMiddleware()
-        main_only_middleware.append(ask_user_middleware)
-        tools.extend(ask_user_middleware.tools)
+        if managed_policy is None:
+            ask_user_middleware = AskUserMiddleware()
+            main_only_middleware.append(ask_user_middleware)
+            tools.extend(ask_user_middleware.tools)
 
         from ptc_agent.agent.tools import think_tool
 
@@ -660,10 +713,10 @@ class PTCAgent:
             ),
         )
         subagent_tool_sets: dict[str, list[Any]] = {
-            "execute_code": [execute_code_tool],
+            "execute_code": [execute_code_tool] if execute_code_tool else [],
             "bash": [bash_tool],
             "filesystem": list(filesystem_tools) if filesystem_tools else [],
-            "web_search": [web_search_tool, web_fetch_tool],
+            "web_search": [web_search_tool, web_fetch_tool] if web_search_tool else [],
             "think": [think_tool],
             "todo": [TodoWrite],
         }
@@ -752,14 +805,18 @@ class PTCAgent:
         # Placed before (outer to) model_resilience so sandbox images are
         # captured once, on the final response only — not per retry attempt.
         image_capture = (
-            ImageCaptureMiddleware(session=session) if session is not None else None
+            ImageCaptureMiddleware(session=session)
+            if session is not None and managed_policy is None
+            else None
         )
 
         # SubagentSteeringMiddleware must be first so follow-up messages are visible before other middleware.
         subagent_middleware = [
             m
             for m in [
-                SubagentSteeringMiddleware(registry=background_middleware.registry),
+                SubagentSteeringMiddleware(registry=background_middleware.registry)
+                if managed_policy is None
+                else None,
                 LargeResultEvictionMiddleware(
                     backend=backend, eviction_dir=eviction_dir
                 ),
@@ -779,7 +836,7 @@ class PTCAgent:
 
         # Workspace context middleware (agent.md injection — main agent only)
         workspace_context_middleware: list[Any] = []
-        if session is not None:
+        if session is not None and managed_policy is None:
             workspace_context_middleware = [WorkspaceContextMiddleware(session=session)]
 
         # Positioned after the prompt-cache breakpoint (innermost) so dynamic

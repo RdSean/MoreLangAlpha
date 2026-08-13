@@ -43,6 +43,7 @@ async def lookup_thread_by_external_id(
                     WHERE ct.platform = %s
                       AND ct.external_id = %s
                       AND w.user_id = %s
+                      AND NOT (w.config ? 'managed_execution')
                     ORDER BY ct.updated_at DESC
                     LIMIT 1
                 """,
@@ -162,6 +163,11 @@ async def get_workspace_threads(
                     SELECT COUNT(*) as total
                     FROM conversation_threads
                     WHERE workspace_id = %s{archived_filter}{where_extra}
+                      AND NOT EXISTS (
+                          SELECT 1 FROM workspaces w
+                          WHERE w.workspace_id = conversation_threads.workspace_id
+                            AND w.config ? 'managed_execution'
+                      )
                 """,
                     (workspace_id, *extra_params),
                 )
@@ -181,6 +187,11 @@ async def get_workspace_threads(
                             last_seen_run_seq, created_at, updated_at
                         FROM conversation_threads
                         WHERE workspace_id = %s{archived_filter}{where_extra}
+                          AND NOT EXISTS (
+                              SELECT 1 FROM workspaces w
+                              WHERE w.workspace_id = conversation_threads.workspace_id
+                                AND w.config ? 'managed_execution'
+                          )
                         ORDER BY {inner_order}{sort_by} {sort_order.upper()},
                                  conversation_thread_id DESC
                         LIMIT %s OFFSET %s
@@ -244,6 +255,7 @@ async def get_threads_for_user(
                     FROM conversation_threads t
                     JOIN workspaces w ON t.workspace_id = w.workspace_id
                     WHERE w.user_id = %s AND w.status != 'deleted'
+                      AND NOT (w.config ? 'managed_execution')
                       AND t.archived_at IS NULL{where_extra}
                     """,
                     (user_id, *extra_params),
@@ -266,6 +278,7 @@ async def get_threads_for_user(
                         FROM conversation_threads t
                         JOIN workspaces w ON t.workspace_id = w.workspace_id
                         WHERE w.user_id = %s AND w.status != 'deleted'
+                          AND NOT (w.config ? 'managed_execution')
                           AND t.archived_at IS NULL{where_extra}
                         ORDER BY {order_by} {sort_order.upper()},
                                  t.conversation_thread_id DESC
@@ -325,6 +338,7 @@ _LIFECYCLE_SNAPSHOT_SQL = f"""
             LIMIT 1
         ) la ON TRUE
         WHERE w.user_id = %s AND w.status != 'deleted'
+          AND NOT (w.config ? 'managed_execution')
     ),
     watermark AS (
         SELECT COALESCE(MAX(latest_run_seq), 0) AS as_of_seq FROM owned
@@ -391,8 +405,10 @@ async def get_thread_with_summary(
                 await cur.execute(
                     """
                     SELECT conversation_thread_id, workspace_id, current_status, thread_index, created_at, updated_at
-                    FROM conversation_threads
-                    WHERE conversation_thread_id = %s
+                    FROM conversation_threads AS t
+                    JOIN workspaces AS w ON w.workspace_id = t.workspace_id
+                    WHERE t.conversation_thread_id = %s
+                      AND NOT (w.config ? 'managed_execution')
                 """,
                     (conversation_thread_id,),
                 )
@@ -502,7 +518,8 @@ async def get_thread_auth_meta(thread_id: str) -> Optional[Dict[str, Any]]:
             async with conn.cursor(row_factory=dict_row) as cur:
                 await cur.execute(
                     """
-                    SELECT w.user_id, t.is_shared, t.msg_type
+                    SELECT w.user_id, t.is_shared, t.msg_type,
+                           w.config->'managed_execution' AS managed_execution
                     FROM conversation_threads t
                     JOIN workspaces w ON w.workspace_id = t.workspace_id
                     WHERE t.conversation_thread_id = %s
@@ -543,6 +560,7 @@ async def get_thread_by_share_token(share_token: str) -> Optional[Dict[str, Any]
                     FROM conversation_threads t
                     JOIN workspaces w ON w.workspace_id = t.workspace_id
                     WHERE t.share_token = %s AND t.is_shared = TRUE
+                      AND NOT (w.config ? 'managed_execution')
                 """,
                     (share_token,),
                 )

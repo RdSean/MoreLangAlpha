@@ -178,6 +178,16 @@ async def test_get_workspace_found(ws_mock_db, mock_cursor):
 
 
 @pytest.mark.asyncio
+async def test_get_workspace_excludes_service_owned_managed_execution(ws_mock_db, mock_cursor):
+    from src.server.database.workspace import get_workspace
+
+    await get_workspace(str(uuid.uuid4()))
+
+    sql = mock_cursor.execute.call_args[0][0]
+    assert "managed_execution" in sql
+
+
+@pytest.mark.asyncio
 async def test_get_workspace_not_found(ws_mock_db, mock_cursor):
     """get_workspace returns None when no row is found."""
     from src.server.database.workspace import get_workspace

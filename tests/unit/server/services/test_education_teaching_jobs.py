@@ -1,0 +1,170 @@
+"""Product-level managed teaching job orchestration contracts."""
+
+from importlib import import_module
+from importlib.util import find_spec
+from pathlib import Path
+from unittest.mock import AsyncMock
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_cancel_stamps_education_job_before_requesting_root_run_cancel(monkeypatch):
+    assert find_spec("src.server.services.education_teaching_jobs") is not None
+    education_teaching_jobs = import_module(
+        "src.server.services.education_teaching_jobs"
+    )
+
+    calls: list[str] = []
+
+    async def mark(**_kwargs):
+        calls.append("mark")
+        return {"managed_thread_id": "thread-1", "root_run_id": "run-1"}
+
+    async def cancel(**kwargs):
+        calls.append("cancel")
+        assert kwargs == {"thread_id": "thread-1", "run_id": "run-1"}
+
+    monkeypatch.setattr(education_teaching_jobs, "mark_teaching_job_cancel_requested", mark)
+    monkeypatch.setattr(education_teaching_jobs, "request_root_run_cancel", cancel)
+
+    await education_teaching_jobs.cancel_teaching_job(
+        parent_user_id="parent-1", job_id="job-1"
+    )
+
+    assert calls == ["mark", "cancel"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_persists_root_run_before_registering_managed_executor(monkeypatch):
+    """Internal teaching dispatch uses the root-run lifecycle, never chat HTTP."""
+    education_teaching_jobs = import_module(
+        "src.server.services.education_teaching_jobs"
+    )
+    policy = import_module("ptc_agent.agent.managed_execution").education_teaching_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+    calls: list[str] = []
+
+    class Coordinator:
+        async def start_run(self, **kwargs):
+            calls.append("start")
+            assert kwargs["user_id"] is None
+            assert kwargs["run_metadata"]["managed_execution"]["kind"] == "education_teaching"
+            return type("Handle", (), {"turn_index": 3, "checkpointer": object()})()
+
+    class Executor:
+        async def start_run(self, **kwargs):
+            calls.append("executor")
+            assert kwargs["completion_callback"] is None
+            assert kwargs["terminal_callback"] is not None
+            return object()
+
+    monkeypatch.setattr(
+        education_teaching_jobs,
+        "build_managed_teaching_graph",
+        AsyncMock(return_value=(object(), {}, {})),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        education_teaching_jobs,
+        "RunCoordinator",
+        type("RunCoordinator", (), {"get_instance": staticmethod(lambda: Coordinator())}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        education_teaching_jobs,
+        "LocalRunExecutor",
+        type("LocalRunExecutor", (), {"get_instance": staticmethod(lambda: Executor())}),
+        raising=False,
+    )
+    monkeypatch.setattr(education_teaching_jobs, "RunSSEProducer", _FakeProducer, raising=False)
+    monkeypatch.setattr(education_teaching_jobs, "uuid4", lambda: "run-1", raising=False)
+    monkeypatch.setattr(
+        education_teaching_jobs,
+        "settle_teaching_attempt",
+        AsyncMock(return_value={"status": "running"}),
+        raising=False,
+    )
+
+    dispatched = await education_teaching_jobs.dispatch_managed_root_run(
+        job={"job_id": "8a77d086-0b23-4a1e-89d0-f163fa23d5d1", "chapters": []},
+        attempt_id="attempt-1",
+        session=object(),
+        workspace_id="workspace-1",
+        thread_id="thread-1",
+        staged={"manifest": {"chapters": []}},
+        policy=policy,
+        skill_contexts=[{"name": "book-to-skill", "instruction": "--managed-textbook"}],
+    )
+
+    assert dispatched == {"root_run_id": "run-1"}
+    assert calls == ["start", "executor"]
+    education_teaching_jobs.settle_teaching_attempt.assert_awaited_once_with(
+        attempt_id="attempt-1", root_run_id="run-1", status="running"
+    )
+
+
+class _FakeProducer:
+    def __init__(self, **_kwargs):
+        pass
+
+    async def stream_workflow(self, **_kwargs):
+        if False:
+            yield ""
+
+
+@pytest.mark.asyncio
+async def test_managed_progress_projection_accepts_only_frozen_chapter_ids(monkeypatch):
+    """A real SSE message advances only an approved phase for frozen input."""
+    education_teaching_jobs = import_module("src.server.services.education_teaching_jobs")
+    recorded = AsyncMock()
+    monkeypatch.setattr(education_teaching_jobs, "record_teaching_event", recorded)
+    chapter_id = "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    event = (
+        'data: {"event":"message","content":"EDUCATION_PROGRESS '
+        '{\\"phase\\":\\"generating_teaching\\",\\"content_chapter_id\\":\\"'
+        f"{chapter_id}"
+        '\\"}"}\n\n'
+    )
+
+    await education_teaching_jobs._record_safe_progress(
+        attempt_id="attempt-1",
+        staged={"chapters": [{"content_chapter_id": chapter_id, "position": 2}]},
+        event=event,
+    )
+
+    recorded.assert_awaited_once_with(
+        attempt_id="attempt-1",
+        phase="generating_teaching",
+        chapter_id=chapter_id,
+        summary="已完成第 2 章教学材料生成",
+    )
+
+
+@pytest.mark.asyncio
+async def test_managed_graph_reads_skill_bodies_from_server_controlled_project_source(monkeypatch):
+    """Skill body injection is host-side; the staged copy is sandbox discovery only."""
+    education_teaching_jobs = import_module("src.server.services.education_teaching_jobs")
+    setup = import_module("src.server.app.setup")
+    policy = import_module("ptc_agent.agent.managed_execution").education_teaching_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+    monkeypatch.setattr(setup, "agent_config", object())
+    monkeypatch.setattr(
+        education_teaching_jobs,
+        "build_ptc_graph_with_session",
+        AsyncMock(return_value=object()),
+    )
+    handle = type("Handle", (), {"run_id": "run-1", "turn_index": 1, "checkpointer": object()})()
+
+    _graph, _state, config = await education_teaching_jobs.build_managed_teaching_graph(
+        session=object(),
+        thread_id="thread-1",
+        run_handle=handle,
+        policy=policy,
+        skill_contexts=[{"name": "book-to-skill", "instruction": "--managed-textbook"}],
+    )
+
+    expected = str(Path(education_teaching_jobs.__file__).resolve().parents[3] / "skills")
+    assert config["configurable"]["skill_dirs"] == [expected]

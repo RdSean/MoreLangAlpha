@@ -5,6 +5,7 @@ import logging
 from typing import Any, Protocol, runtime_checkable
 
 from ptc_agent.agent.agent import PTCAgent
+from ptc_agent.agent.managed_execution import ManagedExecutionPolicy
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.session import Session
 
@@ -157,6 +158,7 @@ async def build_ptc_graph_with_session(
     on_signed_url: Any | None = None,
     namespace_owner: Any | None = None,
     disable_subagents: bool = False,
+    managed_policy: ManagedExecutionPolicy | None = None,
 ) -> Any:
     """Build a BackgroundSubagentOrchestrator from a pre-acquired session (WorkspaceManager path)."""
     workspace_id = session.conversation_id
@@ -166,6 +168,18 @@ async def build_ptc_graph_with_session(
         raise RuntimeError(
             f"Session for workspace {workspace_id} is not properly initialized"
         )
+
+    if managed_policy is not None:
+        # Managed executions have no user-owned runtime state. Enforce this at
+        # the graph boundary as well as in PTCAgent so internal callers cannot
+        # accidentally mount memory, a Vault-derived URL callback, or a parent
+        # identity onto the service-owned run.
+        user_id = None
+        store = None
+        on_signed_url = None
+        namespace_owner = None
+        plan_mode = False
+        disable_subagents = True
 
     if user_id:
         user_profile, ptc_agent = await asyncio.gather(
@@ -202,6 +216,7 @@ async def build_ptc_graph_with_session(
         # turn create_agent never recomputes it — keeps the prompt-cache prefix
         # byte-stable. None → create_agent computes from the registry.
         tool_summary=getattr(session, "mcp_tool_summary", None),
+        managed_policy=managed_policy,
     )
 
     logger.debug(

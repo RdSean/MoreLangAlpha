@@ -1136,6 +1136,8 @@ async def get_thread_status(
     meta = await get_thread_auth_meta(thread_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="Thread not found")
+    if meta.get("managed_execution"):
+        raise HTTPException(status_code=404, detail="Thread not found")
     if meta["user_id"] != x_user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 

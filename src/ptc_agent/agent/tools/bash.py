@@ -1,5 +1,6 @@
 """Execute bash commands in the sandbox."""
 
+from collections.abc import Callable
 from typing import Any
 
 import structlog
@@ -34,7 +35,13 @@ def _command_touches_memory(command: str) -> bool:
     return any(marker in command for marker in _MEMORY_PATH_MARKERS)
 
 
-def create_execute_bash_tool(backend: SandboxBackend, thread_id: str = "") -> BaseTool:
+def create_execute_bash_tool(
+    backend: SandboxBackend,
+    thread_id: str = "",
+    *,
+    command_validator: Callable[[str], str | None] | None = None,
+    fixed_working_dir: str | None = None,
+) -> BaseTool:
     """Factory function to create Bash tool with injected dependencies.
 
     Args:
@@ -84,11 +91,18 @@ def create_execute_bash_tool(backend: SandboxBackend, thread_id: str = "") -> Ba
             )
             return _MEMORY_ROUTE_ERROR, {"mcp_trace": []}
 
+        if command_validator is not None:
+            validation_error = command_validator(command)
+            if validation_error:
+                return validation_error, {"mcp_trace": []}
+
+        effective_working_dir = fixed_working_dir or working_dir
+
         try:
             logger.debug(
                 "Executing bash command",
                 command=command[:100],
-                working_dir=working_dir,
+                working_dir=effective_working_dir,
                 timeout=timeout,
                 background=run_in_background,
                 thread_id=thread_id or None,
@@ -100,7 +114,7 @@ def create_execute_bash_tool(backend: SandboxBackend, thread_id: str = "") -> Ba
             # Execute bash command in sandbox
             result = await backend.aexecute_bash(
                 command,
-                working_dir=working_dir,
+                working_dir=effective_working_dir,
                 timeout=timeout_seconds,
                 background=run_in_background,
                 thread_id=thread_id or None,
