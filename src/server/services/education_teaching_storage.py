@@ -23,7 +23,7 @@ class TeachingPackageStorageError(RuntimeError):
 
 
 class ManagedTeachingSandbox(Protocol):
-    async def aupload_files(self, files: list[tuple[str, bytes]]) -> object: ...
+    async def aupload_file_bytes(self, filepath: str, content: bytes) -> bool: ...
 
     async def adownload_file_bytes(self, path: str) -> bytes | None: ...
 
@@ -34,6 +34,15 @@ _MANAGED_SKILL_FILES: tuple[tuple[str, str], ...] = (
     ("the-knowledge-guy", "SKILL.md"),
     ("the-knowledge-guy", "reference/managed-textbook-contract.md"),
 )
+
+
+async def _upload_staged_files(
+    sandbox: ManagedTeachingSandbox, files: list[tuple[str, bytes]]
+) -> None:
+    """Write fixed staged files through PTCSandbox's public byte API."""
+    for path, content in files:
+        if not await sandbox.aupload_file_bytes(path, content):
+            raise TeachingPackageStorageError("Could not stage managed teaching input")
 
 
 async def stage_managed_teaching_skills(
@@ -50,7 +59,7 @@ async def stage_managed_teaching_skills(
         except OSError as exc:
             raise TeachingPackageStorageError("Managed teaching skill is unavailable") from exc
         files.append((f"{root}/.agents/skills/{skill_name}/{relative_path}", content))
-    await sandbox.aupload_files(files)
+    await _upload_staged_files(sandbox, files)
 
 
 def _safe_component(value: object, fallback: str) -> str:
@@ -164,7 +173,7 @@ async def stage_teaching_inputs(
         (f"{root}/inputs/{chapter['path']}", chapter["markdown"].encode("utf-8"))
         for chapter in frozen["chapters"]
     )
-    await sandbox.aupload_files(files)
+    await _upload_staged_files(sandbox, files)
     return {key: staged[key] for key in ("manifest", "manifest_sha256", "chapters")}
 
 

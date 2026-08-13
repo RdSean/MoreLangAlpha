@@ -30,11 +30,15 @@ def _job() -> dict:
 
 @pytest.mark.asyncio
 async def test_stage_teaching_inputs_uploads_only_safe_manifest_and_frozen_chapters():
-    sandbox = AsyncMock()
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
 
     frozen = await education_teaching_storage.stage_teaching_inputs(_job(), sandbox)
 
-    uploaded = sandbox.aupload_files.await_args.args[0]
+    uploaded = [
+        (call.args[0], call.args[1])
+        for call in sandbox.aupload_file_bytes.await_args_list
+    ]
     paths = [path for path, _ in uploaded]
     bodies = [body.decode("utf-8") for _, body in uploaded]
     assert all(
@@ -47,6 +51,31 @@ async def test_stage_teaching_inputs_uploads_only_safe_manifest_and_frozen_chapt
     assert frozen["chapters"][0]["content_sha256"]
     manifest = json.loads(next(body for path, body in uploaded if path.endswith("manifest.json")))
     assert manifest["chapters"][0]["content_chapter_id"] == _job()["chapters"][0]["content_chapter_id"]
+
+
+@pytest.mark.asyncio
+async def test_stage_managed_teaching_skills_uses_the_sandbox_byte_upload_contract():
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    await education_teaching_storage.stage_managed_teaching_skills(_job()["job_id"], sandbox)
+
+    paths = [call.args[0] for call in sandbox.aupload_file_bytes.await_args_list]
+    assert paths == [
+        "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/.agents/skills/book-to-skill/SKILL.md",
+        "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/.agents/skills/book-to-skill/reference/managed-textbook-contract.md",
+        "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/.agents/skills/the-knowledge-guy/SKILL.md",
+        "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/.agents/skills/the-knowledge-guy/reference/managed-textbook-contract.md",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_staging_fails_closed_when_a_sandbox_upload_is_rejected():
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=False)
+
+    with pytest.raises(education_teaching_storage.TeachingPackageStorageError):
+        await education_teaching_storage.stage_teaching_inputs(_job(), sandbox)
 
 
 @pytest.mark.asyncio
