@@ -289,12 +289,24 @@ def _teaching_actions(*, status: str) -> list[str]:
 def _safe_teaching_projection(job: dict[str, Any]) -> dict[str, Any]:
     """Keep the API shape intentionally independent from PTC runtime records."""
     status = str(job["status"])
+    events = [
+        {
+            "sequence": event["sequence"],
+            "phase": event["phase"],
+            "summary": event["summary"],
+            "chapter_id": event.get("chapter_id"),
+            "asset_kind": event.get("asset_kind"),
+            "created_at": event.get("created_at"),
+        }
+        for event in job.get("events", [])
+    ]
+    phase = job["phase"] if status == "completed" or not events else events[-1]["phase"]
     return {
         "job_id": job["job_id"],
         "teaching_package_id": job["teaching_package_id"],
         "content_version_id": job["content_version_id"],
         "status": status,
-        "phase": job["phase"],
+        "phase": phase,
         "attempt_count": int(job["attempt_count"]),
         "completed_chapter_count": int(job["completed_chapter_count"]),
         "total_chapter_count": int(job["total_chapter_count"]),
@@ -303,17 +315,7 @@ def _safe_teaching_projection(job: dict[str, Any]) -> dict[str, Any]:
         "created_at": job.get("created_at"),
         "completed_at": job.get("completed_at"),
         "actions": _teaching_actions(status=status),
-        "events": [
-            {
-                "sequence": event["sequence"],
-                "phase": event["phase"],
-                "summary": event["summary"],
-                "chapter_id": event.get("chapter_id"),
-                "asset_kind": event.get("asset_kind"),
-                "created_at": event.get("created_at"),
-            }
-            for event in job.get("events", [])
-        ],
+        "events": events,
         "attempts": [
             {
                 "attempt_id": attempt["attempt_id"],

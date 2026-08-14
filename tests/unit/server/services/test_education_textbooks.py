@@ -401,6 +401,43 @@ def test_safe_teaching_projection_never_relays_managed_runtime_fields():
     assert "/managed/" not in repr(projected)
 
 
+def test_active_teaching_projection_uses_latest_autonomous_milestone_but_review_is_verified():
+    active = education_textbooks._safe_teaching_projection(
+        {
+            "job_id": "job-1",
+            "teaching_package_id": "package-1",
+            "content_version_id": "version-1",
+            "status": "running",
+            "phase": "building_skill",
+            "attempt_count": 1,
+            "completed_chapter_count": 1,
+            "total_chapter_count": 2,
+            "events": [
+                {"sequence": 1, "phase": "planning", "summary": "Agent 已报告：正在规划"},
+                {"sequence": 2, "phase": "practice_build", "summary": "Agent 已报告：第 1 章已完成练习构建"},
+            ],
+            "attempts": [],
+        }
+    )
+    completed = education_textbooks._safe_teaching_projection(
+        {
+            "job_id": "job-1",
+            "teaching_package_id": "package-1",
+            "content_version_id": "version-1",
+            "status": "completed",
+            "phase": "review",
+            "attempt_count": 1,
+            "completed_chapter_count": 2,
+            "total_chapter_count": 2,
+            "events": [{"sequence": 2, "phase": "validating_bundle", "summary": "Agent 已报告：正在校验"}],
+            "attempts": [],
+        }
+    )
+
+    assert active["phase"] == "practice_build"
+    assert completed["phase"] == "review"
+
+
 @pytest.mark.asyncio
 async def test_local_processor_makes_stable_chapters_from_extractable_pdf_pages(monkeypatch):
     class Page:

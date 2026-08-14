@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from './api';
-import type { TeachingJob } from './types';
+import type { TeachingJob, TeachingReviewAssetKind } from './types';
 
 const terminalTeachingJobStatuses = new Set<TeachingJob['status']>(['completed', 'failed', 'cancelled']);
 
@@ -68,6 +68,7 @@ export function useTeachingJob(jobId: string | undefined, enabled: boolean) {
     enabled: Boolean(jobId) && enabled,
     staleTime: 2_000,
     refetchInterval: enabled ? 5_000 : false,
+    refetchIntervalInBackground: enabled,
   });
 
   useEffect(() => {
@@ -83,6 +84,33 @@ export function useTeachingJob(jobId: string | undefined, enabled: boolean) {
   }, [query.data?.status, queryClient]);
 
   return query;
+}
+
+export function useTeachingPackageAssets(teachingPackageId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.education.teachingPackageAssets(teachingPackageId ?? ''),
+    queryFn: () => educationApi.getTeachingPackageAssets(teachingPackageId ?? ''),
+    enabled: Boolean(teachingPackageId) && enabled,
+    staleTime: 15_000,
+  });
+}
+
+export function useTeachingChapterAsset(
+  teachingPackageId: string | undefined,
+  chapterId: string | undefined,
+  kind: TeachingReviewAssetKind | undefined,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: queryKeys.education.teachingChapterAsset(teachingPackageId ?? '', chapterId ?? '', kind ?? ''),
+    queryFn: () => educationApi.getTeachingChapterAsset(
+      teachingPackageId ?? '',
+      chapterId ?? '',
+      kind as TeachingReviewAssetKind,
+    ),
+    enabled: Boolean(teachingPackageId && chapterId && kind) && enabled,
+    staleTime: Infinity,
+  });
 }
 
 export function useLearningAssignments(enabled: boolean) {

@@ -447,11 +447,22 @@ async def get_teaching_job_projection_for_parent(
                                FROM education_textbook_chapters AS chapters
                                WHERE chapters.version_id = packages.content_version_id
                            ), 0)
-                           WHEN packages.status IN ('building_skill', 'generating_teaching') THEN COALESCE((
+                           WHEN packages.status = 'building_skill' THEN COALESCE((
                                SELECT COUNT(DISTINCT events.chapter_id)
                                FROM education_teaching_events AS events
                                WHERE events.attempt_id = jobs.latest_attempt_id
-                                 AND events.phase = packages.status
+                                 AND events.phase IN (
+                                     'building_skill', 'chapter_mapping',
+                                     'concept_linking', 'coverage_audit'
+                                 )
+                           ), 0)
+                           WHEN packages.status = 'generating_teaching' THEN COALESCE((
+                               SELECT COUNT(DISTINCT events.chapter_id)
+                               FROM education_teaching_events AS events
+                               WHERE events.attempt_id = jobs.latest_attempt_id
+                                 AND events.phase IN (
+                                     'generating_teaching', 'practice_build', 'teaching_build'
+                                 )
                            ), 0)
                            ELSE 0
                        END AS completed_chapter_count

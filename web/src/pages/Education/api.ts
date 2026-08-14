@@ -1,5 +1,5 @@
 import { api } from '@/api/client';
-import type { CreateEducationTaskInput, EducationAsset, EducationMember, EducationTask, LearningAnswer, LearningAssignment, LearningChatSpace, ParentLearningRecords, ParentLearningTranscript, StudentLearning, SubmitEducationTaskInput, TeachingJob, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookPublication } from './types';
+import type { CreateEducationTaskInput, EducationAsset, EducationMember, EducationTask, LearningAnswer, LearningAssignment, LearningChatSpace, ParentLearningRecords, ParentLearningTranscript, StudentLearning, SubmitEducationTaskInput, TeachingChapterAsset, TeachingJob, TeachingPackageAssets, TeachingReviewAssetKind, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookPublication } from './types';
 
 export async function listEducationTasks(): Promise<EducationTask[]> {
   const { data } = await api.get<EducationTask[]>('/api/v1/education/tasks');
@@ -102,6 +102,16 @@ export async function cancelTeachingJob(jobId: string): Promise<TeachingJob> {
 
 export async function resumeTeachingJob(jobId: string): Promise<TeachingJob> {
   const { data } = await api.post<TeachingJob>(`/api/v1/education/teaching-jobs/${jobId}/resume`);
+  return data;
+}
+
+export async function getTeachingPackageAssets(teachingPackageId: string): Promise<TeachingPackageAssets> {
+  const { data } = await api.get<TeachingPackageAssets>(`/api/v1/education/teaching-packages/${teachingPackageId}/assets`);
+  return data;
+}
+
+export async function getTeachingChapterAsset(teachingPackageId: string, chapterId: string, kind: TeachingReviewAssetKind): Promise<TeachingChapterAsset> {
+  const { data } = await api.get<TeachingChapterAsset>(`/api/v1/education/teaching-packages/${teachingPackageId}/chapters/${chapterId}/assets/${kind}`);
   return data;
 }
 

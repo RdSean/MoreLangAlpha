@@ -15,6 +15,8 @@ const state = vi.hoisted(() => ({
   cancelTeaching: vi.fn(),
   resumeTeaching: vi.fn(),
   teachingJob: null as Record<string, unknown> | null,
+  teachingAssets: null as Record<string, unknown> | null,
+  teachingAsset: null as Record<string, unknown> | null,
   publish: vi.fn(),
   assign: vi.fn(),
 }));
@@ -30,6 +32,8 @@ vi.mock('../queries', () => ({
   useParentLearningTranscript: () => ({ data: { messages: [] }, isLoading: false }),
   useTextbook: () => ({ data: state.textbook, isLoading: false }),
   useTeachingJob: () => ({ data: state.teachingJob }),
+  useTeachingPackageAssets: () => ({ data: state.teachingAssets, isLoading: false }),
+  useTeachingChapterAsset: () => ({ data: state.teachingAsset, isLoading: false }),
   useTextbookMutations: () => ({
     start: { mutateAsync: state.start, isPending: false },
     run: { mutateAsync: state.run, isPending: false },
@@ -62,6 +66,8 @@ beforeEach(() => {
   state.cancelTeaching.mockReset();
   state.resumeTeaching.mockReset();
   state.teachingJob = null;
+  state.teachingAssets = null;
+  state.teachingAsset = null;
   state.publish.mockReset();
   state.assign.mockReset();
 });
@@ -168,5 +174,46 @@ describe('TextbookDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '生成教学包' }));
 
     await waitFor(() => expect(state.createTeaching).toHaveBeenCalledWith('version-1'));
+  });
+
+  it('reviews complete knowledge assets without rendering storage details', () => {
+    state.textbook = {
+      textbook_id: 'textbook-1', household_id: 'household-1', title: '英语第二册', slug: 'english-2',
+      versions: [{
+        version_id: 'version-1', sequence: 1, status: 'review', chapter_count: 1, is_published: false,
+        sources: [], assignments: [],
+        teaching_packages: [{
+          teaching_package_id: 'package-1', job_id: 'job-1', sequence: 1, status: 'review', job_status: 'completed', chapter_count: 1, question_count: 2,
+        }],
+        chapters: [{ chapter_id: 'chapter-1', position: 1, slug: 'overview', title: '导读', markdown: '# 导读', questions: [] }],
+      }],
+    };
+    state.teachingAssets = {
+      teaching_package_id: 'package-1', format: 'langalpha-family-teaching-assets/v2',
+      concept_index: { size_bytes: 120, concept_count: 3 },
+      coverage_audit: { size_bytes: 80, status: 'complete' },
+      chapters: [{
+        chapter_id: 'chapter-1', position: 1, title: '导读', coverage_status: 'complete', concept_count: 3,
+        assets: [{ kind: 'knowledge', size_bytes: 20 }, { kind: 'toolkit', size_bytes: 30 }, { kind: 'practice', size_bytes: 40 }],
+      }],
+      storage_key: 'education/private/manifest.json',
+    };
+    state.teachingAsset = {
+      teaching_package_id: 'package-1', chapter_id: 'chapter-1', kind: 'toolkit', content: '# 导读工具包',
+      managed_path: '/managed/textbook-job/private',
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/education/textbooks/textbook-1']}>
+        <Routes><Route path="/education/textbooks/:textbookId" element={<TextbookDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: '知识资产' }));
+    expect(screen.getByText('覆盖审计通过')).toBeInTheDocument();
+    expect(screen.getByText('3 个概念')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看工具包' }));
+    expect(screen.getByText('# 导读工具包')).toBeInTheDocument();
+    expect(screen.queryByText(/storage_key|education\/private|\/managed\//i)).not.toBeInTheDocument();
   });
 });

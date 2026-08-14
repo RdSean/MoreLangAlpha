@@ -102,14 +102,45 @@ export interface TeachingPackageSummary {
 }
 
 export type TeachingJobAction = 'cancel' | 'resume';
-export type TeachingJobPhase = TeachingPackageSummary['status'];
+export type TeachingJobPhase = TeachingPackageSummary['status'] | 'planning' | 'chapter_mapping' | 'concept_linking' | 'coverage_audit' | 'practice_build' | 'teaching_build' | 'bundle_assembling' | 'validating_bundle';
+export type TeachingAssetKind = 'knowledge' | 'toolkit' | 'practice' | 'teaching';
+export type TeachingReviewAssetKind = Exclude<TeachingAssetKind, 'teaching'>;
 
 export interface TeachingJobEvent {
   sequence: number;
   phase: TeachingJobPhase;
   summary: string;
   chapter_id?: string | null;
+  asset_kind?: TeachingAssetKind | null;
   created_at?: string | null;
+}
+
+export interface TeachingAssetMetadata {
+  kind: TeachingReviewAssetKind;
+  size_bytes: number;
+  sha256?: string | null;
+}
+
+export interface TeachingPackageAssets {
+  teaching_package_id: string;
+  format: 'langalpha-family-teaching-assets/v2';
+  concept_index: { size_bytes: number; concept_count: number };
+  coverage_audit: { size_bytes: number; status: 'complete' };
+  chapters: Array<{
+    chapter_id: string;
+    position: number;
+    title: string;
+    coverage_status: 'complete';
+    concept_count: number;
+    assets: TeachingAssetMetadata[];
+  }>;
+}
+
+export interface TeachingChapterAsset {
+  teaching_package_id: string;
+  chapter_id: string;
+  kind: TeachingReviewAssetKind;
+  content: string | Record<string, unknown>;
 }
 
 export interface TeachingJobAttempt {
