@@ -165,7 +165,12 @@ async def stage_teaching_inputs(
     frozen = staged["frozen"]
     root = managed_job_root(frozen["job_id"])
     files: list[tuple[str, bytes]] = [
-        (f"{root}/inputs/manifest.json", staged["manifest_bytes"])
+        (f"{root}/inputs/manifest.json", staged["manifest_bytes"]),
+        # The Docker job root is service-created. Seed the two fixed writable
+        # directories through the sandbox API so later relative Bash commands
+        # do not fail on its ownership boundary.
+        (f"{root}/work/knowledge-skill/.keep", b""),
+        (f"{root}/outputs/.keep", b""),
     ]
     files.extend(
         (f"{root}/inputs/{chapter['path']}", chapter["markdown"].encode("utf-8"))

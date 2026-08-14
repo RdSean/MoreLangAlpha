@@ -41,16 +41,38 @@ async def test_stage_teaching_inputs_uploads_only_safe_manifest_and_frozen_chapt
     ]
     paths = [path for path, _ in uploaded]
     bodies = [body.decode("utf-8") for _, body in uploaded]
-    assert all(
-        path.startswith(
-            "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/inputs/"
-        )
-        for path in paths
-    )
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+    assert all(path.startswith(root) for path in paths)
+    assert {
+        f"{root}inputs/manifest.json",
+        f"{root}inputs/chapters/01-01-overview.md",
+        f"{root}work/knowledge-skill/.keep",
+        f"{root}outputs/.keep",
+    } == set(paths)
     assert all("storage_key" not in body for body in bodies)
     assert frozen["chapters"][0]["content_sha256"]
     manifest = json.loads(next(body for path, body in uploaded if path.endswith("manifest.json")))
     assert manifest["chapters"][0]["content_chapter_id"] == _job()["chapters"][0]["content_chapter_id"]
+
+
+@pytest.mark.asyncio
+async def test_stage_teaching_inputs_precreates_the_fixed_knowledge_work_directory():
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    await education_teaching_storage.stage_teaching_inputs(_job(), sandbox)
+
+    uploaded = {
+        call.args[0]: call.args[1]
+        for call in sandbox.aupload_file_bytes.await_args_list
+    }
+    assert uploaded[
+        "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+        "work/knowledge-skill/.keep"
+    ] == b""
+    assert uploaded[
+        "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/outputs/.keep"
+    ] == b""
 
 
 @pytest.mark.asyncio
