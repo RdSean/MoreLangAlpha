@@ -187,6 +187,31 @@ async def test_non_byok_platform_profile_is_eager_without_reasoning(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_platform_profile_copies_main_client_to_keyless_compaction_role(monkeypatch):
+    from src.server.services.llm.config import resolve_llm_config
+
+    platform_client = _FakeClient("profile")
+    monkeypatch.setenv("PLATFORM_LLM_SOURCE_EMAIL", "service@example.test")
+    monkeypatch.setenv("PLATFORM_LLM_MODEL", "managed-model")
+    with (
+        _entered(_common_patches()),
+        patch(
+            "src.server.services.llm.platform_profile.resolve_platform_llm_client",
+            new_callable=AsyncMock,
+            return_value=platform_client,
+        ),
+    ):
+        cfg = await resolve_llm_config(
+            _make_config(compaction="compaction-model"), "u", "main-model", False
+        )
+
+    assert cfg.credential_source == CredentialSource.PLATFORM
+    copy = cfg.subsidiary_llm_clients["compaction"]
+    assert copy is not platform_client
+    assert getattr(copy, "_copied_from", None) is platform_client
+
+
+@pytest.mark.asyncio
 async def test_byok_on_system_model_is_byok_source():
     """Orthogonality: BYOK key on a SYSTEM-catalog model → cred=BYOK."""
     from src.server.services.llm.config import ModelSource, resolve_llm_config

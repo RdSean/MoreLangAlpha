@@ -653,16 +653,19 @@ async def _prefetch_byok_cache(
 async def _resolve_role_clients(
     config, user_id: str, roles: list[LLMRole], model_pref: dict,
     byok_cache: dict, *, is_byok: bool, cache_key: str | None,
+    platform_profile_configured: bool,
 ) -> None:
     """Resolve compaction/fetch/subagent role clients onto ``config`` in place.
 
     Assumes ``config`` is already a copy and ``config.credential_source`` /
     ``config.llm_client`` are set. Roles never get an eager platform client
     (``allow_platform_fallback=False``); a keyless role for an OAUTH/BYOK user
-    is seeded with a copy of the main client (BYOK-pure), while PLATFORM/NONE
-    users store nothing so the cheap name-based path stays. Each role's I/O
-    (OAuth check + BYOK walk) runs concurrently; writes happen after the gather
-    so the SSE hot path waits one round-trip, not N.
+    is seeded with a copy of the main client. Traditional PLATFORM/NONE users
+    store nothing so the cheap name-based path stays; a configured deployment
+    platform profile is the exception because its custom client has no matching
+    environment-backed role model. Each role's I/O (OAuth check + BYOK walk)
+    runs concurrently; writes happen after the gather so the SSE hot path waits
+    one round-trip, not N.
     """
 
     async def _resolve_one(role: LLMRole):
@@ -691,23 +694,36 @@ async def _resolve_role_clients(
                 role.key, role.model,
             )
 
-    # BYOK-pure write-time materialization. Gate purely on the credential
-    # SIGNAL: by the primitive's invariant OAUTH/BYOK ⟹ llm_client is set, so a
-    # main-client copy is safe. PLATFORM/NONE users store nothing → cheap name
-    # path stays (a non-BYOK reasoning user's PLATFORM client is NOT copied).
-    # The explicit None check makes the invariant a guard, not an assumption.
+    # Write-time materialization is normally OAuth/BYOK-only. A deployment
+    # platform profile also needs it: role names still come from agent_config,
+    # but the sole approved provider is the profile's pre-resolved main client.
+    # Traditional platform fallback remains name-based to preserve its current
+    # billing and model-selection behavior.
     if (
-        config.credential_source in (CredentialSource.OAUTH, CredentialSource.BYOK)
+        (
+            config.credential_source in (CredentialSource.OAUTH, CredentialSource.BYOK)
+            or (
+                config.credential_source == CredentialSource.PLATFORM
+                and platform_profile_configured
+            )
+        )
         and config.llm_client is not None
     ):
         for role in roles:
             if role.fallback_to_main and role.key not in config.subsidiary_llm_clients:
                 config.subsidiary_llm_clients[role.key] = config.llm_client.model_copy()
-                logger.info(
-                    "[CHAT] Role '%s' has no own key; falling back to the user's "
-                    "main client (cost shifts to main-model rate).",
-                    role.key,
-                )
+                if config.credential_source == CredentialSource.PLATFORM:
+                    logger.info(
+                        "[CHAT] Role '%s' has no own platform client; using the "
+                        "deployment model profile's main client.",
+                        role.key,
+                    )
+                else:
+                    logger.info(
+                        "[CHAT] Role '%s' has no own key; falling back to the user's "
+                        "main client (cost shifts to main-model rate).",
+                        role.key,
+                    )
 
 
 async def _resolve_fallback_clients(
@@ -1078,11 +1094,13 @@ async def resolve_llm_config(
     # (NONE) for the lazy OSS path. An OAuth-required HTTPException propagates.
     from .platform_profile import is_platform_model_profile_configured
 
+    platform_profile_configured = is_platform_model_profile_configured()
+
     main = await resolve_model_client(
         user_id, effective_model, is_byok=is_byok, cache_key=thread_id,
         reasoning_effort=effective_reasoning, service_tier=effective_service_tier,
         allow_platform_fallback=(
-            bool(effective_reasoning) or is_platform_model_profile_configured()
+            bool(effective_reasoning) or platform_profile_configured
         ),
         _pref_cache=model_pref, _byok_cache=byok_cache,
     )
@@ -1109,6 +1127,7 @@ async def resolve_llm_config(
         _resolve_role_clients(
             config, user_id, roles, model_pref, byok_cache,
             is_byok=is_byok, cache_key=thread_id,
+            platform_profile_configured=platform_profile_configured,
         ),
         _resolve_fallback_clients(
             config, user_id, model_pref, byok_cache,
