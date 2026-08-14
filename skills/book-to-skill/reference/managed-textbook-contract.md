@@ -55,25 +55,32 @@ Each `-knowledge.json` has this minimum shape:
     "name": "exact Chinese knowledge-point name",
     "evidence": [{"start": 0, "end": 20}]
   }],
-  "relations": [],
+  "relations": [{
+    "from_concept_id": "stable-concept-id",
+    "to_concept_id": "another-stable-concept-id",
+    "type": "prerequisite"
+  }],
   "prerequisite_concept_ids": []
 }
 ```
 
 `concept_id` values are unique across the bundle. A concept name must equal a
 same-chapter `knowledge_points` value. Evidence ranges point into that frozen
-chapter Markdown; do not put a path, URL or quotation in them. Relations use
-only same-chapter concept IDs. The matching toolkit Markdown must contain
-learning objectives, key concepts, common mistakes, a Chinese-learner
-explanation, an example and a chapter review prompt.
+chapter Markdown; do not put a path, URL or quotation in them. Every relation
+object must use the literal keys `from_concept_id` and `to_concept_id`, never
+`from` or `to`, and both values must be same-chapter `concept_id` values. The
+matching toolkit Markdown must contain learning objectives, key concepts,
+common mistakes, a Chinese-learner explanation, an example and a chapter review
+prompt.
 
 ## Complete-book knowledge assets
 
 `outputs/knowledge/concept-index.json` has format
 `langalpha-managed-concept-index/v1`. Its concepts exactly cover every chapter
 concept and each item contains `concept_id`, identical `name`, and
-`content_chapter_ids` containing its source chapter. Its relations use only
-those concept IDs.
+`content_chapter_ids` containing its source chapter. Its relation objects also
+use the literal `from_concept_id` and `to_concept_id` keys, and both values
+must be concepts in that index.
 
 `outputs/knowledge/coverage-audit.json` has format
 `langalpha-managed-coverage-audit/v1`. It has one item per frozen chapter with

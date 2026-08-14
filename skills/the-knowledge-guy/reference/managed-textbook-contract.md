@@ -23,9 +23,13 @@ outputs/teaching-package.json
 
 For every frozen chapter, the knowledge and practice JSON repeat its exact
 `content_chapter_id` and `content_sha256`; the toolkit is Markdown. Knowledge
-concept names exactly match its `knowledge_points`; every practice question
-uses an existing same-chapter `concept_id` and an exact knowledge point. The
-book-wide concept index includes every verified concept and its source chapter.
+concept names exactly match its `knowledge_points`; every relation object uses
+the literal `from_concept_id` and `to_concept_id` keys, never `from` or `to`,
+and both values are existing same-chapter `concept_id` values; every practice
+question uses an existing same-chapter `concept_id` and an exact knowledge
+point. The book-wide concept index includes every verified concept and its
+source chapter, and its relation objects use those same two literal keys for
+concept IDs in that index.
 The coverage audit has every frozen chapter with `status: "complete"`,
 `missing: []`, and `asset_kinds` equal to `knowledge`, `toolkit`, `practice`,
 and `teaching`.
