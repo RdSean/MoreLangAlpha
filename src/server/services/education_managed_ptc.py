@@ -24,6 +24,7 @@ from src.server.database.workspace import create_workspace
 from src.server.services.workspace_manager import WorkspaceManager
 from src.server.services.education_teaching_storage import (
     download_teaching_output,
+    freeze_teaching_input,
     stage_managed_teaching_skills,
     stage_teaching_inputs,
     write_teaching_package_bundle,
@@ -264,7 +265,7 @@ async def finalize_teaching_attempt(
             )
             return None
         candidate = await download_teaching_output(job_id, sandbox)
-        validated = validate_teaching_package(candidate, job)
+        validated = validate_teaching_package(candidate, freeze_teaching_input(job))
         prefix = await write_teaching_package_bundle(job, validated)
         completed = await complete_teaching_attempt(
             job_id=job_id,

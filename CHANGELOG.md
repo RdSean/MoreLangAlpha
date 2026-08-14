@@ -4,6 +4,7 @@
 
 ### 受管教材 PTC 长程执行
 
+- 修复真实教材教学包已完成 PTC 生成却在最终校验中错误使用未含派生哈希的数据库章节投影、从而一律报“冻结内容哈希无效”的问题：最终化现复用 staging 的 `freeze_teaching_input()` 从不可变 Markdown 重建哈希后再验证候选；不新增可变数据库哈希、不放宽章节覆盖校验，也不改写现有教材或 `education/` 对象。
 - 修复真实教材教学包因中文正文内未转义双引号写出非法 JSON、直到最终归档才失败的问题：受管 `Write` 现在仅在固定候选文件路径先解析严格 JSON 对象，拒绝内容不会写入 sandbox；`the-knowledge-guy` 受管契约同时明确要求转义内嵌双引号并在收到 JSON 错误后原地修正。服务端最终的章节覆盖、哈希和题目校验及 `education/` 私有归档边界不变。
 - 修复 Docker 受管任务根目录由服务创建后、受限 Bash 无权新建 `work/knowledge-skill` 而导致 Agent 重试的问题：冻结输入现在仅通过既有 sandbox 字节上传 API 预建固定知识中间目录和固定输出目录的空标记；模型仍不能指定其他目录、枚举 sandbox 或访问 MinIO，正式资产仍只由服务端校验后写入 `education/`。
 - 受管教材根运行不再被原先面向短聊天的 48 步图递归上限截断，而是遵从部署的 PTC 递归预算；运行仍使用同一持久化根账本、心跳、取消与恢复机制。受管模式现明确指出 sandbox 内两份 staged contract 的实际路径，并仅允许在固定 job 根目录运行 `sha256sum inputs/manifest.json`，使 `book-to-skill` 能生成契约要求的输入清单校验值，而不会尝试绝对路径、Python 辅助程序或普通 shell 能力。

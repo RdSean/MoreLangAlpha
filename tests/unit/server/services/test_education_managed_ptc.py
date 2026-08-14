@@ -2,6 +2,7 @@
 
 from importlib import import_module
 from importlib.util import find_spec
+from hashlib import sha256
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -313,6 +314,7 @@ async def test_resume_requeues_failed_job_then_creates_a_new_root_attempt(monkey
 async def test_completed_root_archives_validated_candidate_before_review_projection(monkeypatch):
     education_managed_ptc = import_module("src.server.services.education_managed_ptc")
     calls: list[str] = []
+    markdown = "# 导读\n\n冻结教材正文"
 
     async def download(*_args, **_kwargs):
         calls.append("download")
@@ -325,7 +327,9 @@ async def test_completed_root_archives_validated_candidate_before_review_project
     def validate(candidate, frozen):
         calls.append("validate")
         assert candidate == {"format": "candidate"}
-        assert frozen["chapters"]
+        assert frozen["chapters"][0]["content_sha256"] == sha256(
+            markdown.encode("utf-8")
+        ).hexdigest()
         return {"chapters": [{"content_chapter_id": "chapter-1"}]}
 
     async def archive(*_args, **_kwargs):
@@ -345,7 +349,18 @@ async def test_completed_root_archives_validated_candidate_before_review_project
     monkeypatch.setattr(education_managed_ptc, "settle_teaching_attempt", AsyncMock(), raising=False)
 
     result = await education_managed_ptc.finalize_teaching_attempt(
-        job={"job_id": JOB_ID, "chapters": [{"content_chapter_id": "chapter-1"}]},
+        job={
+            "job_id": JOB_ID,
+            "chapters": [
+                {
+                    "content_chapter_id": "f5761267-11d1-4977-8107-e2671c99a2f0",
+                    "position": 1,
+                    "slug": "01-overview",
+                    "title": "导读",
+                    "markdown": markdown,
+                }
+            ],
+        },
         attempt_id="attempt-1",
         root_run_id="run-1",
         sandbox=object(),
