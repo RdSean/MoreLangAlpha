@@ -15,8 +15,8 @@
 
 ## 目标
 
-1. 让两个内置 Skill 真正经 Skills middleware 激活，并在相互隔离的受管阶段中
-   使用其完整能力边界。
+1. 让两个内置 Skill 真正经 Skills middleware 在同一受管 PTC 根运行中按需激活，
+   由 PTC 自己决定读取、调用、回查和汇总的顺序。
 2. 从冻结的章节 Markdown 生成可复核的丰富资产，语义上覆盖
    `book-to-skill --complete --practice` 的 map、reduce、audit 和 practice 阶段，
    再由 `the-knowledge-guy` 为中国学生生成教学包。
@@ -39,35 +39,37 @@
 实现最小，但不能表达章节工具包、知识图谱、审计和练习集，也不能证明来源覆盖；
 不采用。
 
-### 方案 B：让一次根运行同时注入两份完整 Skill
+### 方案 B：让服务在一次根运行起始时预注入两份完整 Skill
 
-可使 middleware 实际加载 Skill，但两份超长交互文档同时占用上下文。此前真实运行
-已经显示这会诱发压缩和阶段混淆；不采用。
+可使 middleware 实际加载 Skill，但会在任务开始时无条件消耗两份超长交互文档的
+上下文，并替 PTC 决定使用顺序；不采用。
 
-### 方案 C：推荐，阶段隔离的完整受管资产管线
+### 方案 C：推荐，单一自主 PTC 根运行
 
-一个家长可见的教学任务拥有连续阶段和同一冻结输入；内部依次运行
-`book-to-skill` 资产构建阶段和 `the-knowledge-guy` 教学构建阶段。每个阶段只激活
-本阶段的完整 Skill，仍使用受限 sandbox、持久根运行和安全进度投影。阶段输出是
-固定白名单资产，服务端逐项下载、验证和归档，而不列目录或接受模型指定路径。
+服务把两项内置 Skill 的完整静态目录 stage 到本次受管 sandbox，并仅在系统提示中
+给出任务目标、冻结输入、输出合同和安全边界。PTC 根据任务自行读取
+`book-to-skill`、`the-knowledge-guy` 及其引用资料；PTC mode 的 Skills middleware
+在读取对应 `SKILL.md` 时记录实际加载。允许受管的内置子任务继承同一 policy，以便
+章节 map/reduce/audit 的调度仍由 Agent 决定；禁止用户配置的子代理、MCP、web、Vault
+和普通 workspace。
 
-采用方案 C。它保留 PTC Agent 的长程自主处理，同时避免把家长当作等待聊天的操作员，
-也不让“阶段摘要”和“原始 PTC 界面”重复出现。
+服务不调度 Skill 阶段，也不消费中间产物来触发下一步。它只维持一个持久 root run、
+心跳、取消、恢复和最终 bundle 校验。PTC 自己写出安全的里程碑事件，界面把这些事件
+投影成连续进度，而不是第二套聊天或流程控制界面。
 
 ## 运行与数据流
 
 ```text
-冻结内容 Markdown + manifest
-  -> 受管 book-to-skill 阶段
-  -> 章节知识表示、toolkit、practice、coverage audit、concept index
-  -> 受管 the-knowledge-guy 阶段
-  -> 中国学生教学材料、关联知识点、自动判定题
-  -> 服务端白名单校验与 SHA-256
+冻结内容 Markdown + 完整静态 Skill 目录
+  -> 一个受管、持久 PTC 根运行
+  -> PTC 自主加载/调用 book-to-skill、the-knowledge-guy 和受限子任务
+  -> 章节知识表示、toolkit、practice、coverage audit、concept index、中文教学包
+  -> 服务端终态白名单校验与 SHA-256
   -> 私有 education/ 资产 bundle + 数据库安全 manifest
   -> 家长审阅 -> 发布快照 -> 学生学习
 ```
 
-PDF 提取发生在此链路之前，继续冻结为内容版本。每个阶段均以同一
+PDF 提取发生在此链路之前，继续冻结为内容版本。PTC 的全部调度均以同一
 `content_chapter_id`、位置和 Markdown SHA-256 为唯一输入事实；重新运行生成新教学
 包 attempt，不修改已审阅或已发布版本。
 
@@ -104,11 +106,11 @@ URL、sandbox 路径、原始模型输出或凭据。
 资产；任何客户端请求都须先以家长/家庭授权定位 package，再由服务用内部 manifest
 读取确定的对象。
 
-一个 attempt 可拥有顺序阶段运行记录。每条记录绑定 attempt、阶段名、根运行 ID、
-开始/心跳/终态和脱敏错误。任务 UI 仍投影为一条连续状态：知识资产构建、覆盖审计、
-教学材料生成、校验、待审阅。取消会阻止后续阶段启动；恢复只为同一冻结输入建立新
-attempt，旧阶段和 bundle 保持不可变。跨 worker 的真相仍在 PostgreSQL/Redis/现有
-RunCoordinator，而不放入模块级内存。
+一个 attempt 只拥有一个根运行和相应 checkpoint。任务 UI 从 PTC 自主声明、服务端
+白名单化的里程碑投影“知识资产构建、覆盖审计、教学材料生成、校验、待审阅”；它们
+不是服务对 PTC 的调用顺序。取消由同一根运行接收；恢复只为同一冻结输入建立新
+attempt，旧 attempt、checkpoint 引用和 bundle 保持不可变。跨 worker 的真相仍在
+PostgreSQL/Redis/现有 RunCoordinator，而不放入模块级内存。
 
 ## 家长与学生界面
 
@@ -124,13 +126,13 @@ package。学生页面无需改变权限范围，只读取发布时冻结的教�
 
 | 维度 | 必须满足的标准 | 证据 |
 | --- | --- | --- |
-| Skill 真实性 | 每个受管阶段通过 `configurable.skill_contexts` 激活恰当的内置 Skill；不同时注入另一阶段完整正文 | 图配置单测、阶段运行记录 |
+| Skill 真实性 | PTC 从 staged 内置目录按需读取 Skill；middleware 记录实际加载的 `book-to-skill` 与 `the-knowledge-guy`，服务不强制其顺序 | 图/Skills middleware 单测、根运行 checkpoint/安全事件 |
 | 冻结与覆盖 | 每个冻结章节恰好拥有 knowledge、toolkit、practice 和教学投影；哈希与 ID 全部匹配 | 验证器单测、bundle manifest |
 | 深度 | 有全书 concept index 和 per-chapter coverage audit；toolkit 包含概念、关系、难点、例子和复习；practice 与知识点双向关联 | fixture 校验、家长审阅 API/UI |
 | 中国学生教学质量 | 目标、前置、难点、中文解释、例子和自动判定检查均完整，题目不脱离章节证据 | schema/质量门单测、真实审阅 |
 | 安全 | API/UI/错误/SSE 不含 storage key、MinIO URL、sandbox 路径、provider、密钥或原始模型文本 | 负向 API/UI 测试、真实网络记录 |
 | 家庭权限 | 只有同家庭家长可查看候选资产和控制任务；学生仅见发布快照且不能写家长字段 | 路由服务单测、真实角色验收 |
-| 长程可靠性 | 心跳、取消、恢复和终态对账仍作用于阶段根运行；旧 attempt 不能发布新结果 | 生命周期单测、真实长程运行记录 |
+| 长程可靠性 | 心跳、取消、恢复和终态对账仍作用于唯一根运行；旧 attempt 不能发布新结果 | 生命周期单测、真实长程运行记录 |
 | 存储 | 仅服务端向新 `education/` 前缀写入；不枚举、覆盖或删除无关对象 | storage mock 单测、真实请求/日志边界 |
 
 ## 验收定义
