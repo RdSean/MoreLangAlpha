@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import logging
@@ -30,6 +31,7 @@ from src.server.database.runs.lifecycle import QuerySpec
 from src.server.services.runs.coordinator import RunCoordinator
 from src.server.services.runs.executor import LocalRunExecutor
 from src.server.services.runs.sse_producer import RunSSEProducer
+from src.server.services.education_teaching_assets import expected_teaching_asset_paths
 
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,122 @@ _PROGRESS_LABELS = {
 }
 _PROGRESS_RE = re.compile(r"EDUCATION_PROGRESS\s+(\{[^\r\n]+\})")
 _HEARTBEAT_INTERVAL_SECONDS = 15.0
+
+
+@dataclass
+class ManagedTeachingAssetProgress:
+    """Turn successful fixed-path candidate writes into safe durable milestones.
+
+    This observes the already-authorized Write tool boundary. It neither directs
+    the PTC's order of work nor reads candidate contents; the path-to-milestone
+    map comes solely from the frozen service manifest.
+    """
+
+    attempt_id: str
+    filesystem_root: str
+    staged: Mapping[str, Any]
+    _events_by_path: dict[str, tuple[str, str | None, str | None]] = field(
+        init=False, default_factory=dict
+    )
+    _emitted_paths: set[str] = field(init=False, default_factory=set)
+    _pending: set[asyncio.Task[None]] = field(init=False, default_factory=set)
+
+    def __post_init__(self) -> None:
+        paths = expected_teaching_asset_paths(
+            {"chapters": list(self.staged.get("chapters", []))}
+        )
+        self._events_by_path = {
+            f"{self.filesystem_root}/{paths.concept_index}": (
+                "concept_linking",
+                None,
+                "knowledge",
+            ),
+            f"{self.filesystem_root}/{paths.coverage_audit}": (
+                "coverage_audit",
+                None,
+                None,
+            ),
+            f"{self.filesystem_root}/{paths.teaching_package}": (
+                "bundle_assembling",
+                None,
+                None,
+            ),
+        }
+        for chapter in self.staged.get("chapters", []):
+            if not isinstance(chapter, Mapping):
+                continue
+            chapter_id = chapter.get("content_chapter_id")
+            if not isinstance(chapter_id, str):
+                continue
+            chapter_paths = paths.for_chapter(chapter_id)
+            self._events_by_path.update(
+                {
+                    f"{self.filesystem_root}/{chapter_paths.knowledge}": (
+                        "concept_linking",
+                        chapter_id,
+                        "knowledge",
+                    ),
+                    f"{self.filesystem_root}/{chapter_paths.toolkit}": (
+                        "teaching_build",
+                        chapter_id,
+                        "toolkit",
+                    ),
+                    f"{self.filesystem_root}/{chapter_paths.practice}": (
+                        "practice_build",
+                        chapter_id,
+                        "practice",
+                    ),
+                }
+            )
+
+    def __call__(self, operation: Mapping[str, Any]) -> None:
+        if operation.get("operation") != "write_file":
+            return
+        path = operation.get("file_path")
+        if not isinstance(path, str) or path in self._emitted_paths:
+            return
+        event = self._events_by_path.get(path)
+        if event is None:
+            return
+        self._emitted_paths.add(path)
+        task = asyncio.create_task(self._record(*event))
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
+    async def _record(
+        self, phase: str, chapter_id: str | None, asset_kind: str | None
+    ) -> None:
+        label = _PROGRESS_LABELS[phase]
+        summary = (
+            f"Agent 已报告：第 {self._position_for(chapter_id)} 章{label}"
+            if chapter_id is not None
+            else f"Agent 已报告：{label}"
+        )
+        try:
+            await record_teaching_event(
+                attempt_id=self.attempt_id,
+                phase=phase,
+                chapter_id=chapter_id,
+                asset_kind=asset_kind,
+                summary=summary,
+            )
+        except Exception:
+            logger.warning(
+                "Could not record managed teaching output milestone", exc_info=True
+            )
+
+    def _position_for(self, chapter_id: str) -> int:
+        for chapter in self.staged.get("chapters", []):
+            if (
+                isinstance(chapter, Mapping)
+                and chapter.get("content_chapter_id") == chapter_id
+            ):
+                return int(chapter["position"])
+        raise ValueError("Managed teaching event chapter is not frozen")
+
+    async def drain(self) -> None:
+        while self._pending:
+            await asyncio.gather(*tuple(self._pending), return_exceptions=True)
 
 
 def managed_teaching_prompt(job_id: str) -> str:
@@ -188,7 +306,9 @@ async def _managed_workflow_events(
         except Exception:
             # A heartbeat is observability only. A transient DB failure must not
             # interrupt an otherwise valid managed root run.
-            logger.warning("Could not refresh managed teaching heartbeat", exc_info=True)
+            logger.warning(
+                "Could not refresh managed teaching heartbeat", exc_info=True
+            )
 
     iterator = workflow.__aiter__()
     pending_event: asyncio.Task[str] | None = None
@@ -206,7 +326,9 @@ async def _managed_workflow_events(
                 event = pending_event.result()
             except StopAsyncIteration:
                 break
-            await _record_safe_progress(attempt_id=attempt_id, staged=staged, event=event)
+            await _record_safe_progress(
+                attempt_id=attempt_id, staged=staged, event=event
+            )
             yield event
             pending_event = asyncio.create_task(anext(iterator))
     finally:
@@ -223,6 +345,7 @@ async def build_managed_teaching_graph(
     run_handle: Any,
     policy: ManagedExecutionPolicy,
     agent_config: Any | None = None,
+    operation_callback: Any | None = None,
 ) -> tuple[Any, dict[str, Any], dict[str, Any]]:
     """Build the constrained graph and its fixed input/configuration.
 
@@ -239,6 +362,7 @@ async def build_managed_teaching_graph(
     job_id = str(UUID(policy.filesystem_root.rsplit("/", 1)[-1]))
     graph = await build_ptc_graph_with_session(
         session=session,
+        operation_callback=operation_callback,
         config=config,
         subagent_names=["textbook-chapter-worker"] if policy.allow_subagents else [],
         disable_subagents=not policy.allow_subagents,
@@ -352,12 +476,18 @@ async def dispatch_managed_root_run(
         },
     )
     try:
+        progress = ManagedTeachingAssetProgress(
+            attempt_id=attempt_id,
+            filesystem_root=policy.filesystem_root,
+            staged=staged,
+        )
         graph, input_state, graph_config = await build_managed_teaching_graph(
             session=session,
             thread_id=thread_id,
             run_handle=run_handle,
             policy=policy,
             agent_config=agent_config,
+            operation_callback=progress,
         )
         attempt = await settle_teaching_attempt(
             attempt_id=attempt_id, root_run_id=run_id, status="running"
@@ -372,8 +502,11 @@ async def dispatch_managed_root_run(
         )
 
         async def on_terminal(task_info: Any, status: str) -> None:
-            from src.server.services.education_managed_ptc import finalize_teaching_attempt
+            from src.server.services.education_managed_ptc import (
+                finalize_teaching_attempt,
+            )
 
+            await progress.drain()
             await finalize_teaching_attempt(
                 job=job,
                 attempt_id=attempt_id,
@@ -384,7 +517,9 @@ async def dispatch_managed_root_run(
             )
 
         workflow = _managed_workflow_events(
-            handler.stream_workflow(graph=graph, input_state=input_state, config=graph_config),
+            handler.stream_workflow(
+                graph=graph, input_state=input_state, config=graph_config
+            ),
             attempt_id=attempt_id,
             root_run_id=run_id,
             staged=staged,

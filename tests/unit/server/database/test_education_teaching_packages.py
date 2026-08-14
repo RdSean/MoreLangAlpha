@@ -7,6 +7,21 @@ import pytest
 from src.server.database import education_textbooks
 
 
+def test_teaching_progress_status_never_moves_backward_for_autonomous_events():
+    assert (
+        education_textbooks.advance_teaching_package_status(
+            current="generating_teaching", target="building_skill"
+        )
+        == "generating_teaching"
+    )
+    assert (
+        education_textbooks.advance_teaching_package_status(
+            current="building_skill", target="validating"
+        )
+        == "validating"
+    )
+
+
 @pytest.mark.asyncio
 async def test_queue_teaching_package_freezes_a_parent_reviewable_content_version(
     mock_connection, mock_cursor, monkeypatch
@@ -153,7 +168,7 @@ async def test_recording_generation_progress_advances_the_package_phase(
         yield mock_connection
 
     mock_cursor.fetchone.side_effect = [
-        {"job_id": "job-1", "position": 1},
+        {"job_id": "job-1", "position": 1, "package_status": "preparing"},
         {"sequence": 1},
     ]
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
@@ -182,7 +197,10 @@ async def test_recording_autonomous_global_progress_discards_model_text_and_path
     async def fake_connection():
         yield mock_connection
 
-    mock_cursor.fetchone.side_effect = [{"job_id": "job-1"}, {"sequence": 1}]
+    mock_cursor.fetchone.side_effect = [
+        {"job_id": "job-1", "package_status": "preparing"},
+        {"sequence": 1},
+    ]
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
     monkeypatch.setattr(education_textbooks, "uuid4", lambda: "event-1")
 
@@ -221,7 +239,12 @@ async def test_parent_asset_review_query_requires_household_parent_membership(
         "asset_manifest": {"format": "langalpha-family-teaching-assets/v2"},
     }
     mock_cursor.fetchall.return_value = [
-        {"content_chapter_id": "chapter-1", "position": 1, "slug": "overview", "title": "导读"}
+        {
+            "content_chapter_id": "chapter-1",
+            "position": 1,
+            "slug": "overview",
+            "title": "导读",
+        }
     ]
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
 
@@ -317,9 +340,19 @@ async def test_failing_a_prepared_attempt_without_a_root_run_fails_job_and_packa
 
     assert failed == {"attempt_id": "attempt-1", "status": "failed"}
     statements = [call.args[0] for call in mock_cursor.execute.call_args_list]
-    assert any("root_run_id" not in sql for sql in statements if "UPDATE education_teaching_attempts" in sql)
-    assert any("UPDATE education_teaching_jobs" in sql and "status = 'failed'" in sql for sql in statements)
-    assert any("UPDATE education_teaching_packages" in sql and "status = 'failed'" in sql for sql in statements)
+    assert any(
+        "root_run_id" not in sql
+        for sql in statements
+        if "UPDATE education_teaching_attempts" in sql
+    )
+    assert any(
+        "UPDATE education_teaching_jobs" in sql and "status = 'failed'" in sql
+        for sql in statements
+    )
+    assert any(
+        "UPDATE education_teaching_packages" in sql and "status = 'failed'" in sql
+        for sql in statements
+    )
 
 
 @pytest.mark.asyncio
@@ -346,9 +379,18 @@ async def test_recovered_terminal_root_marks_matching_running_teaching_attempt_r
 
     assert settled == {"attempt_id": "attempt-1", "status": "failed"}
     statements = [call.args[0] for call in mock_cursor.execute.call_args_list]
-    assert any("root_run_id = %s" in sql and "UPDATE education_teaching_attempts" in sql for sql in statements)
-    assert any("UPDATE education_teaching_jobs" in sql and "status = %s" in sql for sql in statements)
-    assert any("UPDATE education_teaching_packages" in sql and "status = %s" in sql for sql in statements)
+    assert any(
+        "root_run_id = %s" in sql and "UPDATE education_teaching_attempts" in sql
+        for sql in statements
+    )
+    assert any(
+        "UPDATE education_teaching_jobs" in sql and "status = %s" in sql
+        for sql in statements
+    )
+    assert any(
+        "UPDATE education_teaching_packages" in sql and "status = %s" in sql
+        for sql in statements
+    )
 
 
 @pytest.mark.asyncio
@@ -585,7 +627,11 @@ async def test_complete_teaching_attempt_writes_review_projection_atomically(
         asset_manifest={
             "format": "langalpha-family-teaching-assets/v2",
             "concept_index": {"sha256": "a" * 64, "size_bytes": 2, "concept_count": 1},
-            "coverage_audit": {"sha256": "b" * 64, "size_bytes": 2, "status": "complete"},
+            "coverage_audit": {
+                "sha256": "b" * 64,
+                "size_bytes": 2,
+                "status": "complete",
+            },
             "chapters": [],
         },
         package={
@@ -614,8 +660,12 @@ async def test_complete_teaching_attempt_writes_review_projection_atomically(
 
     assert completed == {"attempt_id": "attempt-1", "status": "completed"}
     statements = [call.args[0] for call in mock_cursor.execute.call_args_list]
-    assert any("INSERT INTO education_teaching_package_chapters" in sql for sql in statements)
-    assert any("INSERT INTO education_teaching_package_questions" in sql for sql in statements)
+    assert any(
+        "INSERT INTO education_teaching_package_chapters" in sql for sql in statements
+    )
+    assert any(
+        "INSERT INTO education_teaching_package_questions" in sql for sql in statements
+    )
     package_update = next(sql for sql in statements if "status = 'review'" in sql)
     assert "asset_manifest" in package_update
     assert sum("status = 'completed'" in sql for sql in statements) == 2

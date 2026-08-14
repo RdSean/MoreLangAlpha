@@ -34,7 +34,9 @@ _TEACHING_PROGRESS_PHASES = frozenset(
         "validating_bundle",
     }
 )
-_TEACHING_PROGRESS_ASSET_KINDS = frozenset({"knowledge", "toolkit", "practice", "teaching"})
+_TEACHING_PROGRESS_ASSET_KINDS = frozenset(
+    {"knowledge", "toolkit", "practice", "teaching"}
+)
 _TEACHING_PACKAGE_STATUS_BY_PROGRESS = {
     "building_skill": "building_skill",
     "generating_teaching": "generating_teaching",
@@ -46,6 +48,12 @@ _TEACHING_PACKAGE_STATUS_BY_PROGRESS = {
     "teaching_build": "generating_teaching",
     "bundle_assembling": "validating",
     "validating_bundle": "validating",
+}
+_TEACHING_PACKAGE_STATUS_RANK = {
+    "preparing": 0,
+    "building_skill": 1,
+    "generating_teaching": 2,
+    "validating": 3,
 }
 _TEACHING_PROGRESS_LABELS = {
     "planning": "正在规划知识资产加工",
@@ -59,6 +67,15 @@ _TEACHING_PROGRESS_LABELS = {
     "building_skill": "已完成知识整理",
     "generating_teaching": "已完成教学材料生成",
 }
+
+
+def advance_teaching_package_status(*, current: str, target: str) -> str:
+    """Keep autonomous progress events from moving the package phase backward."""
+    current_rank = _TEACHING_PACKAGE_STATUS_RANK.get(current)
+    target_rank = _TEACHING_PACKAGE_STATUS_RANK.get(target)
+    if current_rank is None or target_rank is None or target_rank <= current_rank:
+        return current
+    return target
 
 
 async def get_or_create_student_learning_space(
@@ -610,7 +627,7 @@ async def record_teaching_event(
                 if chapter_id is None:
                     await cur.execute(
                         """
-                        SELECT attempts.job_id
+                        SELECT attempts.job_id, packages.status AS package_status
                         FROM education_teaching_attempts AS attempts
                         JOIN education_teaching_jobs AS jobs ON jobs.job_id = attempts.job_id
                         JOIN education_teaching_packages AS packages
@@ -627,7 +644,7 @@ async def record_teaching_event(
                 else:
                     await cur.execute(
                         """
-                        SELECT attempts.job_id, chapters.position
+                        SELECT attempts.job_id, chapters.position, packages.status AS package_status
                         FROM education_teaching_attempts AS attempts
                         JOIN education_teaching_jobs AS jobs ON jobs.job_id = attempts.job_id
                         JOIN education_teaching_packages AS packages
@@ -682,23 +699,28 @@ async def record_teaching_event(
                         safe_summary,
                     ),
                 )
-                await cur.execute(
-                    """
-                    UPDATE education_teaching_packages AS packages
-                    SET status = %s, error_code = NULL, error_message = NULL
-                    FROM education_teaching_jobs AS jobs
-                    WHERE jobs.job_id = %s
-                      AND jobs.latest_attempt_id = %s
-                      AND jobs.teaching_package_id = packages.teaching_package_id
-                      AND packages.status = ANY(%s::varchar[])
-                    """,
-                    (
-                        _TEACHING_PACKAGE_STATUS_BY_PROGRESS[phase],
-                        active["job_id"],
-                        attempt_id,
-                        list(allowed_package_statuses),
-                    ),
+                next_status = advance_teaching_package_status(
+                    current=str(active["package_status"]),
+                    target=_TEACHING_PACKAGE_STATUS_BY_PROGRESS[phase],
                 )
+                if next_status != active["package_status"]:
+                    await cur.execute(
+                        """
+                        UPDATE education_teaching_packages AS packages
+                        SET status = %s, error_code = NULL, error_message = NULL
+                        FROM education_teaching_jobs AS jobs
+                        WHERE jobs.job_id = %s
+                          AND jobs.latest_attempt_id = %s
+                          AND jobs.teaching_package_id = packages.teaching_package_id
+                          AND packages.status = %s
+                        """,
+                        (
+                            next_status,
+                            active["job_id"],
+                            attempt_id,
+                            active["package_status"],
+                        ),
+                    )
 
 
 async def settle_teaching_attempt(
@@ -1755,7 +1777,9 @@ async def get_textbook_for_parent(
                     """,
                     (version["version_id"],),
                 )
-                version["teaching_packages"] = [dict(row) for row in await cur.fetchall()]
+                version["teaching_packages"] = [
+                    dict(row) for row in await cur.fetchall()
+                ]
                 reviewable_package = next(
                     (
                         package
@@ -2066,7 +2090,11 @@ async def get_student_learning(
                       )
                     ORDER BY questions.position
                     """,
-                    (assignment_id, chapter["chapter_id"], assignment["publication_id"]),
+                    (
+                        assignment_id,
+                        chapter["chapter_id"],
+                        assignment["publication_id"],
+                    ),
                 )
                 chapter["questions"] = [dict(row) for row in await cur.fetchall()]
     result = dict(assignment)
