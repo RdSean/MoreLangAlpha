@@ -88,7 +88,7 @@ git commit -m 'feat(education): stage full teaching asset bundles'
 - Create: `migrations/versions/033_add_education_teaching_asset_manifest.py`
 - Modify: `src/server/database/education_textbooks.py`
 - Modify: `tests/unit/server/database/test_education_teaching_packages.py`
-- Modify: `tests/unit/server/database/test_education_teaching_jobs.py`
+- Modify: `tests/unit/server/database/test_education_textbook_jobs.py`
 
 **Step 1: Write the failing test**
 
@@ -96,7 +96,7 @@ git commit -m 'feat(education): stage full teaching asset bundles'
 
 **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/unit/server/database/test_education_teaching_packages.py tests/unit/server/database/test_education_teaching_jobs.py -q`
+Run: `uv run pytest tests/unit/server/database/test_education_teaching_packages.py tests/unit/server/database/test_education_textbook_jobs.py -q`
 
 Expected: FAIL，因为 schema 和 persistence API 不存在。
 
@@ -106,14 +106,14 @@ Expected: FAIL，因为 schema 和 persistence API 不存在。
 
 **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/unit/server/database/test_education_teaching_packages.py tests/unit/server/database/test_education_teaching_jobs.py -q`
+Run: `uv run pytest tests/unit/server/database/test_education_teaching_packages.py tests/unit/server/database/test_education_textbook_jobs.py -q`
 
 Expected: PASS。
 
 **Step 5: Commit**
 
 ```bash
-git add migrations/versions/033_add_education_teaching_asset_manifest.py src/server/database/education_textbooks.py tests/unit/server/database/test_education_teaching_packages.py tests/unit/server/database/test_education_teaching_jobs.py CHANGELOG.md
+git add migrations/versions/033_add_education_teaching_asset_manifest.py src/server/database/education_textbooks.py tests/unit/server/database/test_education_teaching_packages.py tests/unit/server/database/test_education_textbook_jobs.py CHANGELOG.md
 git commit -m 'feat(education): persist teaching asset manifest'
 ```
 
@@ -254,7 +254,7 @@ Run: `cd web && pnpm playwright test e2e/education.spec.js --grep '完整知识�
 **Step 3: Run complete automated verification**
 
 ```bash
-uv run pytest tests/unit/server/services/test_education_teaching_assets.py tests/unit/server/services/test_education_teaching_validation.py tests/unit/server/services/test_education_teaching_storage.py tests/unit/server/services/test_education_teaching_jobs.py tests/unit/server/services/test_education_managed_ptc.py tests/unit/server/database/test_education_teaching_packages.py tests/unit/server/database/test_education_teaching_jobs.py tests/unit/server/app/education/test_teaching_assets.py tests/unit/server/app/education/test_textbooks.py -q
+uv run pytest tests/unit/server/services/test_education_teaching_assets.py tests/unit/server/services/test_education_teaching_validation.py tests/unit/server/services/test_education_teaching_storage.py tests/unit/server/services/test_education_teaching_jobs.py tests/unit/server/services/test_education_managed_ptc.py tests/unit/server/services/runs/test_education_teaching_timeout.py tests/unit/server/database/test_education_teaching_packages.py tests/unit/server/database/test_education_textbook_jobs.py tests/unit/server/app/education/test_teaching_assets.py tests/unit/server/app/education/test_textbooks.py -q
 make lint
 cd web && pnpm vitest run src/pages/Education/__tests__/TextbookDetailPage.test.tsx src/pages/Education/__tests__/TeachingRunDrawer.test.tsx && pnpm build && pnpm playwright test e2e/education.spec.js
 ```
