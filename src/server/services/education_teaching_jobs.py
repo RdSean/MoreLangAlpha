@@ -10,6 +10,7 @@ from datetime import datetime
 import json
 import logging
 import re
+from time import monotonic
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -312,6 +313,7 @@ async def _managed_workflow_events(
 
     iterator = workflow.__aiter__()
     pending_event: asyncio.Task[str] | None = None
+    last_heartbeat_at = monotonic()
     await touch()
     try:
         pending_event = asyncio.create_task(anext(iterator))
@@ -321,6 +323,7 @@ async def _managed_workflow_events(
             )
             if not done:
                 await touch()
+                last_heartbeat_at = monotonic()
                 continue
             try:
                 event = pending_event.result()
@@ -329,6 +332,10 @@ async def _managed_workflow_events(
             await _record_safe_progress(
                 attempt_id=attempt_id, staged=staged, event=event
             )
+            now = monotonic()
+            if now - last_heartbeat_at >= _HEARTBEAT_INTERVAL_SECONDS:
+                await touch()
+                last_heartbeat_at = now
             yield event
             pending_event = asyncio.create_task(anext(iterator))
     finally:

@@ -337,6 +337,43 @@ async def test_managed_workflow_refreshes_the_attempt_heartbeat(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_managed_workflow_refreshes_heartbeat_during_a_busy_event_stream(
+    monkeypatch,
+):
+    """A continuous model stream must not hide a long-running root from parents."""
+    education_teaching_jobs = import_module(
+        "src.server.services.education_teaching_jobs"
+    )
+    heartbeat = AsyncMock(return_value=True)
+    clock_values = iter([0.0, 3.0, 18.0])
+    monkeypatch.setattr(education_teaching_jobs, "touch_teaching_attempt", heartbeat)
+    monkeypatch.setattr(
+        education_teaching_jobs,
+        "monotonic",
+        lambda: next(clock_values),
+        raising=False,
+    )
+
+    async def workflow():
+        yield 'data: {"event":"message","content":"first chunk"}\n\n'
+        yield 'data: {"event":"message","content":"second chunk"}\n\n'
+
+    events = [
+        event
+        async for event in education_teaching_jobs._managed_workflow_events(
+            workflow(),
+            attempt_id="attempt-1",
+            root_run_id="run-1",
+            staged={"chapters": []},
+        )
+    ]
+
+    assert len(events) == 2
+    assert heartbeat.await_count == 2
+    heartbeat.assert_awaited_with(attempt_id="attempt-1", root_run_id="run-1")
+
+
+@pytest.mark.asyncio
 async def test_managed_graph_does_not_inject_interactive_skill_bodies(monkeypatch):
     """The compact service prompt carries only the managed modes."""
     education_teaching_jobs = import_module(
