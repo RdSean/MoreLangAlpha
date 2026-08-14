@@ -67,6 +67,7 @@ _MAX_READ_CHARS = 160_000
 def create_filesystem_tools(
     backend: FilesystemBackend,
     operation_callback: OperationCallback | None = None,
+    write_validator: Callable[[str, str], str | None] | None = None,
 ) -> tuple:
     """Create the Read, Write, and Edit tools bound to ``backend``.
 
@@ -225,6 +226,11 @@ def create_filesystem_tools(
         try:
             normalized_path = backend.normalize_path(file_path)
             logger.info("Writing file", file_path=file_path, normalized_path=normalized_path, size=len(content))
+
+            if write_validator:
+                error = write_validator(normalized_path, content)
+                if error:
+                    return f"ERROR: {error}"
 
             if backend.filesystem_config.enable_path_validation and not backend.validate_path(normalized_path):
                 error_msg = f"Access denied: {file_path} is not in allowed directories"

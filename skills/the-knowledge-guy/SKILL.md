@@ -63,6 +63,9 @@ This is a service-owned production stage, not a chat, walk or course request.
 4. Write only `/managed/textbook-job/<job>/outputs/teaching-package.json`,
    matching the schema in the contract. Never invent an output filename,
    storage key or URL. The service performs final validation and publication.
+   The candidate must be strict JSON: escape inner double quotes in Chinese
+   prose string values. If `Write` returns a JSON error, correct that candidate
+   in place before continuing.
 5. After each chapter, emit one stdout line beginning `EDUCATION_PROGRESS ` and
    a JSON object such as
    `{ "phase": "generating_teaching", "content_chapter_id": "..." }`.

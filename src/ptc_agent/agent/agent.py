@@ -554,9 +554,16 @@ class PTCAgent:
         # `filesystem_backend` is the composite when a store is wired; otherwise
         # it's the plain sandbox backend. Tools see a uniform rich-method
         # surface either way.
+        write_validator = None
+        if managed_policy is not None:
+            from ptc_agent.agent.managed_execution import validate_managed_textbook_write
+
+            def write_validator(path: str, content: str) -> str | None:
+                return validate_managed_textbook_write(path, content, managed_policy)
         read_file, write_file, edit_file = create_filesystem_tools(
             filesystem_backend,
             operation_callback=operation_callback,
+            write_validator=write_validator,
         )
         filesystem_tools = [
             read_file,  # overrides middleware read_file

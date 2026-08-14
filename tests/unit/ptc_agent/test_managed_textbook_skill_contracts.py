@@ -34,6 +34,8 @@ def test_knowledge_guy_managed_mode_writes_only_schema_validated_outputs():
     assert "AskUserQuestion" not in managed
     assert "artifacts/" not in managed
     assert "content_sha256" in managed
+    assert "strict JSON" in managed
+    assert "escape inner double quotes" in managed
 
 
 def test_managed_contracts_define_the_same_output_schema():

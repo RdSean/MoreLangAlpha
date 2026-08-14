@@ -1,6 +1,7 @@
 """Explicit execution limits for service-owned managed PTC runs."""
 
 from dataclasses import dataclass
+import json
 import re
 from pathlib import PurePosixPath
 from typing import Any
@@ -84,4 +85,20 @@ def validate_managed_bash_command(
         command,
     ):
         return "ERROR: command is not allowed in a managed textbook run"
+    return None
+
+
+def validate_managed_textbook_write(
+    path: str, content: str, policy: ManagedExecutionPolicy
+) -> str | None:
+    """Reject malformed JSON before the managed candidate reaches sandbox disk."""
+    candidate_path = PurePosixPath(policy.filesystem_root) / "outputs" / "teaching-package.json"
+    if PurePosixPath(path) != candidate_path:
+        return None
+    try:
+        decoded = json.loads(content)
+    except json.JSONDecodeError:
+        return "managed teaching candidate must be valid JSON before writing"
+    if not isinstance(decoded, dict):
+        return "managed teaching candidate must be a JSON object"
     return None
