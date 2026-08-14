@@ -83,15 +83,26 @@ use the literal `from_concept_id` and `to_concept_id` keys, and both values
 must be concepts in that index.
 
 `outputs/knowledge/coverage-audit.json` has format
-`langalpha-managed-coverage-audit/v1`. It has one item per frozen chapter with
-the exact ID and hash, `status: "complete"`, `missing: []`, and exactly:
+`langalpha-managed-coverage-audit/v1` and must have this exact top-level
+shape:
 
 ```json
-["knowledge", "toolkit", "practice", "teaching"]
+{
+  "format": "langalpha-managed-coverage-audit/v1",
+  "chapters": [{
+    "content_chapter_id": "frozen UUID",
+    "content_sha256": "frozen 64-lowercase-hex",
+    "status": "complete",
+    "missing": [],
+    "asset_kinds": ["knowledge", "toolkit", "practice", "teaching"]
+  }]
+}
 ```
 
-in `asset_kinds`. Do not report complete coverage unless the actual outputs
-exist and agree with the frozen chapter.
+The `chapters` array has exactly one item per frozen chapter. Do not use
+`coverage`, `items`, or another substitute top-level field. Do not report
+complete coverage unless the actual outputs exist and agree with the frozen
+chapter.
 
 ## Practice and Chinese teaching package
 

@@ -30,9 +30,27 @@ question uses an existing same-chapter `concept_id` and an exact knowledge
 point. The book-wide concept index includes every verified concept and its
 source chapter, and its relation objects use those same two literal keys for
 concept IDs in that index.
-The coverage audit has every frozen chapter with `status: "complete"`,
-`missing: []`, and `asset_kinds` equal to `knowledge`, `toolkit`, `practice`,
-and `teaching`.
+`outputs/knowledge/coverage-audit.json` must be strict JSON with this exact
+top-level shape:
+
+```json
+{
+  "format": "langalpha-managed-coverage-audit/v1",
+  "chapters": [{
+    "content_chapter_id": "frozen UUID",
+    "content_sha256": "frozen 64-lowercase-hex",
+    "status": "complete",
+    "missing": [],
+    "asset_kinds": ["knowledge", "toolkit", "practice", "teaching"]
+  }]
+}
+```
+
+The `chapters` array has exactly one item per frozen chapter. Do not use
+`coverage`, `items`, or another substitute top-level field. Each chapter has
+`status: "complete"`, `missing: []`, and `asset_kinds` equal to `knowledge`,
+`toolkit`, `practice`, and `teaching` only when the actual outputs exist and
+agree with that frozen chapter.
 
 Use the teaching package to write substantial Chinese learning material: clear
 objectives, prerequisite awareness, key difficulties, explanations calibrated

@@ -50,6 +50,8 @@ def test_managed_contracts_define_the_same_output_schema():
     for required_field in (
         "content_chapter_id",
         "content_sha256",
+        '"chapters": [',
+        '"asset_kinds": [',
         "from_concept_id",
         "to_concept_id",
         "learning_objectives",

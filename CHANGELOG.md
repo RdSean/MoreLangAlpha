@@ -4,6 +4,7 @@
 
 ### 受管教材 PTC 长程执行
 
+- 修复受管教材 PTC 覆盖审计合同只描述“每章一项”、却未规定 JSON 顶层字段而使 Agent 写出 `coverage`、最终被服务端拒绝的问题：`book-to-skill` 与 `the-knowledge-guy` 现共享明确的 `coverage-audit.json` 模板，强制使用 `chapters`、冻结 ID/哈希与完整 `asset_kinds`，并禁止 `coverage`、`items` 等替代字段。服务端的严格校验、家庭授权与私有 `education/` 归档边界不变。
 - 修复受管 PTC 已投影“正在汇总教材资产”后将包推进为 `validating`、但终态回调只接受较早阶段而放弃候选归档的状态机断层：同一活跃 root run 现在可从 `validating` 正常领取最终校验，取消和新 attempt 仍优先阻止归档。
 - 修复真实 PostgreSQL 中受管教材进度事件序号查询对 `MAX(sequence)` 使用 `FOR UPDATE` 而被拒绝的问题：事务仍先锁定活跃 attempt/job/package，再无聚合行锁地计算并插入下一个序号；PTC 写入的固定候选路径现在可投影为家长可见的安全里程碑，不存储模型原文、路径或凭据。
 - 修复受管 PTC 教材候选中的知识关系字段合同歧义：两份 staged Skill 合同现明确规定章节和全书关系对象必须使用 `from_concept_id` / `to_concept_id`，禁止含糊的 `from` / `to`。服务端继续严格拒绝未知概念引用，失败候选不会归档、发布或暴露给学生。
