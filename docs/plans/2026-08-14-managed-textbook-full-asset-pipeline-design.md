@@ -92,6 +92,11 @@ outputs/teaching-package.json
 coverage audit 必须对每个冻结章节给出覆盖状态、缺项和引用的资产类型。全书
 concept index 只可引用已冻结章节及已生成概念。
 
+`coverage-audit.json` 的顶层必须是 `format` 与 `chapters`；`chapters` 是每个
+冻结章节恰好一项的数组，每项必须保留冻结 ID、SHA-256、`status: "complete"`、
+空 `missing` 和完整 `asset_kinds`。`coverage`、`items` 或其他替代顶层字段不是
+兼容形式，必须在候选归档前拒绝。
+
 服务不信任任何模型给出的路径或哈希：它自行构造完整的预期路径集合、逐项直接下载、
 限制字节数、解析格式、验证章节集合/哈希/交叉引用和重算摘要哈希。通过后，服务
 生成不可变的 `manifest.json`、README 和稳定相对路径，再写入新的
@@ -146,7 +151,7 @@ package。学生页面无需改变权限范围，只读取发布时冻结的教�
 | 维度 | 必须满足的标准 | 证据 |
 | --- | --- | --- |
 | Skill 真实性 | PTC 从 staged 内置目录按需读取 Skill；middleware 记录实际加载的 `book-to-skill` 与 `the-knowledge-guy`，服务不强制其顺序 | 图/Skills middleware 单测、根运行 checkpoint/安全事件 |
-| 冻结与覆盖 | 每个冻结章节恰好拥有 knowledge、toolkit、practice 和教学投影；哈希与 ID 全部匹配 | 验证器单测、bundle manifest |
+| 冻结与覆盖 | 每个冻结章节恰好拥有 knowledge、toolkit、practice 和教学投影；哈希与 ID 全部匹配；coverage audit 必须以 `chapters` 顶层逐章列出完整资产，禁止 `coverage`、`items` 等替代字段 | 验证器/Skill 合同单测、bundle manifest |
 | 深度 | 有全书 concept index 和 per-chapter coverage audit；toolkit 包含概念、关系、难点、例子和复习；practice 与知识点双向关联 | fixture 校验、家长审阅 API/UI |
 | 中国学生教学质量 | 目标、前置、难点、中文解释、例子和自动判定检查均完整，题目不脱离章节证据 | schema/质量门单测、真实审阅 |
 | 安全 | API/UI/错误/SSE 不含 storage key、MinIO URL、sandbox 路径、provider、密钥或原始模型文本 | 负向 API/UI 测试、真实网络记录 |
