@@ -18,6 +18,9 @@ from src.server.app.education.models import (
     TextbookPublicationResponse,
     TextbookResponse,
     TeachingJobResponse,
+    TeachingPackageAssetSummaryResponse,
+    TeachingChapterAssetResponse,
+    TeachingReviewAssetKind,
     UpdateLearningProgressRequest,
 )
 from src.server.services.education_textbooks import (
@@ -31,6 +34,8 @@ from src.server.services.education_textbooks import (
     create_textbook,
     get_parent_learning_records,
     get_parent_textbook,
+    get_teaching_asset_summary,
+    get_teaching_chapter_asset,
     get_teaching_job_projection,
     get_student_chapter_context,
     get_student_learning,
@@ -87,6 +92,42 @@ async def get_family_textbook(textbook_id: UUID, user_id: CurrentUserId):
     try:
         return await get_parent_textbook(
             parent_user_id=user_id, textbook_id=str(textbook_id)
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/teaching-packages/{teaching_package_id}/assets",
+    response_model=TeachingPackageAssetSummaryResponse,
+)
+async def get_family_teaching_asset_summary(
+    teaching_package_id: UUID, user_id: CurrentUserId
+):
+    try:
+        return await get_teaching_asset_summary(
+            parent_user_id=user_id, teaching_package_id=str(teaching_package_id)
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/teaching-packages/{teaching_package_id}/chapters/{chapter_id}/assets/{kind}",
+    response_model=TeachingChapterAssetResponse,
+)
+async def get_family_teaching_chapter_asset(
+    teaching_package_id: UUID,
+    chapter_id: UUID,
+    kind: TeachingReviewAssetKind,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_teaching_chapter_asset(
+            parent_user_id=user_id,
+            teaching_package_id=str(teaching_package_id),
+            chapter_id=str(chapter_id),
+            kind=kind,
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc

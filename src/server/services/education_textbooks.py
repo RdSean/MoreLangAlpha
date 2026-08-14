@@ -2,6 +2,8 @@
 
 import asyncio
 import hashlib
+import json
+from collections.abc import Mapping
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,7 @@ from src.server.database.education_textbooks import (
     create_textbook_record,
     fail_textbook_processing_job,
     get_processing_job_for_parent,
+    get_teaching_asset_review_for_parent,
     get_teaching_input_for_parent,
     get_teaching_job_projection_for_parent,
     get_student_chapter_context_record,
@@ -32,6 +35,10 @@ from src.server.database.education_textbooks import (
 )
 from src.server.database.education_members import get_membership_for_user
 from src.server.services.education_textbook_storage import write_textbook_content_bundle
+from src.server.services.education_teaching_assets import (
+    TeachingAssetValidationError,
+    expected_teaching_asset_paths,
+)
 from src.server.services.education_teaching_storage import build_staged_teaching_input
 from src.utils.storage import get_bytes
 
@@ -302,6 +309,7 @@ def _safe_teaching_projection(job: dict[str, Any]) -> dict[str, Any]:
                 "phase": event["phase"],
                 "summary": event["summary"],
                 "chapter_id": event.get("chapter_id"),
+                "asset_kind": event.get("asset_kind"),
                 "created_at": event.get("created_at"),
             }
             for event in job.get("events", [])
@@ -318,6 +326,214 @@ def _safe_teaching_projection(job: dict[str, Any]) -> dict[str, Any]:
             }
             for attempt in job.get("attempts", [])
         ],
+    }
+
+
+_REVIEWABLE_TEACHING_ASSET_KINDS = frozenset({"knowledge", "toolkit", "practice"})
+
+
+def _validated_teaching_asset_review(
+    review: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], dict[str, Mapping[str, Any]], Any]:
+    """Rebuild fixed archive paths only from the service-authored manifest."""
+    manifest = review.get("asset_manifest")
+    chapters = review.get("chapters")
+    if (
+        not isinstance(manifest, Mapping)
+        or manifest.get("format") != "langalpha-family-teaching-assets/v2"
+        or not isinstance(chapters, list)
+        or not isinstance(manifest.get("chapters"), list)
+    ):
+        raise TextbookNotFoundError("Teaching assets are not available")
+    manifest_chapters: dict[str, Mapping[str, Any]] = {}
+    for entry in manifest["chapters"]:
+        if not isinstance(entry, Mapping):
+            raise TextbookNotFoundError("Teaching assets are not available")
+        chapter_id = str(entry.get("content_chapter_id", ""))
+        if not chapter_id or chapter_id in manifest_chapters:
+            raise TextbookNotFoundError("Teaching assets are not available")
+        manifest_chapters[chapter_id] = entry
+    chapter_records: dict[str, Mapping[str, Any]] = {}
+    frozen_chapters: list[dict[str, Any]] = []
+    for chapter in chapters:
+        if not isinstance(chapter, Mapping):
+            raise TextbookNotFoundError("Teaching assets are not available")
+        chapter_id = str(chapter.get("content_chapter_id", ""))
+        manifest_chapter = manifest_chapters.get(chapter_id)
+        if not manifest_chapter or chapter_id in chapter_records:
+            raise TextbookNotFoundError("Teaching assets are not available")
+        chapter_records[chapter_id] = chapter
+        frozen_chapters.append(
+            {
+                "content_chapter_id": chapter_id,
+                "content_sha256": manifest_chapter.get("content_sha256"),
+                "position": chapter.get("position"),
+                "slug": chapter.get("slug"),
+            }
+        )
+    if set(chapter_records) != set(manifest_chapters):
+        raise TextbookNotFoundError("Teaching assets are not available")
+    try:
+        paths = expected_teaching_asset_paths({"chapters": frozen_chapters})
+    except TeachingAssetValidationError as exc:
+        raise TextbookNotFoundError("Teaching assets are not available") from exc
+    return manifest, chapter_records, paths
+
+
+def _safe_review_asset_metadata(asset: object) -> dict[str, Any]:
+    if not isinstance(asset, Mapping):
+        raise TextbookNotFoundError("Teaching assets are not available")
+    kind = asset.get("kind")
+    size_bytes = asset.get("size_bytes")
+    sha256 = asset.get("sha256")
+    if (
+        kind not in _REVIEWABLE_TEACHING_ASSET_KINDS
+        or not isinstance(size_bytes, int)
+        or isinstance(size_bytes, bool)
+        or size_bytes < 0
+        or not isinstance(sha256, str)
+        or len(sha256) != 64
+    ):
+        raise TextbookNotFoundError("Teaching assets are not available")
+    return {"kind": kind, "size_bytes": size_bytes, "sha256": sha256}
+
+
+def _private_teaching_asset_key(bundle_prefix: object, relative_path: str) -> str:
+    if not isinstance(bundle_prefix, str) or not bundle_prefix.startswith("education/"):
+        raise TextbookNotFoundError("Teaching assets are not available")
+    prefix_parts = bundle_prefix.split("/")
+    if any(part in {"", ".", ".."} for part in prefix_parts):
+        raise TextbookNotFoundError("Teaching assets are not available")
+    return f"{bundle_prefix}/{relative_path}"
+
+
+async def get_teaching_asset_summary(
+    *, parent_user_id: str, teaching_package_id: str
+) -> dict[str, Any]:
+    review = await get_teaching_asset_review_for_parent(
+        parent_user_id=parent_user_id, teaching_package_id=teaching_package_id
+    )
+    if not review:
+        raise TextbookNotFoundError("Teaching package not found")
+    manifest, chapter_records, _paths = _validated_teaching_asset_review(review)
+    concept_index = manifest.get("concept_index")
+    coverage_audit = manifest.get("coverage_audit")
+    if (
+        not isinstance(concept_index, Mapping)
+        or not isinstance(coverage_audit, Mapping)
+        or not isinstance(concept_index.get("size_bytes"), int)
+        or not isinstance(concept_index.get("concept_count"), int)
+        or not isinstance(coverage_audit.get("size_bytes"), int)
+        or coverage_audit.get("status") != "complete"
+    ):
+        raise TextbookNotFoundError("Teaching assets are not available")
+    manifest_chapters = {
+        str(chapter["content_chapter_id"]): chapter for chapter in manifest["chapters"]
+    }
+    chapters = []
+    for chapter_id, chapter in sorted(
+        chapter_records.items(), key=lambda item: int(item[1]["position"])
+    ):
+        entry = manifest_chapters[chapter_id]
+        assets = entry.get("assets")
+        if (
+            entry.get("coverage_status") != "complete"
+            or not isinstance(entry.get("concept_count"), int)
+            or not isinstance(assets, list)
+        ):
+            raise TextbookNotFoundError("Teaching assets are not available")
+        safe_assets = [_safe_review_asset_metadata(asset) for asset in assets]
+        if {asset["kind"] for asset in safe_assets} != _REVIEWABLE_TEACHING_ASSET_KINDS:
+            raise TextbookNotFoundError("Teaching assets are not available")
+        chapters.append(
+            {
+                "chapter_id": chapter_id,
+                "position": chapter["position"],
+                "title": chapter["title"],
+                "coverage_status": entry["coverage_status"],
+                "concept_count": entry["concept_count"],
+                "assets": safe_assets,
+            }
+        )
+    return {
+        "teaching_package_id": review["teaching_package_id"],
+        "format": manifest["format"],
+        "concept_index": {
+            "size_bytes": concept_index["size_bytes"],
+            "concept_count": concept_index["concept_count"],
+        },
+        "coverage_audit": {
+            "size_bytes": coverage_audit["size_bytes"],
+            "status": coverage_audit["status"],
+        },
+        "chapters": chapters,
+    }
+
+
+async def get_teaching_chapter_asset(
+    *,
+    parent_user_id: str,
+    teaching_package_id: str,
+    chapter_id: str,
+    kind: str,
+) -> dict[str, Any]:
+    if kind not in _REVIEWABLE_TEACHING_ASSET_KINDS:
+        raise TextbookNotFoundError("Teaching asset not found")
+    review = await get_teaching_asset_review_for_parent(
+        parent_user_id=parent_user_id, teaching_package_id=teaching_package_id
+    )
+    if not review:
+        raise TextbookNotFoundError("Teaching package not found")
+    manifest, _chapter_records, paths = _validated_teaching_asset_review(review)
+    manifest_chapter = next(
+        (
+            entry
+            for entry in manifest["chapters"]
+            if str(entry.get("content_chapter_id")) == chapter_id
+        ),
+        None,
+    )
+    if not isinstance(manifest_chapter, Mapping):
+        raise TextbookNotFoundError("Teaching asset not found")
+    metadata = next(
+        (
+            _safe_review_asset_metadata(asset)
+            for asset in manifest_chapter.get("assets", [])
+            if isinstance(asset, Mapping) and asset.get("kind") == kind
+        ),
+        None,
+    )
+    if not metadata:
+        raise TextbookNotFoundError("Teaching asset not found")
+    chapter_paths = paths.for_chapter(chapter_id)
+    relative_path = getattr(chapter_paths, kind)
+    key = _private_teaching_asset_key(
+        review.get("bundle_prefix"), relative_path.removeprefix("outputs/")
+    )
+    content = await asyncio.to_thread(get_bytes, key)
+    if (
+        content is None
+        or len(content) != metadata["size_bytes"]
+        or hashlib.sha256(content).hexdigest() != metadata["sha256"]
+    ):
+        raise TextbookNotFoundError("Teaching asset not found")
+    try:
+        decoded: str | dict[str, Any]
+        if kind == "toolkit":
+            decoded = content.decode("utf-8").strip()
+            if not decoded:
+                raise ValueError
+        else:
+            decoded = json.loads(content.decode("utf-8"))
+            if not isinstance(decoded, dict):
+                raise ValueError
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        raise TextbookNotFoundError("Teaching asset not found") from exc
+    return {
+        "teaching_package_id": review["teaching_package_id"],
+        "chapter_id": chapter_id,
+        "kind": kind,
+        "content": decoded,
     }
 
 

@@ -381,6 +381,47 @@ async def get_teaching_input_for_parent(
     return result
 
 
+async def get_teaching_asset_review_for_parent(
+    *, parent_user_id: str, teaching_package_id: str
+) -> dict[str, Any] | None:
+    """Authorize a parent before returning the private v2 bundle locator."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT packages.teaching_package_id, packages.content_version_id,
+                       packages.bundle_prefix, packages.asset_manifest
+                FROM education_teaching_packages AS packages
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = packages.content_version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                WHERE packages.teaching_package_id = %s
+                  AND packages.status = 'review'
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (teaching_package_id, parent_user_id),
+            )
+            package = await cur.fetchone()
+            if not package:
+                return None
+            result = dict(package)
+            await cur.execute(
+                """
+                SELECT chapter_id AS content_chapter_id, position, slug, title
+                FROM education_textbook_chapters
+                WHERE version_id = %s
+                ORDER BY position
+                """,
+                (result["content_version_id"],),
+            )
+            result["chapters"] = [dict(row) for row in await cur.fetchall()]
+    return result
+
+
 async def get_teaching_job_projection_for_parent(
     *, parent_user_id: str, job_id: str
 ) -> dict[str, Any] | None:

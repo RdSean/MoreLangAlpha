@@ -1,7 +1,7 @@
 """Pydantic contracts for first-party family homework APIs."""
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
@@ -162,11 +162,56 @@ class TeachingPackageSummaryResponse(BaseModel):
     question_count: int
 
 
+TeachingAssetKind = Literal["knowledge", "toolkit", "practice", "teaching"]
+TeachingReviewAssetKind = Literal["knowledge", "toolkit", "practice"]
+
+
+class TeachingAssetMetadataResponse(BaseModel):
+    kind: TeachingAssetKind
+    size_bytes: int
+    sha256: str | None = None
+
+
+class TeachingConceptIndexSummaryResponse(BaseModel):
+    size_bytes: int
+    concept_count: int
+
+
+class TeachingCoverageAuditSummaryResponse(BaseModel):
+    size_bytes: int
+    status: Literal["complete"]
+
+
+class TeachingAssetChapterSummaryResponse(BaseModel):
+    chapter_id: UUID
+    position: int
+    title: str
+    coverage_status: Literal["complete"]
+    concept_count: int
+    assets: list[TeachingAssetMetadataResponse]
+
+
+class TeachingPackageAssetSummaryResponse(BaseModel):
+    teaching_package_id: UUID
+    format: Literal["langalpha-family-teaching-assets/v2"]
+    concept_index: TeachingConceptIndexSummaryResponse
+    coverage_audit: TeachingCoverageAuditSummaryResponse
+    chapters: list[TeachingAssetChapterSummaryResponse]
+
+
+class TeachingChapterAssetResponse(BaseModel):
+    teaching_package_id: UUID
+    chapter_id: UUID
+    kind: TeachingReviewAssetKind
+    content: str | dict[str, Any]
+
+
 class TeachingJobEventResponse(BaseModel):
     sequence: int
     phase: str
     summary: str
     chapter_id: UUID | None = None
+    asset_kind: TeachingAssetKind | None = None
     created_at: datetime | None = None
 
 

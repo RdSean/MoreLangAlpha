@@ -207,6 +207,35 @@ async def test_recording_autonomous_global_progress_discards_model_text_and_path
 
 
 @pytest.mark.asyncio
+async def test_parent_asset_review_query_requires_household_parent_membership(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    mock_cursor.fetchone.return_value = {
+        "teaching_package_id": "package-1",
+        "content_version_id": "version-1",
+        "bundle_prefix": "education/household-1/english-2/v1/teaching/v2",
+        "asset_manifest": {"format": "langalpha-family-teaching-assets/v2"},
+    }
+    mock_cursor.fetchall.return_value = [
+        {"content_chapter_id": "chapter-1", "position": 1, "slug": "overview", "title": "导读"}
+    ]
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+
+    review = await education_textbooks.get_teaching_asset_review_for_parent(
+        parent_user_id="parent-1", teaching_package_id="package-1"
+    )
+
+    assert review["chapters"][0]["title"] == "导读"
+    lookup_sql = mock_cursor.execute.call_args_list[0].args[0]
+    assert "memberships.role = 'parent'" in lookup_sql
+    assert "packages.status = 'review'" in lookup_sql
+
+
+@pytest.mark.asyncio
 async def test_touching_a_live_teaching_attempt_refreshes_only_its_bound_root_run(
     mock_connection, mock_cursor, monkeypatch
 ):

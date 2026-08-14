@@ -426,6 +426,7 @@ async def test_teaching_job_response_whitelists_the_safe_progress_projection(cli
                 "sequence": 2,
                 "phase": "generating_teaching",
                 "summary": "已完成第 1 章教学材料生成",
+                "asset_kind": "teaching",
                 "storage_key": "education/private/source.pdf",
                 "raw_sse": "data: secret",
             }
@@ -457,6 +458,7 @@ async def test_teaching_job_response_whitelists_the_safe_progress_projection(cli
             "phase": "generating_teaching",
             "summary": "已完成第 1 章教学材料生成",
             "chapter_id": None,
+            "asset_kind": "teaching",
             "created_at": None,
         }
     ]

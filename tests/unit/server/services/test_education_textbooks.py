@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock
 from types import SimpleNamespace
 import sys
+from hashlib import sha256
 
 import pytest
 
@@ -423,3 +424,113 @@ async def test_local_processor_makes_stable_chapters_from_extractable_pdf_pages(
     assert package["chapters"][0]["markdown"].endswith("教材正文\n\n教材正文")
     assert "teaching_material" not in package["chapters"][0]
     assert "questions" not in package["chapters"][0]
+
+
+@pytest.mark.asyncio
+async def test_parent_reads_only_manifest_verified_private_teaching_asset(monkeypatch):
+    package_id = "5e3a0b43-8378-4b6c-926f-0f053577501d"
+    chapter_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
+    toolkit = "# 导读工具包\n\n核心概念".encode("utf-8")
+    review = {
+        "teaching_package_id": package_id,
+        "bundle_prefix": "education/household-1/english-2/v1/teaching/v2",
+        "asset_manifest": {
+            "format": "langalpha-family-teaching-assets/v2",
+            "concept_index": {"size_bytes": 2, "concept_count": 1},
+            "coverage_audit": {"size_bytes": 2, "status": "complete"},
+            "chapters": [
+                {
+                    "content_chapter_id": chapter_id,
+                    "content_sha256": "a" * 64,
+                    "coverage_status": "complete",
+                    "concept_count": 1,
+                    "assets": [
+                        {"kind": "knowledge", "size_bytes": 2, "sha256": "b" * 64},
+                        {
+                            "kind": "toolkit",
+                            "size_bytes": len(toolkit),
+                            "sha256": sha256(toolkit).hexdigest(),
+                        },
+                        {"kind": "practice", "size_bytes": 2, "sha256": "c" * 64},
+                    ],
+                }
+            ],
+        },
+        "chapters": [
+            {
+                "content_chapter_id": chapter_id,
+                "position": 1,
+                "slug": "overview",
+                "title": "导读",
+            }
+        ],
+    }
+    get_review = AsyncMock(return_value=review)
+    requested_keys: list[str] = []
+
+    def get_asset(key: str):
+        requested_keys.append(key)
+        return toolkit
+
+    monkeypatch.setattr(education_textbooks, "get_teaching_asset_review_for_parent", get_review)
+    monkeypatch.setattr(education_textbooks, "get_bytes", get_asset)
+
+    asset = await education_textbooks.get_teaching_chapter_asset(
+        parent_user_id="parent-1",
+        teaching_package_id=package_id,
+        chapter_id=chapter_id,
+        kind="toolkit",
+    )
+
+    assert asset == {
+        "teaching_package_id": package_id,
+        "chapter_id": chapter_id,
+        "kind": "toolkit",
+        "content": toolkit.decode("utf-8"),
+    }
+    assert requested_keys == [
+        "education/household-1/english-2/v1/teaching/v2/chapters/01-overview-toolkit.md"
+    ]
+    assert "education/" not in repr(asset)
+
+
+@pytest.mark.asyncio
+async def test_parent_asset_read_rejects_bytes_that_do_not_match_manifest(monkeypatch):
+    chapter_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
+    review = {
+        "teaching_package_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+        "bundle_prefix": "education/household-1/english-2/v1/teaching/v2",
+        "asset_manifest": {
+            "format": "langalpha-family-teaching-assets/v2",
+            "concept_index": {"size_bytes": 2, "concept_count": 1},
+            "coverage_audit": {"size_bytes": 2, "status": "complete"},
+            "chapters": [
+                {
+                    "content_chapter_id": chapter_id,
+                    "content_sha256": "a" * 64,
+                    "coverage_status": "complete",
+                    "concept_count": 1,
+                    "assets": [
+                        {"kind": "knowledge", "size_bytes": 2, "sha256": "b" * 64},
+                        {"kind": "toolkit", "size_bytes": 1, "sha256": "c" * 64},
+                        {"kind": "practice", "size_bytes": 2, "sha256": "d" * 64},
+                    ],
+                }
+            ],
+        },
+        "chapters": [
+            {"content_chapter_id": chapter_id, "position": 1, "slug": "overview", "title": "导读"}
+        ],
+    }
+    monkeypatch.setattr(
+        education_textbooks, "get_teaching_asset_review_for_parent", AsyncMock(return_value=review)
+    )
+    monkeypatch.setattr(education_textbooks, "get_bytes", lambda _key: b"tampered")
+
+    with pytest.raises(education_textbooks.TextbookNotFoundError):
+        await education_textbooks.get_teaching_chapter_asset(
+            parent_user_id="parent-1",
+            teaching_package_id=review["teaching_package_id"],
+            chapter_id=chapter_id,
+            kind="toolkit",
+        )
