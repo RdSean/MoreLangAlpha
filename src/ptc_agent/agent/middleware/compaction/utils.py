@@ -55,6 +55,8 @@ def resolve_compaction_client(config: AgentConfig) -> Any | None:
 
 # Lazy-loaded tiktoken encoder
 _tiktoken_encoder: tiktoken.Encoding | None = None
+_PROVIDER_USAGE_MULTIPLIER = 8
+_PROVIDER_USAGE_SLACK_TOKENS = 32_768
 
 
 def _get_tiktoken_encoder() -> tiktoken.Encoding:
@@ -139,6 +141,30 @@ def count_tokens_tiktoken(messages: Iterable[MessageLikeRepresentation]) -> int:
 
         total += len(enc.encode(text)) + 3  # +3 for role/message overhead
     return total
+
+
+def resolve_context_token_estimate(
+    *,
+    local_estimate: int,
+    cached_input_tokens: int,
+    cached_output_tokens: int,
+) -> int:
+    """Use provider usage only when it is plausible against local context.
+
+    Some OpenAI-compatible providers report cumulative or otherwise inflated
+    usage metadata. Compaction controls the next request's context size, so an
+    implausible report must fall back to the local tiktoken estimate instead of
+    starting a summarization loop.
+    """
+    local = max(0, int(local_estimate))
+    provider_total = max(0, int(cached_input_tokens)) + max(0, int(cached_output_tokens))
+    if provider_total == 0:
+        return local
+    provider_limit = max(
+        local * _PROVIDER_USAGE_MULTIPLIER,
+        local + _PROVIDER_USAGE_SLACK_TOKENS,
+    )
+    return provider_total if provider_total <= provider_limit else local
 
 
 # =============================================================================

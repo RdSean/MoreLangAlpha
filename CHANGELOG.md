@@ -4,6 +4,7 @@
 
 ### 受管教材 PTC 长程执行
 
+- 修复部分 OpenAI 兼容模型将累计或异常 usage 回报为百万级上下文 token、使 PTC 压缩中间件反复总结而教材加工停在“准备中”的问题：压缩预算现在每轮与本地 token 估算交叉校验，异常回报会安全退回本地值；正常范围的 provider usage 仍用于精确控制。该保护同时覆盖同步与异步模型调用路径，不改变模型凭据、家庭权限或 `education/` 私有资产边界。
 - 修复受管教材教学包任务把两份完整的交互式 Skill 文档同时注入 PTC 上下文、并复制到 sandbox，导致模型反复读取普通转换/问答流程且频繁触发上下文压缩的问题：运行时仍从当前 worktree 的 `book-to-skill` 与 `the-knowledge-guy` 提取各自唯一的 `Managed textbook mode` 段落并按顺序执行，但 sandbox 仅保留两份固定 managed contract，不再暴露完整交互文档。
 - 受管根运行现在在等待模型或 SSE 输出期间每 15 秒刷新同一 attempt/root run 的持久化心跳；更新受最新 attempt、运行状态和根运行标识共同约束，取消或新 attempt 不会被旧 worker 重新标为存活。家长运行详情可据此区分仍在执行的长程加工与失联尝试，且不会接收原始模型文本、对象键、sandbox 路径或凭据。
 

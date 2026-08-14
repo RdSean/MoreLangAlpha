@@ -57,6 +57,7 @@ from ptc_agent.agent.middleware.compaction.utils import (
     build_summary_message,
     count_tokens_tiktoken,
     get_effective_messages,
+    resolve_context_token_estimate,
     strip_base64_from_messages,
     truncate_message_args,
     truncate_read_results,
@@ -271,17 +272,27 @@ class CompactionMiddleware(AgentMiddleware):
             request.messages, previous_event
         )
 
-        # 3. Count tokens once (prefer cached from last model call, fall back to tiktoken).
-        #    Pass through to _truncate_args / _truncate_read_results to avoid recomputing.
-        if cached_input_tokens > 0:
-            total_tokens = cached_input_tokens + cached_output_tokens
-        else:
-            counted_msgs = (
-                [request.system_message, *effective_messages]
-                if request.system_message is not None
-                else effective_messages
+        # 3. Count locally every time, then accept prior provider usage only
+        # when it remains plausible. OpenAI-compatible providers can report
+        # cumulative usage, which would otherwise force a compaction loop.
+        counted_msgs = (
+            [request.system_message, *effective_messages]
+            if request.system_message is not None
+            else effective_messages
+        )
+        local_total_tokens = self.token_counter(counted_msgs)
+        total_tokens = resolve_context_token_estimate(
+            local_estimate=local_total_tokens,
+            cached_input_tokens=cached_input_tokens,
+            cached_output_tokens=cached_output_tokens,
+        )
+        provider_total_tokens = cached_input_tokens + cached_output_tokens
+        if provider_total_tokens and total_tokens != provider_total_tokens:
+            logger.warning(
+                "[Compaction] Ignoring implausible provider usage: reported=%d local=%d",
+                provider_total_tokens,
+                local_total_tokens,
             )
-            total_tokens = self.token_counter(counted_msgs)
 
         # 4. TIER 1: Truncate tool args in old messages (batch gated)
         truncated_messages, truncated, originals = self._truncate_args(
@@ -526,10 +537,24 @@ class CompactionMiddleware(AgentMiddleware):
         if state_changed:
             last_truncation_msg_count = len(effective_messages)
 
-        if cached_input_tokens > 0:
-            total_tokens = cached_input_tokens + cached_output_tokens
-        else:
-            total_tokens = self.token_counter(truncated_messages)
+        counted_msgs = (
+            [request.system_message, *truncated_messages]
+            if request.system_message is not None
+            else truncated_messages
+        )
+        local_total_tokens = self.token_counter(counted_msgs)
+        total_tokens = resolve_context_token_estimate(
+            local_estimate=local_total_tokens,
+            cached_input_tokens=cached_input_tokens,
+            cached_output_tokens=cached_output_tokens,
+        )
+        provider_total_tokens = cached_input_tokens + cached_output_tokens
+        if provider_total_tokens and total_tokens != provider_total_tokens:
+            logger.warning(
+                "[Compaction] Ignoring implausible provider usage: reported=%d local=%d",
+                provider_total_tokens,
+                local_total_tokens,
+            )
 
         if not self._should_summarize(truncated_messages, total_tokens):
             try:

@@ -17,6 +17,7 @@ from ptc_agent.agent.middleware.compaction.utils import (
     build_compaction_event,
     compute_absolute_cutoff,
     get_effective_messages,
+    resolve_context_token_estimate,
 )
 
 
@@ -248,3 +249,25 @@ class TestGetEffectiveMessages:
         drifted = [m for m in raw if m.id != "1"]
         result = get_effective_messages(drifted, event)
         assert [m.id for m in result[1:]] == ["3", "4", "5"]
+
+
+class TestResolveContextTokenEstimate:
+    def test_rejects_impossible_provider_usage_for_context_budget(self):
+        """A provider's inflated usage report must not force a compaction loop.
+
+        The managed teaching run reproduced this with a roughly ten-thousand-token
+        prompt and a multi-million-token OpenAI-compatible ``usage_metadata``
+        result. The local estimate is the safe fallback for context control.
+        """
+        assert resolve_context_token_estimate(
+            local_estimate=12_000,
+            cached_input_tokens=1_860_072,
+            cached_output_tokens=27_405,
+        ) == 12_000
+
+    def test_keeps_plausible_provider_usage_for_context_budget(self):
+        assert resolve_context_token_estimate(
+            local_estimate=12_000,
+            cached_input_tokens=32_000,
+            cached_output_tokens=4_000,
+        ) == 36_000
