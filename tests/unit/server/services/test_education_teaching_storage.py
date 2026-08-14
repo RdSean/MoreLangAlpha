@@ -114,6 +114,25 @@ async def test_staged_managed_skill_contracts_describe_only_v2_service_derived_o
 
 
 @pytest.mark.asyncio
+async def test_staged_skill_managed_modes_reference_v2_outputs_without_a_service_order():
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    await education_teaching_storage.stage_managed_teaching_skills(_job()["job_id"], sandbox)
+
+    modes = [
+        call.args[1].decode("utf-8")
+        for call in sandbox.aupload_file_bytes.await_args_list
+        if call.args[0].endswith("/SKILL.md")
+    ]
+    assert len(modes) == 2
+    for mode in modes:
+        assert "outputs/knowledge/concept-index.json" in mode
+        assert "outputs/book-skill-manifest.json" not in mode
+        assert "Return control for the next service-owned stage" not in mode
+
+
+@pytest.mark.asyncio
 async def test_staging_fails_closed_when_a_sandbox_upload_is_rejected():
     sandbox = AsyncMock(spec=["aupload_file_bytes"])
     sandbox.aupload_file_bytes = AsyncMock(return_value=False)

@@ -59,6 +59,16 @@ def get_workflow_timeout() -> int:
     return get_infrastructure_config().workflow_timeout
 
 
+def get_education_teaching_workflow_timeout() -> int:
+    """Dedicated wall-clock timeout for one managed textbook PTC root."""
+    return get_infrastructure_config().education_teaching_workflow_timeout
+
+
+def get_education_teaching_abandoned_timeout() -> int:
+    """Dedicated disconnected-run recovery window for managed textbook work."""
+    return get_infrastructure_config().education_teaching_abandoned_timeout
+
+
 def get_workflow_orchestration_config() -> WorkflowOrchestrationConfig:
     """Caps and timeouts for RunWorkflow programmatic subagent runs."""
     return get_infrastructure_config().workflow

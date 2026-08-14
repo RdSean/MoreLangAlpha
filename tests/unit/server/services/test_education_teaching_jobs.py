@@ -88,6 +88,11 @@ async def test_dispatch_persists_root_run_before_registering_managed_executor(mo
         raising=False,
     )
     monkeypatch.setattr(education_teaching_jobs, "RunSSEProducer", _FakeProducer, raising=False)
+    _FakeProducer.last_kwargs = None
+    monkeypatch.setattr(
+        education_teaching_jobs, "get_education_teaching_workflow_timeout", lambda: 86_400,
+        raising=False,
+    )
     generated_ids = iter([run_id, query_id])
     monkeypatch.setattr(education_teaching_jobs, "uuid4", lambda: next(generated_ids), raising=False)
     monkeypatch.setattr(
@@ -105,19 +110,25 @@ async def test_dispatch_persists_root_run_before_registering_managed_executor(mo
         thread_id="thread-1",
         staged={"manifest": {"chapters": []}},
         policy=policy,
-        skill_contexts=[{"name": "book-to-skill", "instruction": "--managed-textbook"}],
     )
 
     assert dispatched == {"root_run_id": run_id}
     assert calls == ["start", "executor"]
+    assert _FakeProducer.last_kwargs == {
+        "thread_id": "thread-1",
+        "run_id": run_id,
+        "workflow_timeout": 86_400,
+    }
     education_teaching_jobs.settle_teaching_attempt.assert_awaited_once_with(
         attempt_id="attempt-1", root_run_id=run_id, status="running"
     )
 
 
 class _FakeProducer:
-    def __init__(self, **_kwargs):
-        pass
+    last_kwargs = None
+
+    def __init__(self, **kwargs):
+        type(self).last_kwargs = kwargs
 
     async def stream_workflow(self, **_kwargs):
         if False:
@@ -133,9 +144,9 @@ async def test_managed_progress_projection_accepts_only_frozen_chapter_ids(monke
     chapter_id = "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
     event = (
         'data: {"event":"message","content":"EDUCATION_PROGRESS '
-        '{\\"phase\\":\\"generating_teaching\\",\\"content_chapter_id\\":\\"'
+        '{\\"phase\\":\\"practice_build\\",\\"content_chapter_id\\":\\"'
         f"{chapter_id}"
-        '\\"}"}\n\n'
+        '\\",\\"asset_kind\\":\\"practice\\"}"}\n\n'
     )
 
     await education_teaching_jobs._record_safe_progress(
@@ -146,26 +157,26 @@ async def test_managed_progress_projection_accepts_only_frozen_chapter_ids(monke
 
     recorded.assert_awaited_once_with(
         attempt_id="attempt-1",
-        phase="generating_teaching",
+        phase="practice_build",
         chapter_id=chapter_id,
-        summary="已完成第 2 章教学材料生成",
+        asset_kind="practice",
+        summary="Agent 已报告：第 2 章已完成练习构建",
     )
 
 
-def test_managed_prompt_inlines_only_the_two_managed_skill_modes():
+def test_managed_prompt_directs_one_root_to_read_staged_skills_without_forcing_order():
     education_teaching_jobs = import_module("src.server.services.education_teaching_jobs")
 
     prompt = education_teaching_jobs.managed_teaching_prompt(
         "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
     )
 
-    assert "book-to-skill" in prompt
-    assert "the-knowledge-guy" in prompt
-    assert prompt.count("## Managed textbook mode") == 2
+    assert ".agents/skills/book-to-skill/SKILL.md" in prompt
+    assert ".agents/skills/the-knowledge-guy/SKILL.md" in prompt
     assert ".agents/skills/book-to-skill/reference/managed-textbook-contract.md" in prompt
     assert ".agents/skills/the-knowledge-guy/reference/managed-textbook-contract.md" in prompt
-    assert "## Philosophy" not in prompt
-    assert "## Project skill paths" not in prompt
+    assert "## Managed textbook mode" not in prompt
+    assert "严格先完成" not in prompt
 
 
 @pytest.mark.asyncio
@@ -223,6 +234,8 @@ async def test_managed_graph_does_not_inject_interactive_skill_bodies(monkeypatc
     graph_call = education_teaching_jobs.build_ptc_graph_with_session.await_args
     assert graph_call.kwargs["config"] is agent_config
     assert graph_call.kwargs["user_id"] is None
+    assert graph_call.kwargs["disable_subagents"] is False
+    assert graph_call.kwargs["subagent_names"] == ["textbook-chapter-worker"]
 
 
 @pytest.mark.asyncio

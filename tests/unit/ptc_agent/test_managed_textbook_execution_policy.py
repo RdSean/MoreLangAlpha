@@ -22,10 +22,9 @@ def test_managed_textbook_policy_allows_only_staged_files_and_two_builtin_skills
     assert policy.enable_web is False
     assert policy.enable_vault is False
     assert policy.enable_preview is False
-    # A managed teaching run is one service-owned root execution. Letting it
-    # create arbitrary subagents would reintroduce a second execution surface
-    # outside the fixed staged-input boundary.
-    assert policy.allow_subagents is False
+    # The root can fan out only service-defined workers that inherit the same
+    # sandbox boundary; user definitions are never registered for this mode.
+    assert policy.allow_subagents is True
 
 
 def test_managed_textbook_policy_rejects_non_uuid_job_ids():
@@ -236,6 +235,24 @@ def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypat
     monkeypatch.setattr(agent_module, "get_skill_registry", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(agent_module.PTCAgent, "_build_model_resilience_middleware", lambda _self: [])
     monkeypatch.setattr(agent_module, "resolve_compaction_client", lambda _config: None)
+    compiled_subagents: list[dict[str, object]] = []
+
+    def compile_subagents(**kwargs):
+        compiled_subagents.append(
+            {
+                "enabled_names": kwargs["enabled_names"],
+                "definition": kwargs["registry"].get("textbook-chapter-worker"),
+            }
+        )
+        return [
+            {
+                "name": "textbook-chapter-worker",
+                "description": "managed chapter worker",
+                "system_prompt": "managed chapter worker prompt",
+            }
+        ]
+
+    monkeypatch.setattr(agent_module, "create_subagents", compile_subagents)
 
     class Config:
         llm = None
@@ -273,7 +290,9 @@ def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypat
 
     tool_names = {tool.name for tool in captured["tools"]}
     assert {"Bash", "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite"} <= tool_names
-    assert not {"ExecuteCode", "BashOutput", "PreviewURL", "ShowWidget", "WebSearch", "AskUserQuestion", "Task"} & tool_names
+    assert not {"ExecuteCode", "BashOutput", "PreviewURL", "ShowWidget", "WebSearch", "AskUserQuestion"} & tool_names
+    assert compiled_subagents[0]["enabled_names"] == ["textbook-chapter-worker"]
+    assert compiled_subagents[0]["definition"] is not None
 
 
 def test_managed_bash_rejects_shell_escapes_from_the_job_root():

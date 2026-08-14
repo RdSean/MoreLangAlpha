@@ -34,8 +34,32 @@ Use the teaching package to write substantial Chinese learning material: clear
 objectives, prerequisite awareness, key difficulties, explanations calibrated
 for Chinese learners, examples, misconceptions and auto-graded review
 questions. It uses `langalpha-managed-teaching-package/v1` and must cover each
-frozen chapter exactly once. Its chapter `knowledge_points` equal the matching
-knowledge asset list; every question copies one of those strings verbatim.
+frozen chapter exactly once. Each chapter is strict JSON with this minimum
+shape:
+
+```json
+{
+  "content_chapter_id": "frozen UUID",
+  "content_sha256": "frozen 64-lowercase-hex",
+  "learning_objectives": ["Chinese objective"],
+  "knowledge_points": ["exact Chinese knowledge point"],
+  "key_difficulties": ["Chinese difficulty"],
+  "prerequisites": ["optional prerequisite"],
+  "teaching_material": "substantial Chinese explanation",
+  "questions": [{
+    "position": 1,
+    "prompt": "question",
+    "options": {"A": "option", "B": "option"},
+    "correct_option": "A",
+    "explanation": "Chinese explanation",
+    "knowledge_point": "exact Chinese knowledge point"
+  }]
+}
+```
+
+Its chapter `knowledge_points` must exactly match the matching knowledge asset
+list; every question `knowledge_point` must exactly match one of those strings.
+Write strict JSON and escape inner double quotes in every JSON string.
 
 Use only safe `EDUCATION_PROGRESS` stdout events after actual work. Allowed
 phases are `planning`, `chapter_mapping`, `concept_linking`, `coverage_audit`,

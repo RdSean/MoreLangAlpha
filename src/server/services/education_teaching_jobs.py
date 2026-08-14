@@ -8,7 +8,6 @@ from contextlib import suppress
 from datetime import datetime
 import json
 import logging
-from pathlib import Path
 import re
 from typing import Any
 from uuid import UUID, uuid4
@@ -17,7 +16,10 @@ from ptc_agent.agent.graph import build_ptc_graph_with_session
 from ptc_agent.agent.managed_execution import (
     ManagedExecutionPolicy,
 )
-from src.config.settings import get_ptc_recursion_limit
+from src.config.settings import (
+    get_education_teaching_workflow_timeout,
+    get_ptc_recursion_limit,
+)
 from src.server.database.education_textbooks import (
     mark_teaching_job_cancel_requested,
     record_teaching_event,
@@ -34,42 +36,51 @@ logger = logging.getLogger(__name__)
 
 _MANAGED_KIND = "education_teaching"
 _PROGRESS_PREFIX = "EDUCATION_PROGRESS "
-_PROGRESS_PHASES = frozenset({"building_skill", "generating_teaching"})
+_PROGRESS_PHASES = frozenset(
+    {
+        "planning",
+        "chapter_mapping",
+        "concept_linking",
+        "coverage_audit",
+        "practice_build",
+        "teaching_build",
+        "bundle_assembling",
+        "validating_bundle",
+        # Existing in-flight v1 attempts remain readable until they finish.
+        "building_skill",
+        "generating_teaching",
+    }
+)
+_PROGRESS_ASSET_KINDS = frozenset({"knowledge", "toolkit", "practice", "teaching"})
+_PROGRESS_LABELS = {
+    "planning": "正在规划知识资产加工",
+    "chapter_mapping": "已完成章节映射",
+    "concept_linking": "已完成概念关联",
+    "coverage_audit": "已完成覆盖审计",
+    "practice_build": "已完成练习构建",
+    "teaching_build": "已完成教学材料生成",
+    "bundle_assembling": "正在汇总教材资产",
+    "validating_bundle": "正在校验教材资产",
+    "building_skill": "已完成知识整理",
+    "generating_teaching": "已完成教学材料生成",
+}
 _PROGRESS_RE = re.compile(r"EDUCATION_PROGRESS\s+(\{[^\r\n]+\})")
-_MANAGED_SKILL_NAMES = ("book-to-skill", "the-knowledge-guy")
-_MANAGED_SKILL_HEADING = "## Managed textbook mode"
 _HEARTBEAT_INTERVAL_SECONDS = 15.0
 
 
-def _managed_skill_mode(skill_name: str, job_id: str) -> str:
-    """Read only a built-in Skill's fixed managed-mode section for one job."""
-    source = Path(__file__).resolve().parents[3] / "skills" / skill_name / "SKILL.md"
-    try:
-        text = source.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise RuntimeError("Managed teaching skill is unavailable") from exc
-    start = text.find(_MANAGED_SKILL_HEADING)
-    if start < 0:
-        raise RuntimeError("Managed teaching skill has no managed mode")
-    next_heading = text.find("\n## ", start + len(_MANAGED_SKILL_HEADING))
-    mode = text[start:] if next_heading < 0 else text[start:next_heading]
-    return mode.replace("<job>", job_id).strip()
-
-
 def managed_teaching_prompt(job_id: str) -> str:
-    """Return the compact, source-derived instruction for a managed root run."""
-    skill_modes = "\n\n".join(
-        f"# Active skill: {skill_name}\n{_managed_skill_mode(skill_name, job_id)}"
-        for skill_name in _MANAGED_SKILL_NAMES
-    )
+    """Describe immutable service facts without deciding the Skill sequence."""
+    root = f"/managed/textbook-job/{job_id}"
     return (
-        "这是服务托管的家庭教材教学包任务，不是与用户的对话。"
-        f"任务编号为 {job_id}。以下是唯一启用的两个内置技能的受管模式；"
-        "它们按顺序执行，不能进入任何普通交互模式。\n\n"
-        f"{skill_modes}\n\n"
-        "严格先完成 book-to-skill，再完成 the-knowledge-guy。不得提问、不得访问网络、"
-        "不得调用其他技能或子代理、不得读取完整交互技能文档、不得处理普通工作区文件。"
-        "只可在已指定的受管任务目录工作；最终只写入 contract 指定的候选 JSON。"
+        "这是服务托管的家庭教材知识资产任务，不是与用户的对话。"
+        f"任务编号为 {job_id}。冻结输入仅在 {root}/inputs/manifest.json 和 "
+        f"{root}/inputs/chapters/。先按需读取 {root}/.agents/skills/book-to-skill/SKILL.md "
+        f"和 {root}/.agents/skills/the-knowledge-guy/SKILL.md，并在需要具体输出合同时读取 "
+        f"{root}/.agents/skills/book-to-skill/reference/managed-textbook-contract.md 与 "
+        f"{root}/.agents/skills/the-knowledge-guy/reference/managed-textbook-contract.md。"
+        "由你自主决定章节映射、概念关联、覆盖回查、练习构建和中文教学材料的顺序；"
+        "不要询问用户、访问网络、MCP、Vault 或普通工作区，也不要发布或暴露任何资产。"
+        "只写受管合同列出的 v2 固定输出；在真实工作单元完成后写安全的 EDUCATION_PROGRESS 里程碑。"
     )
 
 
@@ -125,25 +136,34 @@ async def _record_safe_progress(
     for progress in _extract_progress_payloads(event):
         phase = progress.get("phase")
         chapter_id = progress.get("content_chapter_id")
-        if phase not in _PROGRESS_PHASES or not isinstance(chapter_id, str):
+        asset_kind = progress.get("asset_kind")
+        if phase not in _PROGRESS_PHASES:
             continue
-        try:
-            UUID(chapter_id)
-        except ValueError:
+        if asset_kind is not None and asset_kind not in _PROGRESS_ASSET_KINDS:
             continue
-        position = chapter_positions.get(chapter_id)
-        if position is None:
-            continue
+        position: int | None = None
+        if chapter_id is not None:
+            if not isinstance(chapter_id, str):
+                continue
+            try:
+                UUID(chapter_id)
+            except ValueError:
+                continue
+            position = chapter_positions.get(chapter_id)
+            if position is None:
+                continue
+        label = _PROGRESS_LABELS[phase]
         summary = (
-            f"已完成第 {position} 章知识整理"
-            if phase == "building_skill"
-            else f"已完成第 {position} 章教学材料生成"
+            f"Agent 已报告：第 {position} 章{label}"
+            if position is not None
+            else f"Agent 已报告：{label}"
         )
         try:
             await record_teaching_event(
                 attempt_id=attempt_id,
                 phase=phase,
                 chapter_id=chapter_id,
+                asset_kind=asset_kind,
                 summary=summary,
             )
         except Exception:
@@ -220,8 +240,8 @@ async def build_managed_teaching_graph(
     graph = await build_ptc_graph_with_session(
         session=session,
         config=config,
-        subagent_names=[],
-        disable_subagents=True,
+        subagent_names=["textbook-chapter-worker"] if policy.allow_subagents else [],
+        disable_subagents=not policy.allow_subagents,
         checkpointer=run_handle.checkpointer,
         background_registry=None,
         namespace_owner=None,
@@ -306,7 +326,6 @@ async def dispatch_managed_root_run(
     thread_id: str,
     staged: Mapping[str, Any],
     policy: ManagedExecutionPolicy,
-    skill_contexts: list[dict[str, str]],
     agent_config: Any | None = None,
     **_ignored: Any,
 ) -> dict[str, str]:
@@ -349,6 +368,7 @@ async def dispatch_managed_root_run(
         handler = RunSSEProducer(
             thread_id=thread_id,
             run_id=run_id,
+            workflow_timeout=get_education_teaching_workflow_timeout(),
         )
 
         async def on_terminal(task_info: Any, status: str) -> None:

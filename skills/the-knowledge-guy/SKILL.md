@@ -48,8 +48,7 @@ This is a service-owned production stage, not a chat, walk or course request.
 
 1. Treat `<job>` as a UUID. Read only the staged manifest and chapter Markdown
    at `/managed/textbook-job/<job>/inputs/manifest.json` and
-   `/managed/textbook-job/<job>/inputs/chapters/`, plus the intermediate
-   representation at `/managed/textbook-job/<job>/work/knowledge-skill/`.
+   `/managed/textbook-job/<job>/inputs/chapters/`.
 2. Read the staged managed contract at
    `/managed/textbook-job/<job>/.agents/skills/the-knowledge-guy/reference/managed-textbook-contract.md`.
    Do not solicit input, fan out unrelated skills, dispatch other skills, use
@@ -58,18 +57,24 @@ This is a service-owned production stage, not a chat, walk or course request.
    response.
 3. For every frozen chapter, generate Chinese-student teaching material,
    learning objectives, knowledge points, difficulties, prerequisites and
-   auto-gradable questions. Preserve the staged `content_chapter_id` and
-   `content_sha256` exactly. Every question's `knowledge_point` must exactly match one string in that chapter's `knowledge_points`; copy the established string rather than expanding or rephrasing it.
-4. Write only `/managed/textbook-job/<job>/outputs/teaching-package.json`,
-   matching the schema in the contract. Never invent an output filename,
-   storage key or URL. The service performs final validation and publication.
-   The candidate must be strict JSON: escape inner double quotes in Chinese
-   prose string values. If `Write` returns a JSON error, correct that candidate
-   in place before continuing.
-5. After each chapter, emit one stdout line beginning `EDUCATION_PROGRESS ` and
-   a JSON object such as
-   `{ "phase": "generating_teaching", "content_chapter_id": "..." }`.
-   End after the candidate file is complete.
+   auto-gradable questions, using the staged chapter knowledge, toolkit and
+   practice candidates whenever they are available. The PTC root decides when
+   to build, audit or revisit those assets. Preserve the staged
+   `content_chapter_id` and `content_sha256` exactly.
+4. Write only the v2 paths listed in the contract, including
+   `/managed/textbook-job/<job>/outputs/knowledge/concept-index.json`,
+   `/managed/textbook-job/<job>/outputs/knowledge/coverage-audit.json`, every
+   chapter's `-knowledge.json`, `-toolkit.md` and `-practice.json`, and
+   `/managed/textbook-job/<job>/outputs/teaching-package.json`. Every question
+   `knowledge_point` exactly matches one string in its chapter's knowledge
+   asset. Never invent an output filename, storage key or URL. The service
+   performs final validation and publication. Write strict JSON, escape inner double quotes
+   in JSON strings, and preserve every frozen identity exactly:
+   the `content_chapter_id`, `content_sha256` and required knowledge-point
+   relationships must exactly match the staged contract.
+5. After an actual work unit, emit one stdout `EDUCATION_PROGRESS ` JSON event
+   with an allowed phase, optional frozen chapter ID and optional asset kind.
+   Do not emit model reasoning, paths, totals, provider data or raw errors.
 
 ## Project skill paths
 

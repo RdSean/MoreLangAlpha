@@ -88,6 +88,7 @@ from ptc_agent.agent.prompts import (
 )
 from ptc_agent.agent.subagents import (
     SubagentCompiler,
+    SubagentDefinition,
     SubagentRegistry,
     create_subagents,
 )
@@ -128,6 +129,31 @@ logger = structlog.get_logger(__name__)
 
 
 DEFAULT_MAX_CONCURRENT_TASK_UNITS = 3
+
+_MANAGED_TEXTBOOK_SUBAGENTS = {
+    "textbook-chapter-worker": SubagentDefinition(
+        name="textbook-chapter-worker",
+        description=(
+            "Delegate one frozen textbook chapter or coverage check. The worker inherits "
+            "the managed textbook sandbox and can only inspect or write the fixed asset contract."
+        ),
+        mode="ptc",
+        role_prompt=(
+            "Work only on the assigned frozen textbook unit. Read the staged managed contract "
+            "before writing a fixed v2 asset. Do not access web, MCP, Vault, user data, or paths "
+            "outside the managed task root. Report concise results to the parent root."
+        ),
+        tools=["filesystem", "bash", "todo"],
+        max_iterations=30,
+        stateful=True,
+        sections={
+            "workspace_paths": False,
+            "tool_guide": False,
+            "data_processing": False,
+            "visualizations": False,
+        },
+    )
+}
 DEFAULT_MAX_TASK_ITERATIONS = 3
 DEFAULT_MAX_GENERAL_ITERATIONS = 10
 
@@ -455,7 +481,7 @@ class PTCAgent:
             # The managed graph is service-owned rather than a variant of a
             # parent's chat. Defend this lower boundary too because PTCAgent is
             # also used directly by internal runners.
-            disable_subagents = True
+            disable_subagents = not managed_policy.allow_subagents
             plan_mode = False
             namespace_owner = None
             store = None
@@ -475,7 +501,7 @@ class PTCAgent:
         short_thread_id = thread_id[:8] if thread_id else ""
 
         if managed_policy is not None:
-            disable_subagents = True
+            disable_subagents = not managed_policy.allow_subagents
             backend = SandboxBackend(
                 sandbox,
                 root_dir=managed_policy.filesystem_root,
@@ -595,7 +621,11 @@ class PTCAgent:
             tools.extend(crawl_tools)
 
         if subagent_names is None:
-            subagent_names = self.config.subagents.enabled
+            subagent_names = (
+                ["textbook-chapter-worker"]
+                if managed_policy is not None and managed_policy.allow_subagents
+                else self.config.subagents.enabled
+            )
 
         # --- Build shared middleware (for both main agent and subagents) ---
         shared_middleware: list[Any] = []
@@ -712,12 +742,16 @@ class PTCAgent:
 
         from ptc_agent.agent.tools import think_tool
 
-        subagent_registry = SubagentRegistry(
-            user_definitions=(
-                self.config.subagents.definitions
-                if self.config.subagents.definitions
-                else None
-            ),
+        subagent_registry = (
+            SubagentRegistry(builtins=_MANAGED_TEXTBOOK_SUBAGENTS)
+            if managed_policy is not None
+            else SubagentRegistry(
+                user_definitions=(
+                    self.config.subagents.definitions
+                    if self.config.subagents.definitions
+                    else None
+                ),
+            )
         )
         subagent_tool_sets: dict[str, list[Any]] = {
             "execute_code": [execute_code_tool] if execute_code_tool else [],

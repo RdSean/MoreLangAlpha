@@ -51,19 +51,22 @@ flows do not apply.
    memory or an HTML presentation file.
 3. Read the staged managed contract at
    `/managed/textbook-job/<job>/.agents/skills/book-to-skill/reference/managed-textbook-contract.md`,
-   derive a chapter-wise knowledge representation from every frozen Markdown
-   chapter, and write it only to
-   `/managed/textbook-job/<job>/work/knowledge-skill/`.
-4. Write exactly one machine-readable summary to
-   `/managed/textbook-job/<job>/outputs/book-skill-manifest.json`. It includes
-   the SHA-256 of `inputs/manifest.json`, every `content_chapter_id` and
-   `content_sha256`, and the generation version. It must not contain a storage
-   key, URL, credential or untrusted output path. For that input checksum, run
-   exactly `sha256sum inputs/manifest.json`: Bash already starts in the job root,
-   so do not use an absolute shell path or create a helper program.
-5. Emit concise stdout progress lines prefixed `EDUCATION_PROGRESS ` with JSON
-   `{ "phase": "building_skill", "content_chapter_id": "..." }` after each
-   chapter. Return control for the next service-owned stage.
+   then derive chapter-wise knowledge, concept links, coverage evidence and
+   practice as the current frozen task needs. Coordinate with the staged
+   `the-knowledge-guy` skill when Chinese teaching material needs those assets;
+   the PTC root chooses the ordering and may revisit a chapter for coverage.
+4. Write only the v2 candidate paths named by that contract:
+   `/managed/textbook-job/<job>/outputs/knowledge/concept-index.json`,
+   `/managed/textbook-job/<job>/outputs/knowledge/coverage-audit.json`,
+   `/managed/textbook-job/<job>/outputs/chapters/<position>-<slug>-knowledge.json`,
+   `/managed/textbook-job/<job>/outputs/chapters/<position>-<slug>-toolkit.md`,
+   `/managed/textbook-job/<job>/outputs/chapters/<position>-<slug>-practice.json`,
+   and `/managed/textbook-job/<job>/outputs/teaching-package.json`. Preserve
+   every frozen chapter ID and hash exactly. Never write a storage key, URL,
+   credential or untrusted output path.
+5. After actual work units, emit concise stdout `EDUCATION_PROGRESS ` JSON with
+   an allowed phase, optional frozen `content_chapter_id`, and optional asset
+   kind. Do not emit model reasoning, paths, self-reported totals or errors.
 
 ## Philosophy
 

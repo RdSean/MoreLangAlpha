@@ -28,6 +28,7 @@ def education_teaching_policy(job_id: str) -> ManagedExecutionPolicy:
     return ManagedExecutionPolicy(
         allowed_skill_names=frozenset({"book-to-skill", "the-knowledge-guy"}),
         filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
+        allow_subagents=True,
     )
 
 

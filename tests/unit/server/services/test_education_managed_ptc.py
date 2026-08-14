@@ -82,16 +82,7 @@ async def test_launcher_creates_hidden_workspace_thread_then_stages_before_dispa
     async def dispatch(**kwargs):
         calls.append("dispatch")
         assert kwargs["agent_config"] is agent_config
-        assert kwargs["skill_contexts"] == [
-            {
-                "name": "book-to-skill",
-                "instruction": f"--managed-textbook {JOB_ID}",
-            },
-            {
-                "name": "the-knowledge-guy",
-                "instruction": f"--managed-textbook {JOB_ID}",
-            },
-        ]
+        assert "skill_contexts" not in kwargs
         policy = kwargs["policy"]
         assert policy.filesystem_root == f"/managed/textbook-job/{JOB_ID}"
         assert policy.enable_mcp is False
@@ -311,14 +302,14 @@ async def test_resume_requeues_failed_job_then_creates_a_new_root_attempt(monkey
 
 
 @pytest.mark.asyncio
-async def test_completed_root_archives_validated_candidate_before_review_projection(monkeypatch):
+async def test_completed_root_archives_validated_complete_asset_bundle_before_review_projection(monkeypatch):
     education_managed_ptc = import_module("src.server.services.education_managed_ptc")
     calls: list[str] = []
     markdown = "# 导读\n\n冻结教材正文"
 
     async def download(*_args, **_kwargs):
         calls.append("download")
-        return {"format": "candidate"}
+        return {"outputs/knowledge/concept-index.json": b"{}"}
 
     async def validating(**_kwargs):
         calls.append("validating")
@@ -326,11 +317,17 @@ async def test_completed_root_archives_validated_candidate_before_review_project
 
     def validate(candidate, frozen):
         calls.append("validate")
-        assert candidate == {"format": "candidate"}
+        assert candidate == {"outputs/knowledge/concept-index.json": b"{}"}
         assert frozen["chapters"][0]["content_sha256"] == sha256(
             markdown.encode("utf-8")
         ).hexdigest()
-        return {"chapters": [{"content_chapter_id": "chapter-1"}]}
+        return {
+            "format": "langalpha-family-teaching-assets/v2",
+            "concept_index": {"sha256": "a" * 64, "size_bytes": 2, "concept_count": 1},
+            "coverage_audit": {"sha256": "b" * 64, "size_bytes": 2, "status": "complete"},
+            "chapters": [],
+            "teaching_package": {"chapters": [{"content_chapter_id": "chapter-1"}]},
+        }
 
     async def archive(*_args, **_kwargs):
         calls.append("archive")
@@ -339,12 +336,14 @@ async def test_completed_root_archives_validated_candidate_before_review_project
     async def complete(**kwargs):
         calls.append("complete")
         assert kwargs["bundle_prefix"].startswith("education/")
+        assert kwargs["asset_manifest"]["format"] == "langalpha-family-teaching-assets/v2"
+        assert kwargs["package"] == {"chapters": [{"content_chapter_id": "chapter-1"}]}
         return {"status": "completed"}
 
-    monkeypatch.setattr(education_managed_ptc, "download_teaching_output", download, raising=False)
+    monkeypatch.setattr(education_managed_ptc, "download_teaching_asset_outputs", download, raising=False)
     monkeypatch.setattr(education_managed_ptc, "begin_teaching_validation", validating, raising=False)
-    monkeypatch.setattr(education_managed_ptc, "validate_teaching_package", validate, raising=False)
-    monkeypatch.setattr(education_managed_ptc, "write_teaching_package_bundle", archive, raising=False)
+    monkeypatch.setattr(education_managed_ptc, "validate_teaching_assets", validate, raising=False)
+    monkeypatch.setattr(education_managed_ptc, "write_teaching_asset_bundle", archive, raising=False)
     monkeypatch.setattr(education_managed_ptc, "complete_teaching_attempt", complete, raising=False)
     monkeypatch.setattr(education_managed_ptc, "settle_teaching_attempt", AsyncMock(), raising=False)
 
@@ -379,13 +378,13 @@ async def test_invalid_completed_root_never_creates_review_projection(monkeypatc
     complete = AsyncMock()
     monkeypatch.setattr(
         education_managed_ptc,
-        "download_teaching_output",
-        AsyncMock(return_value={"format": "candidate"}),
+        "download_teaching_asset_outputs",
+        AsyncMock(return_value={"outputs/knowledge/concept-index.json": b"{}"}),
         raising=False,
     )
     monkeypatch.setattr(
         education_managed_ptc,
-        "validate_teaching_package",
+        "validate_teaching_assets",
         MagicMock(side_effect=ValueError("invalid candidate")),
         raising=False,
     )

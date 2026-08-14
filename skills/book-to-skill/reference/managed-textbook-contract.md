@@ -95,11 +95,33 @@ same-chapter `knowledge_point`, and a `concept_id` belonging to that chapter.
 
 `outputs/teaching-package.json` has format
 `langalpha-managed-teaching-package/v1`. It contains every frozen chapter
-exactly once with the existing learning objectives, knowledge points,
-difficulties, prerequisites, Chinese teaching material and multiple-choice
-questions. Each question's `knowledge_point` must exactly match one value in
-the chapter `knowledge_points`, which must exactly equal the corresponding
-knowledge asset's list. Escape all JSON strings correctly.
+exactly once. Each chapter is strict JSON with this minimum shape:
+
+```json
+{
+  "content_chapter_id": "frozen UUID",
+  "content_sha256": "frozen 64-lowercase-hex",
+  "learning_objectives": ["Chinese objective"],
+  "knowledge_points": ["exact Chinese knowledge point"],
+  "key_difficulties": ["Chinese difficulty"],
+  "prerequisites": ["optional prerequisite"],
+  "teaching_material": "substantial Chinese explanation",
+  "questions": [{
+    "position": 1,
+    "prompt": "question",
+    "options": {"A": "option", "B": "option"},
+    "correct_option": "A",
+    "explanation": "Chinese explanation",
+    "knowledge_point": "exact Chinese knowledge point"
+  }]
+}
+```
+
+`content_chapter_id`, `content_sha256` and every question's
+`knowledge_point` must exactly match the frozen input or its chapter
+`knowledge_points`; that list must exactly match the corresponding knowledge
+asset's list. Write strict JSON and escape inner double quotes in every JSON
+string.
 
 After a real completed unit, emit at most one `EDUCATION_PROGRESS ` stdout
 line with JSON containing only `phase`, optional frozen `content_chapter_id`,

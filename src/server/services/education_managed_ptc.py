@@ -23,16 +23,16 @@ from src.server.database.education_textbooks import (
 from src.server.database.workspace import create_workspace
 from src.server.services.workspace_manager import WorkspaceManager
 from src.server.services.education_teaching_storage import (
-    download_teaching_output,
+    download_teaching_asset_outputs,
     freeze_teaching_input,
     stage_managed_teaching_skills,
     stage_teaching_inputs,
-    write_teaching_package_bundle,
+    write_teaching_asset_bundle,
 )
 from src.server.services.education_teaching_jobs import (
     resolve_managed_teaching_agent_config,
 )
-from src.server.services.education_teaching_validation import validate_teaching_package
+from src.server.services.education_teaching_assets import validate_teaching_assets
 from src.server.utils.error_sanitization import sanitize_error_text
 
 
@@ -118,10 +118,6 @@ async def prepare_and_dispatch_teaching_attempt(
         staged=staged,
         policy=policy,
         agent_config=agent_config,
-        skill_contexts=[
-            {"name": "book-to-skill", "instruction": f"--managed-textbook {job_id}"},
-            {"name": "the-knowledge-guy", "instruction": f"--managed-textbook {job_id}"},
-        ],
     )
     return {
         "managed_workspace_id": workspace_id,
@@ -264,15 +260,20 @@ async def finalize_teaching_attempt(
                 extra={"attempt_id": attempt_id, "root_run_id": root_run_id},
             )
             return None
-        candidate = await download_teaching_output(job_id, sandbox)
-        validated = validate_teaching_package(candidate, freeze_teaching_input(job))
-        prefix = await write_teaching_package_bundle(job, validated)
+        frozen = freeze_teaching_input(job)
+        outputs = await download_teaching_asset_outputs(job_id, frozen, sandbox)
+        validated = validate_teaching_assets(outputs, frozen)
+        prefix = await write_teaching_asset_bundle(job, validated, outputs)
+        asset_manifest = {
+            key: value for key, value in validated.items() if key != "teaching_package"
+        }
         completed = await complete_teaching_attempt(
             job_id=job_id,
             attempt_id=attempt_id,
             root_run_id=root_run_id,
             bundle_prefix=prefix,
-            package=validated,
+            asset_manifest=asset_manifest,
+            package=validated["teaching_package"],
         )
         if completed is None:
             raise RuntimeError("Managed teaching completion lost its active attempt")
