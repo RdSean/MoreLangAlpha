@@ -669,7 +669,6 @@ async def record_teaching_event(
                     SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
                     FROM education_teaching_events
                     WHERE attempt_id = %s
-                    FOR UPDATE
                     """,
                     (attempt_id,),
                 )

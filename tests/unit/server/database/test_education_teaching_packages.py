@@ -187,6 +187,15 @@ async def test_recording_generation_progress_advances_the_package_phase(
         if "UPDATE education_teaching_packages" in call.args[0]
     )
     assert package_update.args[1][0] == "generating_teaching"
+    statements = [call.args[0] for call in mock_cursor.execute.call_args_list]
+    active_attempt_lock = next(
+        sql for sql in statements if "FOR UPDATE OF attempts, jobs, packages" in sql
+    )
+    sequence_lookup = next(
+        sql for sql in statements if "COALESCE(MAX(sequence), 0) + 1" in sql
+    )
+    assert "FOR UPDATE" in active_attempt_lock
+    assert "FOR UPDATE" not in sequence_lookup
 
 
 @pytest.mark.asyncio
