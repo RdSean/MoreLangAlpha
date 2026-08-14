@@ -92,7 +92,7 @@ git commit -m 'feat(education): stage full teaching asset bundles'
 
 **Step 1: Write the failing test**
 
-断言完成 v2 attempt 时 package 保存安全 asset manifest；同一 attempt 只绑定一个活跃 root；取消或新 attempt 后旧 root 不能推进或发布。断言 PTC 白名单里程碑可投影但 parent detail 不返回 bundle prefix、object key、模型错误或 sandbox path。
+断言完成 v2 attempt 时 package 保存安全 asset manifest；同一 attempt 只绑定一个活跃 root；取消或新 attempt 后旧 root 不能推进或发布。断言 PTC 的 `planning`、`chapter_mapping`、`concept_linking`、`coverage_audit`、`practice_build`、`teaching_build`、`bundle_assembling`、`validating_bundle` 里程碑可投影，未知 phase、自由文本、路径和模型自报计数均被丢弃；parent detail 不返回 bundle prefix、object key、模型错误或 sandbox path。
 
 **Step 2: Run test to verify it fails**
 
@@ -102,7 +102,7 @@ Expected: FAIL，因为 schema 和 persistence API 不存在。
 
 **Step 3: Write minimal implementation**
 
-迁移为 `education_teaching_packages` 增加 `asset_manifest JSONB NOT NULL DEFAULT '{}'::jsonb`。复用现有 attempt/root run 行与事件表，只扩展白名单里程碑和安全 asset 摘要的持久化/投影；用既有 family join、transaction 和 row locks 保证取消或新 attempt 不能让旧 root 发布，保持 legacy package 兼容。
+迁移为 `education_teaching_packages` 增加 `asset_manifest JSONB NOT NULL DEFAULT '{}'::jsonb`。复用现有 attempt/root run 行与事件表，只扩展白名单里程碑、asset kind 和安全摘要的持久化/投影；用既有 family join、transaction 和 row locks 保证取消或新 attempt 不能让旧 root 发布，保持 legacy package 兼容。
 
 **Step 4: Run test to verify it passes**
 
@@ -127,10 +127,15 @@ git commit -m 'feat(education): persist teaching asset manifest'
 - Modify: `tests/unit/server/services/test_education_teaching_jobs.py`
 - Modify: `tests/unit/server/services/test_education_managed_ptc.py`
 - Modify: `tests/unit/ptc_agent/test_managed_textbook_skill_contracts.py`
+- Modify: `config.yaml`
+- Modify: `src/config/models.py`
+- Modify: `src/config/settings.py`
+- Modify: `src/server/services/runs/executor.py`
+- Create: `tests/unit/server/services/runs/test_education_teaching_timeout.py`
 
 **Step 1: Write the failing test**
 
-断言 graph 只启动一个 root，且不向 `configurable.skill_contexts` 预注入 Skill 正文。断言 sandbox 中有两项完整内置 Skill，PTC 读取各自 `SKILL.md` 后由 middleware 标记实际加载；受管内置子任务继承同一 policy，而用户自定义子任务、MCP/web/Vault 仍不可用。终态才下载/校验全部资产；取消或失败不得归档。
+断言 graph 只启动一个 root，且不向 `configurable.skill_contexts` 预注入 Skill 正文。断言 sandbox 中有两项完整内置 Skill，PTC 读取各自 `SKILL.md` 后由 middleware 标记实际加载；受管内置子任务继承同一 policy，而用户自定义子任务、MCP/web/Vault 仍不可用。断言模型安静等待期间 15 秒心跳持续发生，教材 root 使用独立的 24 小时 timeout 和无连接回收窗口，而普通聊天仍使用原 `workflow_timeout`。终态才下载/校验全部资产；取消或失败不得归档。
 
 **Step 2: Run test to verify it fails**
 
@@ -140,7 +145,7 @@ Expected: FAIL，因为当前只 stage 两份 contract、图层强制关闭所�
 
 **Step 3: Write minimal implementation**
 
-`build_managed_teaching_graph()` 保持单一 root，prompt 只陈述服务事实、输入、输出合同和安全边界。PTC mode 通过读取 staged `SKILL.md` 自动加载完整 Skill；不在启动时内联两份正文。调整 graph/agent 以尊重 `managed_policy.allow_subagents`，只允许服务定义的内置 worker 并把同一 filesystem/capability policy 传给它们。两个 managed mode 改为 v2 map/reduce/audit/practice 与中文教学构建，但由 PTC 决定调用顺序；恢复始终是新的冻结 attempt，不能复用旧 sandbox output。
+`build_managed_teaching_graph()` 保持单一 root，prompt 只陈述服务事实、输入、输出合同和安全边界。PTC mode 通过读取 staged `SKILL.md` 自动加载完整 Skill；不在启动时内联两份正文。调整 graph/agent 以尊重 `managed_policy.allow_subagents`，只允许服务定义的内置 worker 并把同一 filesystem/capability policy 传给它们。扩展 progress parser/DB projection，使用白名单 milestone 和服务推导的计数，而不是 PTC 指挥。新增 `education_teaching_workflow_timeout` 与 `education_teaching_abandoned_timeout`（均默认 86400 秒），并只对该 managed root 应用；普通聊天 timeout 不变。两个 managed mode 改为 v2 map/reduce/audit/practice 与中文教学构建，但由 PTC 决定调用顺序；恢复始终是新的冻结 attempt，不能复用旧 sandbox output。
 
 **Step 4: Run test to verify it passes**
 
@@ -205,7 +210,7 @@ git commit -m 'feat(education): expose safe teaching asset review'
 
 **Step 1: Write the failing test**
 
-断言 review package 显示“知识资产”标签、每章 coverage 和概念；点击 toolkit/practice 走 API hook 并展示安全内容。断言运行抽屉显示两阶段安全进度和 attempt，却没有 composer、storage key、sandbox path 或 provider 文本。
+断言 review package 显示“知识资产”标签、每章 coverage 和概念；点击 toolkit/practice 走 API hook 并展示安全内容。断言运行抽屉显示 PTC 自主里程碑、逐章已报告资产、开始后的耗时、最近心跳和“等待 Agent/模型响应”，并区分“Agent 已报告”与“已验证”；它没有 composer、storage key、sandbox path 或 provider 文本。
 
 **Step 2: Run test to verify it fails**
 
@@ -215,7 +220,7 @@ Expected: FAIL，因为 asset query、标签和阶段投影不存在。
 
 **Step 3: Write minimal implementation**
 
-增加 typed API/React Query key，不复制 server state。detail 增加紧凑“知识资产”标签，按需读单个 asset；运行抽屉扩展 phase label/progress/retry。沿用 Dialog/Button/Quiet Workspace tokens，保持移动端换行和学生权限，不创建第二套 PTC/chat 界面。
+增加 typed API/React Query key，不复制 server state。detail 增加紧凑“知识资产”标签，按需读单个 asset；运行抽屉扩展 PTC 自主里程碑、逐章资产、elapsed/heartbeat/安静等待和 retry。沿用 Dialog/Button/Quiet Workspace tokens，保持移动端换行和学生权限，不创建第二套 PTC/chat 界面。
 
 **Step 4: Run test to verify it passes**
 

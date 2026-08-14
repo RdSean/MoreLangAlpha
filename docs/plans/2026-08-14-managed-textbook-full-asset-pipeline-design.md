@@ -112,6 +112,25 @@ URL、sandbox 路径、原始模型输出或凭据。
 attempt，旧 attempt、checkpoint 引用和 bundle 保持不可变。跨 worker 的真相仍在
 PostgreSQL/Redis/现有 RunCoordinator，而不放入模块级内存。
 
+## 细粒度进度与长程等待
+
+PTC 在完成真实工作单元后写一条 `EDUCATION_PROGRESS`，但服务不把该事件解释为下一步
+命令。允许的 `phase` 为 `planning`、`chapter_mapping`、`concept_linking`、
+`coverage_audit`、`practice_build`、`teaching_build`、`bundle_assembling` 和
+`validating_bundle`；可选章节和 asset kind 仅可引用冻结章节及固定资产种类。服务从
+冻结 manifest 推导总章节数和每章所需资产数，并用本地中文模板生成摘要；模型提供的
+自由文本、路径、计数、URL 和错误不会进入数据库或浏览器。
+
+家长运行详情显示最近里程碑、逐章已报告资产类型、总量、开始后的耗时、最近持久心跳
+和“正在等待 Agent/模型响应”的安静状态。里程碑在最终 bundle 校验前标记为“Agent
+已报告”，终态校验后才标记为“已验证”；页面既有细节，也不把模型自报伪装成服务证明。
+浏览器刷新、关闭、SSE 断开和网络安静均不取消任务。
+
+教材任务须使用独立的部署级可配置时限，默认 24 小时，而非短聊天的全局 6 小时。
+LocalRunExecutor 的无连接回收和 RunSSEProducer 的硬时限都必须使用这项受管任务值；
+超过该期限应生成可恢复、脱敏的失败状态，显式取消始终可用。15 秒 attempt heartbeat、
+持久 checkpoint、Redis replay 和 worker 对账继续运行，因此等待不依赖打开的浏览器。
+
 ## 家长与学生界面
 
 教材详情继续以“资料、内容、知识资产、教学、审阅、发布、分配”作为单一工作流。
@@ -133,6 +152,7 @@ package。学生页面无需改变权限范围，只读取发布时冻结的教�
 | 安全 | API/UI/错误/SSE 不含 storage key、MinIO URL、sandbox 路径、provider、密钥或原始模型文本 | 负向 API/UI 测试、真实网络记录 |
 | 家庭权限 | 只有同家庭家长可查看候选资产和控制任务；学生仅见发布快照且不能写家长字段 | 路由服务单测、真实角色验收 |
 | 长程可靠性 | 心跳、取消、恢复和终态对账仍作用于唯一根运行；旧 attempt 不能发布新结果 | 生命周期单测、真实长程运行记录 |
+| 进度可信度 | 进度由 PTC 自主声明但只接受白名单 milestone；UI 区分已报告与终态已验证，安静等待不误报失败 | parser/DB/UI 单测、真实长程轮询 |
 | 存储 | 仅服务端向新 `education/` 前缀写入；不枚举、覆盖或删除无关对象 | storage mock 单测、真实请求/日志边界 |
 
 ## 验收定义
