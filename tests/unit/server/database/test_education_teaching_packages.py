@@ -158,6 +158,28 @@ async def test_settling_terminal_attempt_projects_failure_to_teaching_package(
 
 
 @pytest.mark.asyncio
+async def test_validation_claim_accepts_a_package_already_marked_validating_by_progress(
+    mock_connection, mock_cursor, monkeypatch
+):
+    """The final callback may follow the bundle-assembling milestone."""
+
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    mock_cursor.fetchone.return_value = {"attempt_id": "attempt-1", "job_id": "job-1"}
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+
+    claimed = await education_textbooks.begin_teaching_validation(
+        attempt_id="attempt-1", root_run_id="run-1"
+    )
+
+    assert claimed == {"attempt_id": "attempt-1", "job_id": "job-1"}
+    claim_sql = mock_cursor.execute.call_args_list[0].args[0]
+    assert "'validating'" in claim_sql
+
+
+@pytest.mark.asyncio
 async def test_recording_generation_progress_advances_the_package_phase(
     mock_connection, mock_cursor, monkeypatch
 ):

@@ -855,7 +855,7 @@ async def begin_teaching_validation(
                       AND jobs.latest_attempt_id = attempts.attempt_id
                       AND jobs.status = 'running'
                       AND packages.status IN ('preparing', 'building_skill',
-                                              'generating_teaching')
+                                              'generating_teaching', 'validating')
                     RETURNING attempts.attempt_id, attempts.job_id
                     """,
                     (attempt_id, root_run_id),
@@ -880,7 +880,7 @@ async def begin_teaching_validation(
                       AND jobs.latest_attempt_id = %s
                       AND jobs.teaching_package_id = packages.teaching_package_id
                       AND packages.status IN ('preparing', 'building_skill',
-                                              'generating_teaching')
+                                              'generating_teaching', 'validating')
                     """,
                     (attempt["job_id"], attempt_id),
                 )
