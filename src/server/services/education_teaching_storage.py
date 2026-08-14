@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from typing import Any, Protocol
 from uuid import UUID
 
+from src.server.services.education_teaching_assets import expected_teaching_asset_paths
 from src.utils.storage import upload_bytes
 
 
@@ -28,10 +29,8 @@ class ManagedTeachingSandbox(Protocol):
     async def adownload_file_bytes(self, path: str) -> bytes | None: ...
 
 
-_MANAGED_SKILL_FILES: tuple[tuple[str, str], ...] = (
-    ("book-to-skill", "reference/managed-textbook-contract.md"),
-    ("the-knowledge-guy", "reference/managed-textbook-contract.md"),
-)
+_MANAGED_SKILL_NAMES = ("book-to-skill", "the-knowledge-guy")
+_STATIC_SKILL_SUFFIXES = frozenset({".css", ".html", ".json", ".md"})
 
 
 async def _upload_staged_files(
@@ -46,17 +45,27 @@ async def _upload_staged_files(
 async def stage_managed_teaching_skills(
     job_id: str, sandbox: ManagedTeachingSandbox
 ) -> None:
-    """Upload only the two built-in managed contracts, never interactive skill bodies."""
+    """Stage the two complete static built-in skills, never executable helpers."""
     root = managed_job_root(job_id)
     repo_root = Path(__file__).resolve().parents[3]
     files: list[tuple[str, bytes]] = []
-    for skill_name, relative_path in _MANAGED_SKILL_FILES:
-        source = repo_root / "skills" / skill_name / relative_path
-        try:
-            content = source.read_bytes()
-        except OSError as exc:
-            raise TeachingPackageStorageError("Managed teaching skill is unavailable") from exc
-        files.append((f"{root}/.agents/skills/{skill_name}/{relative_path}", content))
+    for skill_name in _MANAGED_SKILL_NAMES:
+        source_root = repo_root / "skills" / skill_name
+        if not (source_root / "SKILL.md").is_file():
+            raise TeachingPackageStorageError("Managed teaching skill is unavailable")
+        for source in sorted(source_root.rglob("*")):
+            if (
+                not source.is_file()
+                or source.is_symlink()
+                or source.suffix.lower() not in _STATIC_SKILL_SUFFIXES
+            ):
+                continue
+            try:
+                content = source.read_bytes()
+            except OSError as exc:
+                raise TeachingPackageStorageError("Managed teaching skill is unavailable") from exc
+            relative_path = source.relative_to(source_root).as_posix()
+            files.append((f"{root}/.agents/skills/{skill_name}/{relative_path}", content))
     await _upload_staged_files(sandbox, files)
 
 
@@ -170,7 +179,8 @@ async def stage_teaching_inputs(
         # directories through the sandbox API so later relative Bash commands
         # do not fail on its ownership boundary.
         (f"{root}/work/knowledge-skill/.keep", b""),
-        (f"{root}/outputs/.keep", b""),
+        (f"{root}/outputs/knowledge/.keep", b""),
+        (f"{root}/outputs/chapters/.keep", b""),
     ]
     files.extend(
         (f"{root}/inputs/{chapter['path']}", chapter["markdown"].encode("utf-8"))
@@ -199,9 +209,84 @@ async def download_teaching_output(
     return output
 
 
+async def download_teaching_asset_outputs(
+    job_id: str, frozen_input: Mapping[str, Any], sandbox: ManagedTeachingSandbox
+) -> dict[str, bytes]:
+    """Download every v2 candidate from service-derived paths without listing."""
+    paths = expected_teaching_asset_paths(frozen_input)
+    root = managed_job_root(job_id)
+    outputs: dict[str, bytes] = {}
+    for path in sorted(paths.all_paths):
+        content = await sandbox.adownload_file_bytes(f"{root}/{path}")
+        if content is None:
+            raise TeachingPackageStorageError("Managed teaching bundle is incomplete")
+        if not isinstance(content, bytes) or len(content) > _MAX_CANDIDATE_BYTES:
+            raise TeachingPackageStorageError("Managed teaching bundle asset is invalid")
+        outputs[path] = content
+    return outputs
+
+
 async def _put(key: str, content: bytes, content_type: str) -> None:
     if not await asyncio.to_thread(upload_bytes, key, content, content_type):
         raise TeachingPackageStorageError("Could not store teaching package artifact")
+
+
+def _asset_content_type(path: str) -> str:
+    return "application/json" if path.endswith(".json") else "text/markdown; charset=utf-8"
+
+
+def _safe_asset_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy only the service-produced asset summary, not caller-controlled paths."""
+    if manifest.get("format") != "langalpha-family-teaching-assets/v2":
+        raise TeachingPackageStorageError("Teaching asset manifest is invalid")
+    concept_index = manifest.get("concept_index")
+    coverage_audit = manifest.get("coverage_audit")
+    chapters = manifest.get("chapters")
+    if not isinstance(concept_index, Mapping) or not isinstance(coverage_audit, Mapping):
+        raise TeachingPackageStorageError("Teaching asset manifest is invalid")
+    if not isinstance(chapters, list):
+        raise TeachingPackageStorageError("Teaching asset manifest is invalid")
+    safe_chapters: list[dict[str, Any]] = []
+    for chapter in chapters:
+        if not isinstance(chapter, Mapping):
+            raise TeachingPackageStorageError("Teaching asset manifest is invalid")
+        assets = chapter.get("assets")
+        if not isinstance(assets, list):
+            raise TeachingPackageStorageError("Teaching asset manifest is invalid")
+        safe_assets = []
+        for asset in assets:
+            if not isinstance(asset, Mapping):
+                raise TeachingPackageStorageError("Teaching asset manifest is invalid")
+            safe_assets.append(
+                {
+                    "kind": asset.get("kind"),
+                    "size_bytes": asset.get("size_bytes"),
+                    "sha256": asset.get("sha256"),
+                }
+            )
+        safe_chapters.append(
+            {
+                "content_chapter_id": chapter.get("content_chapter_id"),
+                "content_sha256": chapter.get("content_sha256"),
+                "coverage_status": chapter.get("coverage_status"),
+                "concept_count": chapter.get("concept_count"),
+                "assets": safe_assets,
+            }
+        )
+    return {
+        "format": "langalpha-family-teaching-assets/v2",
+        "concept_index": {
+            "sha256": concept_index.get("sha256"),
+            "size_bytes": concept_index.get("size_bytes"),
+            "concept_count": concept_index.get("concept_count"),
+        },
+        "coverage_audit": {
+            "sha256": coverage_audit.get("sha256"),
+            "size_bytes": coverage_audit.get("size_bytes"),
+            "status": coverage_audit.get("status"),
+        },
+        "chapters": safe_chapters,
+    }
 
 
 def teaching_package_bundle_prefix(job: Mapping[str, Any]) -> str:
@@ -218,6 +303,38 @@ def teaching_package_bundle_prefix(job: Mapping[str, Any]) -> str:
         content_sequence,
         package_sequence,
     )
+
+
+async def write_teaching_asset_bundle(
+    job: Mapping[str, Any], manifest: Mapping[str, Any], outputs: Mapping[str, bytes]
+) -> str:
+    """Archive a validated v2 output set under private service-generated keys."""
+    frozen_input = freeze_teaching_input(job)
+    paths = expected_teaching_asset_paths(frozen_input)
+    if set(outputs) != set(paths.all_paths):
+        raise TeachingPackageStorageError("Teaching asset bundle paths are invalid")
+    prefix = teaching_package_bundle_prefix(job)
+    for source_path in sorted(paths.all_paths):
+        content = outputs[source_path]
+        if not isinstance(content, bytes):
+            raise TeachingPackageStorageError("Teaching asset bundle content is invalid")
+        archive_path = source_path.removeprefix("outputs/")
+        await _put(f"{prefix}/{archive_path}", content, _asset_content_type(archive_path))
+    safe_manifest = _safe_asset_manifest(manifest)
+    safe_manifest.update(
+        {
+            "content_version": job["content_version_sequence"],
+            "teaching_package": job["teaching_package_sequence"],
+        }
+    )
+    readme = "# 教学知识资产\n\n本目录由受管教材任务生成，须经服务端校验与家长审阅后才可发布。\n"
+    await _put(f"{prefix}/README.md", readme.encode("utf-8"), "text/markdown; charset=utf-8")
+    await _put(
+        f"{prefix}/manifest.json",
+        json.dumps(safe_manifest, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8"),
+        "application/json",
+    )
+    return prefix
 
 
 async def write_teaching_package_bundle(

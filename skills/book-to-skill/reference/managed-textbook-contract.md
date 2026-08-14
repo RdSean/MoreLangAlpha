@@ -1,72 +1,109 @@
 # Managed Textbook Contract
 
-This contract is for the server-owned `--managed-textbook` mode only. It is
-not a user-facing conversion workflow.
+This contract is for the server-owned `--managed-textbook` mode only. It does
+not run the normal interactive conversion workflow and it does not publish an
+asset by itself.
 
-## Inputs and workspace
+## Frozen inputs and capability boundary
 
-The service supplies only these staged files under one job root:
-
-```text
-/managed/textbook-job/<job>/inputs/manifest.json
-/managed/textbook-job/<job>/inputs/chapters/<position>-<slug>.md
-```
-
-`manifest.json` contains a job identifier, frozen `content_chapter_id`, slug,
-position and `content_sha256` for every chapter. The files contain extracted
-Markdown. They contain no object-storage key, URL, credential or raw PDF.
-
-The knowledge intermediate representation may be written only under:
+The service supplies only these files under one job root:
 
 ```text
-/managed/textbook-job/<job>/work/knowledge-skill/
+inputs/manifest.json
+inputs/chapters/<position>-<slug>.md
+.agents/skills/book-to-skill/
+.agents/skills/the-knowledge-guy/
 ```
 
-The `book-to-skill` summary must be written to:
+The manifest contains only a frozen `content_chapter_id`, position, slug and
+`content_sha256` for each Markdown chapter. It contains no storage key, URL,
+credential, raw PDF, user memory or normal workspace state. Read the staged
+Skill documentation only when it helps the task. The PTC root decides its own
+map, reduce, audit and teaching order; this contract does not prescribe a
+service pipeline.
+
+Only write the fixed candidate outputs below. Do not create other files, use
+scripts, access a network, enumerate directories, or make public artifacts:
 
 ```text
-/managed/textbook-job/<job>/outputs/book-skill-manifest.json
+outputs/knowledge/concept-index.json
+outputs/knowledge/coverage-audit.json
+outputs/chapters/<position>-<slug>-knowledge.json
+outputs/chapters/<position>-<slug>-toolkit.md
+outputs/chapters/<position>-<slug>-practice.json
+outputs/teaching-package.json
 ```
 
-It includes the input manifest SHA-256, every `content_chapter_id` and
-`content_sha256`, plus the skill generation version. It is intermediate only;
-it is not a published asset.
+Every frozen chapter must have exactly one `knowledge`, `toolkit` and
+`practice` file. Use the literal position and slug from `manifest.json`; never
+invent a path. Preserve the chapter ID and SHA-256 exactly in every chapter
+JSON. The service downloads only these paths directly, then validates every
+identity, reference and hash before it writes private `education/` assets.
 
-## Teaching package schema
+## Chapter knowledge and toolkit
 
-The second stage writes `outputs/teaching-package.json` with this shape:
+Each `-knowledge.json` has this minimum shape:
 
 ```json
 {
-  "format": "langalpha-managed-teaching-package/v1",
-  "chapters": [
-    {
-      "content_chapter_id": "uuid",
-      "content_sha256": "64-lowercase-hex",
-      "learning_objectives": ["..."],
-      "knowledge_points": ["..."],
-      "key_difficulties": ["..."],
-      "prerequisites": ["..."],
-      "teaching_material": "# Chinese teaching material",
-      "questions": [
-        {
-          "position": 1,
-          "prompt": "...",
-          "options": {"A": "...", "B": "..."},
-          "correct_option": "A",
-          "explanation": "...",
-          "knowledge_point": "..."
-        }
-      ]
-    }
-  ]
+  "format": "langalpha-managed-chapter-knowledge/v1",
+  "content_chapter_id": "uuid",
+  "content_sha256": "64-lowercase-hex",
+  "knowledge_points": ["exact Chinese knowledge-point name"],
+  "concepts": [{
+    "concept_id": "stable-concept-id",
+    "name": "exact Chinese knowledge-point name",
+    "evidence": [{"start": 0, "end": 20}]
+  }],
+  "relations": [],
+  "prerequisite_concept_ids": []
 }
 ```
 
-The service, rather than either Skill, validates chapter coverage, hashes,
-limits, option counts, answers and knowledge-point links before writing any
-official `education/` asset.
+`concept_id` values are unique across the bundle. A concept name must equal a
+same-chapter `knowledge_points` value. Evidence ranges point into that frozen
+chapter Markdown; do not put a path, URL or quotation in them. Relations use
+only same-chapter concept IDs. The matching toolkit Markdown must contain
+learning objectives, key concepts, common mistakes, a Chinese-learner
+explanation, an example and a chapter review prompt.
 
-Every question's `knowledge_point` must exactly match one string in its own
-chapter's `knowledge_points`; copy that string without expanding or rephrasing
-it.
+## Complete-book knowledge assets
+
+`outputs/knowledge/concept-index.json` has format
+`langalpha-managed-concept-index/v1`. Its concepts exactly cover every chapter
+concept and each item contains `concept_id`, identical `name`, and
+`content_chapter_ids` containing its source chapter. Its relations use only
+those concept IDs.
+
+`outputs/knowledge/coverage-audit.json` has format
+`langalpha-managed-coverage-audit/v1`. It has one item per frozen chapter with
+the exact ID and hash, `status: "complete"`, `missing: []`, and exactly:
+
+```json
+["knowledge", "toolkit", "practice", "teaching"]
+```
+
+in `asset_kinds`. Do not report complete coverage unless the actual outputs
+exist and agree with the frozen chapter.
+
+## Practice and Chinese teaching package
+
+Each `-practice.json` has format
+`langalpha-managed-chapter-practice/v1`, the exact chapter ID/hash, and
+auto-graded questions. Every question has a positive `position`, an exact
+same-chapter `knowledge_point`, and a `concept_id` belonging to that chapter.
+
+`outputs/teaching-package.json` has format
+`langalpha-managed-teaching-package/v1`. It contains every frozen chapter
+exactly once with the existing learning objectives, knowledge points,
+difficulties, prerequisites, Chinese teaching material and multiple-choice
+questions. Each question's `knowledge_point` must exactly match one value in
+the chapter `knowledge_points`, which must exactly equal the corresponding
+knowledge asset's list. Escape all JSON strings correctly.
+
+After a real completed unit, emit at most one `EDUCATION_PROGRESS ` stdout
+line with JSON containing only `phase`, optional frozen `content_chapter_id`,
+and optional asset kind. Allowed phases are `planning`, `chapter_mapping`,
+`concept_linking`, `coverage_audit`, `practice_build`, `teaching_build`,
+`bundle_assembling` and `validating_bundle`. Never emit free model reasoning,
+paths, URLs, credentials, provider text or self-reported totals.

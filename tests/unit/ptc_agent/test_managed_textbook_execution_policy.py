@@ -336,10 +336,17 @@ def test_managed_candidate_write_requires_strict_json_before_saving():
         )
         is None
     )
-    assert (
+    assert "not allowed" in str(
         managed_execution.validate_managed_textbook_write(
             f"{policy.filesystem_root}/work/knowledge-skill/chapter.json",
             "not JSON",
+            policy,
+        )
+    )
+    assert (
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/outputs/chapters/01-overview-toolkit.md",
+            "# 工具包\n\n中文解释",
             policy,
         )
         is None

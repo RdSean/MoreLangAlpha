@@ -92,9 +92,28 @@ def validate_managed_bash_command(
 def validate_managed_textbook_write(
     path: str, content: str, policy: ManagedExecutionPolicy
 ) -> str | None:
-    """Reject malformed JSON before the managed candidate reaches sandbox disk."""
-    candidate_path = PurePosixPath(policy.filesystem_root) / "outputs" / "teaching-package.json"
-    if PurePosixPath(path) != candidate_path:
+    """Restrict writes to v2 candidate paths before they reach sandbox disk."""
+    candidate_path = PurePosixPath(path)
+    root = PurePosixPath(policy.filesystem_root)
+    try:
+        relative = candidate_path.relative_to(root)
+    except ValueError:
+        return "managed teaching candidate path is not allowed"
+    allowed_json = {
+        PurePosixPath("outputs/knowledge/concept-index.json"),
+        PurePosixPath("outputs/knowledge/coverage-audit.json"),
+        PurePosixPath("outputs/teaching-package.json"),
+    }
+    chapter_json = re.fullmatch(
+        r"outputs/chapters/[0-9]{2,}-[0-9A-Za-z._-]+-(?:knowledge|practice)\.json",
+        relative.as_posix(),
+    )
+    chapter_toolkit = re.fullmatch(
+        r"outputs/chapters/[0-9]{2,}-[0-9A-Za-z._-]+-toolkit\.md", relative.as_posix()
+    )
+    if relative not in allowed_json and not chapter_json and not chapter_toolkit:
+        return "managed teaching candidate path is not allowed"
+    if chapter_toolkit:
         return None
     try:
         decoded = json.loads(content)
@@ -102,6 +121,8 @@ def validate_managed_textbook_write(
         return "managed teaching candidate must be valid JSON before writing"
     if not isinstance(decoded, dict):
         return "managed teaching candidate must be a JSON object"
+    if relative != PurePosixPath("outputs/teaching-package.json"):
+        return None
     chapters = decoded.get("chapters")
     if not isinstance(chapters, list):
         return None
