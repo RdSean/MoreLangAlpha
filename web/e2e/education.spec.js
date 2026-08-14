@@ -303,6 +303,30 @@ test.describe('Family education roles', () => {
         events: teachingState === 'review' ? [{ sequence: 1, phase: 'generating_teaching', summary: '已完成第 1 章教学材料生成' }] : [],
         attempts: [{ attempt_id: 'attempt-1', root_run_id: 'root-run-1', status: teachingState === 'review' ? 'completed' : 'running' }],
       }),
+      'GET /education/teaching-packages/teaching-package-1/assets': {
+        teaching_package_id: 'teaching-package-1',
+        format: 'langalpha-family-teaching-assets/v2',
+        concept_index: { size_bytes: 120, concept_count: 3 },
+        coverage_audit: { size_bytes: 80, status: 'complete' },
+        chapters: [{
+          chapter_id: chapter.chapter_id,
+          position: chapter.position,
+          title: chapter.title,
+          coverage_status: 'complete',
+          concept_count: 3,
+          assets: [
+            { kind: 'knowledge', size_bytes: 20 },
+            { kind: 'toolkit', size_bytes: 30 },
+            { kind: 'practice', size_bytes: 40 },
+          ],
+        }],
+      },
+      'GET /education/teaching-packages/teaching-package-1/chapters/chapter-1/assets/toolkit': {
+        teaching_package_id: 'teaching-package-1',
+        chapter_id: chapter.chapter_id,
+        kind: 'toolkit',
+        content: '# 导读工具包\n\n用于中文学习者的讲解与练习策略。',
+      },
       'POST /education/textbooks/textbook-1/versions/version-1/publish': async (route) => {
         processingState = 'published';
         await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ publication_id: 'publication-1', version_id: 'version-1' }) });
@@ -342,6 +366,12 @@ test.describe('Family education roles', () => {
     await page.getByRole('button', { name: 'Close' }).click();
     teachingState = 'review';
     await page.reload();
+    await page.getByRole('tab', { name: '知识资产' }).click();
+    await expect(page.getByText('覆盖审计通过')).toBeVisible();
+    await expect(page.getByText('3 个概念', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '查看工具包' }).click();
+    await expect(page.getByText('用于中文学习者的讲解与练习策略。')).toBeVisible();
+    await expect(page.locator('body')).not.toContainText(/storage_key|education\/|\/managed\//i);
     await page.getByRole('button', { name: '发布版本' }).click();
     await page.getByRole('button', { name: '分配学生' }).click();
     await page.getByLabel('学生').selectOption(student.user_id);
