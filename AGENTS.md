@@ -73,8 +73,9 @@ The ownership hierarchy is User -> Workspace -> Thread -> Turns.
   containers, images, volumes, or networks.
 - PostgreSQL and other local dependencies may be started through Docker, using
   project-scoped names and non-conflicting ports.
-- MinIO is at `http://192.168.3.164:9001`. Read its credentials only from the
-  local `密码.md` file when needed; never print, commit, or copy that file.
+- MinIO S3 API is at `http://192.168.3.164:9000` (`9001` is the console, not
+  the S3 API). Read its credentials only from the local `密码.md` file when
+  needed; never print, commit, or copy that file.
 - New education attachments must use the `education/` object prefix. Never
   delete, overwrite, or enumerate unrelated MinIO objects.
 - Before handing off frontend work, run it on `0.0.0.0:5177` and verify it can
