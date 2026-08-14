@@ -175,6 +175,38 @@ async def test_recording_generation_progress_advances_the_package_phase(
 
 
 @pytest.mark.asyncio
+async def test_recording_autonomous_global_progress_discards_model_text_and_paths(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    mock_cursor.fetchone.side_effect = [{"job_id": "job-1"}, {"sequence": 1}]
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    monkeypatch.setattr(education_textbooks, "uuid4", lambda: "event-1")
+
+    await education_textbooks.record_teaching_event(
+        attempt_id="attempt-1",
+        phase="planning",
+        chapter_id=None,
+        asset_kind=None,
+        summary="模型原文 /managed/textbook-job/secret 不能进入数据库",
+    )
+
+    event_insert = next(
+        call
+        for call in mock_cursor.execute.call_args_list
+        if "INSERT INTO education_teaching_events" in call.args[0]
+    )
+    assert "asset_kind" in event_insert.args[0]
+    assert event_insert.args[1][3] == "planning"
+    assert event_insert.args[1][4] is None
+    assert "模型原文" not in event_insert.args[1][-1]
+    assert "/managed/" not in event_insert.args[1][-1]
+
+
+@pytest.mark.asyncio
 async def test_touching_a_live_teaching_attempt_refreshes_only_its_bound_root_run(
     mock_connection, mock_cursor, monkeypatch
 ):
@@ -521,6 +553,12 @@ async def test_complete_teaching_attempt_writes_review_projection_atomically(
         attempt_id="attempt-1",
         root_run_id="run-1",
         bundle_prefix="education/household/book/v1/teaching/v1",
+        asset_manifest={
+            "format": "langalpha-family-teaching-assets/v2",
+            "concept_index": {"sha256": "a" * 64, "size_bytes": 2, "concept_count": 1},
+            "coverage_audit": {"sha256": "b" * 64, "size_bytes": 2, "status": "complete"},
+            "chapters": [],
+        },
         package={
             "chapters": [
                 {
@@ -549,5 +587,6 @@ async def test_complete_teaching_attempt_writes_review_projection_atomically(
     statements = [call.args[0] for call in mock_cursor.execute.call_args_list]
     assert any("INSERT INTO education_teaching_package_chapters" in sql for sql in statements)
     assert any("INSERT INTO education_teaching_package_questions" in sql for sql in statements)
-    assert any("status = 'review'" in sql for sql in statements)
+    package_update = next(sql for sql in statements if "status = 'review'" in sql)
+    assert "asset_manifest" in package_update
     assert sum("status = 'completed'" in sql for sql in statements) == 2

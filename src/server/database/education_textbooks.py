@@ -20,6 +20,47 @@ class TeachingInputHashes:
     adapter_prompt_sha256: str
 
 
+_TEACHING_PROGRESS_PHASES = frozenset(
+    {
+        "building_skill",
+        "generating_teaching",
+        "planning",
+        "chapter_mapping",
+        "concept_linking",
+        "coverage_audit",
+        "practice_build",
+        "teaching_build",
+        "bundle_assembling",
+        "validating_bundle",
+    }
+)
+_TEACHING_PROGRESS_ASSET_KINDS = frozenset({"knowledge", "toolkit", "practice", "teaching"})
+_TEACHING_PACKAGE_STATUS_BY_PROGRESS = {
+    "building_skill": "building_skill",
+    "generating_teaching": "generating_teaching",
+    "planning": "preparing",
+    "chapter_mapping": "building_skill",
+    "concept_linking": "building_skill",
+    "coverage_audit": "building_skill",
+    "practice_build": "generating_teaching",
+    "teaching_build": "generating_teaching",
+    "bundle_assembling": "validating",
+    "validating_bundle": "validating",
+}
+_TEACHING_PROGRESS_LABELS = {
+    "planning": "正在规划知识资产加工",
+    "chapter_mapping": "已完成章节映射",
+    "concept_linking": "已完成概念关联",
+    "coverage_audit": "已完成覆盖审计",
+    "practice_build": "已完成练习构建",
+    "teaching_build": "已完成教学材料生成",
+    "bundle_assembling": "正在汇总教材资产",
+    "validating_bundle": "正在校验教材资产",
+    "building_skill": "已完成知识整理",
+    "generating_teaching": "已完成教学材料生成",
+}
+
+
 async def get_or_create_student_learning_space(
     *, student_user_id: str, assignment_id: str
 ) -> dict[str, Any] | None:
@@ -398,7 +439,7 @@ async def get_teaching_job_projection_for_parent(
             if latest_attempt_id:
                 await cur.execute(
                     """
-                    SELECT sequence, phase, summary, chapter_id, created_at
+                    SELECT sequence, phase, summary, chapter_id, asset_kind, created_at
                     FROM education_teaching_events
                     WHERE attempt_id = %s
                     ORDER BY sequence
@@ -491,43 +532,66 @@ async def record_teaching_event(
     phase: str,
     summary: str,
     chapter_id: str | None = None,
+    asset_kind: str | None = None,
 ) -> None:
     """Append one whitelisted progress event for the active frozen attempt only."""
-    if phase not in {"building_skill", "generating_teaching"}:
+    if phase not in _TEACHING_PROGRESS_PHASES:
         raise ValueError("Invalid teaching progress phase")
-    try:
-        UUID(str(chapter_id))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Teaching progress chapter is invalid") from exc
+    if asset_kind is not None and asset_kind not in _TEACHING_PROGRESS_ASSET_KINDS:
+        raise ValueError("Teaching progress asset kind is invalid")
+    if chapter_id is not None:
+        try:
+            UUID(str(chapter_id))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Teaching progress chapter is invalid") from exc
 
     event_id = str(uuid4())
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
-                allowed_package_statuses = (
-                    ("preparing", "building_skill")
-                    if phase == "building_skill"
-                    else ("preparing", "building_skill", "generating_teaching")
-                )
-                await cur.execute(
-                    """
-                    SELECT attempts.job_id, chapters.position
-                    FROM education_teaching_attempts AS attempts
-                    JOIN education_teaching_jobs AS jobs ON jobs.job_id = attempts.job_id
-                    JOIN education_teaching_packages AS packages
-                      ON packages.teaching_package_id = jobs.teaching_package_id
-                    JOIN education_textbook_chapters AS chapters
-                      ON chapters.version_id = packages.content_version_id
-                     AND chapters.chapter_id = %s
-                    WHERE attempts.attempt_id = %s
-                      AND attempts.status = 'running'
-                      AND jobs.latest_attempt_id = attempts.attempt_id
-                      AND jobs.status = 'running'
-                      AND packages.status = ANY(%s::varchar[])
-                    FOR UPDATE OF attempts, jobs, packages
-                    """,
-                    (chapter_id, attempt_id, list(allowed_package_statuses)),
-                )
+                allowed_package_statuses = [
+                    "preparing",
+                    "building_skill",
+                    "generating_teaching",
+                    "validating",
+                ]
+                if chapter_id is None:
+                    await cur.execute(
+                        """
+                        SELECT attempts.job_id
+                        FROM education_teaching_attempts AS attempts
+                        JOIN education_teaching_jobs AS jobs ON jobs.job_id = attempts.job_id
+                        JOIN education_teaching_packages AS packages
+                          ON packages.teaching_package_id = jobs.teaching_package_id
+                        WHERE attempts.attempt_id = %s
+                          AND attempts.status = 'running'
+                          AND jobs.latest_attempt_id = attempts.attempt_id
+                          AND jobs.status = 'running'
+                          AND packages.status = ANY(%s::varchar[])
+                        FOR UPDATE OF attempts, jobs, packages
+                        """,
+                        (attempt_id, allowed_package_statuses),
+                    )
+                else:
+                    await cur.execute(
+                        """
+                        SELECT attempts.job_id, chapters.position
+                        FROM education_teaching_attempts AS attempts
+                        JOIN education_teaching_jobs AS jobs ON jobs.job_id = attempts.job_id
+                        JOIN education_teaching_packages AS packages
+                          ON packages.teaching_package_id = jobs.teaching_package_id
+                        JOIN education_textbook_chapters AS chapters
+                          ON chapters.version_id = packages.content_version_id
+                         AND chapters.chapter_id = %s
+                        WHERE attempts.attempt_id = %s
+                          AND attempts.status = 'running'
+                          AND jobs.latest_attempt_id = attempts.attempt_id
+                          AND jobs.status = 'running'
+                          AND packages.status = ANY(%s::varchar[])
+                        FOR UPDATE OF attempts, jobs, packages
+                        """,
+                        (chapter_id, attempt_id, allowed_package_statuses),
+                    )
                 active = await cur.fetchone()
                 if not active:
                     return
@@ -541,21 +605,30 @@ async def record_teaching_event(
                     (attempt_id,),
                 )
                 sequence = (await cur.fetchone())["sequence"]
-                # The caller passes a precomposed product label for tests and
-                # diagnostics, but only this fixed local projection reaches DB.
+                # The caller passes untrusted model text. Only a local status
+                # template reaches the database or parent-facing projection.
                 del summary
+                label = _TEACHING_PROGRESS_LABELS[phase]
                 safe_summary = (
-                    f"已完成第 {active['position']} 章知识整理"
-                    if phase == "building_skill"
-                    else f"已完成第 {active['position']} 章教学材料生成"
+                    f"Agent 已报告：第 {active['position']} 章{label}"
+                    if chapter_id is not None
+                    else f"Agent 已报告：{label}"
                 )
                 await cur.execute(
                     """
                     INSERT INTO education_teaching_events (
-                        event_id, attempt_id, sequence, phase, chapter_id, summary
-                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                        event_id, attempt_id, sequence, phase, chapter_id, asset_kind, summary
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (event_id, attempt_id, sequence, phase, chapter_id, safe_summary),
+                    (
+                        event_id,
+                        attempt_id,
+                        sequence,
+                        phase,
+                        chapter_id,
+                        asset_kind,
+                        safe_summary,
+                    ),
                 )
                 await cur.execute(
                     """
@@ -568,7 +641,7 @@ async def record_teaching_event(
                       AND packages.status = ANY(%s::varchar[])
                     """,
                     (
-                        phase,
+                        _TEACHING_PACKAGE_STATUS_BY_PROGRESS[phase],
                         active["job_id"],
                         attempt_id,
                         list(allowed_package_statuses),
@@ -747,6 +820,7 @@ async def complete_teaching_attempt(
     attempt_id: str,
     root_run_id: str,
     bundle_prefix: str,
+    asset_manifest: dict[str, Any] | None = None,
     package: dict[str, Any],
 ) -> dict[str, Any] | None:
     """Atomically persist a validated candidate and make its package reviewable.
@@ -842,10 +916,15 @@ async def complete_teaching_attempt(
                     """
                     UPDATE education_teaching_packages
                     SET status = 'review', bundle_prefix = %s, reviewed_at = NOW(),
+                        asset_manifest = COALESCE(%s::jsonb, asset_manifest),
                         error_code = NULL, error_message = NULL
                     WHERE teaching_package_id = %s
                     """,
-                    (bundle_prefix, teaching_package_id),
+                    (
+                        bundle_prefix,
+                        Json(asset_manifest) if asset_manifest is not None else None,
+                        teaching_package_id,
+                    ),
                 )
                 await cur.execute(
                     """
