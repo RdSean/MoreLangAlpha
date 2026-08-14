@@ -271,7 +271,7 @@ async def resolve_byok_llm_client(
             return None
         logger.info(
             f"[CHAT] Using BYOK key for custom model={model_name} "
-            f"provider={custom_config['provider']} base_url={base_url or 'SDK default'}"
+            f"provider={custom_config['provider']}"
         )
         return create_llm_from_custom(
             custom_config,
