@@ -1,6 +1,10 @@
+import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from './api';
+import type { TeachingJob } from './types';
+
+const terminalTeachingJobStatuses = new Set<TeachingJob['status']>(['completed', 'failed', 'cancelled']);
 
 export function useEducationTasks() {
   return useQuery({
@@ -56,13 +60,29 @@ export function useTextbook(textbookId: string | undefined) {
 }
 
 export function useTeachingJob(jobId: string | undefined, enabled: boolean) {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const lastInvalidatedTerminalStatus = useRef<TeachingJob['status'] | null>(null);
+  const query = useQuery({
     queryKey: queryKeys.education.teachingJob(jobId ?? ''),
     queryFn: () => educationApi.getTeachingJob(jobId ?? ''),
     enabled: Boolean(jobId) && enabled,
     staleTime: 2_000,
     refetchInterval: enabled ? 5_000 : false,
   });
+
+  useEffect(() => {
+    const status = query.data?.status;
+    if (!status || !terminalTeachingJobStatuses.has(status)) {
+      lastInvalidatedTerminalStatus.current = null;
+      return;
+    }
+    if (lastInvalidatedTerminalStatus.current === status) return;
+
+    lastInvalidatedTerminalStatus.current = status;
+    void queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
+  }, [query.data?.status, queryClient]);
+
+  return query;
 }
 
 export function useLearningAssignments(enabled: boolean) {
