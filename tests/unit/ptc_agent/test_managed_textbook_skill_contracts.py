@@ -36,6 +36,7 @@ def test_knowledge_guy_managed_mode_writes_only_schema_validated_outputs():
     assert "content_sha256" in managed
     assert "strict JSON" in managed
     assert "escape inner double quotes" in managed
+    assert "must exactly match" in managed
 
 
 def test_managed_contracts_define_the_same_output_schema():
@@ -56,3 +57,5 @@ def test_managed_contracts_define_the_same_output_schema():
     ):
         assert required_field in book_contract
         assert required_field in knowledge_contract
+    assert "must exactly match" in book_contract
+    assert "must exactly match" in knowledge_contract

@@ -1,5 +1,6 @@
 """Explicit execution limits for service-owned managed PTC runs."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import json
 import re
@@ -101,4 +102,32 @@ def validate_managed_textbook_write(
         return "managed teaching candidate must be valid JSON before writing"
     if not isinstance(decoded, dict):
         return "managed teaching candidate must be a JSON object"
+    chapters = decoded.get("chapters")
+    if not isinstance(chapters, list):
+        return None
+    for chapter in chapters:
+        if not isinstance(chapter, Mapping):
+            continue
+        knowledge_points = chapter.get("knowledge_points")
+        questions = chapter.get("questions")
+        if not isinstance(knowledge_points, list) or not isinstance(questions, list):
+            continue
+        normalized_points = {
+            value.strip()
+            for value in knowledge_points
+            if isinstance(value, str) and value.strip()
+        }
+        for question in questions:
+            if not isinstance(question, Mapping):
+                continue
+            knowledge_point = question.get("knowledge_point")
+            if (
+                isinstance(knowledge_point, str)
+                and knowledge_point.strip()
+                and knowledge_point.strip() not in normalized_points
+            ):
+                return (
+                    "each question knowledge point must exactly match a chapter "
+                    "knowledge_points value"
+                )
     return None

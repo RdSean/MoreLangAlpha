@@ -59,7 +59,7 @@ This is a service-owned production stage, not a chat, walk or course request.
 3. For every frozen chapter, generate Chinese-student teaching material,
    learning objectives, knowledge points, difficulties, prerequisites and
    auto-gradable questions. Preserve the staged `content_chapter_id` and
-   `content_sha256` exactly.
+   `content_sha256` exactly. Every question's `knowledge_point` must exactly match one string in that chapter's `knowledge_points`; copy the established string rather than expanding or rephrasing it.
 4. Write only `/managed/textbook-job/<job>/outputs/teaching-package.json`,
    matching the schema in the contract. Never invent an output filename,
    storage key or URL. The service performs final validation and publication.

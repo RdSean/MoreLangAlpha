@@ -66,3 +66,7 @@ The second stage writes `outputs/teaching-package.json` with this shape:
 The service, rather than either Skill, validates chapter coverage, hashes,
 limits, option counts, answers and knowledge-point links before writing any
 official `education/` asset.
+
+Every question's `knowledge_point` must exactly match one string in its own
+chapter's `knowledge_points`; copy that string without expanding or rephrasing
+it.

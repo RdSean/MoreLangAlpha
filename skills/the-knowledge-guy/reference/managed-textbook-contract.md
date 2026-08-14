@@ -48,3 +48,7 @@ Each completed chapter emits one stdout line prefixed with
 `learning_objectives`, `knowledge_points`, `teaching_material`, questions and
 `correct_option` values before publication. No storage key, object URL,
 credential, user memory, artifact or chat transcript is accepted or emitted.
+
+Every question's `knowledge_point` must exactly match one string in its own
+chapter's `knowledge_points`; copy that string without expanding or rephrasing
+it.

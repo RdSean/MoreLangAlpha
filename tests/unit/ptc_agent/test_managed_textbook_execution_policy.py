@@ -319,6 +319,23 @@ def test_managed_candidate_write_requires_strict_json_before_saving():
         )
         is None
     )
+    assert "knowledge point" in str(
+        managed_execution.validate_managed_textbook_write(
+            candidate,
+            '{"chapters":[{"knowledge_points":["核心概念"],'
+            '"questions":[{"knowledge_point":"扩展概念"}]}]}',
+            policy,
+        )
+    )
+    assert (
+        managed_execution.validate_managed_textbook_write(
+            candidate,
+            '{"chapters":[{"knowledge_points":["核心概念"],'
+            '"questions":[{"knowledge_point":"核心概念"}]}]}',
+            policy,
+        )
+        is None
+    )
     assert (
         managed_execution.validate_managed_textbook_write(
             f"{policy.filesystem_root}/work/knowledge-skill/chapter.json",
