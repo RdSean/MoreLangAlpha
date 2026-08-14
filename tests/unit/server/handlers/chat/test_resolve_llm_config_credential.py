@@ -166,6 +166,27 @@ async def test_non_byok_no_reasoning_is_none():
 
 
 @pytest.mark.asyncio
+async def test_non_byok_platform_profile_is_eager_without_reasoning(monkeypatch):
+    from src.server.services.llm.config import resolve_llm_config
+
+    platform_client = _FakeClient("profile")
+    monkeypatch.setenv("PLATFORM_LLM_SOURCE_EMAIL", "service@example.test")
+    monkeypatch.setenv("PLATFORM_LLM_MODEL", "managed-model")
+    with (
+        _entered(_common_patches()),
+        patch(
+            "src.server.services.llm.platform_profile.resolve_platform_llm_client",
+            new_callable=AsyncMock,
+            return_value=platform_client,
+        ),
+    ):
+        cfg = await resolve_llm_config(_make_config(), "u", "main-model", False)
+
+    assert cfg.credential_source == CredentialSource.PLATFORM
+    assert cfg.llm_client is platform_client
+
+
+@pytest.mark.asyncio
 async def test_byok_on_system_model_is_byok_source():
     """Orthogonality: BYOK key on a SYSTEM-catalog model → cred=BYOK."""
     from src.server.services.llm.config import ModelSource, resolve_llm_config

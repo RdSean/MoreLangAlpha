@@ -100,6 +100,43 @@ async def test_platform_fallback_when_byok_none_and_system():
 
 
 @pytest.mark.asyncio
+async def test_platform_profile_preempts_legacy_environment_fallback(monkeypatch):
+    from src.server.services.llm.config import ModelSource, resolve_model_client
+
+    profile_client = MagicMock(name="platform-profile-client")
+    legacy_client = MagicMock(name="legacy-environment-client")
+    monkeypatch.setenv("PLATFORM_LLM_SOURCE_EMAIL", "service@example.test")
+    monkeypatch.setenv("PLATFORM_LLM_MODEL", "managed-model")
+    with (
+        _patch_classify(ModelSource.SYSTEM),
+        patch(
+            f"{HANDLER}.resolve_oauth_llm_client",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            f"{HANDLER}.resolve_byok_llm_client",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "src.server.services.llm.platform_profile.resolve_platform_llm_client",
+            new_callable=AsyncMock,
+            return_value=profile_client,
+        ) as resolve_profile,
+        patch("src.llms.llm.create_llm", return_value=legacy_client) as create_legacy,
+    ):
+        result = await resolve_model_client(
+            "parent", "system-model", is_byok=False, allow_platform_fallback=True,
+        )
+
+    assert result.client is profile_client
+    assert result.credential_source == CredentialSource.PLATFORM
+    resolve_profile.assert_awaited_once_with(cache_key=None)
+    create_legacy.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_no_fallback_when_disabled():
     from src.server.services.llm.config import ModelSource, resolve_model_client
 

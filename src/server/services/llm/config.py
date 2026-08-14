@@ -462,6 +462,12 @@ async def resolve_model_client(
     # BYOK both miss. service_tier is OAuth-only (matches the main-branch
     # reasoning path), so it is intentionally NOT passed here.
     if allow_platform_fallback and source == ModelSource.SYSTEM:
+        from .platform_profile import resolve_platform_llm_client
+
+        platform_client = await resolve_platform_llm_client(cache_key=cache_key)
+        if platform_client is not None:
+            return ResolvedClient(platform_client, source, CredentialSource.PLATFORM)
+
         from src.llms.llm import create_llm
 
         client = create_llm(
@@ -1070,10 +1076,14 @@ async def resolve_llm_config(
     # non-credentialed reasoning request gets an eager platform client (tagged
     # PLATFORM); a non-reasoning non-credentialed request leaves llm_client=None
     # (NONE) for the lazy OSS path. An OAuth-required HTTPException propagates.
+    from .platform_profile import is_platform_model_profile_configured
+
     main = await resolve_model_client(
         user_id, effective_model, is_byok=is_byok, cache_key=thread_id,
         reasoning_effort=effective_reasoning, service_tier=effective_service_tier,
-        allow_platform_fallback=bool(effective_reasoning),
+        allow_platform_fallback=(
+            bool(effective_reasoning) or is_platform_model_profile_configured()
+        ),
         _pref_cache=model_pref, _byok_cache=byok_cache,
     )
     _cow()
