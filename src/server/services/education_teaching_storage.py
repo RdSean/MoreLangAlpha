@@ -29,9 +29,7 @@ class ManagedTeachingSandbox(Protocol):
 
 
 _MANAGED_SKILL_FILES: tuple[tuple[str, str], ...] = (
-    ("book-to-skill", "SKILL.md"),
     ("book-to-skill", "reference/managed-textbook-contract.md"),
-    ("the-knowledge-guy", "SKILL.md"),
     ("the-knowledge-guy", "reference/managed-textbook-contract.md"),
 )
 
@@ -48,7 +46,7 @@ async def _upload_staged_files(
 async def stage_managed_teaching_skills(
     job_id: str, sandbox: ManagedTeachingSandbox
 ) -> None:
-    """Upload the two built-in managed contracts, and no workspace skills."""
+    """Upload only the two built-in managed contracts, never interactive skill bodies."""
     root = managed_job_root(job_id)
     repo_root = Path(__file__).resolve().parents[3]
     files: list[tuple[str, bytes]] = []

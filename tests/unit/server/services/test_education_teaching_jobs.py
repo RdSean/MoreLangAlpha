@@ -2,7 +2,6 @@
 
 from importlib import import_module
 from importlib.util import find_spec
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
@@ -153,9 +152,46 @@ async def test_managed_progress_projection_accepts_only_frozen_chapter_ids(monke
     )
 
 
+def test_managed_prompt_inlines_only_the_two_managed_skill_modes():
+    education_teaching_jobs = import_module("src.server.services.education_teaching_jobs")
+
+    prompt = education_teaching_jobs.managed_teaching_prompt(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+
+    assert "book-to-skill" in prompt
+    assert "the-knowledge-guy" in prompt
+    assert prompt.count("## Managed textbook mode") == 2
+    assert "## Philosophy" not in prompt
+    assert "## Project skill paths" not in prompt
+
+
 @pytest.mark.asyncio
-async def test_managed_graph_reads_skill_bodies_from_server_controlled_project_source(monkeypatch):
-    """Skill body injection is host-side; the staged copy is sandbox discovery only."""
+async def test_managed_workflow_refreshes_the_attempt_heartbeat(monkeypatch):
+    education_teaching_jobs = import_module("src.server.services.education_teaching_jobs")
+    heartbeat = AsyncMock(return_value=True)
+    monkeypatch.setattr(education_teaching_jobs, "touch_teaching_attempt", heartbeat)
+
+    async def workflow():
+        yield "data: {\"event\":\"message\",\"content\":\"working\"}\n\n"
+
+    events = [
+        event
+        async for event in education_teaching_jobs._managed_workflow_events(
+            workflow(),
+            attempt_id="attempt-1",
+            root_run_id="run-1",
+            staged={"chapters": []},
+        )
+    ]
+
+    assert len(events) == 1
+    heartbeat.assert_awaited_once_with(attempt_id="attempt-1", root_run_id="run-1")
+
+
+@pytest.mark.asyncio
+async def test_managed_graph_does_not_inject_interactive_skill_bodies(monkeypatch):
+    """The compact service prompt carries only the managed modes."""
     education_teaching_jobs = import_module("src.server.services.education_teaching_jobs")
     setup = import_module("src.server.app.setup")
     policy = import_module("ptc_agent.agent.managed_execution").education_teaching_policy(
@@ -175,12 +211,11 @@ async def test_managed_graph_reads_skill_bodies_from_server_controlled_project_s
         thread_id="thread-1",
         run_handle=handle,
         policy=policy,
-        skill_contexts=[{"name": "book-to-skill", "instruction": "--managed-textbook"}],
         agent_config=agent_config,
     )
 
-    expected = str(Path(education_teaching_jobs.__file__).resolve().parents[3] / "skills")
-    assert config["configurable"]["skill_dirs"] == [expected]
+    assert "skill_contexts" not in config["configurable"]
+    assert "skill_dirs" not in config["configurable"]
     graph_call = education_teaching_jobs.build_ptc_graph_with_session.await_args
     assert graph_call.kwargs["config"] is agent_config
     assert graph_call.kwargs["user_id"] is None

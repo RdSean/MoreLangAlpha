@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator, Mapping
+from contextlib import suppress
 from datetime import datetime
 import json
 import logging
@@ -20,6 +22,7 @@ from src.server.database.education_textbooks import (
     mark_teaching_job_cancel_requested,
     record_teaching_event,
     settle_teaching_attempt,
+    touch_teaching_attempt,
 )
 from src.server.database.runs.lifecycle import QuerySpec
 from src.server.services.runs.coordinator import RunCoordinator
@@ -33,17 +36,39 @@ _MANAGED_KIND = "education_teaching"
 _PROGRESS_PREFIX = "EDUCATION_PROGRESS "
 _PROGRESS_PHASES = frozenset({"building_skill", "generating_teaching"})
 _PROGRESS_RE = re.compile(r"EDUCATION_PROGRESS\s+(\{[^\r\n]+\})")
+_MANAGED_SKILL_NAMES = ("book-to-skill", "the-knowledge-guy")
+_MANAGED_SKILL_HEADING = "## Managed textbook mode"
+_HEARTBEAT_INTERVAL_SECONDS = 15.0
+
+
+def _managed_skill_mode(skill_name: str, job_id: str) -> str:
+    """Read only a built-in Skill's fixed managed-mode section for one job."""
+    source = Path(__file__).resolve().parents[3] / "skills" / skill_name / "SKILL.md"
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError("Managed teaching skill is unavailable") from exc
+    start = text.find(_MANAGED_SKILL_HEADING)
+    if start < 0:
+        raise RuntimeError("Managed teaching skill has no managed mode")
+    next_heading = text.find("\n## ", start + len(_MANAGED_SKILL_HEADING))
+    mode = text[start:] if next_heading < 0 else text[start:next_heading]
+    return mode.replace("<job>", job_id).strip()
 
 
 def managed_teaching_prompt(job_id: str) -> str:
-    """Return the only instruction accepted by the service-owned root run."""
+    """Return the compact, source-derived instruction for a managed root run."""
+    skill_modes = "\n\n".join(
+        f"# Active skill: {skill_name}\n{_managed_skill_mode(skill_name, job_id)}"
+        for skill_name in _MANAGED_SKILL_NAMES
+    )
     return (
         "这是服务托管的家庭教材教学包任务，不是与用户的对话。"
-        f"任务编号为 {job_id}。严格按以下顺序完成：\n"
-        f"1. 执行 book-to-skill --managed-textbook {job_id}，只处理已冻结的 Markdown。\n"
-        f"2. 在其成功后执行 the-knowledge-guy --managed-textbook {job_id}，"
-        "为中国学生生成教学材料和可自动判定题集。\n"
-        "不得提问、不得访问网络、不得调用其他技能或子代理、不得处理普通工作区文件。"
+        f"任务编号为 {job_id}。以下是唯一启用的两个内置技能的受管模式；"
+        "它们按顺序执行，不能进入任何普通交互模式。\n\n"
+        f"{skill_modes}\n\n"
+        "严格先完成 book-to-skill，再完成 the-knowledge-guy。不得提问、不得访问网络、"
+        "不得调用其他技能或子代理、不得读取完整交互技能文档、不得处理普通工作区文件。"
         "只可在已指定的受管任务目录工作；最终只写入 contract 指定的候选 JSON。"
     )
 
@@ -129,11 +154,46 @@ async def _record_safe_progress(
 
 
 async def _managed_workflow_events(
-    workflow: AsyncGenerator[str, None], *, attempt_id: str, staged: Mapping[str, Any]
+    workflow: AsyncGenerator[str, None],
+    *,
+    attempt_id: str,
+    root_run_id: str,
+    staged: Mapping[str, Any],
 ) -> AsyncGenerator[str, None]:
-    async for event in workflow:
-        await _record_safe_progress(attempt_id=attempt_id, staged=staged, event=event)
-        yield event
+    """Project progress while keeping a durable heartbeat during model waits."""
+
+    async def touch() -> None:
+        try:
+            await touch_teaching_attempt(attempt_id=attempt_id, root_run_id=root_run_id)
+        except Exception:
+            # A heartbeat is observability only. A transient DB failure must not
+            # interrupt an otherwise valid managed root run.
+            logger.warning("Could not refresh managed teaching heartbeat", exc_info=True)
+
+    iterator = workflow.__aiter__()
+    pending_event: asyncio.Task[str] | None = None
+    await touch()
+    try:
+        pending_event = asyncio.create_task(anext(iterator))
+        while True:
+            done, _pending = await asyncio.wait(
+                {pending_event}, timeout=_HEARTBEAT_INTERVAL_SECONDS
+            )
+            if not done:
+                await touch()
+                continue
+            try:
+                event = pending_event.result()
+            except StopAsyncIteration:
+                break
+            await _record_safe_progress(attempt_id=attempt_id, staged=staged, event=event)
+            yield event
+            pending_event = asyncio.create_task(anext(iterator))
+    finally:
+        if pending_event is not None and not pending_event.done():
+            pending_event.cancel()
+            with suppress(asyncio.CancelledError):
+                await pending_event
 
 
 async def build_managed_teaching_graph(
@@ -142,7 +202,6 @@ async def build_managed_teaching_graph(
     thread_id: str,
     run_handle: Any,
     policy: ManagedExecutionPolicy,
-    skill_contexts: list[dict[str, str]],
     agent_config: Any | None = None,
 ) -> tuple[Any, dict[str, Any], dict[str, Any]]:
     """Build the constrained graph and its fixed input/configuration.
@@ -173,18 +232,11 @@ async def build_managed_teaching_graph(
         on_signed_url=None,
         managed_policy=policy,
     )
-    # Skill bodies are injected by ``SkillsMiddleware`` from the server process,
-    # so this must be the checked-in built-in catalog rather than the sandbox
-    # path. The staged sandbox copies remain the only files discoverable and
-    # executable from within the managed job.
-    managed_skill_source = str(Path(__file__).resolve().parents[3] / "skills")
     graph_config: dict[str, Any] = {
         "configurable": {
             "thread_id": thread_id,
             "agent_mode": "ptc",
             "managed_execution": {"kind": _MANAGED_KIND, "job_id": job_id},
-            "skill_contexts": skill_contexts,
-            "skill_dirs": [managed_skill_source],
         },
         "recursion_limit": min(get_ptc_recursion_limit(), 48),
         "tags": ["managed", "education", "teaching"],
@@ -283,7 +335,6 @@ async def dispatch_managed_root_run(
             thread_id=thread_id,
             run_handle=run_handle,
             policy=policy,
-            skill_contexts=skill_contexts,
             agent_config=agent_config,
         )
         attempt = await settle_teaching_attempt(
@@ -312,6 +363,7 @@ async def dispatch_managed_root_run(
         workflow = _managed_workflow_events(
             handler.stream_workflow(graph=graph, input_state=input_state, config=graph_config),
             attempt_id=attempt_id,
+            root_run_id=run_id,
             staged=staged,
         )
         await LocalRunExecutor.get_instance().start_run(

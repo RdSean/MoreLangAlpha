@@ -660,6 +660,29 @@ async def settle_teaching_attempt(
     return dict(attempt)
 
 
+async def touch_teaching_attempt(*, attempt_id: str, root_run_id: str) -> bool:
+    """Refresh a live managed attempt only while it remains the current root run."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_attempts AS attempts
+                    SET heartbeat_at = NOW()
+                    FROM education_teaching_jobs AS jobs
+                    WHERE attempts.attempt_id = %s
+                      AND attempts.root_run_id = %s
+                      AND attempts.status = 'running'
+                      AND jobs.job_id = attempts.job_id
+                      AND jobs.latest_attempt_id = attempts.attempt_id
+                      AND jobs.status = 'running'
+                    RETURNING attempts.attempt_id
+                    """,
+                    (attempt_id, root_run_id),
+                )
+                return await cur.fetchone() is not None
+
+
 async def begin_teaching_validation(
     *, attempt_id: str, root_run_id: str
 ) -> dict[str, Any] | None:

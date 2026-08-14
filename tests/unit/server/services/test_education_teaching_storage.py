@@ -54,7 +54,7 @@ async def test_stage_teaching_inputs_uploads_only_safe_manifest_and_frozen_chapt
 
 
 @pytest.mark.asyncio
-async def test_stage_managed_teaching_skills_uses_the_sandbox_byte_upload_contract():
+async def test_stage_managed_teaching_skills_stages_only_fixed_managed_contracts():
     sandbox = AsyncMock(spec=["aupload_file_bytes"])
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
 
@@ -62,9 +62,7 @@ async def test_stage_managed_teaching_skills_uses_the_sandbox_byte_upload_contra
 
     paths = [call.args[0] for call in sandbox.aupload_file_bytes.await_args_list]
     assert paths == [
-        "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/.agents/skills/book-to-skill/SKILL.md",
         "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/.agents/skills/book-to-skill/reference/managed-textbook-contract.md",
-        "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/.agents/skills/the-knowledge-guy/SKILL.md",
         "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/.agents/skills/the-knowledge-guy/reference/managed-textbook-contract.md",
     ]
 

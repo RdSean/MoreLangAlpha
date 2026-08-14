@@ -175,6 +175,28 @@ async def test_recording_generation_progress_advances_the_package_phase(
 
 
 @pytest.mark.asyncio
+async def test_touching_a_live_teaching_attempt_refreshes_only_its_bound_root_run(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    mock_cursor.fetchone.return_value = {"attempt_id": "attempt-1"}
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+
+    touched = await education_textbooks.touch_teaching_attempt(
+        attempt_id="attempt-1", root_run_id="run-1"
+    )
+
+    assert touched is True
+    heartbeat_update = mock_cursor.execute.await_args.args[0]
+    assert "SET heartbeat_at = NOW()" in heartbeat_update
+    assert "attempts.root_run_id = %s" in heartbeat_update
+    assert "jobs.latest_attempt_id = attempts.attempt_id" in heartbeat_update
+
+
+@pytest.mark.asyncio
 async def test_parent_can_requeue_only_a_failed_or_cancelled_teaching_job(
     mock_connection, mock_cursor, monkeypatch
 ):
