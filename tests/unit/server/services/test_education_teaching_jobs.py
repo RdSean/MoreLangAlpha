@@ -162,6 +162,8 @@ def test_managed_prompt_inlines_only_the_two_managed_skill_modes():
     assert "book-to-skill" in prompt
     assert "the-knowledge-guy" in prompt
     assert prompt.count("## Managed textbook mode") == 2
+    assert ".agents/skills/book-to-skill/reference/managed-textbook-contract.md" in prompt
+    assert ".agents/skills/the-knowledge-guy/reference/managed-textbook-contract.md" in prompt
     assert "## Philosophy" not in prompt
     assert "## Project skill paths" not in prompt
 
@@ -199,6 +201,7 @@ async def test_managed_graph_does_not_inject_interactive_skill_bodies(monkeypatc
     )
     agent_config = object()
     monkeypatch.setattr(setup, "agent_config", object())
+    monkeypatch.setattr(education_teaching_jobs, "get_ptc_recursion_limit", lambda: 200)
     monkeypatch.setattr(
         education_teaching_jobs,
         "build_ptc_graph_with_session",
@@ -216,6 +219,7 @@ async def test_managed_graph_does_not_inject_interactive_skill_bodies(monkeypatc
 
     assert "skill_contexts" not in config["configurable"]
     assert "skill_dirs" not in config["configurable"]
+    assert config["recursion_limit"] == 200
     graph_call = education_teaching_jobs.build_ptc_graph_with_session.await_args
     assert graph_call.kwargs["config"] is agent_config
     assert graph_call.kwargs["user_id"] is None

@@ -285,6 +285,9 @@ def test_managed_bash_rejects_shell_escapes_from_the_job_root():
     assert managed_execution.validate_managed_bash_command(
         "cat inputs/manifest.json", policy
     ) is None
+    assert managed_execution.validate_managed_bash_command(
+        "sha256sum inputs/manifest.json", policy
+    ) is None
     assert "outside the managed textbook job root" in str(
         managed_execution.validate_managed_bash_command("cat /etc/passwd", policy)
     )

@@ -50,10 +50,12 @@ This is a service-owned production stage, not a chat, walk or course request.
    at `/managed/textbook-job/<job>/inputs/manifest.json` and
    `/managed/textbook-job/<job>/inputs/chapters/`, plus the intermediate
    representation at `/managed/textbook-job/<job>/work/knowledge-skill/`.
-2. Read [the managed contract](reference/managed-textbook-contract.md). Do not
-   solicit input, fan out unrelated skills, dispatch other skills, use user
-   memory, web access, ordinary workspace files or paths outside the job root.
-   Do not create an HTML presentation, a course, a walk state or a chat response.
+2. Read the staged managed contract at
+   `/managed/textbook-job/<job>/.agents/skills/the-knowledge-guy/reference/managed-textbook-contract.md`.
+   Do not solicit input, fan out unrelated skills, dispatch other skills, use
+   user memory, web access, ordinary workspace files or paths outside the job
+   root. Do not create an HTML presentation, a course, a walk state or a chat
+   response.
 3. For every frozen chapter, generate Chinese-student teaching material,
    learning objectives, knowledge points, difficulties, prerequisites and
    auto-gradable questions. Preserve the staged `content_chapter_id` and

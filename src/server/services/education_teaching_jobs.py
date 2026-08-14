@@ -238,7 +238,10 @@ async def build_managed_teaching_graph(
             "agent_mode": "ptc",
             "managed_execution": {"kind": _MANAGED_KIND, "job_id": job_id},
         },
-        "recursion_limit": min(get_ptc_recursion_limit(), 48),
+        # Teaching packages can span many chapters. Their durable root run
+        # must use the configured operational limit rather than chat's former
+        # short-turn cap, while cancellation and heartbeats remain shared.
+        "recursion_limit": get_ptc_recursion_limit(),
         "tags": ["managed", "education", "teaching"],
         "metadata": {
             "managed_execution": {"kind": _MANAGED_KIND, "job_id": job_id},

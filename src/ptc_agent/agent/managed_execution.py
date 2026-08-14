@@ -77,6 +77,8 @@ def validate_managed_bash_command(
     forbidden = ("..", "$", "`", ";", "&&", "||", "|", "<", ">", "\\")
     if re.search(r"(?:^|\s)/", command) or any(token in command for token in forbidden):
         return "ERROR: command reaches outside the managed textbook job root"
+    if command == "sha256sum inputs/manifest.json":
+        return None
     if not re.fullmatch(
         r"(?:cat|mkdir -p|printf|echo|test -[def]) [0-9A-Za-z._/{}:,= -]+",
         command,
