@@ -108,8 +108,25 @@ chapter.
 
 Each `-practice.json` has format
 `langalpha-managed-chapter-practice/v1`, the exact chapter ID/hash, and
-auto-graded questions. Every question has a positive `position`, an exact
-same-chapter `knowledge_point`, and a `concept_id` belonging to that chapter.
+auto-graded questions. Its strict JSON top-level shape is:
+
+```json
+{
+  "format": "langalpha-managed-chapter-practice/v1",
+  "content_chapter_id": "frozen UUID",
+  "content_sha256": "frozen 64-lowercase-hex",
+  "questions": [{
+    "position": 1,
+    "concept_id": "same-chapter concept ID",
+    "knowledge_point": "exact same-chapter knowledge point"
+  }]
+}
+```
+
+`questions` must be a non-empty array. Do not use `exercises`, `items`, or
+another replacement top-level field. Every question has a positive `position`,
+an exact same-chapter `knowledge_point`, and a `concept_id` belonging to that
+chapter.
 
 `outputs/teaching-package.json` has format
 `langalpha-managed-teaching-package/v1`. It contains every frozen chapter

@@ -1,5 +1,6 @@
 """Managed textbook mode remains non-interactive and output-bounded."""
 
+import re
 from pathlib import Path
 
 
@@ -63,3 +64,17 @@ def test_managed_contracts_define_the_same_output_schema():
         assert required_field in knowledge_contract
     assert "must exactly match" in book_contract
     assert "must exactly match" in knowledge_contract
+
+
+def test_managed_contracts_require_questions_for_each_practice_asset():
+    for skill_name in ("book-to-skill", "the-knowledge-guy"):
+        contract = (
+            ROOT / f"skills/{skill_name}/reference/managed-textbook-contract.md"
+        ).read_text()
+
+        assert re.search(
+            r'"format": "langalpha-managed-chapter-practice/v1".{0,1000}"questions": \[',
+            contract,
+            re.DOTALL,
+        )
+        assert '"exercises"' not in contract

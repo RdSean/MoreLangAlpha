@@ -30,6 +30,26 @@ question uses an existing same-chapter `concept_id` and an exact knowledge
 point. The book-wide concept index includes every verified concept and its
 source chapter, and its relation objects use those same two literal keys for
 concept IDs in that index.
+
+Each `-practice.json` uses this strict top-level shape:
+
+```json
+{
+  "format": "langalpha-managed-chapter-practice/v1",
+  "content_chapter_id": "frozen UUID",
+  "content_sha256": "frozen 64-lowercase-hex",
+  "questions": [{
+    "position": 1,
+    "concept_id": "same-chapter concept ID",
+    "knowledge_point": "exact same-chapter knowledge point"
+  }]
+}
+```
+
+`questions` is a non-empty array. Do not use `exercises`, `items`, or another
+replacement top-level field. Each question has a positive `position`, an exact
+same-chapter `knowledge_point`, and a `concept_id` belonging to that chapter.
+
 `outputs/knowledge/coverage-audit.json` must be strict JSON with this exact
 top-level shape:
 
