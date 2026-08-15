@@ -57,7 +57,7 @@ git commit -m 'feat(education): validate complete teaching assets'
 
 **Step 1: Write the failing test**
 
-断言服务从 frozen manifest 派生固定集合：`outputs/knowledge/concept-index.json`、`coverage-audit.json`、每章 knowledge/toolkit/practice 和 `teaching-package.json`。下载必须逐项请求已知 path，不得 listing；超大、非法、未知或不完整候选安全失败；归档 manifest 不含 storage key、URL 或 sandbox path。
+断言服务从 frozen manifest 派生固定集合：`outputs/knowledge/concept-index.json`、`coverage-audit.json`、每章 knowledge/toolkit/practice 和 `teaching-package.json`。下载必须逐项请求已知 path，不得 listing；超大、非法、未知或不完整候选安全失败；归档 manifest 不含 storage key、URL 或 sandbox path。对同一服务派生私有对象注入临时写入失败，断言按 5、10、20、40、60 秒有界退避后可继续归档，耗尽后保持可恢复失败。
 
 **Step 2: Run test to verify it fails**
 
