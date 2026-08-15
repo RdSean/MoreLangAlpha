@@ -17,7 +17,7 @@ from src.utils.storage import upload_bytes
 
 _SAFE_COMPONENT_RE = re.compile(r"[^0-9A-Za-z._-]+")
 _MAX_CANDIDATE_BYTES = 4 * 1024 * 1024
-_ARCHIVE_PUT_RETRY_DELAYS = (1, 2, 4, 8, 15)
+_ARCHIVE_PUT_RETRY_DELAYS = (5, 10, 20, 40, 60)
 
 
 class TeachingPackageStorageError(RuntimeError):

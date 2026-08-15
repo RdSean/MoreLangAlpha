@@ -202,14 +202,14 @@ async def test_write_teaching_asset_bundle_uses_only_service_generated_education
 
 
 @pytest.mark.asyncio
-async def test_private_teaching_archive_retries_a_transient_storage_write(monkeypatch):
+async def test_private_teaching_archive_retries_across_the_transient_storage_window(monkeypatch):
     attempts = 0
     delays: list[float] = []
 
     def upload(_key: str, _content: bytes, _content_type: str) -> bool:
         nonlocal attempts
         attempts += 1
-        return attempts == 3
+        return attempts == 6
 
     async def to_thread(function, *args):
         return function(*args)
@@ -227,8 +227,8 @@ async def test_private_teaching_archive_retries_a_transient_storage_write(monkey
         "application/json",
     )
 
-    assert attempts == 3
-    assert delays == [1, 2]
+    assert attempts == 6
+    assert delays == [5, 10, 20, 40, 60]
 
 
 @pytest.mark.asyncio
