@@ -173,6 +173,25 @@ async def test_download_complete_teaching_outputs_uses_only_all_service_derived_
 
 
 @pytest.mark.asyncio
+async def test_download_incomplete_teaching_outputs_reports_only_safe_relative_path():
+    sandbox = AsyncMock()
+    frozen = education_teaching_storage.freeze_teaching_input(_job())
+    paths = expected_teaching_asset_paths(frozen)
+    missing_path = paths.for_chapter(_job()["chapters"][0]["content_chapter_id"]).practice
+    sandbox.adownload_file_bytes.side_effect = [
+        None if path == missing_path else b"{}" for path in sorted(paths.all_paths)
+    ]
+
+    with pytest.raises(education_teaching_storage.TeachingPackageStorageError) as exc_info:
+        await education_teaching_storage.download_teaching_asset_outputs(
+            _job()["job_id"], frozen, sandbox
+        )
+
+    assert exc_info.value.relative_path == missing_path
+    assert "/managed/" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_write_teaching_asset_bundle_uses_only_service_generated_education_keys(monkeypatch):
     uploads: list[tuple[str, bytes]] = []
 

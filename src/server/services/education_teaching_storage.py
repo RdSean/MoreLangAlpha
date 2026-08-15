@@ -23,6 +23,10 @@ _ARCHIVE_PUT_RETRY_DELAYS = (5, 10, 20, 40, 60)
 class TeachingPackageStorageError(RuntimeError):
     """A sandbox transfer or private teaching-package archive failed."""
 
+    def __init__(self, message: str, *, relative_path: str | None = None) -> None:
+        super().__init__(message)
+        self.relative_path = relative_path
+
 
 class ManagedTeachingSandbox(Protocol):
     async def aupload_file_bytes(self, filepath: str, content: bytes) -> bool: ...
@@ -220,7 +224,9 @@ async def download_teaching_asset_outputs(
     for path in sorted(paths.all_paths):
         content = await sandbox.adownload_file_bytes(f"{root}/{path}")
         if content is None:
-            raise TeachingPackageStorageError("Managed teaching bundle is incomplete")
+            raise TeachingPackageStorageError(
+                "Managed teaching bundle is incomplete", relative_path=path
+            )
         if not isinstance(content, bytes) or len(content) > _MAX_CANDIDATE_BYTES:
             raise TeachingPackageStorageError("Managed teaching bundle asset is invalid")
         outputs[path] = content

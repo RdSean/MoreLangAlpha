@@ -278,11 +278,16 @@ async def finalize_teaching_attempt(
         if completed is None:
             raise RuntimeError("Managed teaching completion lost its active attempt")
         return completed
-    except Exception:
+    except Exception as exc:
         # Keep raw PTC/provider/sandbox diagnostics out of the product API.
         # The detailed exception remains in server logs, while the persisted
         # message stays useful without leaking credentials, paths or endpoints.
-        logger.exception("Managed teaching candidate finalization failed")
+        logger.exception(
+            "Managed teaching candidate finalization failed",
+            extra={
+                "relative_output_path": getattr(exc, "relative_path", None),
+            },
+        )
         return await settle_teaching_attempt(
             attempt_id=attempt_id,
             root_run_id=root_run_id,
