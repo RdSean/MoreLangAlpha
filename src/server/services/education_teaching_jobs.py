@@ -375,7 +375,9 @@ async def build_managed_teaching_graph(
         disable_subagents=not policy.allow_subagents,
         checkpointer=run_handle.checkpointer,
         background_registry=None,
-        namespace_owner=None,
+        # Built-in workers write to task:<id> through the same fenced saver as
+        # the root run. This is a service-side write lease, not parent state.
+        namespace_owner=run_handle.guard if policy.allow_subagents else None,
         user_id=None,
         plan_mode=False,
         thread_id=thread_id,

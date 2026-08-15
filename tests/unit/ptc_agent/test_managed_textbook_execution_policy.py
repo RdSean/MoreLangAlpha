@@ -215,6 +215,47 @@ async def test_managed_graph_discards_caller_identity_and_store(monkeypatch):
     assert captured["on_signed_url"] is None
 
 
+@pytest.mark.asyncio
+async def test_managed_graph_keeps_the_root_guard_for_allowed_builtin_subagents(monkeypatch):
+    """Service-owned work still needs the root fence for its fixed workers."""
+    graph_module = import_module("ptc_agent.agent.graph")
+    policy = import_module("ptc_agent.agent.managed_execution").education_teaching_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+    captured: dict[str, object] = {}
+
+    class FakePTCAgent:
+        def __init__(self, _config):
+            pass
+
+        def create_agent(self, **kwargs):
+            captured.update(kwargs)
+            return object()
+
+    monkeypatch.setattr(graph_module, "PTCAgent", FakePTCAgent)
+    session = type(
+        "Session",
+        (),
+        {
+            "conversation_id": "workspace-1",
+            "sandbox": object(),
+            "mcp_registry": object(),
+            "mcp_tool_summary": None,
+            "invalidate_agent_md": lambda self: None,
+        },
+    )()
+    guard = object()
+
+    await graph_module.build_ptc_graph_with_session(
+        session=session,
+        config=type("Config", (), {"subagents": type("Subagents", (), {"enabled": []})()})(),
+        namespace_owner=guard,
+        managed_policy=policy,
+    )
+
+    assert captured["namespace_owner"] is guard
+
+
 def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypatch):
     agent_module = import_module("ptc_agent.agent.agent")
     policy = import_module("ptc_agent.agent.managed_execution").education_teaching_policy(
@@ -281,10 +322,12 @@ def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypat
     sandbox.sandbox_id = "sandbox-1"
     sandbox.skills_manifest = None
     ptc_agent = agent_module.PTCAgent(Config())
+    guard = object()
 
     ptc_agent.create_agent(
         sandbox=sandbox,
         mcp_registry=object(),
+        namespace_owner=guard,
         managed_policy=policy,
     )
 
@@ -293,6 +336,12 @@ def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypat
     assert not {"ExecuteCode", "BashOutput", "PreviewURL", "ShowWidget", "WebSearch", "AskUserQuestion"} & tool_names
     assert compiled_subagents[0]["enabled_names"] == ["textbook-chapter-worker"]
     assert compiled_subagents[0]["definition"] is not None
+    background = next(
+        middleware
+        for middleware in captured["middleware"]
+        if type(middleware).__name__ == "BackgroundSubagentMiddleware"
+    )
+    assert background.namespace_owner is guard
 
 
 def test_managed_bash_rejects_shell_escapes_from_the_job_root():

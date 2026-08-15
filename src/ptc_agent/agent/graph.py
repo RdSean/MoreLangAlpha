@@ -177,9 +177,14 @@ async def build_ptc_graph_with_session(
         user_id = None
         store = None
         on_signed_url = None
-        namespace_owner = None
+        # The guard only fences service-created worker checkpoint namespaces;
+        # it carries no parent identity or capability. Keep it when this
+        # managed policy explicitly permits its fixed worker set.
+        namespace_owner = (
+            namespace_owner if managed_policy.allow_subagents else None
+        )
         plan_mode = False
-        disable_subagents = True
+        disable_subagents = not managed_policy.allow_subagents
 
     if user_id:
         user_profile, ptc_agent = await asyncio.gather(

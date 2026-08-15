@@ -391,8 +391,11 @@ async def test_managed_graph_does_not_inject_interactive_skill_bodies(monkeypatc
         "build_ptc_graph_with_session",
         AsyncMock(return_value=object()),
     )
+    guard = object()
     handle = type(
-        "Handle", (), {"run_id": "run-1", "turn_index": 1, "checkpointer": object()}
+        "Handle",
+        (),
+        {"run_id": "run-1", "turn_index": 1, "checkpointer": object(), "guard": guard},
     )()
 
     _graph, _state, config = await education_teaching_jobs.build_managed_teaching_graph(
@@ -411,6 +414,7 @@ async def test_managed_graph_does_not_inject_interactive_skill_bodies(monkeypatc
     assert graph_call.kwargs["user_id"] is None
     assert graph_call.kwargs["disable_subagents"] is False
     assert graph_call.kwargs["subagent_names"] == ["textbook-chapter-worker"]
+    assert graph_call.kwargs["namespace_owner"] is guard
 
 
 @pytest.mark.asyncio

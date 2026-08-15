@@ -483,7 +483,12 @@ class PTCAgent:
             # also used directly by internal runners.
             disable_subagents = not managed_policy.allow_subagents
             plan_mode = False
-            namespace_owner = None
+            # A WriterGuard is a service-owned checkpoint lease, not an
+            # inherited parent capability. Fixed managed workers need it to
+            # write their task namespaces through the root's fenced saver.
+            namespace_owner = (
+                namespace_owner if managed_policy.allow_subagents else None
+            )
             store = None
             user_id = None
             user_profile = None
