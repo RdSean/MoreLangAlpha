@@ -209,7 +209,7 @@ async def test_processing_completion_is_fenced_to_its_claimed_attempt(
 
 
 @pytest.mark.asyncio
-async def test_parent_claims_only_its_failed_verified_archive_stage(
+async def test_parent_claims_a_pending_or_legacy_terminal_verified_archive_stage(
     mock_connection, mock_cursor, monkeypatch
 ):
     @asynccontextmanager
@@ -235,9 +235,13 @@ async def test_parent_claims_only_its_failed_verified_archive_stage(
     assert "education_teaching_archive_staging" in claim_sql
     assert "memberships.household_id = textbooks.household_id" in claim_sql
     assert "attempts.error_code = 'managed_archive_pending'" in claim_sql
+    assert "managed_terminal_unprojected" in claim_sql
     assert "FOR UPDATE OF stages, attempts, jobs, packages" in claim_sql
-    assert "SET status = 'running'" in mock_cursor.execute.call_args_list[1].args[0]
-    assert "SET status = 'validating'" in mock_cursor.execute.call_args_list[2].args[0]
+    lease_sql = mock_cursor.execute.call_args_list[1].args[0]
+    assert "UPDATE education_teaching_archive_staging" in lease_sql
+    assert "created_at = NOW()" in lease_sql
+    assert "SET status = 'running'" in mock_cursor.execute.call_args_list[2].args[0]
+    assert "SET status = 'validating'" in mock_cursor.execute.call_args_list[3].args[0]
 
 
 @pytest.mark.asyncio

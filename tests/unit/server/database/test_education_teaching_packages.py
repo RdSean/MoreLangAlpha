@@ -462,6 +462,104 @@ async def test_reconcile_terminal_roots_repairs_running_attempt_after_projection
 
 
 @pytest.mark.asyncio
+async def test_reconcile_terminal_roots_defers_a_fresh_archive_callback_lease(
+    mock_connection, mock_cursor, monkeypatch
+):
+    """A validated candidate keeps its terminal callback exclusive briefly."""
+
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    mock_cursor.fetchall.return_value = []
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    projected = []
+
+    async def record_projection(**kwargs):
+        projected.append(kwargs)
+        return {"attempt_id": "attempt-1", "status": "failed"}
+
+    monkeypatch.setattr(
+        education_textbooks, "settle_recovered_teaching_root_run", record_projection
+    )
+    repaired = await education_textbooks.reconcile_terminal_teaching_root_runs()
+
+    assert repaired == 0
+    assert projected == []
+    reconciliation_sql = mock_cursor.execute.call_args.args[0]
+    assert "education_teaching_archive_staging" in reconciliation_sql
+    assert "stages.created_at <= NOW()" in reconciliation_sql
+
+
+@pytest.mark.asyncio
+async def test_reconcile_terminal_roots_projects_an_expired_archive_stage_as_retryable(
+    mock_connection, mock_cursor, monkeypatch
+):
+    """A dead callback must preserve a validated bundle for archive-only resume."""
+
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    mock_cursor.fetchall.return_value = [
+        {
+            "root_run_id": "run-1",
+            "root_status": "completed",
+            "has_archive_stage": True,
+        }
+    ]
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    projected = []
+
+    async def record_projection(**kwargs):
+        projected.append(kwargs)
+        return {"attempt_id": "attempt-1", "status": "failed"}
+
+    monkeypatch.setattr(
+        education_textbooks, "settle_recovered_teaching_root_run", record_projection
+    )
+
+    repaired = await education_textbooks.reconcile_terminal_teaching_root_runs()
+
+    assert repaired == 1
+    assert projected == [
+        {
+            "root_run_id": "run-1",
+            "status": "failed",
+            "error_code": "managed_archive_pending",
+            "error_message": "教材教学资产已校验，正在等待私有存储连接，请继续运行。",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_recovered_terminal_settlement_cannot_overwrite_a_renewed_archive_lease(
+    mock_connection, mock_cursor, monkeypatch
+):
+    """A stale scan result loses to an archive retry that renewed its lease."""
+
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    mock_cursor.fetchone.return_value = None
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+
+    settled = await education_textbooks.settle_recovered_teaching_root_run(
+        root_run_id="run-1",
+        status="failed",
+        error_code="managed_terminal_unprojected",
+        error_message="教材教学加工进程中断，请重新运行。",
+    )
+
+    assert settled is None
+    settlement_sql = mock_cursor.execute.call_args.args[0]
+    assert "NOT EXISTS" in settlement_sql
+    assert "education_teaching_archive_staging" in settlement_sql
+    assert "stages.created_at > NOW()" in settlement_sql
+
+
+@pytest.mark.asyncio
 async def test_parent_detail_selects_safe_teaching_package_projection(
     mock_connection, mock_cursor, monkeypatch
 ):

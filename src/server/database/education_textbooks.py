@@ -67,6 +67,7 @@ _TEACHING_PROGRESS_LABELS = {
     "building_skill": "已完成知识整理",
     "generating_teaching": "已完成教学材料生成",
 }
+_TEACHING_ARCHIVE_CALLBACK_LEASE_SECONDS = 360
 
 
 def advance_teaching_package_status(*, current: str, target: str) -> str:
@@ -973,12 +974,21 @@ async def claim_teaching_archive_stage_for_parent(
                       AND attempts.job_id = jobs.job_id
                       AND attempts.root_run_id = stages.root_run_id
                       AND attempts.status = 'failed'
-                      AND attempts.error_code = 'managed_archive_pending'
                       AND jobs.latest_attempt_id = attempts.attempt_id
                       AND jobs.status = 'failed'
-                      AND jobs.error_code = 'managed_archive_pending'
                       AND packages.status = 'failed'
-                      AND packages.error_code = 'managed_archive_pending'
+                      AND (
+                          (
+                              attempts.error_code = 'managed_archive_pending'
+                              AND jobs.error_code = 'managed_archive_pending'
+                              AND packages.error_code = 'managed_archive_pending'
+                          )
+                          OR (
+                              attempts.error_code = 'managed_terminal_unprojected'
+                              AND jobs.error_code = 'managed_terminal_unprojected'
+                              AND packages.error_code = 'managed_terminal_unprojected'
+                          )
+                      )
                     FOR UPDATE OF stages, attempts, jobs, packages
                     """,
                     (job_id, parent_user_id),
@@ -986,6 +996,14 @@ async def claim_teaching_archive_stage_for_parent(
                 stage = await cur.fetchone()
                 if not stage:
                     return None
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_archive_staging
+                    SET created_at = NOW()
+                    WHERE attempt_id = %s AND job_id = %s AND root_run_id = %s
+                    """,
+                    (stage["attempt_id"], stage["job_id"], stage["root_run_id"]),
+                )
                 await cur.execute(
                     """
                     UPDATE education_teaching_attempts
@@ -1405,9 +1423,23 @@ async def settle_recovered_teaching_root_run(
                       AND jobs.status IN ('running', 'validating')
                       AND packages.status IN ('preparing', 'building_skill',
                                               'generating_teaching', 'validating')
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM education_teaching_archive_staging AS stages
+                          WHERE stages.attempt_id = attempts.attempt_id
+                            AND stages.job_id = attempts.job_id
+                            AND stages.root_run_id = attempts.root_run_id
+                            AND stages.created_at > NOW() - (%s * INTERVAL '1 second')
+                      )
                     RETURNING attempts.attempt_id, attempts.job_id, attempts.status
                     """,
-                    (status, error_code, error_message[:10_000], root_run_id),
+                    (
+                        status,
+                        error_code,
+                        error_message[:10_000],
+                        root_run_id,
+                        _TEACHING_ARCHIVE_CALLBACK_LEASE_SECONDS,
+                    ),
                 )
                 attempt = await cur.fetchone()
                 if not attempt:
@@ -1463,23 +1495,32 @@ async def reconcile_terminal_teaching_root_runs(*, limit: int = 100) -> int:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
-                SELECT attempts.root_run_id, roots.status AS root_status
+                SELECT attempts.root_run_id, roots.status AS root_status,
+                       stages.attempt_id IS NOT NULL AS has_archive_stage
                 FROM education_teaching_attempts AS attempts
                 JOIN education_teaching_jobs AS jobs ON jobs.job_id = attempts.job_id
                 JOIN education_teaching_packages AS packages
                   ON packages.teaching_package_id = jobs.teaching_package_id
                 JOIN conversation_responses AS roots
                   ON roots.conversation_response_id = attempts.root_run_id
+                LEFT JOIN education_teaching_archive_staging AS stages
+                  ON stages.attempt_id = attempts.attempt_id
+                 AND stages.job_id = attempts.job_id
+                 AND stages.root_run_id = attempts.root_run_id
                 WHERE attempts.status = 'running'
                   AND jobs.latest_attempt_id = attempts.attempt_id
                   AND jobs.status IN ('running', 'validating')
                   AND packages.status IN ('preparing', 'building_skill',
                                           'generating_teaching', 'validating')
                   AND roots.status != 'in_progress'
+                  AND (
+                      stages.attempt_id IS NULL
+                      OR stages.created_at <= NOW() - (%s * INTERVAL '1 second')
+                  )
                 ORDER BY roots.created_at
                 LIMIT %s
                 """,
-                (limit,),
+                (_TEACHING_ARCHIVE_CALLBACK_LEASE_SECONDS, limit),
             )
             roots = [dict(row) for row in await cur.fetchall()]
 
@@ -1487,19 +1528,30 @@ async def reconcile_terminal_teaching_root_runs(*, limit: int = 100) -> int:
     for root in roots:
         terminal_status = str(root.get("root_status") or "")
         status = "cancelled" if terminal_status == "cancelled" else "failed"
+        has_archive_stage = bool(root.get("has_archive_stage"))
+        error_code = (
+            "managed_cancelled"
+            if status == "cancelled"
+            else (
+                "managed_archive_pending"
+                if has_archive_stage
+                else "managed_terminal_unprojected"
+            )
+        )
+        error_message = (
+            "教材教学加工已取消。"
+            if status == "cancelled"
+            else (
+                "教材教学资产已校验，正在等待私有存储连接，请继续运行。"
+                if has_archive_stage
+                else "教材教学加工进程中断，请重新运行。"
+            )
+        )
         result = await settle_recovered_teaching_root_run(
             root_run_id=str(root["root_run_id"]),
             status=status,
-            error_code=(
-                "managed_cancelled"
-                if status == "cancelled"
-                else "managed_terminal_unprojected"
-            ),
-            error_message=(
-                "教材教学加工已取消。"
-                if status == "cancelled"
-                else "教材教学加工进程中断，请重新运行。"
-            ),
+            error_code=error_code,
+            error_message=error_message,
         )
         if result is not None:
             repaired += 1

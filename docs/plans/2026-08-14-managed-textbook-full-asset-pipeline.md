@@ -324,3 +324,50 @@ Expected: PASS，且失败归档不会启动第二个 root run。
 git add migrations/versions/032_add_education_teaching_archive_staging.py src/server/database/education_textbooks.py src/server/services/education_teaching_storage.py src/server/services/education_managed_ptc.py tests/unit/server/database/test_education_textbook_jobs.py tests/unit/server/services/test_education_teaching_storage.py tests/unit/server/services/test_education_managed_ptc.py docs/plans/2026-08-14-managed-textbook-full-asset-pipeline-design.md docs/plans/2026-08-14-managed-textbook-full-asset-pipeline.md CHANGELOG.md
 git commit -m 'fix(education): retry verified teaching archive without rerunning PTC'
 ```
+
+### Task 9: 归档回调租约与终态对账竞争
+
+**Files:**
+- Modify: `src/server/database/education_textbooks.py`
+- Modify: `tests/unit/server/database/test_education_teaching_packages.py`
+- Modify: `tests/unit/server/database/test_education_textbook_jobs.py`
+- Modify: `docs/plans/2026-08-14-managed-textbook-full-asset-pipeline-design.md`
+- Modify: `CHANGELOG.md`
+
+**Step 1: Write failing recovery-race tests**
+
+断言新写入的 archive staging 在有界 MinIO 重试窗口内不会被空闲恢复扫描器投影为
+`managed_terminal_unprojected`；过期 staging 应投影为 `managed_archive_pending`；已开始的
+仅归档重试必须让旧扫描结果在最终更新处失效。另断言已有 staging 且 attempt/job/package
+三者一致处于历史 `managed_terminal_unprojected` 时，同家庭 parent 可领取同一 attempt，
+无 staging 仍回退到新 PTC attempt。
+
+**Step 2: Verify RED**
+
+Run:
+
+```bash
+uv run pytest tests/unit/server/database/test_education_teaching_packages.py tests/unit/server/database/test_education_textbook_jobs.py -q
+```
+
+Expected: FAIL，因为扫描器未区分暂存 callback 和已中断的普通 root，且领取只接受
+`managed_archive_pending`。
+
+**Step 3: Add the durable lease fence**
+
+复用 staging 的持久 `created_at`：finalize 写入时开始六分钟 lease，archive-only claim
+在同一行锁事务中续租；扫描查询仅取无 staging 或 lease 过期的 root。根 ID 条件结算也
+以同一 lease 作 `NOT EXISTS` 围栏，避免查询与 claim 交错。过期 staging 的安全错误为
+`managed_archive_pending`；历史通用终态只在三条产品记录错误码一致、staging 存在且
+parent household join 成立时兼容领取。不得读取、列举或暴露暂存字节，也不得创建第二个
+root run。
+
+**Step 4: Verify GREEN and commit**
+
+Run focused database tests, `git diff --check`, update Chinese changelog, then commit only this
+behavior and its documentation:
+
+```bash
+git add src/server/database/education_textbooks.py tests/unit/server/database/test_education_teaching_packages.py tests/unit/server/database/test_education_textbook_jobs.py docs/plans/2026-08-14-managed-textbook-full-asset-pipeline-design.md docs/plans/2026-08-14-managed-textbook-full-asset-pipeline.md CHANGELOG.md
+git commit -m 'fix(education): fence staged teaching archive recovery'
+```
