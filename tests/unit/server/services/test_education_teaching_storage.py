@@ -202,6 +202,36 @@ async def test_write_teaching_asset_bundle_uses_only_service_generated_education
 
 
 @pytest.mark.asyncio
+async def test_private_teaching_archive_retries_a_transient_storage_write(monkeypatch):
+    attempts = 0
+    delays: list[float] = []
+
+    def upload(_key: str, _content: bytes, _content_type: str) -> bool:
+        nonlocal attempts
+        attempts += 1
+        return attempts == 3
+
+    async def to_thread(function, *args):
+        return function(*args)
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(education_teaching_storage, "upload_bytes", upload)
+    monkeypatch.setattr(education_teaching_storage.asyncio, "to_thread", to_thread)
+    monkeypatch.setattr(education_teaching_storage.asyncio, "sleep", sleep)
+
+    await education_teaching_storage._put(
+        "education/household-1/english-2/v1/teaching/v2/manifest.json",
+        b"{}",
+        "application/json",
+    )
+
+    assert attempts == 3
+    assert delays == [1, 2]
+
+
+@pytest.mark.asyncio
 async def test_write_teaching_package_bundle_uses_server_generated_education_keys(monkeypatch):
     uploads: list[tuple[str, bytes]] = []
 

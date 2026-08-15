@@ -17,6 +17,7 @@ from src.utils.storage import upload_bytes
 
 _SAFE_COMPONENT_RE = re.compile(r"[^0-9A-Za-z._-]+")
 _MAX_CANDIDATE_BYTES = 4 * 1024 * 1024
+_ARCHIVE_PUT_RETRY_DELAYS = (1, 2, 4, 8, 15)
 
 
 class TeachingPackageStorageError(RuntimeError):
@@ -227,8 +228,12 @@ async def download_teaching_asset_outputs(
 
 
 async def _put(key: str, content: bytes, content_type: str) -> None:
-    if not await asyncio.to_thread(upload_bytes, key, content, content_type):
-        raise TeachingPackageStorageError("Could not store teaching package artifact")
+    for retry_delay in (*_ARCHIVE_PUT_RETRY_DELAYS, None):
+        if await asyncio.to_thread(upload_bytes, key, content, content_type):
+            return
+        if retry_delay is not None:
+            await asyncio.sleep(retry_delay)
+    raise TeachingPackageStorageError("Could not store teaching package artifact")
 
 
 def _asset_content_type(path: str) -> str:
