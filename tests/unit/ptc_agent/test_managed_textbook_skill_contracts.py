@@ -78,3 +78,20 @@ def test_managed_contracts_require_questions_for_each_practice_asset():
             re.DOTALL,
         )
         assert '"exercises"' not in contract
+
+
+def test_managed_contracts_require_concept_index_to_copy_chapter_concepts_verbatim():
+    for skill_name in ("book-to-skill", "the-knowledge-guy"):
+        contract = (
+            ROOT / f"skills/{skill_name}/reference/managed-textbook-contract.md"
+        ).read_text()
+
+        assert re.search(
+            r'"format": "langalpha-managed-concept-index/v1".{0,1000}'
+            r'"concepts": \[\{.{0,1000}'
+            r'"concept_id": "exact existing concept_id copied verbatim from a -knowledge\.json".{0,1000}'
+            r'"content_chapter_ids": \["source content_chapter_id copied verbatim"\]',
+            contract,
+            re.DOTALL,
+        )
+        assert "Do not rename, merge, substitute or add concepts." in contract

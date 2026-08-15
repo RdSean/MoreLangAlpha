@@ -82,6 +82,31 @@ concept and each item contains `concept_id`, identical `name`, and
 use the literal `from_concept_id` and `to_concept_id` keys, and both values
 must be concepts in that index.
 
+Use this exact top-level shape:
+
+```json
+{
+  "format": "langalpha-managed-concept-index/v1",
+  "concepts": [{
+    "concept_id": "exact existing concept_id copied verbatim from a -knowledge.json",
+    "name": "exact same concept name copied verbatim from that -knowledge.json",
+    "content_chapter_ids": ["source content_chapter_id copied verbatim"]
+  }],
+  "relations": [{
+    "from_concept_id": "an exact concept_id from concepts",
+    "to_concept_id": "another exact concept_id from concepts",
+    "type": "prerequisite"
+  }]
+}
+```
+
+The `concepts` array has every `concept_id` from every chapter `-knowledge.json`
+exactly once. Copy each concept ID, name and source chapter ID verbatim from
+that chapter knowledge asset. Do not rename, merge, substitute or add concepts.
+Do not turn similarly named concepts into one cross-chapter item. The final
+concept count equals the total number of concepts across the chapter knowledge
+assets.
+
 `outputs/knowledge/coverage-audit.json` has format
 `langalpha-managed-coverage-audit/v1` and must have this exact top-level
 shape:
