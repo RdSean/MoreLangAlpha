@@ -887,6 +887,153 @@ async def begin_teaching_validation(
     return dict(attempt)
 
 
+async def store_teaching_archive_stage(
+    *,
+    attempt_id: str,
+    job_id: str,
+    root_run_id: str,
+    validated_assets: dict[str, Any],
+    output_bundle: bytes,
+    output_bundle_sha256: str,
+) -> bool:
+    """Persist one service-validated candidate before private object writes."""
+    if len(output_bundle_sha256) != 64:
+        raise ValueError("Teaching archive stage digest is invalid")
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT attempts.attempt_id
+                    FROM education_teaching_attempts AS attempts
+                    JOIN education_teaching_jobs AS jobs ON jobs.job_id = attempts.job_id
+                    JOIN education_teaching_packages AS packages
+                      ON packages.teaching_package_id = jobs.teaching_package_id
+                    WHERE attempts.attempt_id = %s
+                      AND attempts.job_id = %s
+                      AND attempts.root_run_id = %s
+                      AND attempts.status = 'running'
+                      AND jobs.latest_attempt_id = attempts.attempt_id
+                      AND jobs.status = 'validating'
+                      AND packages.status = 'validating'
+                    FOR UPDATE OF attempts, jobs, packages
+                    """,
+                    (attempt_id, job_id, root_run_id),
+                )
+                if await cur.fetchone() is None:
+                    return False
+                await cur.execute(
+                    """
+                    INSERT INTO education_teaching_archive_staging (
+                        attempt_id, job_id, root_run_id, validated_assets,
+                        output_bundle, output_bundle_sha256
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (attempt_id) DO NOTHING
+                    RETURNING attempt_id
+                    """,
+                    (
+                        attempt_id,
+                        job_id,
+                        root_run_id,
+                        Json(validated_assets),
+                        output_bundle,
+                        output_bundle_sha256,
+                    ),
+                )
+                return await cur.fetchone() is not None
+
+
+async def claim_teaching_archive_stage_for_parent(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any] | None:
+    """Claim a failed archive retry without minting a second PTC root run."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT stages.attempt_id, stages.job_id, stages.root_run_id,
+                           stages.validated_assets, stages.output_bundle,
+                           stages.output_bundle_sha256
+                    FROM education_teaching_archive_staging AS stages
+                    JOIN education_teaching_attempts AS attempts
+                      ON attempts.attempt_id = stages.attempt_id
+                    JOIN education_teaching_jobs AS jobs ON jobs.job_id = stages.job_id
+                    JOIN education_teaching_packages AS packages
+                      ON packages.teaching_package_id = jobs.teaching_package_id
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = packages.content_version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE stages.job_id = %s
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                      AND attempts.job_id = jobs.job_id
+                      AND attempts.root_run_id = stages.root_run_id
+                      AND attempts.status = 'failed'
+                      AND attempts.error_code = 'managed_archive_pending'
+                      AND jobs.latest_attempt_id = attempts.attempt_id
+                      AND jobs.status = 'failed'
+                      AND jobs.error_code = 'managed_archive_pending'
+                      AND packages.status = 'failed'
+                      AND packages.error_code = 'managed_archive_pending'
+                    FOR UPDATE OF stages, attempts, jobs, packages
+                    """,
+                    (job_id, parent_user_id),
+                )
+                stage = await cur.fetchone()
+                if not stage:
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_attempts
+                    SET status = 'running', completed_at = NULL, heartbeat_at = NOW(),
+                        error_code = NULL, error_message = NULL
+                    WHERE attempt_id = %s AND status = 'failed'
+                    """,
+                    (stage["attempt_id"],),
+                )
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_jobs
+                    SET status = 'validating', completed_at = NULL,
+                        error_code = NULL, error_message = NULL, updated_at = NOW()
+                    WHERE job_id = %s AND latest_attempt_id = %s AND status = 'failed'
+                    """,
+                    (stage["job_id"], stage["attempt_id"]),
+                )
+                await cur.execute(
+                    """
+                    UPDATE education_teaching_packages AS packages
+                    SET status = 'validating', error_code = NULL, error_message = NULL
+                    FROM education_teaching_jobs AS jobs
+                    WHERE jobs.job_id = %s
+                      AND jobs.latest_attempt_id = %s
+                      AND jobs.teaching_package_id = packages.teaching_package_id
+                      AND packages.status = 'failed'
+                    """,
+                    (stage["job_id"], stage["attempt_id"]),
+                )
+    return dict(stage)
+
+
+async def delete_teaching_archive_stage(
+    *, attempt_id: str, job_id: str, root_run_id: str
+) -> None:
+    """Drop internal recovery bytes after their package is safely reviewable."""
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                DELETE FROM education_teaching_archive_staging
+                WHERE attempt_id = %s AND job_id = %s AND root_run_id = %s
+                """,
+                (attempt_id, job_id, root_run_id),
+            )
+
+
 async def complete_teaching_attempt(
     *,
     job_id: str,

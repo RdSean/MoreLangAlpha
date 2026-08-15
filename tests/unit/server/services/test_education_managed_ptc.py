@@ -294,11 +294,42 @@ async def test_resume_requeues_failed_job_then_creates_a_new_root_attempt(monkey
 
     monkeypatch.setattr(education_managed_ptc, "requeue_teaching_job", requeue, raising=False)
     monkeypatch.setattr(education_managed_ptc, "launch_teaching_attempt", launch)
+    monkeypatch.setattr(
+        education_managed_ptc,
+        "retry_staged_teaching_archive",
+        AsyncMock(return_value=None),
+    )
 
     resumed = await education_managed_ptc.resume_teaching_job(parent_user_id="parent-1", job_id=JOB_ID)
 
     assert resumed == {"root_run_id": "run-2"}
     assert calls == ["requeue", "launch"]
+
+
+@pytest.mark.asyncio
+async def test_resume_retries_verified_archive_without_creating_a_new_root_attempt(monkeypatch):
+    education_managed_ptc = import_module("src.server.services.education_managed_ptc")
+    retry_archive = AsyncMock(return_value={"status": "completed"})
+    requeue = AsyncMock()
+    launch = AsyncMock()
+
+    monkeypatch.setattr(
+        education_managed_ptc,
+        "retry_staged_teaching_archive",
+        retry_archive,
+        raising=False,
+    )
+    monkeypatch.setattr(education_managed_ptc, "requeue_teaching_job", requeue)
+    monkeypatch.setattr(education_managed_ptc, "launch_teaching_attempt", launch)
+
+    resumed = await education_managed_ptc.resume_teaching_job(
+        parent_user_id="parent-1", job_id=JOB_ID
+    )
+
+    assert resumed == {"status": "completed"}
+    retry_archive.assert_awaited_once_with(parent_user_id="parent-1", job_id=JOB_ID)
+    requeue.assert_not_awaited()
+    launch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -333,6 +364,13 @@ async def test_completed_root_archives_validated_complete_asset_bundle_before_re
         calls.append("archive")
         return "education/household/book/v1/teaching/v1"
 
+    async def stage(**kwargs):
+        calls.append("stage")
+        assert kwargs["output_bundle"]
+        assert len(kwargs["output_bundle_sha256"]) == 64
+        assert kwargs["validated_assets"]["format"] == "langalpha-family-teaching-assets/v2"
+        return True
+
     async def complete(**kwargs):
         calls.append("complete")
         assert kwargs["bundle_prefix"].startswith("education/")
@@ -343,8 +381,11 @@ async def test_completed_root_archives_validated_complete_asset_bundle_before_re
     monkeypatch.setattr(education_managed_ptc, "download_teaching_asset_outputs", download, raising=False)
     monkeypatch.setattr(education_managed_ptc, "begin_teaching_validation", validating, raising=False)
     monkeypatch.setattr(education_managed_ptc, "validate_teaching_assets", validate, raising=False)
+    monkeypatch.setattr(education_managed_ptc, "encode_teaching_archive_stage", MagicMock(return_value=b"stage"))
+    monkeypatch.setattr(education_managed_ptc, "store_teaching_archive_stage", stage, raising=False)
     monkeypatch.setattr(education_managed_ptc, "write_teaching_asset_bundle", archive, raising=False)
     monkeypatch.setattr(education_managed_ptc, "complete_teaching_attempt", complete, raising=False)
+    monkeypatch.setattr(education_managed_ptc, "delete_teaching_archive_stage", AsyncMock(), raising=False)
     monkeypatch.setattr(education_managed_ptc, "settle_teaching_attempt", AsyncMock(), raising=False)
 
     result = await education_managed_ptc.finalize_teaching_attempt(
@@ -368,7 +409,7 @@ async def test_completed_root_archives_validated_complete_asset_bundle_before_re
     )
 
     assert result == {"status": "completed"}
-    assert calls == ["validating", "download", "validate", "archive", "complete"]
+    assert calls == ["validating", "download", "validate", "stage", "archive", "complete"]
 
 
 @pytest.mark.asyncio

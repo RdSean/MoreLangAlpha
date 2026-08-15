@@ -266,3 +266,61 @@ cd web && pnpm vitest run src/pages/Education/__tests__/TextbookDetailPage.test.
 **Step 5: Finish branch**
 
 使用 `superpowers:verification-before-completion` 对照 `2026-08-14-managed-textbook-full-asset-pipeline-design.md` 逐项审计，再使用 `superpowers:finishing-a-development-branch` 完成分支。最终报告分列真实服务、单元测试、mock E2E、构建/lint 和进程来源。
+
+### Task 8: 已验证候选的可恢复私有归档
+
+**Files:**
+- Create: `migrations/versions/032_add_education_teaching_archive_staging.py`
+- Modify: `src/server/database/education_textbooks.py`
+- Modify: `src/server/services/education_teaching_storage.py`
+- Modify: `src/server/services/education_managed_ptc.py`
+- Modify: `tests/unit/server/database/test_education_textbook_jobs.py`
+- Modify: `tests/unit/server/services/test_education_teaching_storage.py`
+- Modify: `tests/unit/server/services/test_education_managed_ptc.py`
+- Modify: `CHANGELOG.md`
+
+**Step 1: Write failing tests**
+
+构造一份服务已验证的固定 v2 bundle，并断言最终化在首次 MinIO 归档失败前把有限大小的
+原始候选与服务生成 package 写入 attempt 绑定的内部暂存；随后调用同一家长的 resume，
+断言它只取回、重新验证并归档该暂存，不创建 root run 或新 attempt。取消、异家庭家长、
+未知路径、篡改字节或非 `managed_archive_pending` 失败都不能领取或发布暂存。
+
+**Step 2: Run tests to verify RED**
+
+Run:
+
+```bash
+uv run pytest tests/unit/server/database/test_education_textbook_jobs.py tests/unit/server/services/test_education_teaching_storage.py tests/unit/server/services/test_education_managed_ptc.py -q
+```
+
+Expected: FAIL，因为当前归档耗尽后只标记失败，resume 会创建新 PTC attempt。
+
+**Step 3: Add the smallest durable staging boundary**
+
+创建内部 `education_teaching_archive_staging` 表，以 `attempt_id` 为唯一键，保存受上限约束的
+二进制 bundle、服务验证后的 JSON、SHA-256 与时间戳；不存 MinIO key、URL、sandbox 路径、
+模型/provider 文本或凭据。finalize 在 validator 成功后、第一次 MinIO put 前以现有 row lock
+写入 staging；归档仍只使用 service-derived `education/` key 和既有有界退避。归档耗尽时以
+`managed_archive_pending` 安全失败投影保留 staging。resume 先经既有家庭 parent join 领取该
+staging，重新 freeze/validate 后只重试 archive；成功时同一 attempt 进入 review 并删除 staging。
+无法领取时保留原有“新 PTC attempt”恢复行为。
+
+**Step 4: Run tests to verify GREEN**
+
+Run:
+
+```bash
+uv run pytest tests/unit/server/database/test_education_textbook_jobs.py tests/unit/server/services/test_education_teaching_storage.py tests/unit/server/services/test_education_managed_ptc.py -q
+```
+
+Expected: PASS，且失败归档不会启动第二个 root run。
+
+**Step 5: Verify migration and commit**
+
+在项目数据库执行迁移，随后运行同一组测试、`git diff --check`，更新中文变更日志并创建原子提交：
+
+```bash
+git add migrations/versions/032_add_education_teaching_archive_staging.py src/server/database/education_textbooks.py src/server/services/education_teaching_storage.py src/server/services/education_managed_ptc.py tests/unit/server/database/test_education_textbook_jobs.py tests/unit/server/services/test_education_teaching_storage.py tests/unit/server/services/test_education_managed_ptc.py docs/plans/2026-08-14-managed-textbook-full-asset-pipeline-design.md docs/plans/2026-08-14-managed-textbook-full-asset-pipeline.md CHANGELOG.md
+git commit -m 'fix(education): retry verified teaching archive without rerunning PTC'
+```

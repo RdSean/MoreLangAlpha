@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hashlib
 import logging
 from typing import Any
 from uuid import uuid4
@@ -11,19 +12,24 @@ from ptc_agent.agent.managed_execution import education_teaching_policy
 from src.server.database.conversation import create_thread
 from src.server.database.education_textbooks import (
     begin_teaching_validation,
+    claim_teaching_archive_stage_for_parent,
     complete_teaching_attempt,
     create_teaching_attempt,
+    delete_teaching_archive_stage,
     fail_preparing_teaching_attempt,
     get_teaching_job_for_parent,
     requeue_teaching_job,
     reconcile_terminal_teaching_root_runs as _reconcile_terminal_teaching_root_runs,
     settle_recovered_teaching_root_run as _settle_recovered_teaching_root_run,
     settle_teaching_attempt,
+    store_teaching_archive_stage,
 )
 from src.server.database.workspace import create_workspace
 from src.server.services.workspace_manager import WorkspaceManager
 from src.server.services.education_teaching_storage import (
+    decode_teaching_archive_stage,
     download_teaching_asset_outputs,
+    encode_teaching_archive_stage,
     freeze_teaching_input,
     stage_managed_teaching_skills,
     stage_teaching_inputs,
@@ -195,11 +201,85 @@ async def launch_teaching_attempt(
 
 
 async def resume_teaching_job(*, parent_user_id: str, job_id: str) -> dict[str, str]:
-    """Resume a recoverable job as a new managed attempt over its frozen input."""
+    """Retry private archive first, otherwise create a new managed root attempt."""
+    archived = await retry_staged_teaching_archive(
+        parent_user_id=parent_user_id, job_id=job_id
+    )
+    if archived is not None:
+        return archived
     resumed = await requeue_teaching_job(parent_user_id=parent_user_id, job_id=job_id)
     if not resumed:
         raise LookupError("Teaching job cannot be resumed")
     return await launch_teaching_attempt(parent_user_id=parent_user_id, job_id=job_id)
+
+
+async def _archive_validated_teaching_candidate(
+    *,
+    job: Mapping[str, Any],
+    attempt_id: str,
+    root_run_id: str,
+    outputs: Mapping[str, bytes],
+    validated: Mapping[str, Any],
+) -> dict[str, Any]:
+    prefix = await write_teaching_asset_bundle(job, validated, outputs)
+    asset_manifest = {
+        key: value for key, value in validated.items() if key != "teaching_package"
+    }
+    completed = await complete_teaching_attempt(
+        job_id=str(job["job_id"]),
+        attempt_id=attempt_id,
+        root_run_id=root_run_id,
+        bundle_prefix=prefix,
+        asset_manifest=asset_manifest,
+        package=dict(validated["teaching_package"]),
+    )
+    if completed is None:
+        raise RuntimeError("Managed teaching completion lost its active attempt")
+    await delete_teaching_archive_stage(
+        attempt_id=attempt_id, job_id=str(job["job_id"]), root_run_id=root_run_id
+    )
+    return completed
+
+
+async def retry_staged_teaching_archive(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any] | None:
+    """Resume only the private archive of a previously validated candidate."""
+    stage = await claim_teaching_archive_stage_for_parent(
+        parent_user_id=parent_user_id, job_id=job_id
+    )
+    if stage is None:
+        return None
+    attempt_id = str(stage["attempt_id"])
+    root_run_id = str(stage["root_run_id"])
+    try:
+        job = await get_teaching_job_for_parent(parent_user_id=parent_user_id, job_id=job_id)
+        if job is None or str(job["job_id"]) != job_id:
+            raise LookupError("Teaching archive stage job is unavailable")
+        output_bundle = bytes(stage["output_bundle"])
+        if hashlib.sha256(output_bundle).hexdigest() != stage["output_bundle_sha256"]:
+            raise RuntimeError("Teaching archive stage digest is invalid")
+        frozen = freeze_teaching_input(job)
+        outputs = decode_teaching_archive_stage(frozen, output_bundle)
+        validated = validate_teaching_assets(outputs, frozen)
+        return await _archive_validated_teaching_candidate(
+            job=job,
+            attempt_id=attempt_id,
+            root_run_id=root_run_id,
+            outputs=outputs,
+            validated=validated,
+        )
+    except Exception:
+        logger.exception("Managed teaching archive retry failed")
+        return await settle_teaching_attempt(
+            attempt_id=attempt_id,
+            root_run_id=root_run_id,
+            status="failed",
+            error_code="managed_archive_pending",
+            error_message=sanitize_error_text(
+                "教材教学资产已校验，正在等待私有存储连接，请继续运行。"
+            ),
+        )
 
 
 async def settle_recovered_teaching_root_run(
@@ -250,6 +330,7 @@ async def finalize_teaching_attempt(
             ),
         )
 
+    archive_staged = False
     try:
         validation = await begin_teaching_validation(
             attempt_id=attempt_id, root_run_id=root_run_id
@@ -263,21 +344,25 @@ async def finalize_teaching_attempt(
         frozen = freeze_teaching_input(job)
         outputs = await download_teaching_asset_outputs(job_id, frozen, sandbox)
         validated = validate_teaching_assets(outputs, frozen)
-        prefix = await write_teaching_asset_bundle(job, validated, outputs)
-        asset_manifest = {
-            key: value for key, value in validated.items() if key != "teaching_package"
-        }
-        completed = await complete_teaching_attempt(
+        output_bundle = encode_teaching_archive_stage(frozen, outputs)
+        stored = await store_teaching_archive_stage(
+            attempt_id=attempt_id,
             job_id=job_id,
+            root_run_id=root_run_id,
+            validated_assets=dict(validated),
+            output_bundle=output_bundle,
+            output_bundle_sha256=hashlib.sha256(output_bundle).hexdigest(),
+        )
+        if not stored:
+            raise RuntimeError("Managed teaching archive stage was not retained")
+        archive_staged = True
+        return await _archive_validated_teaching_candidate(
+            job=job,
             attempt_id=attempt_id,
             root_run_id=root_run_id,
-            bundle_prefix=prefix,
-            asset_manifest=asset_manifest,
-            package=validated["teaching_package"],
+            outputs=outputs,
+            validated=validated,
         )
-        if completed is None:
-            raise RuntimeError("Managed teaching completion lost its active attempt")
-        return completed
     except Exception as exc:
         # Keep raw PTC/provider/sandbox diagnostics out of the product API.
         # The detailed exception remains in server logs, while the persisted
@@ -292,8 +377,12 @@ async def finalize_teaching_attempt(
             attempt_id=attempt_id,
             root_run_id=root_run_id,
             status="failed",
-            error_code="managed_output_invalid",
+            error_code=("managed_archive_pending" if archive_staged else "managed_output_invalid"),
             error_message=sanitize_error_text(
-                "教材教学包校验或归档失败，请重新运行。"
+                (
+                    "教材教学资产已校验，正在等待私有存储连接，请继续运行。"
+                    if archive_staged
+                    else "教材教学包校验或归档失败，请重新运行。"
+                )
             ),
         )

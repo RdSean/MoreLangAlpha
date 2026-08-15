@@ -250,6 +250,27 @@ async def test_private_teaching_archive_retries_across_the_transient_storage_win
     assert delays == [5, 10, 20, 40, 60]
 
 
+def test_validated_teaching_archive_stage_round_trips_only_fixed_candidate_paths():
+    frozen = education_teaching_storage.freeze_teaching_input(_job())
+    paths = expected_teaching_asset_paths(frozen)
+    outputs = {
+        path: f"validated candidate: {path}".encode("utf-8")
+        for path in paths.all_paths
+    }
+
+    staged = education_teaching_storage.encode_teaching_archive_stage(
+        frozen, outputs
+    )
+
+    restored = education_teaching_storage.decode_teaching_archive_stage(
+        frozen, staged
+    )
+
+    assert restored == outputs
+    assert b"education/" not in staged
+    assert b"storage_key" not in staged
+
+
 @pytest.mark.asyncio
 async def test_write_teaching_package_bundle_uses_server_generated_education_keys(monkeypatch):
     uploads: list[tuple[str, bytes]] = []

@@ -209,6 +209,70 @@ async def test_processing_completion_is_fenced_to_its_claimed_attempt(
 
 
 @pytest.mark.asyncio
+async def test_parent_claims_only_its_failed_verified_archive_stage(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {
+        "attempt_id": "attempt-1",
+        "job_id": "job-1",
+        "root_run_id": "run-1",
+        "validated_assets": {"format": "langalpha-family-teaching-assets/v2"},
+        "output_bundle": b"service-owned-stage",
+        "output_bundle_sha256": "a" * 64,
+    }
+
+    stage = await education_textbooks.claim_teaching_archive_stage_for_parent(
+        parent_user_id="parent-1", job_id="job-1"
+    )
+
+    assert stage is not None
+    claim_sql = mock_cursor.execute.call_args_list[0].args[0]
+    assert "education_teaching_archive_staging" in claim_sql
+    assert "memberships.household_id = textbooks.household_id" in claim_sql
+    assert "attempts.error_code = 'managed_archive_pending'" in claim_sql
+    assert "FOR UPDATE OF stages, attempts, jobs, packages" in claim_sql
+    assert "SET status = 'running'" in mock_cursor.execute.call_args_list[1].args[0]
+    assert "SET status = 'validating'" in mock_cursor.execute.call_args_list[2].args[0]
+
+
+@pytest.mark.asyncio
+async def test_archive_stage_is_written_only_from_the_active_validation_attempt(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"attempt_id": "attempt-1"},
+        {"attempt_id": "attempt-1"},
+    ]
+
+    stored = await education_textbooks.store_teaching_archive_stage(
+        attempt_id="attempt-1",
+        job_id="job-1",
+        root_run_id="run-1",
+        validated_assets={"format": "langalpha-family-teaching-assets/v2"},
+        output_bundle=b"validated-candidate",
+        output_bundle_sha256="a" * 64,
+    )
+
+    assert stored is True
+    fence_sql = mock_cursor.execute.call_args_list[0].args[0]
+    insert_sql = mock_cursor.execute.call_args_list[1].args[0]
+    assert "jobs.latest_attempt_id = attempts.attempt_id" in fence_sql
+    assert "jobs.status = 'validating'" in fence_sql
+    assert "education_teaching_archive_staging" in insert_sql
+    assert "ON CONFLICT (attempt_id) DO NOTHING" in insert_sql
+
+
+@pytest.mark.asyncio
 async def test_published_textbook_detail_reads_assignment_names_from_household_memberships(
     mock_connection, mock_cursor, monkeypatch
 ):

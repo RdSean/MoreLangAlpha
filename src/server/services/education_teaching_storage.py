@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
 import re
+import zipfile
 from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, Protocol
@@ -17,6 +19,7 @@ from src.utils.storage import upload_bytes
 
 _SAFE_COMPONENT_RE = re.compile(r"[^0-9A-Za-z._-]+")
 _MAX_CANDIDATE_BYTES = 4 * 1024 * 1024
+_MAX_ARCHIVE_STAGE_BYTES = 64 * 1024 * 1024
 _ARCHIVE_PUT_RETRY_DELAYS = (5, 10, 20, 40, 60)
 
 
@@ -230,6 +233,62 @@ async def download_teaching_asset_outputs(
         if not isinstance(content, bytes) or len(content) > _MAX_CANDIDATE_BYTES:
             raise TeachingPackageStorageError("Managed teaching bundle asset is invalid")
         outputs[path] = content
+    return outputs
+
+
+def encode_teaching_archive_stage(
+    frozen_input: Mapping[str, Any], outputs: Mapping[str, bytes]
+) -> bytes:
+    """Pack one validated fixed-output set for internal archive recovery."""
+    paths = expected_teaching_asset_paths(frozen_input)
+    if set(outputs) != set(paths.all_paths):
+        raise TeachingPackageStorageError("Teaching archive stage paths are invalid")
+    total_size = 0
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(
+        buffer, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+    ) as archive:
+        for path in sorted(paths.all_paths):
+            content = outputs[path]
+            if not isinstance(content, bytes) or len(content) > _MAX_CANDIDATE_BYTES:
+                raise TeachingPackageStorageError("Teaching archive stage content is invalid")
+            total_size += len(content)
+            if total_size > _MAX_ARCHIVE_STAGE_BYTES:
+                raise TeachingPackageStorageError("Teaching archive stage is too large")
+            archive.writestr(path, content)
+    staged = buffer.getvalue()
+    if len(staged) > _MAX_ARCHIVE_STAGE_BYTES:
+        raise TeachingPackageStorageError("Teaching archive stage is too large")
+    return staged
+
+
+def decode_teaching_archive_stage(
+    frozen_input: Mapping[str, Any], staged: bytes
+) -> dict[str, bytes]:
+    """Restore only the exact fixed outputs from a service-owned archive stage."""
+    if not isinstance(staged, bytes) or not staged or len(staged) > _MAX_ARCHIVE_STAGE_BYTES:
+        raise TeachingPackageStorageError("Teaching archive stage is invalid")
+    paths = expected_teaching_asset_paths(frozen_input)
+    try:
+        with zipfile.ZipFile(io.BytesIO(staged)) as archive:
+            infos = archive.infolist()
+            names = [info.filename for info in infos]
+            if len(names) != len(set(names)) or set(names) != set(paths.all_paths):
+                raise TeachingPackageStorageError("Teaching archive stage paths are invalid")
+            total_size = 0
+            outputs: dict[str, bytes] = {}
+            for info in infos:
+                if info.is_dir() or info.file_size > _MAX_CANDIDATE_BYTES:
+                    raise TeachingPackageStorageError("Teaching archive stage content is invalid")
+                total_size += info.file_size
+                if total_size > _MAX_ARCHIVE_STAGE_BYTES:
+                    raise TeachingPackageStorageError("Teaching archive stage is too large")
+                content = archive.read(info)
+                if len(content) != info.file_size:
+                    raise TeachingPackageStorageError("Teaching archive stage content is invalid")
+                outputs[info.filename] = content
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
+        raise TeachingPackageStorageError("Teaching archive stage is invalid") from exc
     return outputs
 
 
