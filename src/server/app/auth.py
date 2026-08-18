@@ -1,9 +1,13 @@
 """First-party local account and household membership API."""
 
+import json
 import re
+from datetime import datetime
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from src.server.auth.local_sessions import (
@@ -27,6 +31,15 @@ from src.server.database.auth_accounts import (
     rotate_session_record,
     session_expiry,
 )
+from src.server.models.conversation import WorkspaceThreadListItem, WorkspaceThreadsListResponse
+from src.server.services.family_accounts import (
+    FamilyMemberNotFoundError,
+    FamilyThreadNotFoundError,
+    get_family_child_replay,
+    get_family_child_workspace,
+    list_family_child_threads,
+    list_family_children,
+)
 from src.server.utils.api import CurrentUserId
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
@@ -48,6 +61,17 @@ class MemberResponse(BaseModel):
     name: str
     role: str
     household_id: str
+
+
+class FlashWorkspaceSummaryResponse(BaseModel):
+    workspace_id: str
+    name: str
+    status: str | None = None
+    updated_at: datetime | None = None
+
+
+class FamilyChildResponse(MemberResponse):
+    flash_workspace: FlashWorkspaceSummaryResponse
 
 
 class ParentRegistrationRequest(BaseModel):
@@ -117,6 +141,44 @@ def _clear_session_cookie(response: Response) -> None:
         secure=session_cookie_options()["secure"],
         samesite="lax",
     )
+
+
+def _family_thread_item(row: dict[str, Any]) -> WorkspaceThreadListItem:
+    """Project a database thread row without exposing write capabilities."""
+    return WorkspaceThreadListItem(
+        thread_id=str(row["conversation_thread_id"]),
+        workspace_id=str(row["workspace_id"]),
+        thread_index=row["thread_index"],
+        current_status=row["current_status"],
+        msg_type=row.get("msg_type"),
+        title=row.get("title"),
+        first_query_content=row.get("first_query_content"),
+        platform=row.get("platform"),
+        metadata=row.get("metadata") or {},
+        is_shared=bool(row.get("is_shared", False)),
+        is_pinned=bool(row.get("is_pinned", False)),
+        archived_at=row.get("archived_at"),
+        turn_count=row.get("turn_count"),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        run_status=row.get("latest_run_status"),
+        interrupt_reason=row.get("latest_interrupt_reason"),
+        latest_run_seq=row.get("latest_run_seq"),
+        latest_run_id=row.get("latest_run_id"),
+        last_seen_run_seq=row.get("last_seen_run_seq"),
+        run_started_at=row.get("latest_run_started_at"),
+    )
+
+
+def _safe_family_replay_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Keep the family view to original user and assistant text only."""
+    event = item.get("event")
+    data = item.get("data") or {}
+    if event == "user_message" and isinstance(data.get("content"), str):
+        return {"event": event, "data": {"content": data["content"], "timestamp": data.get("timestamp")}}
+    if event == "message_chunk" and data.get("role") == "assistant" and isinstance(data.get("content"), str):
+        return {"event": event, "data": {"role": "assistant", "content": data["content"], "timestamp": data.get("timestamp")}}
+    return None
 
 
 async def create_authenticated_session(user_id: str) -> str:
@@ -231,6 +293,124 @@ async def create_child(body: ChildAccountRequest, user_id: CurrentUserId):
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except AccountAlreadyExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/children", response_model=list[FamilyChildResponse])
+async def list_children(user_id: CurrentUserId):
+    """List a parent's students and their private Flash workspace summaries."""
+    try:
+        return await list_family_children(user_id)
+    except ParentMembershipRequiredError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@router.get("/children/{student_user_id}/workspace", response_model=FlashWorkspaceSummaryResponse)
+async def get_child_workspace(student_user_id: str, user_id: CurrentUserId):
+    try:
+        return await get_family_child_workspace(user_id, student_user_id)
+    except ParentMembershipRequiredError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FamilyMemberNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/children/{student_user_id}/threads", response_model=WorkspaceThreadsListResponse)
+async def list_child_threads(
+    student_user_id: str,
+    user_id: CurrentUserId,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    sort_by: Literal["created_at", "updated_at", "thread_index"] = Query("updated_at"),
+    sort_order: Literal["asc", "desc"] = Query("desc"),
+):
+    try:
+        threads, total, _workspace = await list_family_child_threads(
+            user_id,
+            student_user_id,
+            limit=limit,
+            offset=offset,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+    except ParentMembershipRequiredError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FamilyMemberNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return WorkspaceThreadsListResponse(
+        threads=[_family_thread_item(thread) for thread in threads],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/children/{student_user_id}/threads/{thread_id}/replay")
+async def replay_child_thread(
+    student_user_id: str,
+    thread_id: str,
+    user_id: CurrentUserId,
+    source: Literal["auto", "checkpoint", "sse"] = Query("auto"),
+    limit: int | None = Query(None, ge=1),
+):
+    try:
+        _, thread, queries, responses, usages, provenance = await get_family_child_replay(
+            user_id, student_user_id, thread_id
+        )
+    except ParentMembershipRequiredError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (FamilyMemberNotFoundError, FamilyThreadNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    from src.server.services.history.replay import (
+        CheckpointReplayUnavailable,
+        build_checkpoint_replay_items,
+        build_sse_replay_items,
+    )
+
+    responses_by_turn = {
+        row.get("turn_index"): row for row in responses if isinstance(row, dict)
+    }
+    replay_items: list[dict[str, Any]] | None = None
+    if source in ("auto", "checkpoint") and thread.get("latest_checkpoint_id"):
+        try:
+            replay_items = await build_checkpoint_replay_items(
+                thread_id,
+                queries,
+                responses_by_turn,
+                branch_tip_checkpoint_id=thread["latest_checkpoint_id"],
+                last_n_turns=limit,
+                usages=usages,
+                provenance=provenance,
+            )
+        except CheckpointReplayUnavailable:
+            if source == "checkpoint":
+                raise HTTPException(status_code=409, detail="Checkpoint replay unavailable") from None
+        except Exception:
+            if source == "checkpoint":
+                raise
+    if replay_items is None:
+        replay_items = build_sse_replay_items(thread_id, queries, responses_by_turn)
+
+    async def event_generator():
+        sequence = 0
+        for item in replay_items or []:
+            safe_item = _safe_family_replay_item(item)
+            if safe_item is None:
+                continue
+            sequence += 1
+            yield (
+                f"id: {sequence}\n"
+                f"event: {safe_item['event']}\n"
+                f"data: {json.dumps(safe_item['data'], ensure_ascii=False, default=str)}\n\n"
+            )
+        sequence += 1
+        yield f"id: {sequence}\nevent: replay_done\ndata: {json.dumps({'thread_id': thread_id})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/members", response_model=list[MemberResponse])

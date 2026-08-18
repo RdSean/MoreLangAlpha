@@ -119,6 +119,71 @@ async def test_child_creation_requires_an_authenticated_parent(client):
 
 
 @pytest.mark.asyncio
+async def test_parent_can_list_children_with_flash_summary(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-user"
+    child = {
+        **CHILD,
+        "flash_workspace": {
+            "workspace_id": "flash-child",
+            "name": "Flash",
+            "status": "flash",
+            "updated_at": NOW,
+        },
+    }
+    with patch(
+        "src.server.app.auth.list_family_children",
+        new=AsyncMock(return_value=[child]),
+    ):
+        response = await client.get("/api/v1/auth/children")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            **CHILD,
+            "flash_workspace": {
+                "workspace_id": "flash-child",
+                "name": "Flash",
+                "status": "flash",
+                "updated_at": NOW.isoformat().replace("+00:00", "Z"),
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parent_can_list_child_threads(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-user"
+    thread = {
+        "conversation_thread_id": "thread-1",
+        "workspace_id": "flash-child",
+        "thread_index": 0,
+        "current_status": "completed",
+        "msg_type": "flash",
+        "title": "学习记录",
+        "first_query_content": "你好",
+        "platform": "web",
+        "metadata": {},
+        "is_shared": False,
+        "is_pinned": False,
+        "archived_at": None,
+        "turn_count": 1,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    with patch(
+        "src.server.app.auth.list_family_child_threads",
+        new=AsyncMock(return_value=([thread], 1, {"workspace_id": "flash-child", "name": "Flash", "status": "flash", "updated_at": NOW})),
+    ):
+        response = await client.get("/api/v1/auth/children/child-user/threads")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["threads"][0]["thread_id"] == "thread-1"
+
+
+@pytest.mark.asyncio
 async def test_logout_revokes_session_and_clears_cookie(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-user"
