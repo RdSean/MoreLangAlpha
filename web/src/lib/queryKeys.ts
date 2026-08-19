@@ -95,6 +95,21 @@ export const queryKeys = {
     learning: () => [...queryKeys.education.all, 'learning'],
     assignment: (id: string) => [...queryKeys.education.learning(), id],
   },
+  settings: {
+    all: ['settings'],
+    family: {
+      all: ['settings', 'family'],
+      children: () => [...queryKeys.settings.family.all, 'children'],
+      workspace: (studentUserId: string) => [...queryKeys.settings.family.all, 'workspace', studentUserId],
+      threads: (studentUserId: string, limit = 20, offset = 0) => [
+        ...queryKeys.settings.family.all,
+        'threads',
+        studentUserId,
+        limit,
+        offset,
+      ],
+    },
+  },
 };
 
 /**
