@@ -24,13 +24,16 @@ def normalize_login_identifier(value: str) -> str:
 
 
 def _member_from_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
+    member = {
         "user_id": row["user_id"],
         "email": row["email"],
         "name": row["display_name"],
         "role": row["role"],
         "household_id": str(row["household_id"]),
     }
+    if row.get("login_identifier"):
+        member["username"] = row["login_identifier"]
+    return member
 
 
 async def register_parent_account(
@@ -222,9 +225,11 @@ async def get_member_for_user(user_id: str) -> dict[str, Any] | None:
             await cur.execute(
                 """
                 SELECT users.user_id, users.email, memberships.household_id,
-                       memberships.role, memberships.display_name
+                       memberships.role, memberships.display_name,
+                       accounts.login_identifier
                 FROM education_memberships AS memberships
                 JOIN users ON users.user_id = memberships.user_id
+                LEFT JOIN local_auth_accounts AS accounts ON accounts.user_id = memberships.user_id
                 WHERE memberships.user_id = %s
                 ORDER BY memberships.created_at ASC
                 LIMIT 1
@@ -255,9 +260,11 @@ async def list_household_members_for_parent(parent_user_id: str) -> list[dict[st
             await cur.execute(
                 """
                 SELECT users.user_id, users.email, memberships.household_id,
-                       memberships.role, memberships.display_name
+                       memberships.role, memberships.display_name,
+                       accounts.login_identifier
                 FROM education_memberships AS memberships
                 JOIN users ON users.user_id = memberships.user_id
+                LEFT JOIN local_auth_accounts AS accounts ON accounts.user_id = memberships.user_id
                 WHERE memberships.household_id = %s
                 ORDER BY memberships.role ASC, memberships.created_at ASC
                 """,

@@ -71,6 +71,7 @@ class FlashWorkspaceSummaryResponse(BaseModel):
 
 
 class FamilyChildResponse(MemberResponse):
+    username: str
     flash_workspace: FlashWorkspaceSummaryResponse
 
 

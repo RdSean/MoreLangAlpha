@@ -124,6 +124,7 @@ async def test_parent_can_list_children_with_flash_summary(client):
     app.dependency_overrides[get_current_user_id] = lambda: "parent-user"
     child = {
         **CHILD,
+        "username": "child.lee",
         "flash_workspace": {
             "workspace_id": "flash-child",
             "name": "Flash",
@@ -141,6 +142,7 @@ async def test_parent_can_list_children_with_flash_summary(client):
     assert response.json() == [
         {
             **CHILD,
+            "username": "child.lee",
             "flash_workspace": {
                 "workspace_id": "flash-child",
                 "name": "Flash",
@@ -181,6 +183,39 @@ async def test_parent_can_list_child_threads(client):
     assert response.status_code == 200
     assert response.json()["total"] == 1
     assert response.json()["threads"][0]["thread_id"] == "thread-1"
+
+
+@pytest.mark.asyncio
+async def test_parent_replay_only_emits_student_and_assistant_text(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-user"
+    replay = (
+        "child-user",
+        {"conversation_thread_id": "thread-1", "workspace_id": "flash-child"},
+        [],
+        [],
+        [],
+        [],
+    )
+    replay_items = [
+        {"event": "user_message", "data": {"content": "今天学什么？"}},
+        {"event": "tool_calls", "data": {"tool_calls": [{"name": "private_tool"}]}},
+        {"event": "message_chunk", "data": {"role": "assistant", "content": "复习单词。"}},
+    ]
+    with patch(
+        "src.server.app.auth.get_family_child_replay",
+        new=AsyncMock(return_value=replay),
+    ), patch(
+        "src.server.services.history.replay.build_sse_replay_items",
+        return_value=replay_items,
+    ):
+        response = await client.get("/api/v1/auth/children/child-user/threads/thread-1/replay")
+
+    assert response.status_code == 200
+    assert "今天学什么？" in response.text
+    assert "复习单词。" in response.text
+    assert "private_tool" not in response.text
+    assert "event: replay_done" in response.text
 
 
 @pytest.mark.asyncio
