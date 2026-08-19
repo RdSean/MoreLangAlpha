@@ -35,6 +35,7 @@ from src.server.models.conversation import WorkspaceThreadListItem, WorkspaceThr
 from src.server.services.family_accounts import (
     FamilyMemberNotFoundError,
     FamilyThreadNotFoundError,
+    FamilyWorkspaceNotFoundError,
     get_family_child_replay,
     get_family_child_workspace,
     list_family_child_threads,
@@ -71,7 +72,7 @@ class FlashWorkspaceSummaryResponse(BaseModel):
 
 
 class FamilyChildResponse(MemberResponse):
-    username: str
+    username: str | None = None
     flash_workspace: FlashWorkspaceSummaryResponse
 
 
@@ -175,9 +176,18 @@ def _safe_family_replay_item(item: dict[str, Any]) -> dict[str, Any] | None:
     """Keep the family view to original user and assistant text only."""
     event = item.get("event")
     data = item.get("data") or {}
-    if event == "user_message" and isinstance(data.get("content"), str):
+    if (
+        event == "user_message"
+        and data.get("query_type") != "system"
+        and isinstance(data.get("content"), str)
+    ):
         return {"event": event, "data": {"content": data["content"], "timestamp": data.get("timestamp")}}
-    if event == "message_chunk" and data.get("role") == "assistant" and isinstance(data.get("content"), str):
+    if (
+        event == "message_chunk"
+        and data.get("role") == "assistant"
+        and data.get("content_type") == "text"
+        and isinstance(data.get("content"), str)
+    ):
         return {"event": event, "data": {"role": "assistant", "content": data["content"], "timestamp": data.get("timestamp")}}
     return None
 
@@ -303,6 +313,8 @@ async def list_children(user_id: CurrentUserId):
         return await list_family_children(user_id)
     except ParentMembershipRequiredError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FamilyWorkspaceNotFoundError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/children/{student_user_id}/workspace", response_model=FlashWorkspaceSummaryResponse)
@@ -313,6 +325,8 @@ async def get_child_workspace(student_user_id: str, user_id: CurrentUserId):
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except FamilyMemberNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FamilyWorkspaceNotFoundError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/children/{student_user_id}/threads", response_model=WorkspaceThreadsListResponse)
@@ -337,6 +351,8 @@ async def list_child_threads(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except FamilyMemberNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FamilyWorkspaceNotFoundError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return WorkspaceThreadsListResponse(
         threads=[_family_thread_item(thread) for thread in threads],
         total=total,
@@ -361,6 +377,8 @@ async def replay_child_thread(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except (FamilyMemberNotFoundError, FamilyThreadNotFoundError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FamilyWorkspaceNotFoundError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     from src.server.services.history.replay import (
         CheckpointReplayUnavailable,

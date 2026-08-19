@@ -137,9 +137,11 @@ function Settings() {
               instead of spanning the full settings container. */}
           {!isLoading && activeTab === 'experiments' && <ExperimentsTab />}
 
-          {!isLoading && activeTab === 'family' && !studentUserId && <FamilyAccountsTab onOpenChild={openChild} />}
+          {!isLoading && activeTab === 'family' && !isParent && <FamilyAccountsTab onOpenChild={openChild} />}
 
-          {!isLoading && activeTab === 'family' && studentUserId && <FamilyChildConversations
+          {!isLoading && activeTab === 'family' && isParent && !studentUserId && <FamilyAccountsTab onOpenChild={openChild} />}
+
+          {!isLoading && activeTab === 'family' && isParent && studentUserId && <FamilyChildConversations
             student={{ user_id: studentUserId, name: selectedChild?.name ?? '子女' }}
             onBack={closeChild}
           />}

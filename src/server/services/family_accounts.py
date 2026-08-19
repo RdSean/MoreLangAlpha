@@ -21,6 +21,20 @@ class FamilyThreadNotFoundError(LookupError):
     """The requested thread is not owned by the student's Flash workspace."""
 
 
+class FamilyWorkspaceNotFoundError(LookupError):
+    """The deterministic Flash workspace cannot be used for this student."""
+
+
+def _require_student_flash_workspace(
+    workspace: dict[str, Any], student_user_id: str
+) -> None:
+    if (
+        str(workspace.get("user_id")) != student_user_id
+        or workspace.get("status") != "flash"
+    ):
+        raise FamilyWorkspaceNotFoundError("Student Flash workspace not found")
+
+
 def _flash_summary(workspace: dict[str, Any]) -> dict[str, Any]:
     return {
         "workspace_id": str(workspace["workspace_id"]),
@@ -60,6 +74,7 @@ async def list_family_children(parent_user_id: str) -> list[dict[str, Any]]:
         if member["role"] != "student":
             continue
         workspace = await get_or_create_flash_workspace(member["user_id"])
+        _require_student_flash_workspace(workspace, member["user_id"])
         children.append({**member, "flash_workspace": _flash_summary(workspace)})
     return children
 
@@ -70,6 +85,7 @@ async def get_family_child_workspace(
     """Ensure and return a student's private Flash workspace summary."""
     await _require_student(parent_user_id, student_user_id)
     workspace = await get_or_create_flash_workspace(student_user_id)
+    _require_student_flash_workspace(workspace, student_user_id)
     return _flash_summary(workspace)
 
 
@@ -85,6 +101,7 @@ async def list_family_child_threads(
     """List thread metadata in a student's Flash workspace."""
     await _require_student(parent_user_id, student_user_id)
     workspace = await get_or_create_flash_workspace(student_user_id)
+    _require_student_flash_workspace(workspace, student_user_id)
     threads, total = await get_workspace_threads(
         workspace_id=str(workspace["workspace_id"]),
         limit=limit,
@@ -101,6 +118,7 @@ async def get_family_child_replay(
     """Return replay inputs only after parent/child/workspace ownership checks."""
     await _require_student(parent_user_id, student_user_id)
     workspace = await get_or_create_flash_workspace(student_user_id)
+    _require_student_flash_workspace(workspace, student_user_id)
     replay = await get_replay_thread_data(thread_id)
     owner_id, thread, queries, responses, usages, provenance = replay
     if (
@@ -115,6 +133,7 @@ async def get_family_child_replay(
 __all__ = [
     "FamilyMemberNotFoundError",
     "FamilyThreadNotFoundError",
+    "FamilyWorkspaceNotFoundError",
     "ParentMembershipRequiredError",
     "get_family_child_replay",
     "get_family_child_workspace",

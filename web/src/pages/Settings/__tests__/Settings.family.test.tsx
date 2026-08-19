@@ -28,9 +28,9 @@ function Location() {
   return <output data-testid="location">{useLocation().search}</output>;
 }
 
-function renderSettings() {
+function renderSettings(initialEntry = '/settings?tab=family') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/settings?tab=family']}><Settings /><Location /></MemoryRouter></QueryClientProvider>);
+  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[initialEntry]}><Settings /><Location /></MemoryRouter></QueryClientProvider>);
 }
 
 beforeEach(() => {
@@ -47,5 +47,14 @@ describe('Settings family account route', () => {
 
     expect(screen.getByTestId('location')).toHaveTextContent('?tab=family&student=student-1');
     expect(screen.getByRole('heading', { name: '小明的对话记录' })).toBeInTheDocument();
+  });
+
+  it('does not load a child detail for a student deep link', () => {
+    state.member = { user_id: 'student-1', name: '小明', role: 'student' };
+
+    renderSettings('/settings?tab=family&student=student-1');
+
+    expect(screen.getByText('只有家长可以管理家庭账户。')).toBeInTheDocument();
+    expect(screen.queryByLabelText('只读对话内容')).not.toBeInTheDocument();
   });
 });

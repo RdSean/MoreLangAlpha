@@ -70,4 +70,12 @@ describe('FamilyAccountsTab', () => {
     expect(screen.getByText('只有家长可以管理家庭账户。')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '添加子女账户' })).not.toBeInTheDocument();
   });
+
+  it('identifies an existing child without a local login username', () => {
+    state.children[0].username = null;
+
+    renderTab();
+
+    expect(screen.getByText('未设置登录名')).toBeInTheDocument();
+  });
 });

@@ -84,7 +84,7 @@ export function FamilyAccountsTab({ onOpenChild }: FamilyAccountsTabProps) {
       {(childrenQuery.data ?? []).map((child) => <article key={child.user_id} className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: 'var(--color-accent-soft)', color: 'var(--color-accent-primary)' }}><UserRound className="size-4" aria-hidden="true" /></span>
-          <div className="min-w-0"><h4 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{child.name}</h4><p className="mt-0.5 font-mono text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{child.username}</p><p className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>Flash 空间：{child.flash_workspace.status === 'flash' ? '可用' : child.flash_workspace.status ?? '未知'}</p></div>
+          <div className="min-w-0"><h4 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{child.name}</h4><p className="mt-0.5 font-mono text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{child.username ?? '未设置登录名'}</p><p className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>Flash 空间：{child.flash_workspace.status === 'flash' ? '可用' : child.flash_workspace.status ?? '未知'}</p></div>
         </div>
         <Button size="sm" variant="outline" onClick={() => onOpenChild(child.user_id)}><MessageSquarePlus className="mr-2 size-4" aria-hidden="true" />查看对话</Button>
       </article>)}

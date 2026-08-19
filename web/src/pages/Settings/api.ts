@@ -11,7 +11,7 @@ export interface FlashWorkspaceSummary {
 export interface FamilyChild {
   user_id: string;
   email: string | null;
-  username: string;
+  username: string | null;
   name: string;
   role: 'student';
   household_id: string;

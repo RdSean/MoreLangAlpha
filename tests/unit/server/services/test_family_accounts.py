@@ -94,6 +94,30 @@ async def test_child_workspace_rejects_cross_household_student(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("user_id", "other-student"), ("status", "running")],
+)
+async def test_child_workspace_rejects_workspace_not_owned_by_student_or_not_flash(
+    monkeypatch, field, value
+):
+    monkeypatch.setattr(
+        family_accounts,
+        "list_household_members_for_parent",
+        AsyncMock(return_value=[PARENT, STUDENT]),
+    )
+    workspace = {**FLASH, field: value}
+    monkeypatch.setattr(
+        family_accounts,
+        "get_or_create_flash_workspace",
+        AsyncMock(return_value=workspace),
+    )
+
+    with pytest.raises(family_accounts.FamilyWorkspaceNotFoundError):
+        await family_accounts.get_family_child_workspace("parent-1", "student-1")
+
+
+@pytest.mark.asyncio
 async def test_replay_rejects_thread_from_another_workspace(monkeypatch):
     monkeypatch.setattr(
         family_accounts,

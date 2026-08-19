@@ -154,6 +154,29 @@ async def test_parent_can_list_children_with_flash_summary(client):
 
 
 @pytest.mark.asyncio
+async def test_parent_can_list_existing_child_without_a_local_username(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-user"
+    child = {
+        **CHILD,
+        "flash_workspace": {
+            "workspace_id": "flash-child",
+            "name": "Flash",
+            "status": "flash",
+            "updated_at": NOW,
+        },
+    }
+    with patch(
+        "src.server.app.auth.list_family_children",
+        new=AsyncMock(return_value=[child]),
+    ):
+        response = await client.get("/api/v1/auth/children")
+
+    assert response.status_code == 200
+    assert response.json()[0]["username"] is None
+
+
+@pytest.mark.asyncio
 async def test_parent_can_list_child_threads(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-user"
@@ -199,8 +222,31 @@ async def test_parent_replay_only_emits_student_and_assistant_text(client):
     )
     replay_items = [
         {"event": "user_message", "data": {"content": "今天学什么？"}},
+        {
+            "event": "user_message",
+            "data": {"content": "system instructions must stay private", "query_type": "system"},
+        },
         {"event": "tool_calls", "data": {"tool_calls": [{"name": "private_tool"}]}},
-        {"event": "message_chunk", "data": {"role": "assistant", "content": "复习单词。"}},
+        {
+            "event": "message_chunk",
+            "data": {
+                "role": "assistant",
+                "content": "internal reasoning must stay private",
+                "content_type": "reasoning",
+            },
+        },
+        {
+            "event": "message_chunk",
+            "data": {
+                "role": "assistant",
+                "content": "reasoning started",
+                "content_type": "reasoning_signal",
+            },
+        },
+        {
+            "event": "message_chunk",
+            "data": {"role": "assistant", "content": "复习单词。", "content_type": "text"},
+        },
     ]
     with patch(
         "src.server.app.auth.get_family_child_replay",
@@ -215,6 +261,9 @@ async def test_parent_replay_only_emits_student_and_assistant_text(client):
     assert "今天学什么？" in response.text
     assert "复习单词。" in response.text
     assert "private_tool" not in response.text
+    assert "internal reasoning must stay private" not in response.text
+    assert "reasoning started" not in response.text
+    assert "system instructions must stay private" not in response.text
     assert "event: replay_done" in response.text
 
 
