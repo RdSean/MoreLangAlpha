@@ -125,6 +125,11 @@ const baseChatState = () => ({
 
 let chatState: ReturnType<typeof baseChatState>;
 
+const THREAD_CREATED_AT = '2026-08-01T12:34:00Z';
+const { getThreadMock } = vi.hoisted(() => ({
+  getThreadMock: vi.fn(),
+}));
+
 vi.mock('../../hooks/useChatMessages', async (importOriginal) => ({
   ...(await importOriginal() as Record<string, unknown>),
   useChatMessages: () => chatState,
@@ -153,6 +158,7 @@ vi.mock('../../hooks/useNavigationData', async (importOriginal) => ({
 vi.mock('../../utils/api', async (importOriginal) => ({
   ...(await importOriginal() as Record<string, unknown>),
   getWorkspace: vi.fn().mockResolvedValue({ workspace_id: 'ws-mount', name: 'Mount WS', status: 'active' }),
+  getThread: getThreadMock,
   getThreadShareStatus: vi.fn().mockResolvedValue({ is_shared: false }),
   getSubagentTaskStatus: vi.fn().mockResolvedValue({}),
 }));
@@ -199,6 +205,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   chatState = baseChatState();
+  getThreadMock.mockReset();
+  getThreadMock.mockImplementation(() => new Promise(() => {}));
 });
 
 describe('ChatView mounting harness', () => {
@@ -206,6 +214,17 @@ describe('ChatView mounting harness', () => {
     const { container } = mountChatView();
     expect(screen.getByTestId('chat-input-stub')).toBeInTheDocument();
     expect(container.querySelector('[data-message-id]')).toBeNull();
+  });
+
+  it('renders the conversation start time in the top bar', async () => {
+    getThreadMock.mockResolvedValue({
+      thread_id: 'thread-mount-1',
+      created_at: THREAD_CREATED_AT,
+    });
+    mountChatView();
+    const time = await screen.findByTestId('thread-created-at');
+    expect(time).toHaveAttribute('dateTime', THREAD_CREATED_AT);
+    expect(time.textContent?.trim()).not.toBe('');
   });
 
   it('renders transcript bubbles from the hook state', () => {

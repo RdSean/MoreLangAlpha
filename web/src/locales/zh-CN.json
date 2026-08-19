@@ -463,6 +463,8 @@
     "backToWorkflow": "返回工作流",
     "backToMain": "返回主对话",
     "backToFlash": "返回 Flash",
+    "threadStartedAt": "开始于",
+    "messageTimestamp": "发送于 {{time}}",
     "reconnecting": "重新连接中…",
     "jumpToLatest": {
       "aria": "滚动到最新消息"

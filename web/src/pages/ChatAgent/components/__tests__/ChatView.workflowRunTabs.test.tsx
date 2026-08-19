@@ -204,6 +204,7 @@ const cancelSubagentTask = vi.fn(
 
 vi.mock('../../utils/api', async (importOriginal) => ({
   ...(await importOriginal() as Record<string, unknown>),
+  getThread: vi.fn().mockImplementation(() => new Promise(() => {})),
   getWorkspace: vi.fn().mockResolvedValue({ workspace_id: 'ws-wf', name: 'WF WS', status: 'active' }),
   getThreadShareStatus: vi.fn().mockResolvedValue({ is_shared: false }),
   getSubagentTaskStatus: vi.fn().mockResolvedValue({}),

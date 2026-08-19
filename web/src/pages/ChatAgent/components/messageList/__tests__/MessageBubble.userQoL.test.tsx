@@ -86,6 +86,29 @@ describe('MessageBubble — user copy action', () => {
   });
 });
 
+describe('MessageBubble — message timestamps', () => {
+  it('renders the user message send time', () => {
+    const timestamp = new Date('2026-08-01T12:34:00Z');
+    renderBubble(makeMessage({ timestamp }));
+    const time = screen.getByTestId('message-timestamp');
+    expect(time).toHaveAttribute('dateTime', timestamp.toISOString());
+    expect(time.textContent?.trim()).not.toBe('');
+  });
+
+  it('renders the assistant message send time', () => {
+    const timestamp = new Date('2026-08-01T12:35:00Z');
+    renderBubble(makeMessage({ id: 'm-2', role: 'assistant', content: 'Answer', timestamp }));
+    const time = screen.getByTestId('message-timestamp');
+    expect(time).toHaveAttribute('dateTime', timestamp.toISOString());
+    expect(time.textContent?.trim()).not.toBe('');
+  });
+
+  it('omits the time element when a legacy message has no timestamp', () => {
+    renderBubble(makeMessage({ timestamp: undefined }));
+    expect(screen.queryByTestId('message-timestamp')).toBeNull();
+  });
+});
+
 describe('MessageBubble — long user message collapse', () => {
   let restore: () => void;
   afterEach(() => restore?.());

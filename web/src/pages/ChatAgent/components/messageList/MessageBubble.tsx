@@ -19,11 +19,13 @@ import { useMessageActions } from './MessageActionsContext';
 import { isSteeringUserMessage } from './messagePredicates';
 import { EMPTY_OBJ } from './types';
 import type { ContentSegmentRecord, FeedbackResult, MessageRecord, ToolCallProcessRecord } from './types';
+import { createDateFormatter } from '@/lib/format';
 
 // --- MessageBubble ---
 
 /** Collapsed bound for long user messages (~10 lines of chat text). */
 const USER_MESSAGE_COLLAPSE_PX = 240;
+const messageTimeFormatter = createDateFormatter({ hour: 'numeric', minute: '2-digit' });
 
 interface MessageBubbleProps {
   message: MessageRecord;
@@ -66,6 +68,13 @@ export const MessageBubble = memo(function MessageBubble({ message, turnIndex, i
   const hasAttachments = isUser && attachments && attachments.length > 0;
   const widgetSnapshots = message.widgetSnapshots as WidgetChipShape[] | undefined;
   const hasWidgetSnapshots = isUser && widgetSnapshots && widgetSnapshots.length > 0;
+  const messageTimestamp = useMemo(() => {
+    const raw = message.timestamp;
+    if (raw === null || raw === undefined || raw === '') return null;
+    const date = raw instanceof Date ? raw : new Date(raw as string | number);
+    if (Number.isNaN(date.getTime())) return null;
+    return { date, label: messageTimeFormatter(date) };
+  }, [message.timestamp]);
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
@@ -345,6 +354,18 @@ export const MessageBubble = memo(function MessageBubble({ message, turnIndex, i
             return <LissajousLoading className={`${hasContent ? "mt-2" : "mt-0"} ${isMobile ? 'w-5 h-5' : 'w-6 h-6'} text-neutral-500 dark:text-neutral-400`} />;
           })()}
         </div>
+
+        {(isUser || isAssistant) && messageTimestamp && (
+          <time
+            data-testid="message-timestamp"
+            dateTime={messageTimestamp.date.toISOString()}
+            aria-label={t('chat.messageTimestamp', { time: messageTimestamp.label })}
+            className={`block text-xs leading-none ${isUser ? 'text-right' : 'text-left'}`}
+            style={{ color: 'var(--color-text-tertiary)' }}
+          >
+            {messageTimestamp.label}
+          </time>
+        )}
 
         {/* Sources pill -- always-visible row (not the hover-gated footer below,
             which is hidden during streaming). Surfaces the turn's tracked data

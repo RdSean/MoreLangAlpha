@@ -463,6 +463,8 @@
     "backToWorkflow": "Back to workflow",
     "backToMain": "Back to main",
     "backToFlash": "Back to Flash",
+    "threadStartedAt": "Started",
+    "messageTimestamp": "Sent {{time}}",
     "reconnecting": "Reconnecting…",
     "jumpToLatest": {
       "aria": "Scroll to latest message"

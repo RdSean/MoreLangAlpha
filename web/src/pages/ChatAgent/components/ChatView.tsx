@@ -11,7 +11,8 @@ import { usePreferences } from '@/hooks/usePreferences';
 import { useUpdatePreferences } from '@/hooks/useUpdatePreferences';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
-import { getWorkspace, summarizeThread, offloadThread, getThreadShareStatus, updateThreadSharing, cancelSubagentTask } from '../utils/api';
+import { createDateFormatter } from '@/lib/format';
+import { getWorkspace, getThread, summarizeThread, offloadThread, getThreadShareStatus, updateThreadSharing, cancelSubagentTask } from '../utils/api';
 import { buildSharedServeUrl, buildWsfilesUrl } from './viewers/html/wsfilesUrl';
 import ShareReportLinkModal from './ShareReportLinkModal';
 import { toast } from '@/components/ui/use-toast';
@@ -60,6 +61,7 @@ import { MobileBottomSheet } from '@/components/ui/mobile-bottom-sheet';
 const RightPanel = React.lazy(() => import('./RightPanel'));
 const DetailPanel = React.lazy(() => import('./DetailPanel'));
 const PreviewViewer = React.lazy(() => import('./viewers/PreviewViewer'));
+const threadCreatedAtFormatter = createDateFormatter({ dateStyle: 'medium', timeStyle: 'short' });
 
 import {
   type MessageRecord, type LocationState,
@@ -274,6 +276,36 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     resolveSubagentIdToAgentId,
     hydrateTaskTranscript,
   } = useChatMessages(workspaceId, threadId, updateTodoListCard as (todoData: Record<string, unknown>) => void, updateSubagentCard, finalizePendingTodos, handleFileArtifact, handleOpenPreviewFromStream, agentMode, clearSubagentCards, handleWorkspaceCreated, 'web');
+
+  // The thread detail endpoint already exposes the durable conversation start
+  // time. New-thread placeholders do not have a row until their first send.
+  const threadMetadataId = currentThreadId && currentThreadId !== '__default__'
+    ? currentThreadId
+    : threadId !== '__default__' ? threadId : null;
+  const [threadCreatedAt, setThreadCreatedAt] = useState<string | null>(null);
+  useEffect(() => {
+    if (!threadMetadataId) {
+      setThreadCreatedAt(null);
+      return;
+    }
+    let cancelled = false;
+    getThread(threadMetadataId)
+      .then((thread: { created_at?: string | null }) => {
+        if (cancelled) return;
+        const createdAt = typeof thread?.created_at === 'string' ? new Date(thread.created_at) : null;
+        setThreadCreatedAt(createdAt && !Number.isNaN(createdAt.getTime()) ? thread.created_at! : null);
+      })
+      .catch(() => {
+        if (!cancelled) setThreadCreatedAt(null);
+      });
+    return () => { cancelled = true; };
+  }, [threadMetadataId]);
+
+  const threadCreatedAtDate = useMemo(() => {
+    if (!threadCreatedAt) return null;
+    const date = new Date(threadCreatedAt);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }, [threadCreatedAt]);
 
   // Fallback-suggestion pill action: adopt the model that actually answered —
   // immediately for this thread's next send (chat input selection) and
@@ -1249,9 +1281,22 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
                 <Menu className="h-5 w-5" />
               </button>
             )}
-            <h1 className="text-base font-semibold whitespace-nowrap title-font truncate" style={{ color: 'var(--color-text-primary)' }}>
+            <h1 className="min-w-0 text-base font-semibold whitespace-nowrap title-font truncate" style={{ color: 'var(--color-text-primary)' }}>
               {workspaceName || t('thread.workspace')}
             </h1>
+            {threadCreatedAtDate && threadCreatedAt && (
+              <span
+                className="inline-flex min-w-0 flex-shrink-0 items-center gap-1.5 text-xs whitespace-nowrap"
+                style={{ color: 'var(--color-text-tertiary)' }}
+                aria-label={`${t('chat.threadStartedAt')} ${threadCreatedAtFormatter(threadCreatedAtDate)}`}
+              >
+                <Clock aria-hidden="true" className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="hidden sm:inline">{t('chat.threadStartedAt')}</span>
+                <time data-testid="thread-created-at" dateTime={threadCreatedAt}>
+                  {threadCreatedAtFormatter(threadCreatedAtDate)}
+                </time>
+              </span>
+            )}
             {isLoadingHistory ? (
               <span className="text-xs whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
                 {t('chat.loadingHistory')}
