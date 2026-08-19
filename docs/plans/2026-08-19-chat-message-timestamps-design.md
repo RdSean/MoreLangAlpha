@@ -25,8 +25,8 @@ value directly, so replay and live messages use the same path.
 
 - The header shows a compact localized date-and-time value with the existing
   `Clock` icon and a translated "started" label.
-- Each message shows a localized short time in a semantic `<time>` element
-  below its content. User messages align the time to the right; assistant
+- Each message shows a localized date and time in a semantic `<time>` element
+  above its content. User messages align the time to the right; assistant
   messages align it to the left.
 - Invalid or missing timestamps render no time, preserving the current layout
   for legacy records.

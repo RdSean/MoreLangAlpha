@@ -87,20 +87,24 @@ describe('MessageBubble — user copy action', () => {
 });
 
 describe('MessageBubble — message timestamps', () => {
-  it('renders the user message send time', () => {
+  it('renders the user message date and send time above the message', () => {
     const timestamp = new Date('2026-08-01T12:34:00Z');
     renderBubble(makeMessage({ timestamp }));
     const time = screen.getByTestId('message-timestamp');
+    const content = screen.getByText('What does the Q3 report say about margins?');
     expect(time).toHaveAttribute('dateTime', timestamp.toISOString());
-    expect(time.textContent?.trim()).not.toBe('');
+    expect(time.textContent).toMatch(/2026/);
+    expect(time.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('renders the assistant message send time', () => {
+  it('renders the assistant message date and send time above the message', () => {
     const timestamp = new Date('2026-08-01T12:35:00Z');
     renderBubble(makeMessage({ id: 'm-2', role: 'assistant', content: 'Answer', timestamp }));
     const time = screen.getByTestId('message-timestamp');
+    const content = screen.getByText('Answer');
     expect(time).toHaveAttribute('dateTime', timestamp.toISOString());
-    expect(time.textContent?.trim()).not.toBe('');
+    expect(time.textContent).toMatch(/2026/);
+    expect(time.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('omits the time element when a legacy message has no timestamp', () => {

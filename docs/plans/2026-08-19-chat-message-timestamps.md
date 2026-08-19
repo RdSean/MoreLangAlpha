@@ -3,7 +3,7 @@
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Display the existing conversation start time in the chat header and
-the existing send time below every user and assistant message.
+the existing send date and time above every user and assistant message.
 
 **Architecture:** Reuse `getThread` from the existing API facade to read
 `conversation_threads.created_at` in `ChatView`; do not add an endpoint or
@@ -87,12 +87,12 @@ Run the Task 1 Vitest command and expect PASS.
 
 **Step 1: Format the existing message date**
 
-Use `createDateFormatter({ hour: 'numeric', minute: '2-digit' })` and guard
-against absent or invalid values.
+Use `createDateFormatter({ dateStyle: 'medium', timeStyle: 'short' })` and
+guard against absent or invalid values.
 
 **Step 2: Render the semantic time**
 
-Place the short localized time immediately below the normal message content,
+Place the localized date and time immediately above the normal message content,
 aligned with the message role and styled with the tertiary text token.
 
 **Step 3: Run the message test**
