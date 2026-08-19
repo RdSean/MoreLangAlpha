@@ -18,9 +18,16 @@ PARENT = {
 STUDENT = {
     "user_id": "student-1",
     "email": None,
+    "username": "student.lee",
     "name": "Student",
     "role": "student",
     "household_id": "household-1",
+}
+OTHER_HOUSEHOLD_STUDENT = {
+    **STUDENT,
+    "user_id": "student-2",
+    "username": "student.other",
+    "household_id": "household-2",
 }
 FLASH = {
     "workspace_id": "flash-1",
@@ -68,6 +75,22 @@ async def test_child_workspace_requires_parent_membership(monkeypatch):
 
     with pytest.raises(ParentMembershipRequiredError):
         await family_accounts.get_family_child_workspace("student-1", "student-1")
+
+
+@pytest.mark.asyncio
+async def test_child_workspace_rejects_cross_household_student(monkeypatch):
+    monkeypatch.setattr(
+        family_accounts,
+        "list_household_members_for_parent",
+        AsyncMock(return_value=[PARENT, OTHER_HOUSEHOLD_STUDENT]),
+    )
+    ensure_flash = AsyncMock(return_value=FLASH)
+    monkeypatch.setattr(family_accounts, "get_or_create_flash_workspace", ensure_flash)
+
+    with pytest.raises(family_accounts.FamilyMemberNotFoundError):
+        await family_accounts.get_family_child_workspace("parent-1", "student-2")
+
+    ensure_flash.assert_not_awaited()
 
 
 @pytest.mark.asyncio

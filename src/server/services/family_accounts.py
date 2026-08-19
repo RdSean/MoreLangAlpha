@@ -32,8 +32,22 @@ def _flash_summary(workspace: dict[str, Any]) -> dict[str, Any]:
 
 async def _require_student(parent_user_id: str, student_user_id: str) -> dict[str, Any]:
     members = await list_household_members_for_parent(parent_user_id)
+    parent = next(
+        (
+            member
+            for member in members
+            if member["user_id"] == parent_user_id and member["role"] == "parent"
+        ),
+        None,
+    )
+    if parent is None:
+        raise ParentMembershipRequiredError("Only a parent can view household members")
     for member in members:
-        if member["user_id"] == student_user_id and member["role"] == "student":
+        if (
+            member["user_id"] == student_user_id
+            and member["role"] == "student"
+            and str(member["household_id"]) == str(parent["household_id"])
+        ):
             return member
     raise FamilyMemberNotFoundError("Student account not found")
 
