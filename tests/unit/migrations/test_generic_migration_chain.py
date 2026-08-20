@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import runpy
 
 
 FINANCE_MIGRATION_FILES = (
@@ -44,3 +45,12 @@ def test_automation_code_has_no_price_trigger_or_monitor_service():
         assert 'Literal["cron", "once", "price"]' not in source
 
     assert not (root / "src/server/services/price_monitor.py").exists()
+
+
+def test_household_llm_pool_migration_follows_teaching_archive_staging():
+    """The household model pool is the next linear migration after 032."""
+    migration_dir = Path(__file__).parents[3] / "migrations/versions"
+    migration = runpy.run_path(str(migration_dir / "033_add_household_llm_pool.py"))
+
+    assert migration["revision"] == "033"
+    assert migration["down_revision"] == "032"
