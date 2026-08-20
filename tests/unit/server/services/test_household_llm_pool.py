@@ -208,3 +208,23 @@ async def test_parent_mutations_reject_malformed_endpoint_identifiers_before_dat
     update.assert_not_awaited()
     delete.assert_not_awaited()
     set_default.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_selection_services_distinguish_disabled_from_missing_endpoint(
+    monkeypatch, membership
+):
+    disabled_endpoint = {"endpoint_id": ENDPOINT_ID, "enabled": False}
+    list_endpoints = AsyncMock(return_value=[disabled_endpoint])
+    monkeypatch.setattr(service, "list_household_endpoints", list_endpoints)
+    set_default = AsyncMock(side_effect=AssertionError("disabled endpoint must not be set"))
+    monkeypatch.setattr(service, "set_household_default_row", set_default)
+
+    with pytest.raises(service.HouseholdEndpointDisabledError):
+        await service.set_household_default("parent-1", ENDPOINT_ID)
+    set_default.assert_not_awaited()
+
+    monkeypatch.setattr(service, "get_endpoint_for_runtime", AsyncMock(return_value=None))
+    with pytest.raises(service.HouseholdEndpointDisabledError):
+        await service.set_student_preference("student-1", ENDPOINT_ID)
+    assert list_endpoints.await_count == 2

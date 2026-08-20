@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from src.server.database.auth_accounts import ParentMembershipRequiredError
 from src.server.services.household_llm_pool import (
     FamilyModelAccessError,
+    HouseholdEndpointDisabledError,
     create_endpoint,
     delete_endpoint,
     get_household_availability,
@@ -35,7 +36,9 @@ class _RequestModel(BaseModel):
     model_config = ConfigDict(hide_input_in_errors=True)
 
 
-def _required_text(value: str) -> str:
+def _required_text(value: str | None) -> str:
+    if not isinstance(value, str):
+        raise ValueError("A non-empty value is required")
     value = value.strip()
     if not value:
         raise ValueError("A non-empty value is required")
@@ -97,11 +100,11 @@ class EndpointUpdateRequest(_RequestModel):
 
 
 class DefaultEndpointRequest(_RequestModel):
-    endpoint_id: UUID | None = None
+    endpoint_id: UUID | None
 
 
 class StudentPreferenceRequest(_RequestModel):
-    endpoint_id: UUID | None = None
+    endpoint_id: UUID | None
 
 
 @lru_cache(maxsize=1)
@@ -234,9 +237,13 @@ async def update_pool_default(body: DefaultEndpointRequest, user_id: CurrentUser
         result = await set_household_default(user_id, endpoint_id)
     except ParentMembershipRequiredError as exc:
         raise _parent_error(exc) from exc
+    except HouseholdEndpointDisabledError as exc:
+        raise HTTPException(
+            status_code=409, detail="The requested default endpoint is disabled"
+        ) from exc
     except FamilyModelAccessError as exc:
         raise HTTPException(
-            status_code=409, detail="The requested default endpoint is unavailable"
+            status_code=404, detail="Household endpoint not found"
         ) from exc
     return {"default_endpoint_id": result.get("default_endpoint_id")}
 
@@ -269,9 +276,12 @@ async def update_llm_preference(body: StudentPreferenceRequest, user_id: Current
     endpoint_id = str(body.endpoint_id) if body.endpoint_id is not None else None
     try:
         await set_student_preference(user_id, endpoint_id)
+    except HouseholdEndpointDisabledError as exc:
+        raise HTTPException(
+            status_code=409, detail="The requested endpoint is disabled"
+        ) from exc
     except FamilyModelAccessError as exc:
-        # An unavailable selection (including a disabled endpoint) is a state
-        # conflict. The service also enforces household membership for the ID.
-        raise HTTPException(status_code=409, detail="The requested endpoint is unavailable") from exc
+        # Unknown and cross-household IDs are indistinguishable by design.
+        raise HTTPException(status_code=404, detail="Household endpoint not found") from exc
     availability = await get_household_availability(context["household_id"], user_id)
     return _availability_projection(availability)

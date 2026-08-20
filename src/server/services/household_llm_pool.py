@@ -26,6 +26,10 @@ class FamilyModelAccessError(PermissionError):
     """The account is not allowed to access the requested household pool."""
 
 
+class HouseholdEndpointDisabledError(FamilyModelAccessError):
+    """The endpoint belongs to this household but is currently disabled."""
+
+
 class NoFamilyModelAvailableError(LookupError):
     """The household has no enabled endpoint to run."""
 
@@ -117,6 +121,7 @@ async def set_household_default(
     household_id = await require_parent_household(parent_id)
     if endpoint_id is not None:
         endpoint_id = _normalize_endpoint_id(endpoint_id)
+        await _raise_if_disabled(household_id, endpoint_id)
     result = await set_household_default_row(household_id, endpoint_id)
     if endpoint_id is not None and result.get("default_endpoint_id") is None:
         raise FamilyModelAccessError("Endpoint is unavailable in this household")
@@ -136,12 +141,23 @@ async def set_student_preference(
         raise FamilyModelAccessError("Only student accounts can set a model preference")
     if endpoint_id is not None:
         endpoint_id = _normalize_endpoint_id(endpoint_id)
+        await _raise_if_disabled(context["household_id"], endpoint_id)
         endpoint = await get_endpoint_for_runtime(context["household_id"], endpoint_id)
         if endpoint is None:
             raise FamilyModelAccessError("Endpoint is unavailable in this household")
     return await upsert_student_preference(
         student_id, context["household_id"], endpoint_id
     )
+
+
+async def _raise_if_disabled(household_id: str, endpoint_id: str) -> None:
+    """Classify a same-household disabled endpoint without exposing other rows."""
+    endpoints = await list_household_endpoints(household_id, include_disabled=True)
+    for endpoint in endpoints:
+        if str(endpoint.get("endpoint_id")) == endpoint_id:
+            if not endpoint.get("enabled", True):
+                raise HouseholdEndpointDisabledError("Endpoint is disabled")
+            return
 
 
 def public_model_key(endpoint_id: str) -> str:
@@ -212,6 +228,7 @@ async def resolve_family_model_key(
 __all__ = [
     "FAMILY_MODEL_PREFIX",
     "FamilyModelAccessError",
+    "HouseholdEndpointDisabledError",
     "NoFamilyModelAvailableError",
     "create_endpoint",
     "delete_endpoint",

@@ -10,7 +10,10 @@ from httpx import ASGITransport, AsyncClient
 
 from src.server.app.family_llm import router
 from src.server.database.auth_accounts import ParentMembershipRequiredError
-from src.server.services.household_llm_pool import FamilyModelAccessError
+from src.server.services.household_llm_pool import (
+    FamilyModelAccessError,
+    HouseholdEndpointDisabledError,
+)
 from src.server.utils.api import get_current_user_id
 
 
@@ -231,7 +234,7 @@ async def test_disabled_student_preference_is_a_conflict(client):
         new=AsyncMock(return_value={"household_id": "household-1", "role": "student"}),
     ), patch(
         "src.server.app.family_llm.set_student_preference",
-        new=AsyncMock(side_effect=FamilyModelAccessError("Endpoint is disabled")),
+        new=AsyncMock(side_effect=HouseholdEndpointDisabledError("Endpoint is disabled")),
     ), patch(
         "src.server.app.family_llm.get_household_availability",
         new=AsyncMock(return_value=_availability()),
@@ -368,3 +371,106 @@ async def test_api_key_type_error_never_echoes_submitted_value(client):
     )
     assert response.status_code == 422
     assert secret not in response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["display_name", "provider", "model_id"])
+async def test_patch_required_text_does_not_accept_explicit_null(client, field):
+    app = client._transport.app
+    _user(app, PARENT)
+    update = AsyncMock()
+    api_key = "secret-that-must-not-be-echoed"
+    with patch("src.server.app.family_llm.update_endpoint", new=update):
+        response = await client.patch(
+            f"/api/v1/family/llm-pool/{ENDPOINT_ID}",
+            json={field: None, "api_key": api_key},
+        )
+    assert response.status_code == 422
+    assert api_key not in response.text
+    update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_default_endpoint_must_be_explicit_and_nullable(client):
+    app = client._transport.app
+    _user(app, PARENT)
+    set_default = AsyncMock(return_value={"default_endpoint_id": None})
+    with patch("src.server.app.family_llm.set_household_default", new=set_default):
+        omitted = await client.put("/api/v1/family/llm-pool/default", json={})
+        cleared = await client.put(
+            "/api/v1/family/llm-pool/default", json={"endpoint_id": None}
+        )
+    assert omitted.status_code == 422
+    set_default.assert_awaited_once_with(PARENT, None)
+    assert cleared.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_student_preference_must_be_explicit_and_nullable(client):
+    app = client._transport.app
+    _user(app, STUDENT)
+    preference = AsyncMock()
+    context = AsyncMock(
+        return_value={"household_id": "household-1", "role": "student"}
+    )
+    with patch("src.server.app.family_llm.get_household_context", new=context), patch(
+        "src.server.app.family_llm.set_student_preference", new=preference
+    ), patch(
+        "src.server.app.family_llm.get_household_availability",
+        new=AsyncMock(return_value=_availability()),
+    ):
+        omitted = await client.put("/api/v1/family/llm-preference", json={})
+        cleared = await client.put(
+            "/api/v1/family/llm-preference", json={"endpoint_id": None}
+        )
+    assert omitted.status_code == 422
+    context.assert_awaited_once_with(STUDENT)
+    preference.assert_awaited_once_with(STUDENT, None)
+    assert cleared.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_disabled_default_endpoint_is_a_conflict_but_unknown_is_not_found(client):
+    app = client._transport.app
+    _user(app, PARENT)
+    with patch(
+        "src.server.app.family_llm.set_household_default",
+        new=AsyncMock(side_effect=HouseholdEndpointDisabledError("disabled")),
+    ):
+        disabled = await client.put(
+            "/api/v1/family/llm-pool/default", json={"endpoint_id": ENDPOINT_ID}
+        )
+    with patch(
+        "src.server.app.family_llm.set_household_default",
+        new=AsyncMock(side_effect=FamilyModelAccessError("unavailable")),
+    ):
+        missing = await client.put(
+            "/api/v1/family/llm-pool/default", json={"endpoint_id": ENDPOINT_ID}
+        )
+    assert disabled.status_code == 409
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_disabled_preference_is_a_conflict_but_unknown_is_not_found(client):
+    app = client._transport.app
+    _user(app, STUDENT)
+    context = AsyncMock(
+        return_value={"household_id": "household-1", "role": "student"}
+    )
+    with patch("src.server.app.family_llm.get_household_context", new=context), patch(
+        "src.server.app.family_llm.set_student_preference",
+        new=AsyncMock(side_effect=HouseholdEndpointDisabledError("disabled")),
+    ):
+        disabled = await client.put(
+            "/api/v1/family/llm-preference", json={"endpoint_id": ENDPOINT_ID}
+        )
+    with patch("src.server.app.family_llm.get_household_context", new=context), patch(
+        "src.server.app.family_llm.set_student_preference",
+        new=AsyncMock(side_effect=FamilyModelAccessError("unavailable")),
+    ):
+        missing = await client.put(
+            "/api/v1/family/llm-preference", json={"endpoint_id": ENDPOINT_ID}
+        )
+    assert disabled.status_code == 409
+    assert missing.status_code == 404
