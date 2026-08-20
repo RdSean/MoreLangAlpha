@@ -374,6 +374,34 @@ async def test_api_key_type_error_never_echoes_submitted_value(client):
 
 
 @pytest.mark.asyncio
+async def test_missing_required_field_does_not_echo_valid_api_key(client):
+    app = client._transport.app
+    _user(app, PARENT)
+    api_key = "valid-secret-key"
+    response = await client.post(
+        "/api/v1/family/llm-pool",
+        json={"display_name": "x", "model_id": "chat", "api_key": api_key},
+    )
+    assert response.status_code == 422
+    assert api_key not in response.text
+    assert all("input" not in error for error in response.json()["detail"])
+
+
+@pytest.mark.asyncio
+async def test_malformed_endpoint_id_does_not_echo_body_credentials(client):
+    app = client._transport.app
+    _user(app, PARENT)
+    api_key = "valid-secret-key"
+    response = await client.patch(
+        "/api/v1/family/llm-pool/not-a-uuid",
+        json={"api_key": api_key},
+    )
+    assert response.status_code == 422
+    assert api_key not in response.text
+    assert all("input" not in error for error in response.json()["detail"])
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("field", ["display_name", "provider", "model_id"])
 async def test_patch_required_text_does_not_accept_explicit_null(client, field):
     app = client._transport.app

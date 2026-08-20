@@ -356,6 +356,10 @@ async def test_pool_service_encrypts_keys_and_enforces_household_access(
         str(household_a), student_a
     )
     assert disabled_default_availability["default"] is None
+    with pytest.raises(pool_service.HouseholdEndpointDisabledError):
+        await pool_service.set_household_default(parent_a, disabled_default["endpoint_id"])
+    with pytest.raises(pool_service.HouseholdEndpointDisabledError):
+        await pool_service.set_student_preference(student_a, disabled_default["endpoint_id"])
 
     with pytest.raises(pool_service.FamilyModelAccessError):
         await pool_service.update_endpoint(parent_b, first_id, {"display_name": "Nope"})
@@ -472,7 +476,7 @@ async def test_default_selection_locks_endpoint_against_concurrent_disable(
             result = await self._cursor.execute(query, params)
             normalized = " ".join(query.upper().split())
             if (
-                "SELECT ENDPOINT_ID FROM HOUSEHOLD_LLM_ENDPOINTS" in normalized
+                "SELECT ENABLED FROM HOUSEHOLD_LLM_ENDPOINTS" in normalized
                 and "FOR UPDATE" in normalized
             ):
                 candidate_checked.set()

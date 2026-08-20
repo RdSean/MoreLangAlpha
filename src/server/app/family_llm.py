@@ -6,7 +6,10 @@ from functools import lru_cache
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.server.database.auth_accounts import ParentMembershipRequiredError
@@ -27,7 +30,34 @@ from src.server.services.household_llm_pool import (
 from src.server.utils.api import CurrentUserId
 
 
-router = APIRouter(prefix="/api/v1/family", tags=["Family LLM Pool"])
+class SecretSafeValidationRoute(APIRoute):
+    """Remove request values from validation responses on credential routes."""
+
+    def get_route_handler(self):
+        original_handler = super().get_route_handler()
+
+        async def secret_safe_handler(request: Request) -> Response:
+            try:
+                return await original_handler(request)
+            except RequestValidationError as exc:
+                errors = [
+                    {
+                        key: error[key]
+                        for key in ("loc", "msg", "type")
+                        if key in error
+                    }
+                    for error in exc.errors()
+                ]
+                return JSONResponse(status_code=422, content={"detail": errors})
+
+        return secret_safe_handler
+
+
+router = APIRouter(
+    prefix="/api/v1/family",
+    tags=["Family LLM Pool"],
+    route_class=SecretSafeValidationRoute,
+)
 
 
 class _RequestModel(BaseModel):

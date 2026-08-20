@@ -20,6 +20,14 @@ API_KEY_UNSET = object()
 FIELD_UNSET = object()
 
 
+class HouseholdEndpointNotFoundError(LookupError):
+    """No endpoint with this ID belongs to the selected household."""
+
+
+class HouseholdEndpointDisabledError(LookupError):
+    """The endpoint belongs to the household but cannot be selected."""
+
+
 def _endpoint_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if row is None:
         return None
@@ -291,21 +299,9 @@ async def set_household_default(
     """Set or clear a household default, refusing disabled/cross-household IDs."""
     async with get_db_connection() as conn:
         async with conn.transaction():
-            async with conn.cursor() as cur:
+            async with conn.cursor(row_factory=dict_row) as cur:
                 if endpoint_id is not None:
-                    await cur.execute(
-                        """
-                        SELECT endpoint_id FROM household_llm_endpoints
-                        WHERE household_id = %s AND endpoint_id = %s AND enabled = TRUE
-                        FOR UPDATE
-                        """,
-                        (household_id, endpoint_id),
-                    )
-                    if await cur.fetchone() is None:
-                        return {
-                            "household_id": household_id,
-                            "default_endpoint_id": None,
-                        }
+                    await _lock_enabled_endpoint(cur, household_id, endpoint_id)
                 await cur.execute(
                     """
                     INSERT INTO household_llm_settings (household_id, default_endpoint_id)
@@ -380,22 +376,25 @@ async def get_household_availability(
 async def upsert_student_preference(
     user_id: str, household_id: str, endpoint_id: str | None
 ) -> dict[str, Any]:
-    """Set a student's preference; composite FKs enforce household ownership."""
+    """Set a student's preference after atomically locking its endpoint."""
     async with get_db_connection() as conn:
-        async with conn.cursor(row_factory=dict_row) as cur:
-            await cur.execute(
-                """
-                INSERT INTO student_llm_preferences (user_id, household_id, endpoint_id)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (user_id) DO UPDATE
-                SET household_id = EXCLUDED.household_id,
-                    endpoint_id = EXCLUDED.endpoint_id,
-                    updated_at = NOW()
-                RETURNING user_id, household_id, endpoint_id, updated_at
-                """,
-                (user_id, household_id, endpoint_id),
-            )
-            row = await cur.fetchone()
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                if endpoint_id is not None:
+                    await _lock_enabled_endpoint(cur, household_id, endpoint_id)
+                await cur.execute(
+                    """
+                    INSERT INTO student_llm_preferences (user_id, household_id, endpoint_id)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id) DO UPDATE
+                    SET household_id = EXCLUDED.household_id,
+                        endpoint_id = EXCLUDED.endpoint_id,
+                        updated_at = NOW()
+                    RETURNING user_id, household_id, endpoint_id, updated_at
+                    """,
+                    (user_id, household_id, endpoint_id),
+                )
+                row = await cur.fetchone()
     result = dict(
         row
         or {
@@ -410,9 +409,29 @@ async def upsert_student_preference(
     return result
 
 
+async def _lock_enabled_endpoint(cur, household_id: str, endpoint_id: str) -> None:
+    """Lock and classify one household endpoint before a selecting write."""
+    await cur.execute(
+        """
+        SELECT enabled
+        FROM household_llm_endpoints
+        WHERE household_id = %s AND endpoint_id = %s
+        FOR UPDATE
+        """,
+        (household_id, endpoint_id),
+    )
+    endpoint = await cur.fetchone()
+    if endpoint is None:
+        raise HouseholdEndpointNotFoundError("Endpoint is unavailable in this household")
+    if not endpoint["enabled"]:
+        raise HouseholdEndpointDisabledError("Endpoint is disabled")
+
+
 __all__ = [
     "API_KEY_UNSET",
     "FIELD_UNSET",
+    "HouseholdEndpointDisabledError",
+    "HouseholdEndpointNotFoundError",
     "create_household_endpoint",
     "delete_household_endpoint",
     "get_endpoint_for_runtime",

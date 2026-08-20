@@ -214,17 +214,48 @@ async def test_parent_mutations_reject_malformed_endpoint_identifiers_before_dat
 async def test_selection_services_distinguish_disabled_from_missing_endpoint(
     monkeypatch, membership
 ):
-    disabled_endpoint = {"endpoint_id": ENDPOINT_ID, "enabled": False}
-    list_endpoints = AsyncMock(return_value=[disabled_endpoint])
+    list_endpoints = AsyncMock(side_effect=AssertionError("must not scan endpoint list"))
     monkeypatch.setattr(service, "list_household_endpoints", list_endpoints)
-    set_default = AsyncMock(side_effect=AssertionError("disabled endpoint must not be set"))
+    set_default = AsyncMock(
+        side_effect=service.HouseholdEndpointDisabledError("Endpoint is disabled")
+    )
     monkeypatch.setattr(service, "set_household_default_row", set_default)
 
     with pytest.raises(service.HouseholdEndpointDisabledError):
         await service.set_household_default("parent-1", ENDPOINT_ID)
-    set_default.assert_not_awaited()
+    set_default.assert_awaited_once_with(HOUSEHOLD_ID, ENDPOINT_ID)
 
-    monkeypatch.setattr(service, "get_endpoint_for_runtime", AsyncMock(return_value=None))
+    preference = AsyncMock(
+        side_effect=service.HouseholdEndpointDisabledError("Endpoint is disabled")
+    )
+    monkeypatch.setattr(service, "upsert_student_preference", preference)
+    get_runtime = AsyncMock(side_effect=AssertionError("must not resolve runtime endpoint"))
+    monkeypatch.setattr(service, "get_endpoint_for_runtime", get_runtime)
     with pytest.raises(service.HouseholdEndpointDisabledError):
         await service.set_student_preference("student-1", ENDPOINT_ID)
-    assert list_endpoints.await_count == 2
+    preference.assert_awaited_once_with("student-1", HOUSEHOLD_ID, ENDPOINT_ID)
+    list_endpoints.assert_not_awaited()
+    get_runtime.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_selection_services_hide_missing_endpoint_as_family_access_error(
+    monkeypatch, membership
+):
+    from src.server.database.household_llm_pool import HouseholdEndpointNotFoundError
+
+    monkeypatch.setattr(
+        service,
+        "set_household_default_row",
+        AsyncMock(side_effect=HouseholdEndpointNotFoundError("missing")),
+    )
+    with pytest.raises(service.FamilyModelAccessError):
+        await service.set_household_default("parent-1", ENDPOINT_ID)
+
+    monkeypatch.setattr(
+        service,
+        "upsert_student_preference",
+        AsyncMock(side_effect=HouseholdEndpointNotFoundError("missing")),
+    )
+    with pytest.raises(service.FamilyModelAccessError):
+        await service.set_student_preference("student-1", ENDPOINT_ID)
