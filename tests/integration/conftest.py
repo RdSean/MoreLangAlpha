@@ -27,6 +27,8 @@ _ALL_TABLES = [
     "student_llm_preferences",
     "household_llm_settings",
     "household_llm_endpoints",
+    "education_memberships",
+    "education_households",
     "platform_secret_rollouts",
     "automation_executions",
     "automations",

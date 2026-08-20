@@ -8,8 +8,28 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
+from tests.integration.conftest import _ALL_TABLES
+
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+
+async def test_cleanup_tables_remove_household_rows(db_conn):
+    """The integration fixture must not leave standalone households behind."""
+    household_id = uuid4()
+
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            "INSERT INTO education_households (household_id, name) VALUES (%s, %s)",
+            (household_id, "Fixture cleanup household"),
+        )
+        for table in _ALL_TABLES:
+            await cur.execute(f"TRUNCATE TABLE {table} CASCADE")
+        await cur.execute(
+            "SELECT EXISTS(SELECT 1 FROM education_households WHERE household_id = %s)",
+            (household_id,),
+        )
+        assert (await cur.fetchone())["exists"] is False
 
 
 async def test_household_llm_pool_schema_is_household_scoped(db_conn):
