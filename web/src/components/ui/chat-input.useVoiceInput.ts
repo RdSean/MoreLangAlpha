@@ -36,6 +36,9 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
   const { t, i18n } = useTranslation();
   const { toast } = useToast();
   const [isListening, setIsListening] = useState(false);
+  const [speechMode, setSpeechMode] = useState<'backend' | 'browser'>(() => (
+    canUseBackendSpeech() ? 'backend' : 'browser'
+  ));
   const messageRef = useRef(message);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -86,6 +89,7 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
   }, []);
 
   const startBrowser = useCallback(() => {
+    setSpeechMode('browser');
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionAPI) {
       toast({ title: t('chat.voice.serviceError'), variant: 'destructive' });
@@ -127,6 +131,7 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
       startBrowser();
       return;
     }
+    setSpeechMode('backend');
     const socket = new WebSocket(speechWebSocketUrl());
     socketRef.current = socket;
     let receivedText = false;
@@ -258,5 +263,5 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
 
   useEffect(() => () => stopListening(), [stopListening]);
 
-  return { isListening, toggleListening, stopListening };
+  return { isListening, speechMode, toggleListening, stopListening };
 }

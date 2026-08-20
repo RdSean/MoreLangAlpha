@@ -80,6 +80,7 @@ describe('useVoiceInput', () => {
     const socket = MockWebSocket.instances[0];
     expect(socket.url).toMatch(/\/ws\/v1\/speech\/transcribe$/);
     expect(MockRecognition.instances).toHaveLength(0);
+    expect(result.current.speechMode).toBe('backend');
 
     await act(async () => socket.open());
     act(() => socket.message({ type: 'partial', text: '你好' }));
@@ -95,6 +96,7 @@ describe('useVoiceInput', () => {
 
     expect(MockRecognition.instances).toHaveLength(1);
     expect(MockRecognition.instances[0].start).toHaveBeenCalledOnce();
+    expect(result.current.speechMode).toBe('browser');
   });
 
   it('stops the socket and microphone tracks', async () => {

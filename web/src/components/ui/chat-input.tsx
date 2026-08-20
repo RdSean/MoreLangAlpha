@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import {
   Plus, ArrowUp, X, FileText, Archive, Square, ClipboardList,
-  TextSelect, MoreHorizontal, Mic,
+  TextSelect, MoreHorizontal, AudioLines, Mic,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { TokenUsageRing, type TokenUsageData } from './token-usage-ring';
@@ -191,7 +191,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   } = slash;
 
   // Voice input (speech recognition) — see chat-input.useVoiceInput.
-  const { isListening, toggleListening, stopListening } = useVoiceInput({ message, setMessage, isLoading });
+  const { isListening, speechMode, toggleListening, stopListening } = useVoiceInput({ message, setMessage, isLoading });
 
   // Stop button state
   const [isStopping, setIsStopping] = useState(false);
@@ -803,6 +803,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                   >
                     {isListening ? (
                       <Square className="w-4 h-4" fill="currentColor" />
+                    ) : speechMode === 'backend' ? (
+                      <AudioLines className="w-4 h-4" />
                     ) : (
                       <Mic className="w-4 h-4" />
                     )}
