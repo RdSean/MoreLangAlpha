@@ -55,6 +55,16 @@ USD_TO_CREDITS_RATE: int = int(os.getenv("USD_TO_CREDITS_RATE", "1000"))
 AUTOMATION_WEBHOOK_URL: str = os.getenv("AUTOMATION_WEBHOOK_URL", "")
 AUTOMATION_WEBHOOK_SECRET: str = os.getenv("AUTOMATION_WEBHOOK_SECRET", "")
 
+# Volcengine Doubao ASR is a deployment-level service credential. It is never
+# exposed to browsers; the speech relay reads these constants through settings.
+VOLCENGINE_ASR_APP_ID: str = os.getenv("VOLCENGINE_ASR_APP_ID", "")
+VOLCENGINE_ASR_ACCESS_TOKEN: str = os.getenv("VOLCENGINE_ASR_ACCESS_TOKEN", "")
+VOLCENGINE_ASR_ACCESS_SECRET: str = os.getenv("VOLCENGINE_ASR_ACCESS_SECRET", "")
+VOLCENGINE_ASR_CLUSTER: str = os.getenv("VOLCENGINE_ASR_CLUSTER", "")
+VOLCENGINE_ASR_WS_URL: str = os.getenv(
+    "VOLCENGINE_ASR_WS_URL", "wss://openspeech.bytedance.com/api/v2/asr"
+)
+
 # Host IP for local LLM providers (Ollama, LM Studio, vLLM).
 # In Docker, "localhost" means the container — use host.docker.internal to reach the host.
 _IN_DOCKER: bool = os.path.exists("/.dockerenv")
