@@ -159,3 +159,29 @@ async def test_family_model_key_rejects_cross_household_and_disabled(monkeypatch
         await service.resolve_family_model_key("student", f"family:{uuid4()}") is None
     )
     get_runtime.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_malformed_endpoint_identifiers_are_rejected_before_database_lookup(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        service,
+        "get_membership_for_user",
+        AsyncMock(
+            return_value={
+                "user_id": "student",
+                "household_id": HOUSEHOLD_ID,
+                "role": "student",
+            }
+        ),
+    )
+    get_runtime = AsyncMock(side_effect=AssertionError("must not query malformed UUID"))
+    monkeypatch.setattr(service, "get_endpoint_for_runtime", get_runtime)
+
+    assert (
+        await service.resolve_family_model_key("student", "family:not-a-uuid") is None
+    )
+    with pytest.raises(service.FamilyModelAccessError):
+        await service.set_student_preference("student", "not-a-uuid")
+    get_runtime.assert_not_awaited()

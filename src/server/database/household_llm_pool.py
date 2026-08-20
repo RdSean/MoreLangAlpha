@@ -288,8 +288,8 @@ async def get_household_availability(
 ) -> dict[str, Any]:
     """Return enabled summaries plus default/preference projections."""
     all_endpoints = await list_household_endpoints(household_id, include_disabled=True)
-    endpoint_by_id = {str(row["endpoint_id"]): row for row in all_endpoints}
     endpoints = [row for row in all_endpoints if row["enabled"]]
+    endpoint_by_id = {str(row["endpoint_id"]): row for row in endpoints}
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
@@ -330,6 +330,9 @@ async def get_household_availability(
         "preference": _student_endpoint_summary(endpoint_by_id.get(preference_id))
         if preference_id
         else None,
+        "_stale_preference": bool(
+            preference_id and preference_id not in endpoint_by_id
+        ),
     }
 
 

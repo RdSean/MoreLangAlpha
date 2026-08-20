@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from src.server.database.auth_accounts import ParentMembershipRequiredError
 from src.server.database.education_members import get_membership_for_user
@@ -123,6 +124,10 @@ async def set_student_preference(
     if context["role"] != "student":
         raise FamilyModelAccessError("Only student accounts can set a model preference")
     if endpoint_id is not None:
+        try:
+            endpoint_id = str(UUID(str(endpoint_id)))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise FamilyModelAccessError("Endpoint identifier is invalid") from exc
         endpoint = await get_endpoint_for_runtime(context["household_id"], endpoint_id)
         if endpoint is None:
             raise FamilyModelAccessError("Endpoint is unavailable in this household")
@@ -157,6 +162,8 @@ async def resolve_student_endpoint(user_id: str) -> dict[str, Any] | None:
     household_id = context["household_id"]
     availability = await get_household_availability(household_id, user_id)
     preference = availability.get("preference")
+    if availability.get("_stale_preference"):
+        await upsert_student_preference(user_id, household_id, None)
     if preference:
         preferred = await _resolve_candidate(household_id, preference)
         if preferred:
@@ -186,6 +193,10 @@ async def resolve_family_model_key(
         return None
     endpoint_id = model_key[len(FAMILY_MODEL_PREFIX) :]
     if not endpoint_id:
+        return None
+    try:
+        endpoint_id = str(UUID(endpoint_id))
+    except (TypeError, ValueError, AttributeError):
         return None
     return await get_endpoint_for_runtime(context["household_id"], endpoint_id)
 

@@ -311,6 +311,11 @@ async def test_pool_service_encrypts_keys_and_enforces_household_access(
     assert preferred["endpoint_id"] == first_id
 
     await pool_service.update_endpoint(parent_a, first_id, {"enabled": False})
+    disabled_preference = await pool_db.get_household_availability(
+        str(household_a), student_a
+    )
+    assert disabled_preference["preference"] is None
+    assert disabled_preference["_stale_preference"] is True
     fallback = await pool_service.resolve_student_model(student_a)
     assert fallback is not None
     assert fallback["endpoint_id"] == second["endpoint_id"]
@@ -329,6 +334,25 @@ async def test_pool_service_encrypts_keys_and_enforces_household_access(
             (student_a,),
         )
         assert (await cur.fetchone())["endpoint_id"] is None
+
+    disabled_default = await pool_service.create_endpoint(
+        parent_a,
+        {
+            "display_name": "Disabled default",
+            "provider": "deepseek",
+            "model_id": "deepseek-disabled",
+        },
+    )
+    await pool_service.set_household_default(parent_a, disabled_default["endpoint_id"])
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            "UPDATE household_llm_endpoints SET enabled = FALSE WHERE endpoint_id = %s",
+            (disabled_default["endpoint_id"],),
+        )
+    disabled_default_availability = await pool_db.get_household_availability(
+        str(household_a), student_a
+    )
+    assert disabled_default_availability["default"] is None
 
     with pytest.raises(pool_service.FamilyModelAccessError):
         await pool_service.update_endpoint(parent_b, first_id, {"display_name": "Nope"})
