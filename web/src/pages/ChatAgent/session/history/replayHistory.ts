@@ -308,6 +308,11 @@ export async function loadConversationHistory(
           // History replays chronologically, so the last write wins = most recent query's model.
           rt.setLastThreadModel(llmModel);
         }
+        rt.setLastThreadResolvedModel(
+          typeof event.metadata?.resolved_llm_model === 'string'
+            ? event.metadata.resolved_llm_model
+            : null,
+        );
         // Resolve pending plan_approval interrupt from content (empty = approved, non-empty = rejected).
         {
           const idx = pendingHistoryInterrupts.findIndex((p) => p.type === 'plan_approval');

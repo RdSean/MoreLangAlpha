@@ -263,6 +263,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     threadId: currentThreadId,
     threadModels,
     lastThreadModel,
+    lastThreadResolvedModel,
     isShared: threadIsShared,
     insertNotification,
     handleEditMessage,
@@ -1692,6 +1693,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
                       tokenUsage={tokenUsage}
                       onAction={handleAction}
                       initialModel={lastThreadModel}
+                      displayModel={lastThreadResolvedModel}
                       onModelChange={setInputModel}
                       threadModels={threadModels}
                       mode={isFlashMode ? 'fast' : 'ptc'}

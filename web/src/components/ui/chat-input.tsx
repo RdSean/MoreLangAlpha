@@ -82,6 +82,8 @@ export interface ChatInputProps {
   tokenUsage?: TokenUsageData | null;
   onAction?: ((cmd: SlashCommand) => void) | null;
   initialModel?: string | null;
+  /** Read-only identity of the model that actually served the last turn. */
+  displayModel?: string | null;
   /** Reports the live model selection (fires on mount and every change). */
   onModelChange?: ((model: string | null) => void) | null;
   threadModels?: string[];
@@ -115,6 +117,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   onAction = null,
   // Model selector
   initialModel = null,
+  displayModel = null,
   onModelChange = null,
   // All models used in this thread (shown in primary menu)
   threadModels: threadModelsProp = [],
@@ -767,7 +770,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                   <span key={item.id} data-measure={item.id}>{item.inline({ measureOnly: true })}</span>
                 ))}
                 <span data-measure="model">
-                  <ModelTriggerMeasure selectedModel={selectedModel} fastMode={fastMode} isCodexModel={isCodexModel} />
+                  <ModelTriggerMeasure selectedModel={displayModel || selectedModel} fastMode={fastMode} isCodexModel={isCodexModel} />
                 </span>
               </div>
             </div>
@@ -776,6 +779,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             <div className="flex flex-row items-center min-w-0 gap-1">
               <ChatInputModelMenu
                 selectedModel={selectedModel}
+                displayModel={displayModel}
                 onSelectModel={setSelectedModel}
                 threadModels={threadModelsProp}
                 validModelNames={validModelNames}

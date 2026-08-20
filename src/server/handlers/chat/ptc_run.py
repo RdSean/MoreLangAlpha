@@ -253,6 +253,9 @@ async def astream_ptc_workflow(
         }
         if effective_model:
             query_metadata["llm_model"] = effective_model
+        resolved_model = getattr(config, "resolved_model", None)
+        if resolved_model:
+            query_metadata["resolved_llm_model"] = resolved_model
         if request.origin:
             # Per-turn initiator, mirroring the thread-level metadata['origin']
             # (threads go mixed: a pinned automation thread also takes manual

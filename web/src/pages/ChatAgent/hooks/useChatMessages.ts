@@ -245,6 +245,7 @@ export function useChatMessages(
   // model rather than the first. Distinct from threadModels because dedup there
   // makes its tail unreliable when a thread switches models back and forth.
   const [lastThreadModel, setLastThreadModel] = useState<string | null>(null);
+  const [lastThreadResolvedModel, setLastThreadResolvedModel] = useState<string | null>(null);
 
   // Track if streaming is in progress to prevent history loading during streaming
   const isStreamingRef = useRef(false);
@@ -486,6 +487,7 @@ export function useChatMessages(
     setFallbackSuggestion,
     setThreadModels,
     setLastThreadModel,
+    setLastThreadResolvedModel,
     setTokenUsage,
     setReloadTrigger,
     setHasActiveSubagents,
@@ -610,6 +612,7 @@ export function useChatMessages(
         setMessages([]);
         setThreadModels([]);
         setLastThreadModel(null);
+        setLastThreadResolvedModel(null);
         setFallbackSuggestion(null);
         // A mid-retry pill belongs to the thread we're leaving; without this
         // it would render over thread B until B's next content event.
@@ -1536,6 +1539,7 @@ export function useChatMessages(
     if (model) {
       setThreadModels(prev => prev.includes(model) ? prev : [...prev, model]);
       setLastThreadModel(model);
+      setLastThreadResolvedModel(null);
     }
 
     // Add user message after history messages
@@ -2574,6 +2578,7 @@ export function useChatMessages(
     threadId,
     threadModels,
     lastThreadModel,
+    lastThreadResolvedModel,
     isLoading,
     hasActiveSubagents,
     awaitingReportBack,

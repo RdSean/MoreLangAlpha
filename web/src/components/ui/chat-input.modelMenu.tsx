@@ -52,6 +52,7 @@ export function ModelTriggerMeasure(props: {
  */
 export function ChatInputModelMenu({
   selectedModel,
+  displayModel,
   onSelectModel,
   threadModels,
   validModelNames,
@@ -67,6 +68,7 @@ export function ChatInputModelMenu({
   containerRef,
 }: {
   selectedModel: string | null;
+  displayModel?: string | null;
   onSelectModel: (model: string) => void;
   threadModels: string[];
   /** Gates thread history — a model can be revoked after a turn used it. */
@@ -92,7 +94,7 @@ export function ChatInputModelMenu({
   // Show if there's anything to pick (quick-access list or current selection),
   // or if the user has stars to manage even when they all filter out (keeps
   // the settings link reachable).
-  if (moreModelsItems.length === 0 && !hasStarredModels && !selectedModel) return null;
+  if (moreModelsItems.length === 0 && !hasStarredModels && !selectedModel && !displayModel) return null;
 
   const primaryModels = derivePrimaryModels({ selectedModel, threadModels, validModelNames });
 
@@ -105,7 +107,7 @@ export function ChatInputModelMenu({
           type="button"
           title="Select model"
         >
-          <TriggerBody selectedModel={selectedModel} fastMode={fastMode} isCodexModel={isCodexModel} accent />
+          <TriggerBody selectedModel={displayModel || selectedModel} fastMode={fastMode} isCodexModel={isCodexModel} accent />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

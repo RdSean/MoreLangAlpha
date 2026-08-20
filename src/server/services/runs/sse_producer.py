@@ -533,11 +533,11 @@ class RunSSEProducer:
             # the canonical run_id for this turn. Mirrors the
             # langgraph_sdk SSE protocol so frontend reconnect/demotion
             # logic can latch onto the authoritative identity immediately.
-            yield self._format_sse_event(
-                "metadata",
-                {"thread_id": self.thread_id, "run_id": self.run_id},
-                accumulate=False,
-            )
+            metadata_payload = {"thread_id": self.thread_id, "run_id": self.run_id}
+            resolved_model = getattr(self.agent_config, "resolved_model", None)
+            if resolved_model:
+                metadata_payload["resolved_llm_model"] = resolved_model
+            yield self._format_sse_event("metadata", metadata_payload, accumulate=False)
 
             # Create graph stream. durability="sync" awaits each checkpoint
             # put before the next step — necessary but NOT sufficient for

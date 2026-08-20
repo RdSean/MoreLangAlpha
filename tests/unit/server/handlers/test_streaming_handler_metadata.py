@@ -15,6 +15,7 @@ synthesise it on demand from the response row's ``conversation_response_id``.)
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -101,6 +102,19 @@ class TestMetadataFrameFirst:
         assert "metadata" not in kinds, (
             f"metadata frame must not be persisted; got accumulated events={kinds!r}"
         )
+
+    @pytest.mark.asyncio
+    async def test_metadata_includes_resolved_model_identity(self):
+        handler = RunSSEProducer(
+            thread_id="t-1",
+            run_id="r-abc",
+            agent_config=SimpleNamespace(resolved_model="deepseek-ai/DeepSeek-V4-Flash"),
+        )
+
+        chunks = await _collect_stream(handler)
+        _, data = _parse_sse(chunks[0])
+
+        assert data["resolved_llm_model"] == "deepseek-ai/DeepSeek-V4-Flash"
 
     def test_run_id_is_required_at_construction(self):
         """``run_id`` has no default — forgetting it is a TypeError, not a

@@ -281,7 +281,7 @@ export const MessageBubble = memo(function MessageBubble({ message, turnIndex, i
             data-testid="message-timestamp"
             dateTime={messageTimestamp.date.toISOString()}
             aria-label={t('chat.messageTimestamp', { time: messageTimestamp.label })}
-            className={`block text-xs leading-none ${isUser ? 'self-end text-right' : 'self-start text-left'}`}
+            className={`block text-xs leading-none ${isUser ? 'self-end text-right' : 'self-start text-left'} ${isMobile ? 'pb-2' : 'pb-3'}`}
             style={{ color: 'var(--color-text-tertiary)' }}
           >
             {messageTimestamp.label}

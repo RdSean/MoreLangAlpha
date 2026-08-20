@@ -28,6 +28,23 @@ interface AppSidebarProps {
   onWidthChange: (width: number, commit?: boolean) => void;
 }
 
+export function getNewChatNavigation(
+  role: string | null | undefined,
+  currentWorkspaceId: string | null,
+): { path: string; state?: Record<string, string> } {
+  if (role === 'student' && currentWorkspaceId) {
+    return {
+      path: '/chat/t/__default__',
+      state: {
+        workspaceId: currentWorkspaceId,
+        workspaceStatus: 'flash',
+        agentMode: 'flash',
+      },
+    };
+  }
+  return { path: '/chat' };
+}
+
 /**
  * App-shell sidebar combining the old icon rail and the chat-only overlay
  * thread panel into one Codex-style panel: primary nav up top, the
@@ -132,8 +149,9 @@ function AppSidebar({ collapsed, onToggleCollapse, width, onWidthChange }: AppSi
   // is part of starting a conversation. The tree's per-workspace ✎ skips the
   // chooser and goes straight to that workspace's home.
   const handleNewChat = useCallback(() => {
-    navigate('/chat');
-  }, [navigate]);
+    const target = getNewChatNavigation(member?.role, currentWorkspaceId);
+    navigate(target.path, target.state ? { state: target.state } : undefined);
+  }, [currentWorkspaceId, member?.role, navigate]);
 
   const openGallery = useCallback(() => navigate('/chat'), [navigate]);
 

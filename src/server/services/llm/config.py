@@ -50,6 +50,23 @@ class ResolvedClient:
     credential_source: CredentialSource
 
 
+def resolved_model_name(config: Any, requested_model: str | None) -> str | None:
+    """Return the non-secret model identity represented by a resolved client.
+
+    A platform model profile can route a logical catalog model through a
+    deployment-managed model.  The client metadata is the authoritative,
+    already-sanitized identity for display and durable turn metadata; when no
+    eager client exists, the requested model is also the effective model.
+    """
+    client = getattr(config, "llm_client", None)
+    metadata = getattr(client, "metadata", None)
+    if isinstance(metadata, dict):
+        manifest_model = metadata.get("manifest_model")
+        if isinstance(manifest_model, str) and manifest_model.strip():
+            return manifest_model.strip()
+    return requested_model
+
+
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
@@ -1113,6 +1130,9 @@ async def resolve_llm_config(
     elif is_custom or is_custom_provider:
         # Custom model selected but no usable key — fail loud with a CTA.
         _raise_byok_key_required(effective_model)
+
+    _cow()
+    config.resolved_model = resolved_model_name(config, effective_model)
 
     # Stash on config so the lazy ``AgentConfig.get_llm_client()`` path forwards
     # it to ``create_llm`` when no client was pre-built.

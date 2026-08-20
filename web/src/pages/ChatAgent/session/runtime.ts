@@ -92,6 +92,7 @@ export interface HistoryRuntime {
   setFallbackSuggestion: React.Dispatch<React.SetStateAction<FallbackSuggestion | null>>;
   setThreadModels: React.Dispatch<React.SetStateAction<string[]>>;
   setLastThreadModel: React.Dispatch<React.SetStateAction<string | null>>;
+  setLastThreadResolvedModel: React.Dispatch<React.SetStateAction<string | null>>;
   setTokenUsage: React.Dispatch<React.SetStateAction<TokenUsage | null>>;
   setReloadTrigger: React.Dispatch<React.SetStateAction<number>>;
   setThreadId: React.Dispatch<React.SetStateAction<string>>;
@@ -135,6 +136,7 @@ export interface StreamRuntime {
   setMessageError: React.Dispatch<React.SetStateAction<string | StructuredError | null>>;
   setIsCompacting: React.Dispatch<React.SetStateAction<string | false>>;
   setFallbackSuggestion: React.Dispatch<React.SetStateAction<FallbackSuggestion | null>>;
+  setLastThreadResolvedModel: React.Dispatch<React.SetStateAction<string | null>>;
   setReturnedSteering: React.Dispatch<React.SetStateAction<string | null>>;
   setThreadId: React.Dispatch<React.SetStateAction<string>>;
   setWorkspaceStarting: React.Dispatch<React.SetStateAction<false | 'starting' | 'archived'>>;

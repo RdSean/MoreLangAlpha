@@ -5,7 +5,7 @@
  * pill on this reported value (the model the next send actually uses).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { render, act, screen } from '@testing-library/react';
 import { createRef } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -29,7 +29,7 @@ vi.mock('../use-toast', () => ({
   useToast: () => ({ toast: vi.fn() }),
 }));
 
-function renderInput(props: { initialModel?: string | null; onModelChange?: (m: string | null) => void } = {}) {
+function renderInput(props: { initialModel?: string | null; displayModel?: string | null; onModelChange?: (m: string | null) => void } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ref = createRef<ChatInputHandle>();
   const utils = render(
@@ -67,5 +67,13 @@ describe('ChatInput — onModelChange reporting', () => {
       ref.current?.setModel('model-beta');
     });
     expect(onModelChange).toHaveBeenCalledWith('model-beta');
+  });
+
+  it('shows the resolved model without changing the model sent on the next turn', () => {
+    const onModelChange = vi.fn();
+    renderInput({ initialModel: 'logical-model', displayModel: 'actual-model', onModelChange });
+
+    expect(screen.getAllByText('Actual Model')).not.toHaveLength(0);
+    expect(onModelChange).toHaveBeenCalledWith('logical-model');
   });
 });

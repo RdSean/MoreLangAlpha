@@ -134,6 +134,9 @@ export const createStreamEventProcessor = (rt: StreamRuntime, deps: StreamRouter
       if (event.run_id) {
         rt.currentRunIdRef.current = event.run_id;
       }
+      if (typeof event.resolved_llm_model === 'string' && event.resolved_llm_model) {
+        rt.setLastThreadResolvedModel(event.resolved_llm_model);
+      }
       return;
     }
 
