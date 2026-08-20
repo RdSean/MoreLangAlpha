@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import {
   Plus, ArrowUp, X, FileText, Archive, Square, ClipboardList,
-  TextSelect, MoreHorizontal, Mic, MicOff,
+  TextSelect, MoreHorizontal, Mic,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { TokenUsageRing, type TokenUsageData } from './token-usage-ring';
@@ -802,7 +802,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                     aria-label={isListening ? t('chat.voice.stop') : t('chat.voice.start')}
                   >
                     {isListening ? (
-                      <MicOff className="w-4 h-4" />
+                      <Square className="w-4 h-4" fill="currentColor" />
                     ) : (
                       <Mic className="w-4 h-4" />
                     )}
