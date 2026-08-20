@@ -375,6 +375,7 @@ class LLM:
         api_key: str | None = None,
         base_url_override=_UNSET,
         cache_key: str | None = None,
+        billing_type_override: str | None = None,
         **override_params,
     ):
         """
@@ -404,6 +405,7 @@ class LLM:
         instance.extra_body = copy.deepcopy(config.get("extra_body") or {})
         instance.parameters.update(override_params)
         instance.api_key_override = api_key
+        instance.billing_type_override = billing_type_override
 
         # Get provider info from manifest (empty dict for unknown providers)
         instance.provider_info = instance.model_config.get_provider_info(instance.provider)
@@ -446,8 +448,12 @@ class LLM:
         Returns one of:
         - "byok"     — user-provided API key
         - "oauth"    — user-provided OAuth token
+        - "household" — family-managed credential or local family endpoint
         - "platform" — system key (platform pays, credits deducted)
         """
+        override = getattr(self, "billing_type_override", None)
+        if override in {"byok", "oauth", "household", "platform"}:
+            return override
         if self.api_key_override is not None and self.api_key_override != "":
             if self.provider_info.get("access_type") == "oauth":
                 return "oauth"
@@ -835,6 +841,7 @@ def create_llm_from_custom(
     api_key: str | None = None,
     base_url=_UNSET,
     cache_key: str | None = None,
+    billing_type_override: str | None = None,
     **kwargs,
 ):
     """
@@ -853,7 +860,12 @@ def create_llm_from_custom(
         A LangChain chat model instance.
     """
     return LLM.from_custom_config(
-        config, api_key=api_key, base_url_override=base_url, cache_key=cache_key, **kwargs
+        config,
+        api_key=api_key,
+        base_url_override=base_url,
+        cache_key=cache_key,
+        billing_type_override=billing_type_override,
+        **kwargs,
     )
 
 

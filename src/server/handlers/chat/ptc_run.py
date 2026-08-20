@@ -807,6 +807,7 @@ async def astream_ptc_workflow(
                 "start_time": start_time,
                 "msg_type": "ptc",
                 "is_byok": is_byok,
+                "llm_runtime": query_metadata.get("llm_runtime"),
                 "burst_slot_id": request.burst_slot_id,
                 "locale": request.locale,
                 "timezone": timezone_str,
@@ -908,6 +909,7 @@ async def astream_ptc_workflow(
             msg_type="ptc",
             log_prefix="PTC_CHAT",
             timezone_str=timezone_str,
+            llm_runtime_metadata=getattr(config, "llm_runtime_metadata", None),
         ):
             yield event
 

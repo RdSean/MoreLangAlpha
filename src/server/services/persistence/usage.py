@@ -242,7 +242,8 @@ class UsagePersistenceService:
         deepthinking: bool = False,
         status: str = "completed",
         conn: Optional[Any] = None,
-        is_byok: bool = False
+        is_byok: bool = False,
+        llm_runtime_metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         Persist usage data to conversation_usage table.
@@ -266,6 +267,7 @@ class UsagePersistenceService:
             status: Workflow completion status (completed, error, cancelled, interrupted)
             conn: Optional database connection for transaction support
             is_byok: Caller hint for billing type (overridden by per-call data when available)
+            llm_runtime_metadata: Safe runtime provenance from the resolved model.
 
         Returns:
             True if successful, False otherwise
@@ -280,9 +282,6 @@ class UsagePersistenceService:
             # Calculate infrastructure credits
             self._infrastructure_credits = self._calculate_infrastructure_credits()
 
-            # Calculate total credits
-            total_credits = self._token_credits + self._infrastructure_credits
-
             # Format infrastructure usage for JSONB
             infrastructure_usage = None
             if self._tool_usage:
@@ -290,14 +289,49 @@ class UsagePersistenceService:
 
             final_msg_type = msg_type or 'ptc'
 
+            from src.server.services.llm.runtime_metadata import safe_llm_runtime_metadata
+
+            runtime = safe_llm_runtime_metadata(llm_runtime_metadata)
+            is_household = runtime.get("credential_source") == "household"
+            if is_household:
+                # Family endpoints are non-platform even when a password-less
+                # local endpoint reports an empty key to its provider SDK.
+                self._token_credits = Decimal("0.0")
+                if self._token_usage:
+                    self._token_usage = {
+                        **self._token_usage,
+                        "platform_cost": 0.0,
+                        "per_call_costs": [
+                            {**call, "billing_type": "household"}
+                            for call in self._token_usage.get("per_call_costs", [])
+                        ],
+                    }
+
+            # Calculate total credits after household provenance has excluded
+            # any token charge inferred from provider-level tracking metadata.
+            total_credits = self._token_credits + self._infrastructure_credits
+
             # Compute is_byok from actual per-call billing data.
             # If we tracked any LLM calls, use real billing data: BYOK only
             # when no call used the platform key.  Otherwise fall back to the
             # flag from the auth layer.
             if self._token_usage:
-                effective_is_byok = not self._has_platform_calls
+                effective_is_byok = is_household or not self._has_platform_calls
             else:
-                effective_is_byok = is_byok
+                effective_is_byok = is_household or is_byok
+
+            household_usage: Dict[str, Any] = {}
+            if is_household:
+                household_usage = {
+                    "household_id": runtime.get("household_id"),
+                    "llm_endpoint_id": runtime.get("family_endpoint_id"),
+                    "credential_source": "household",
+                    "model_snapshot": {
+                        key: runtime[key]
+                        for key in ("display_name", "provider", "model_id")
+                        if key in runtime
+                    },
+                }
 
             # Build usage record (write-once data, no updates)
             usage_data = {
@@ -316,6 +350,7 @@ class UsagePersistenceService:
                 "is_byok": effective_is_byok,
                 "created_at": timestamp
             }
+            usage_data.update(household_usage)
 
             # Persist to database (use provided conn for transaction support)
             if conn:

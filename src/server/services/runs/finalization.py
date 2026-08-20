@@ -132,6 +132,11 @@ async def assemble_finalize_artifacts(
         "deepthinking": metadata.get("deepthinking", False),
         "is_byok": metadata.get("is_byok", False),
     }
+    from src.server.services.llm.runtime_metadata import safe_llm_runtime_metadata
+
+    llm_runtime = safe_llm_runtime_metadata(metadata.get("llm_runtime"))
+    if llm_runtime:
+        persist_metadata["llm_runtime"] = llm_runtime
     for extra in ("workspace_id", "sandbox_id", "locale", "timezone"):
         if metadata.get(extra):
             persist_metadata[extra] = metadata[extra]

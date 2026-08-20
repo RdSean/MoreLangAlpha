@@ -495,6 +495,7 @@ async def astream_flash_workflow(
                     "start_time": start_time,
                     "msg_type": "flash",
                     "is_byok": is_byok,
+                    "llm_runtime": query_metadata.get("llm_runtime"),
                     "burst_slot_id": request.burst_slot_id,
                     "locale": request.locale,
                     "timezone": timezone_str,
@@ -606,6 +607,7 @@ async def astream_flash_workflow(
             msg_type="flash",
             log_prefix="FLASH_CHAT",
             timezone_str=timezone_str,
+            llm_runtime_metadata=getattr(config, "llm_runtime_metadata", None),
         ):
             yield event
 

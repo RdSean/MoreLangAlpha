@@ -92,8 +92,10 @@ ALLOWLIST: dict[tuple[str, str], int] = {
     ("src/tools/web/fetch.py", "get_llm"): 1,
     # The resolution layer itself — the sanctioned constructor home. Entered
     # scan scope when 3.1 moved it from handlers/chat (never a scan root).
+    # The third call resolves a student household endpoint with server-only
+    # credential provenance.
     ("src/server/services/llm/config.py", "create_llm"): 3,
-    ("src/server/services/llm/config.py", "create_llm_from_custom"): 2,
+    ("src/server/services/llm/config.py", "create_llm_from_custom"): 3,
     # user_id=None system path AND resolved-None platform fallback (two calls).
     ("src/server/services/llm/service.py", "create_llm"): 2,
 }

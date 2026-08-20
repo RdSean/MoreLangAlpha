@@ -11,6 +11,7 @@ PLATFORM credential_source must still produce ``byok=False``.  The old check
 for a platform-reasoning user whose eager client build set ``llm_client``.
 """
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,6 +22,7 @@ from ptc_agent.config.agent import CredentialSource
 from tests.conftest import create_test_app
 
 THREADS_MOD = "src.server.app.threads.messaging"
+THREAD_CREATE_MOD = "src.server.app.threads.create"
 
 
 # ---------------------------------------------------------------------------
@@ -460,3 +462,170 @@ async def test_missing_explicit_workspace_is_rejected_before_model_resolution(
     assert response.json()["detail"] == "Workspace not found"
     resolve_config.assert_not_awaited()
     astream.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# POST /threads (pre-create) household admission
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_student_precreate_without_household_model_creates_no_workspace_or_thread():
+    """The pre-create door must reject an empty family pool before persistence."""
+    from fastapi import HTTPException
+    from src.server.app import setup as setup_module
+    from src.server.app.threads import router
+
+    app = create_test_app(router)
+    no_model = HTTPException(
+        status_code=409,
+        detail={"type": "no_model_available", "message": "No household model"},
+    )
+    flash_workspace = AsyncMock()
+    create_row = AsyncMock()
+    schedule_title = MagicMock()
+
+    with (
+        patch.object(setup_module, "agent_config", MagicMock()),
+        patch(
+            "src.server.services.education_access.is_student_account",
+            new=AsyncMock(return_value=True),
+        ),
+        patch(
+            "src.server.services.llm.config.resolve_llm_config",
+            new=AsyncMock(side_effect=no_model),
+        ) as resolve_config,
+        patch(
+            f"{THREAD_CREATE_MOD}.get_or_create_flash_workspace",
+            new=flash_workspace,
+        ),
+        patch(f"{THREAD_CREATE_MOD}.create_thread", new=create_row),
+        patch(f"{THREAD_CREATE_MOD}.schedule_title_generation", schedule_title),
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/api/v1/threads",
+                json={"first_query": "hello", "agent_mode": "flash"},
+            )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["type"] == "no_model_available"
+    resolve_config.assert_awaited_once()
+    flash_workspace.assert_not_awaited()
+    create_row.assert_not_awaited()
+    schedule_title.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_student_precreate_admits_household_model_without_personal_credentials():
+    """A student family endpoint is sufficient for pre-create and its quota gate."""
+    from src.server.app import setup as setup_module
+    from src.server.app.threads import router
+
+    app = create_test_app(router)
+    resolved = _make_config(CredentialSource.HOUSEHOLD, llm_client_set=True)
+    now = datetime.now(timezone.utc)
+    flash_workspace = {
+        "workspace_id": "flash-ws",
+        "user_id": "test-user-123",
+        "status": "flash",
+    }
+    create_row = {
+        "thread_index": 0,
+        "created_at": now,
+        "updated_at": now,
+    }
+    enforce_credit = AsyncMock()
+
+    with (
+        patch.object(setup_module, "agent_config", MagicMock()),
+        patch(f"{THREAD_CREATE_MOD}.HOST_MODE", "platform"),
+        patch(
+            "src.server.services.education_access.is_student_account",
+            new=AsyncMock(return_value=True),
+        ),
+        patch(
+            "src.server.services.llm.config.resolve_llm_config",
+            new=AsyncMock(return_value=resolved),
+        ) as resolve_config,
+        patch(
+            f"{THREAD_CREATE_MOD}.get_or_create_flash_workspace",
+            new=AsyncMock(return_value=flash_workspace),
+        ),
+        patch(f"{THREAD_CREATE_MOD}.create_thread", new=AsyncMock(return_value=create_row)) as create_thread,
+        patch(f"{THREAD_CREATE_MOD}.schedule_title_generation", return_value=None),
+        patch(
+            "src.server.dependencies.usage_limits.enforce_credit_limit",
+            new=enforce_credit,
+        ),
+        patch(
+            "src.server.database.api_keys.is_byok_active",
+            new=AsyncMock(side_effect=AssertionError("student pre-create must not read personal BYOK")),
+        ),
+        patch(
+            "src.server.database.oauth_tokens.has_any_oauth_token",
+            new=AsyncMock(side_effect=AssertionError("student pre-create must not read OAuth")),
+        ),
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/api/v1/threads",
+                json={"first_query": "hello", "agent_mode": "flash"},
+            )
+
+    assert response.status_code == 201
+    resolve_config.assert_awaited_once()
+    enforce_credit.assert_awaited_once_with("test-user-123", byok=True)
+    create_thread.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_student_precreate_rejects_nonflash_workspace_before_model_resolution():
+    """A forbidden workspace must not reveal whether the household has a model."""
+    from src.server.app import setup as setup_module
+    from src.server.app.threads import router
+
+    app = create_test_app(router)
+    resolve_config = AsyncMock()
+    with (
+        patch.object(setup_module, "agent_config", MagicMock()),
+        patch(
+            "src.server.services.education_access.is_student_account",
+            new=AsyncMock(return_value=True),
+        ),
+        patch(
+            f"{THREAD_CREATE_MOD}.get_workspace",
+            new=AsyncMock(
+                return_value={
+                    "workspace_id": "ptc-ws",
+                    "user_id": "test-user-123",
+                    "status": "running",
+                }
+            ),
+        ),
+        patch(
+            "src.server.services.llm.config.resolve_llm_config",
+            new=resolve_config,
+        ),
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/api/v1/threads",
+                json={
+                    "first_query": "hello",
+                    "agent_mode": "ptc",
+                    "workspace_id": "ptc-ws",
+                },
+            )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == (
+        "Student accounts can use only their private Flash workspace."
+    )
+    resolve_config.assert_not_awaited()

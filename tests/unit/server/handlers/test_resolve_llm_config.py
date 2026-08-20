@@ -234,6 +234,7 @@ class TestStudentHouseholdModelPool:
             api_key="family-secret-key",
             base_url="https://family.example/v1",
             cache_key="thread-1",
+            billing_type_override="household",
         )
         assert config.llm.flash == "deepseek-ai/DeepSeek-V4-Flash"
         assert config.llm_client is family_client

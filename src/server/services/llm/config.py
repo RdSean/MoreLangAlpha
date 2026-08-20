@@ -97,6 +97,7 @@ def resolve_household_llm_client(
         api_key=endpoint.get("api_key") or "",
         base_url=endpoint.get("base_url"),
         cache_key=cache_key,
+        billing_type_override=CredentialSource.HOUSEHOLD.value,
     )
 
 

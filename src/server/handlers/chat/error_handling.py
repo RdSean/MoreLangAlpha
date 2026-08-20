@@ -172,6 +172,7 @@ async def handle_workflow_error(
     msg_type: str,
     log_prefix: str,
     timezone_str: str | None = None,
+    llm_runtime_metadata: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """Handle a workflow exception: classify, retry-or-fail, finalize, yield SSE events.
 
@@ -218,6 +219,11 @@ async def handle_workflow_error(
     _tz = timezone_str or getattr(request, "timezone", None)
     if _tz:
         persist_metadata["timezone"] = _tz
+    from src.server.services.llm.runtime_metadata import safe_llm_runtime_metadata
+
+    llm_runtime = safe_llm_runtime_metadata(llm_runtime_metadata)
+    if llm_runtime:
+        persist_metadata["llm_runtime"] = llm_runtime
 
     async def _finalize_error(error_msg: str, extra_metadata: dict) -> bool:
         """Terminal-write the open run as error; CRITICAL on failure (row

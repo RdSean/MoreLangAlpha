@@ -108,11 +108,52 @@ async def create_thread_endpoint(
             detail="workspace_id is required for 'ptc' agent mode.",
         )
 
-    if request.agent_mode == "flash" and not workspace_id:
+    # Validate an explicitly supplied workspace before the model resolver so
+    # invalid IDs and cross-user requests cannot probe household availability.
+    workspace = None
+    if workspace_id:
+        workspace = await get_workspace(workspace_id)
+
+        require_workspace_owner(workspace, user_id=x_user_id)
+
+    # Student accounts use only the household model pool. Resolve before the
+    # Flash workspace upsert and thread/title creation so an empty pool leaves
+    # no durable artifacts behind.
+    from src.server.services.education_access import is_student_account
+
+    student_config = None
+    is_student = await is_student_account(x_user_id)
+    if is_student and workspace is not None and workspace.get("status") != "flash":
+        raise HTTPException(
+            status_code=403,
+            detail="Student accounts can use only their private Flash workspace.",
+        )
+
+    if is_student:
+        from ptc_agent.config.agent import CredentialSource
+        from src.server.app import setup
+        from src.server.services.llm.config import resolve_llm_config
+
+        student_config = await resolve_llm_config(
+            setup.agent_config,
+            x_user_id,
+            None,
+            False,
+            mode=request.agent_mode,
+        )
+        if student_config.credential_source != CredentialSource.HOUSEHOLD:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "No household model is available for this account.",
+                    "type": "no_model_available",
+                },
+            )
+
+    if request.agent_mode == "flash" and workspace is None:
         workspace = await get_or_create_flash_workspace(x_user_id)
         workspace_id = str(workspace["workspace_id"])
-    else:
-        workspace = await get_workspace(workspace_id)
+
     require_workspace_owner(workspace, user_id=x_user_id)
     await require_student_flash_workspace(x_user_id, workspace)
 
@@ -125,10 +166,13 @@ async def create_thread_endpoint(
         from src.server.database.oauth_tokens import has_any_oauth_token
         from src.server.dependencies.usage_limits import enforce_credit_limit
 
-        is_byok, has_oauth = await asyncio.gather(
-            is_byok_active(x_user_id), has_any_oauth_token(x_user_id)
-        )
-        await enforce_credit_limit(x_user_id, byok=is_byok or has_oauth)
+        if student_config is not None:
+            await enforce_credit_limit(x_user_id, byok=True)
+        else:
+            is_byok, has_oauth = await asyncio.gather(
+                is_byok_active(x_user_id), has_any_oauth_token(x_user_id)
+            )
+            await enforce_credit_limit(x_user_id, byok=is_byok or has_oauth)
 
     # Mirror the message path's flash auto-detect so msg_type can't disagree
     # with the runs the thread will actually carry.

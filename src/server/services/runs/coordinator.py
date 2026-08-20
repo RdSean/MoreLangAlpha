@@ -282,7 +282,11 @@ class RunCoordinator:
             checkpoint_id = await self._latest_checkpoint_id(handle)
 
             usage_writer = None
-            if outcome.per_call_records or outcome.tool_usage:
+            if (
+                outcome.per_call_records
+                or outcome.tool_usage
+                or outcome.metadata.get("llm_runtime")
+            ):
                 usage_writer = self._build_usage_writer(handle, outcome)
 
             if outcome.errors:
@@ -592,6 +596,7 @@ class RunCoordinator:
                 status=final_status,
                 conn=conn,
                 is_byok=outcome.metadata.get("is_byok", handle.is_byok),
+                llm_runtime_metadata=outcome.metadata.get("llm_runtime"),
             )
             if not ok:
                 # persist_usage swallows into False; inside the finalize txn
