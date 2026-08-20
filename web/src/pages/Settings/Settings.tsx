@@ -11,6 +11,7 @@ import { ModelTab } from './panels/ModelTab';
 import { ExperimentsTab } from './panels/ExperimentsTab';
 import { FamilyAccountsTab } from './panels/FamilyAccountsTab';
 import { FamilyChildConversations } from './panels/FamilyChildConversations';
+import { HouseholdModelPoolTab } from './panels/HouseholdModelPoolTab';
 import { useFamilyChildren } from './queries';
 import './Settings.css';
 
@@ -118,6 +119,17 @@ function Settings() {
           >
             家庭账户
           </button>}
+          {isParent && <button
+            type="button"
+            onClick={() => handleTabChange('family-models')}
+            className="px-4 py-2 text-sm font-medium whitespace-nowrap flex-shrink-0"
+            style={{
+              color: activeTab === 'family-models' ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
+              borderBottom: activeTab === 'family-models' ? '2px solid var(--color-accent-primary)' : '2px solid transparent',
+            }}
+          >
+            家庭模型池
+          </button>}
         </div>
 
         <div className="settings-content">
@@ -145,6 +157,8 @@ function Settings() {
             student={{ user_id: studentUserId, name: selectedChild?.name ?? '子女' }}
             onBack={closeChild}
           />}
+
+          {!isLoading && activeTab === 'family-models' && isParent && <HouseholdModelPoolTab />}
         </div>
       </div>
     </div>

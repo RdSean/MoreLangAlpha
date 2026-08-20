@@ -100,6 +100,9 @@ export const queryKeys = {
     family: {
       all: ['settings', 'family'],
       children: () => [...queryKeys.settings.family.all, 'children'],
+      llmPool: () => [...queryKeys.settings.family.all, 'llm-pool'],
+      availability: () => [...queryKeys.settings.family.all, 'llm-availability'],
+      preference: () => [...queryKeys.settings.family.all, 'llm-preference'],
       workspace: (studentUserId: string) => [...queryKeys.settings.family.all, 'workspace', studentUserId],
       threads: (studentUserId: string, limit = 20, offset = 0) => [
         ...queryKeys.settings.family.all,
