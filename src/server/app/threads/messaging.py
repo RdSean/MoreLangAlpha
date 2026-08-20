@@ -292,24 +292,30 @@ async def _handle_send_message(
         if request.request_key:
             await _reject_duplicate_request(request.request_key, user_id)
 
-        # 403 guard: require BYOK, OAuth, or platform access (tier >= 0).
-        # All flags are pre-checked by enforce_chat_limit — no DB calls here.
         from src.config.settings import HOST_MODE
 
-        if (
+        # Preserve the established no-provider response for ordinary accounts
+        # before touching a workspace or the general resolver. Students are
+        # the sole exception: their server-managed household model must be
+        # resolved before this gate can decide whether one is available.
+        no_personal_provider = (
             HOST_MODE == "platform"
             and not auth.is_byok
             and not auth.has_oauth
             and auth.access_tier < 0
-        ):
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "message": "No provider configured. Set up an API key or connect via OAuth.",
-                    "type": "no_provider",
-                    "link": {"url": "/setup/method", "label": "Set up provider"},
-                },
-            )
+        )
+        if no_personal_provider:
+            from src.server.services.education_access import is_student_account
+
+            if not await is_student_account(user_id):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "message": "No provider configured. Set up an API key or connect via OAuth.",
+                        "type": "no_provider",
+                        "link": {"url": "/setup/method", "label": "Set up provider"},
+                    },
+                )
 
         # Reject an unauthenticated background dispatch up front, before the
         # owner lookup, workspace/LLM resolution, and credit check below — a
@@ -369,15 +375,13 @@ async def _handle_send_message(
                 detail="workspace_id is required for 'ptc' agent mode. Create workspace first via POST /workspaces, or use agent_mode='flash' for lightweight queries.",
             )
 
-        # For flash mode, resolve workspace_id to the shared flash workspace.
-        # The upsert returns the full row, reused by the ownership guard below
-        # and by the flash workflow (skipping a repeat upsert).
+        # A new Flash workspace is durable state, so defer its deterministic
+        # upsert until after model resolution, provider admission, and credit
+        # gates. Existing caller-supplied workspaces are still checked before
+        # resolving a model.
         workspace: dict | None = None
         flash_workspace: dict | None = None
-        if agent_mode == "flash" and not workspace_id:
-            workspace = await get_or_create_flash_workspace(user_id)
-            workspace_id = str(workspace["workspace_id"])
-            flash_workspace = workspace
+        needs_flash_workspace = agent_mode == "flash" and not workspace_id
 
         # Single workspace lookup, shared by the flash auto-detect and the
         # ownership guard below — one DB round-trip instead of two.
@@ -402,8 +406,93 @@ async def _handle_send_message(
         # IDOR guard (workspace dimension): pairs with the thread guard above so
         # a fresh thread_id cannot run inside another user's workspace/sandbox.
         # The internal report-back dispatch sets X-User-Id to the owner, so it passes.
-        require_workspace_owner(workspace, user_id=user_id)
-        await require_student_flash_workspace(user_id, workspace)
+        # An explicitly supplied or thread-derived workspace_id must resolve
+        # to a real owned row. Only the deferred automatic Flash workspace has
+        # no id yet and may skip this guard until after the model/credit gates.
+        if workspace_id is not None:
+            require_workspace_owner(workspace, user_id=user_id)
+            await require_student_flash_workspace(user_id, workspace)
+
+        # Extract user input
+        user_input = ""
+        if request.messages:
+            last_msg = request.messages[-1]
+            if isinstance(last_msg.content, str):
+                user_input = last_msg.content
+            elif isinstance(last_msg.content, list):
+                for item in last_msg.content:
+                    if hasattr(item, "text") and item.text:
+                        user_input = item.text
+                        break
+
+        logger.info(
+            f"[{'FLASH' if agent_mode == 'flash' else 'PTC'}_CHAT] New request: "
+            f"workspace_id={workspace_id} thread_id={thread_id} user_id={user_id} "
+            f"mode={agent_mode}"
+        )
+
+        # Resolve LLM config eagerly — credit check must happen before SSE stream starts
+        from src.server.services.llm.config import resolve_llm_config
+        from src.server.dependencies.usage_limits import enforce_credit_limit
+        from ptc_agent.config.agent import CredentialSource
+
+        config = await resolve_llm_config(
+            setup.agent_config,
+            user_id,
+            request.llm_model,
+            is_byok,
+            mode=agent_mode,
+            reasoning_effort=getattr(request, "reasoning_effort", None),
+            fast_mode=getattr(request, "fast_mode", None),
+            thread_id=thread_id,
+            enabled_subagents=request.subagents_enabled,
+        )
+
+        # A student household endpoint is a server-resolved credential, so it
+        # must reach this point before the normal personal-provider guard.
+        # Preserve the exact no-provider response for every other account.
+        if (
+            no_personal_provider
+            and config.credential_source != CredentialSource.HOUSEHOLD
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "No provider configured. Set up an API key or connect via OAuth.",
+                    "type": "no_provider",
+                    "link": {"url": "/setup/method", "label": "Set up provider"},
+                },
+            )
+
+        # ``is_byok`` is the established non-platform billing/runtime flag,
+        # not a claim that the user supplied a personal key. Household
+        # credentials are resolved server-side but follow the same
+        # non-platform credit and runtime path.
+        is_byok = config.credential_source in (
+            CredentialSource.OAUTH,
+            CredentialSource.BYOK,
+            CredentialSource.HOUSEHOLD,
+        )
+
+        # Credit check: always enforce.
+        # - Platform-served (is_byok=False): block when daily limit reached.
+        # - BYOK/OAuth (is_byok=True): block only on negative balance (outstanding
+        #   debt from past platform usage, e.g. fallback routing).
+        await enforce_credit_limit(user_id, byok=is_byok)
+
+        # I6: Redis down at START = 503 before any durable row. Ordered after
+        # the auth/authz/credit gates (their statuses are more meaningful and
+        # leak nothing about infra), before anything durable happens. Without
+        # the transport the run's first buffered event would kill it as
+        # failed(transport_lost) anyway — refuse cheaply instead.
+        await _assert_stream_transport_ready()
+
+        if needs_flash_workspace:
+            workspace = await get_or_create_flash_workspace(user_id)
+            workspace_id = str(workspace["workspace_id"])
+            flash_workspace = workspace
+            require_workspace_owner(workspace, user_id=user_id)
+            await require_student_flash_workspace(user_id, workspace)
 
         # A learning reference can only ever drive the student's private Flash
         # workspace. Resolve the immutable published chapter on the server so a
@@ -454,61 +543,6 @@ async def _handle_send_message(
                 )
             except EducationLearningChatContextError as exc:
                 raise HTTPException(status_code=403, detail=str(exc)) from exc
-
-        # Extract user input
-        user_input = ""
-        if request.messages:
-            last_msg = request.messages[-1]
-            if isinstance(last_msg.content, str):
-                user_input = last_msg.content
-            elif isinstance(last_msg.content, list):
-                for item in last_msg.content:
-                    if hasattr(item, "text") and item.text:
-                        user_input = item.text
-                        break
-
-        logger.info(
-            f"[{'FLASH' if agent_mode == 'flash' else 'PTC'}_CHAT] New request: "
-            f"workspace_id={workspace_id} thread_id={thread_id} user_id={user_id} "
-            f"mode={agent_mode}"
-        )
-
-        # Resolve LLM config eagerly — credit check must happen before SSE stream starts
-        from src.server.services.llm.config import resolve_llm_config
-        from src.server.dependencies.usage_limits import enforce_credit_limit
-        from ptc_agent.config.agent import CredentialSource
-
-        config = await resolve_llm_config(
-            setup.agent_config,
-            user_id,
-            request.llm_model,
-            is_byok,
-            mode=agent_mode,
-            reasoning_effort=getattr(request, "reasoning_effort", None),
-            fast_mode=getattr(request, "fast_mode", None),
-            thread_id=thread_id,
-            enabled_subagents=request.subagents_enabled,
-        )
-
-        # is_byok is True only when the stamped credential_source confirms the user
-        # supplied their own key (OAUTH or BYOK), not merely that a client object exists.
-        is_byok = config.credential_source in (
-            CredentialSource.OAUTH,
-            CredentialSource.BYOK,
-        )
-
-        # Credit check: always enforce.
-        # - Platform-served (is_byok=False): block when daily limit reached.
-        # - BYOK/OAuth (is_byok=True): block only on negative balance (outstanding
-        #   debt from past platform usage, e.g. fallback routing).
-        await enforce_credit_limit(user_id, byok=is_byok)
-
-        # I6: Redis down at START = 503 before any durable row. Ordered after
-        # the auth/authz/credit gates (their statuses are more meaningful and
-        # leak nothing about infra), before anything durable happens. Without
-        # the transport the run's first buffered event would kill it as
-        # failed(transport_lost) anyway — refuse cheaply instead.
-        await _assert_stream_transport_ready()
 
         # Strip internal-only fields from non-internal requests (prevent
         # spoofing system messages / forging report-back watch cleanup).

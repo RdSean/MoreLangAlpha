@@ -191,6 +191,35 @@ async def astream_flash_workflow(
                 yield steering_event
             return
 
+        # Resolve a standalone caller's model before creating any thread or
+        # START row. The HTTP route normally supplies ``config`` eagerly, but
+        # direct/background drivers may omit it.
+        if config is None:
+            config = await resolve_llm_config(
+                setup.agent_config,
+                user_id,
+                request.llm_model,
+                is_byok,
+                mode="flash",
+                reasoning_effort=getattr(request, "reasoning_effort", None),
+                fast_mode=getattr(request, "fast_mode", None),
+                thread_id=thread_id,
+            )
+
+        # The route normally derives this from the resolved config. Direct
+        # callers may enter with ``config=None`` though, so normalize it once
+        # resolution is complete without feeding household status back into
+        # the personal-BYOK resolver above.
+        from ptc_agent.config.agent import CredentialSource
+
+        credential_source = getattr(config, "credential_source", None)
+        if credential_source is not None:
+            is_byok = credential_source in (
+                CredentialSource.OAUTH,
+                CredentialSource.BYOK,
+                CredentialSource.HOUSEHOLD,
+            )
+
         # =================================================================
         # Database Persistence Setup
         # =================================================================
@@ -305,20 +334,6 @@ async def astream_flash_workflow(
         # =================================================================
         # Build Flash Agent Graph
         # =================================================================
-
-        # Resolve LLM config (pre-resolved by route handler, fallback for
-        # standalone use)
-        if config is None:
-            config = await resolve_llm_config(
-                setup.agent_config,
-                user_id,
-                request.llm_model,
-                is_byok,
-                mode="flash",
-                reasoning_effort=getattr(request, "reasoning_effort", None),
-                fast_mode=getattr(request, "fast_mode", None),
-                thread_id=thread_id,
-            )
 
         # Resolve timezone for metadata (observability only -- agent clock
         # uses DB user_profile)

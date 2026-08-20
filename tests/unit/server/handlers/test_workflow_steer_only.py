@@ -226,3 +226,121 @@ async def test_flash_dispatched_forwards_can_steer_false():
     kwargs = mock_wos.await_args.kwargs
     assert kwargs["steer_only"] is True
     assert kwargs["can_steer"] is False
+
+
+# ---------------------------------------------------------------------------
+# Standalone config resolution must precede START
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_flash_standalone_no_model_resolves_before_begin_run():
+    """A direct Flash caller must not persist START before no-model fails."""
+    from fastapi import HTTPException
+    from src.server.handlers.chat.flash_run import astream_flash_workflow
+
+    no_model = HTTPException(status_code=409, detail={"type": "no_model_available"})
+    request = _make_request()
+    request.burst_slot_id = None
+
+    with (
+        patch(f"{FLASH}.setup") as mock_setup,
+        patch(f"{FLASH}.ExecutionTracker"),
+        patch(f"{FLASH}.LocalRunExecutor") as mock_btm_cls,
+        patch(f"{FLASH}.dedup_retransmit_or_raise", new_callable=AsyncMock),
+        patch(
+            f"{FLASH}.wait_or_steer",
+            new_callable=AsyncMock,
+            return_value=(True, None),
+        ),
+        patch(
+            f"{FLASH}.resolve_llm_config",
+            new_callable=AsyncMock,
+            side_effect=no_model,
+        ) as resolve_config,
+        patch(
+            f"{FLASH}.get_or_create_flash_workspace",
+            new_callable=AsyncMock,
+            return_value={"workspace_id": "ws-1"},
+        ) as flash_workspace,
+        patch(f"{FLASH}.ensure_thread", new_callable=AsyncMock),
+        patch(
+            f"{FLASH}.begin_run",
+            new_callable=AsyncMock,
+            side_effect=AssertionError("begin_run called before config resolution"),
+        ) as begin_run,
+    ):
+        mock_setup.agent_config = MagicMock()
+        mock_btm_cls.get_instance.return_value = _make_manager()
+        generator = astream_flash_workflow(
+            request=request,
+            thread_id="t-1",
+            run_id="r-1",
+            user_input="hi",
+            user_id="u-1",
+            dispatched=True,
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await anext(generator)
+        await generator.aclose()
+
+    assert exc_info.value.status_code == 409
+    resolve_config.assert_awaited_once()
+    flash_workspace.assert_not_awaited()
+    begin_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ptc_standalone_no_model_resolves_before_begin_run():
+    """A direct PTC caller must not persist START before no-model fails."""
+    from fastapi import HTTPException
+    from src.server.handlers.chat.ptc_run import astream_ptc_workflow
+
+    no_model = HTTPException(status_code=409, detail={"type": "no_model_available"})
+    request = _make_request()
+    request.burst_slot_id = None
+    workspace_manager = MagicMock()
+    workspace_manager.has_ready_session.return_value = True
+
+    with (
+        patch(f"{PTC}.setup") as mock_setup,
+        patch(f"{PTC}.ExecutionTracker"),
+        patch(f"{PTC}.LocalRunExecutor") as mock_btm_cls,
+        patch(f"{PTC}.WorkspaceManager") as mock_wm_cls,
+        patch(f"{PTC}.dedup_retransmit_or_raise", new_callable=AsyncMock),
+        patch(
+            f"{PTC}.wait_or_steer",
+            new_callable=AsyncMock,
+            return_value=(True, None),
+        ),
+        patch(
+            f"{PTC}.resolve_llm_config",
+            new_callable=AsyncMock,
+            side_effect=no_model,
+        ) as resolve_config,
+        patch(f"{PTC}.ensure_thread", new_callable=AsyncMock),
+        patch(
+            f"{PTC}.begin_run",
+            new_callable=AsyncMock,
+            side_effect=AssertionError("begin_run called before config resolution"),
+        ) as begin_run,
+    ):
+        mock_setup.agent_config = MagicMock()
+        mock_btm_cls.get_instance.return_value = _make_manager()
+        mock_wm_cls.get_instance.return_value = workspace_manager
+        generator = astream_ptc_workflow(
+            request=request,
+            thread_id="t-1",
+            run_id="r-1",
+            user_input="hi",
+            user_id="u-1",
+            workspace_id="ws-1",
+            dispatched=True,
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await anext(generator)
+        await generator.aclose()
+
+    assert exc_info.value.status_code == 409
+    resolve_config.assert_awaited_once()
+    begin_run.assert_not_awaited()

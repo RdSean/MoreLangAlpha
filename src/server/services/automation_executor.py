@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
+from ptc_agent.config.agent import CredentialSource
 from src.server.database import automation as auto_db
 from src.server.database.api_keys import is_byok_active
 from src.server.database.oauth_tokens import has_any_oauth_token
@@ -150,17 +151,43 @@ class AutomationExecutor:
         thread_id = None
         workspace_id = None
         try:
-            # ─── Credential check + credit gate ───────────────────
+            # ─── Credential resolution + credit gate ───────────────
             # BYOK and OAuth checks are independent — run concurrently.
+            # ``has_byok`` remains an input to resolution; the resolved source
+            # decides whether billing follows the non-platform path.
             has_byok, has_oauth = await asyncio.gather(
                 is_byok_active(user_id), has_any_oauth_token(user_id)
             )
-            # has_cred drives the credit gate (BYOK negative-balance vs platform
-            # daily-credit). The workflow's is_byok only controls whether the
-            # BYOK ladder is attempted, so it keys off has_byok alone — passing
-            # has_cred would fire a futile BYOK prefetch for OAuth-only users.
-            has_cred = has_byok or has_oauth
-            await enforce_credit_limit(user_id, byok=has_cred)
+
+            # ─── Determine thread_id without persistence ───────────
+            thread_strategy = automation.get("thread_strategy", "new")
+            needs_new_thread = not (
+                thread_strategy == "continue" and automation.get("conversation_thread_id")
+            )
+            if not needs_new_thread:
+                thread_id = str(automation["conversation_thread_id"])
+            else:
+                thread_id = str(uuid4())
+
+            # Resolve before creating a workspace/thread or calling a workflow:
+            # a student household with no selected model must fail pre-run.
+            from src.server.app import setup
+            from src.server.services.llm.config import resolve_llm_config
+
+            config = await resolve_llm_config(
+                setup.agent_config,
+                user_id,
+                automation.get("llm_model"),
+                has_byok,
+                mode=agent_mode,
+                thread_id=thread_id,
+            )
+            resolved_is_byok = config.credential_source in (
+                CredentialSource.OAUTH,
+                CredentialSource.BYOK,
+                CredentialSource.HOUSEHOLD,
+            )
+            await enforce_credit_limit(user_id, byok=resolved_is_byok)
 
             # ─── Resolve workspace ─────────────────────────────────
             if agent_mode == "flash":
@@ -175,13 +202,7 @@ class AutomationExecutor:
                     )
                 workspace_id = str(ws_id)
 
-            # ─── Determine thread_id ───────────────────────────────
-            thread_strategy = automation.get("thread_strategy", "new")
-
-            if thread_strategy == "continue" and automation.get("conversation_thread_id"):
-                thread_id = str(automation["conversation_thread_id"])
-            else:
-                thread_id = str(uuid4())
+            if needs_new_thread:
                 # If strategy is 'continue' but no pinned thread yet, pin this one
                 if thread_strategy == "continue":
                     await auto_db.update_automation(
@@ -227,7 +248,8 @@ class AutomationExecutor:
                     run_id=run_id,
                     user_input=instruction,
                     user_id=user_id,
-                    is_byok=has_byok,
+                    is_byok=resolved_is_byok,
+                    config=config,
                 )
             else:
                 generator = astream_ptc_workflow(
@@ -237,7 +259,8 @@ class AutomationExecutor:
                     user_input=instruction,
                     user_id=user_id,
                     workspace_id=workspace_id,
-                    is_byok=has_byok,
+                    is_byok=resolved_is_byok,
+                    config=config,
                 )
 
             # Notify webhooks: started

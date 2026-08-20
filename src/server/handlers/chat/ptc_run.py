@@ -232,6 +232,36 @@ async def astream_ptc_workflow(
                 yield steering_event
             return
 
+        # Resolve standalone callers before ensure_thread/START. The normal
+        # HTTP route supplies config eagerly; background and direct drivers may
+        # intentionally omit it.
+        if config is None:
+            config = await resolve_llm_config(
+                setup.agent_config,
+                user_id,
+                request.llm_model,
+                is_byok,
+                mode="ptc",
+                reasoning_effort=getattr(request, "reasoning_effort", None),
+                fast_mode=getattr(request, "fast_mode", None),
+                thread_id=thread_id,
+                enabled_subagents=request.subagents_enabled,
+            )
+
+        # See the matching Flash path: standalone callers resolve their model
+        # here, then carry the stamped credential source into run metadata and
+        # graph configuration. The resolver still received only personal BYOK
+        # status above.
+        from ptc_agent.config.agent import CredentialSource
+
+        credential_source = getattr(config, "credential_source", None)
+        if credential_source is not None:
+            is_byok = credential_source in (
+                CredentialSource.OAUTH,
+                CredentialSource.BYOK,
+                CredentialSource.HOUSEHOLD,
+            )
+
         # =====================================================================
         # Database Persistence Setup
         # =====================================================================
@@ -349,16 +379,6 @@ async def astream_ptc_workflow(
         # =====================================================================
         # Session and Graph Setup
         # =====================================================================
-
-        # Resolve LLM config (pre-resolved by route handler, fallback for standalone use)
-        if config is None:
-            config = await resolve_llm_config(
-                setup.agent_config, user_id, request.llm_model, is_byok, mode="ptc",
-                reasoning_effort=getattr(request, "reasoning_effort", None),
-                fast_mode=getattr(request, "fast_mode", None),
-                thread_id=thread_id,
-                enabled_subagents=request.subagents_enabled,
-            )
 
         # Propagate fetch model override to tool context
         apply_fetch_override(config)
