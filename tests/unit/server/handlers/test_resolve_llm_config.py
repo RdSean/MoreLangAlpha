@@ -28,6 +28,20 @@ from ptc_agent.config.core import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _non_household_by_default():
+    """Keep legacy resolver cases on their existing non-household path."""
+    from src.server.services.household_llm_pool import FamilyModelAccessError
+
+    with patch(
+        f"{HANDLER}.get_household_context",
+        new_callable=AsyncMock,
+        side_effect=FamilyModelAccessError("not a household member"),
+        create=True,
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -144,6 +158,309 @@ class TestModelPriority:
         # Returned config changed, but base_config unchanged
         assert config.llm.name == "gpt-4o"
         assert base_config.llm.name == original_name
+
+
+# ---------------------------------------------------------------------------
+# Student household model pool
+# ---------------------------------------------------------------------------
+
+
+class TestStudentHouseholdModelPool:
+    _HOUSEHOLD_ID = "60c12328-15a2-4f95-bdda-11a1c245e7dc"
+    _ENDPOINT_ID = "a3fcb5f4-a01c-4de5-96e3-0f6ce052f301"
+
+    def _endpoint(self):
+        return {
+            "household_id": self._HOUSEHOLD_ID,
+            "endpoint_id": self._ENDPOINT_ID,
+            "display_name": "Family DeepSeek Flash",
+            "provider": "deepseek",
+            "model_id": "deepseek-ai/DeepSeek-V4-Flash",
+            "base_url": "https://family.example/v1",
+            "api_key": "family-secret-key",
+        }
+
+    @pytest.mark.asyncio
+    async def test_student_uses_household_default_without_personal_preferences(
+        self, base_config
+    ):
+        from src.server.services.llm.config import resolve_llm_config
+
+        endpoint = self._endpoint()
+        family_client = MagicMock(name="family_client")
+        with (
+            patch(
+                f"{HANDLER}.get_household_context",
+                new_callable=AsyncMock,
+                return_value={
+                    "user_id": "student-1",
+                    "household_id": self._HOUSEHOLD_ID,
+                    "role": "student",
+                },
+            ),
+            patch(
+                f"{HANDLER}.resolve_family_model_key",
+                new_callable=AsyncMock,
+                return_value=endpoint,
+                create=True,
+            ) as resolve_family,
+            patch(
+                "src.llms.llm.create_llm_from_custom",
+                return_value=family_client,
+            ) as create_custom,
+            patch(
+                f"{HANDLER}.get_model_preference",
+                new_callable=AsyncMock,
+                return_value={},
+            ) as get_preferences,
+        ):
+            config = await resolve_llm_config(
+                base_config,
+                "student-1",
+                None,
+                False,
+                mode="flash",
+                thread_id="thread-1",
+            )
+
+        resolve_family.assert_awaited_once_with("student-1", None)
+        get_preferences.assert_not_awaited()
+        create_custom.assert_called_once_with(
+            {
+                "name": "Family DeepSeek Flash",
+                "model_id": "deepseek-ai/DeepSeek-V4-Flash",
+                "provider": "deepseek",
+            },
+            api_key="family-secret-key",
+            base_url="https://family.example/v1",
+            cache_key="thread-1",
+        )
+        assert config.llm.flash == "deepseek-ai/DeepSeek-V4-Flash"
+        assert config.llm_client is family_client
+        assert config.credential_source.value == "household"
+        assert config.resolved_model == "deepseek-ai/DeepSeek-V4-Flash"
+        assert config.llm_runtime_metadata == {
+            "credential_source": "household",
+            "household_id": self._HOUSEHOLD_ID,
+            "family_endpoint_id": self._ENDPOINT_ID,
+            "display_name": "Family DeepSeek Flash",
+            "provider": "deepseek",
+            "model_id": "deepseek-ai/DeepSeek-V4-Flash",
+        }
+        assert "family-secret-key" not in str(config.model_dump())
+
+    @pytest.mark.asyncio
+    async def test_student_without_selected_household_model_fails_before_client_factory(
+        self, base_config
+    ):
+        from fastapi import HTTPException
+        from src.server.services.llm.config import resolve_llm_config
+
+        with (
+            patch(
+                f"{HANDLER}.get_household_context",
+                new_callable=AsyncMock,
+                return_value={
+                    "user_id": "student-1",
+                    "household_id": self._HOUSEHOLD_ID,
+                    "role": "student",
+                },
+            ),
+            patch(
+                f"{HANDLER}.resolve_family_model_key",
+                new_callable=AsyncMock,
+                return_value=None,
+                create=True,
+            ),
+            patch(
+                "src.llms.llm.create_llm_from_custom",
+            ) as create_custom,
+            patch(
+                f"{HANDLER}.get_model_preference",
+                new_callable=AsyncMock,
+                return_value={},
+            ) as get_preferences,
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await resolve_llm_config(base_config, "student-1", None, False)
+
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.detail["type"] == "no_model_available"
+        create_custom.assert_not_called()
+        get_preferences.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_student_reuses_household_client_for_all_runtime_roles(
+        self, base_config
+    ):
+        """Flash/PTC role clients cannot materialize a personal fallback."""
+        from src.server.services.llm.config import resolve_llm_config
+
+        endpoint = self._endpoint()
+        family_client = MagicMock(name="family_client")
+        with (
+            patch(
+                f"{HANDLER}.get_household_context",
+                new_callable=AsyncMock,
+                return_value={
+                    "user_id": "student-1",
+                    "household_id": self._HOUSEHOLD_ID,
+                    "role": "student",
+                },
+            ),
+            patch(
+                f"{HANDLER}.resolve_family_model_key",
+                new_callable=AsyncMock,
+                return_value=endpoint,
+                create=True,
+            ),
+            patch(
+                "src.llms.llm.create_llm_from_custom",
+                return_value=family_client,
+            ),
+        ):
+            config = await resolve_llm_config(
+                base_config,
+                "student-1",
+                None,
+                False,
+                enabled_subagents=["research"],
+            )
+
+        assert config.llm.fallback is None
+        assert config.fallback_llm_clients is None
+        assert config.subsidiary_llm_clients == {
+            "compaction": family_client,
+            "fetch": family_client,
+            "subagent:research": family_client,
+        }
+
+    def test_household_runtime_metadata_is_allow_listed_for_run_persistence(self):
+        """The run handoff carries provenance, never endpoint credentials."""
+        from types import SimpleNamespace
+        from src.server.handlers.chat.request_prep import apply_llm_runtime_metadata
+
+        query_metadata = {}
+        apply_llm_runtime_metadata(
+            SimpleNamespace(
+                llm_runtime_metadata={
+                    "credential_source": "household",
+                    "household_id": self._HOUSEHOLD_ID,
+                    "family_endpoint_id": self._ENDPOINT_ID,
+                    "display_name": "Family DeepSeek Flash",
+                    "provider": "deepseek",
+                    "model_id": "deepseek-ai/DeepSeek-V4-Flash",
+                    "api_key": "family-secret-key",
+                    "base_url": "https://family.example/v1",
+                }
+            ),
+            query_metadata,
+        )
+
+        assert query_metadata["llm_runtime"] == {
+            "credential_source": "household",
+            "household_id": self._HOUSEHOLD_ID,
+            "family_endpoint_id": self._ENDPOINT_ID,
+            "display_name": "Family DeepSeek Flash",
+            "provider": "deepseek",
+            "model_id": "deepseek-ai/DeepSeek-V4-Flash",
+        }
+        assert "family-secret-key" not in str(query_metadata)
+
+    @pytest.mark.asyncio
+    async def test_student_cannot_resolve_endpoint_from_another_household(
+        self, base_config
+    ):
+        """An unavailable explicit family endpoint returns a non-enumerating 404."""
+        from fastapi import HTTPException
+        from src.server.services.llm.config import resolve_llm_config
+
+        with (
+            patch(
+                f"{HANDLER}.get_household_context",
+                new_callable=AsyncMock,
+                return_value={
+                    "user_id": "student-1",
+                    "household_id": self._HOUSEHOLD_ID,
+                    "role": "student",
+                },
+            ),
+            patch(
+                f"{HANDLER}.resolve_family_model_key",
+                new_callable=AsyncMock,
+                return_value=None,
+                create=True,
+            ) as resolve_family,
+            patch(
+                f"{HANDLER}.get_model_preference",
+                new_callable=AsyncMock,
+                return_value={},
+            ) as get_preferences,
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await resolve_llm_config(
+                    base_config,
+                    "student-1",
+                    f"family:{self._ENDPOINT_ID}",
+                    False,
+                )
+
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail["type"] == "no_model_available"
+        resolve_family.assert_awaited_once_with(
+            "student-1", f"family:{self._ENDPOINT_ID}"
+        )
+        get_preferences.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_student_standard_model_request_never_reaches_personal_paths(
+        self, base_config
+    ):
+        """A student cannot escape to a standard model, BYOK, or OAuth."""
+        from fastapi import HTTPException
+        from src.server.services.llm.config import resolve_llm_config
+
+        with (
+            patch(
+                f"{HANDLER}.get_household_context",
+                new_callable=AsyncMock,
+                return_value={
+                    "user_id": "student-1",
+                    "household_id": self._HOUSEHOLD_ID,
+                    "role": "student",
+                },
+            ),
+            patch(
+                f"{HANDLER}.get_model_preference",
+                new_callable=AsyncMock,
+                return_value={},
+            ) as get_preferences,
+            patch(
+                f"{HANDLER}.resolve_oauth_llm_client",
+                new_callable=AsyncMock,
+            ) as resolve_oauth,
+            patch(
+                f"{HANDLER}.resolve_byok_llm_client",
+                new_callable=AsyncMock,
+            ) as resolve_byok,
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await resolve_llm_config(base_config, "student-1", "gpt-4o", True)
+
+        assert exc_info.value.detail["type"] == "no_model_available"
+        get_preferences.assert_not_awaited()
+        resolve_oauth.assert_not_awaited()
+        resolve_byok.assert_not_awaited()
+
+    def test_keyless_household_endpoint_does_not_fall_back_to_server_env_key(self):
+        """Keyless local endpoints pass an explicit empty key to the factory."""
+        from src.server.services.llm.config import resolve_household_llm_client
+
+        endpoint = self._endpoint() | {"api_key": None}
+        with patch("src.llms.llm.create_llm_from_custom") as create_custom:
+            resolve_household_llm_client(endpoint, cache_key="thread-1")
+
+        assert create_custom.call_args.kwargs["api_key"] == ""
 
 
 # ---------------------------------------------------------------------------

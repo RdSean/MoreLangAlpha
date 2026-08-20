@@ -16,12 +16,19 @@ from typing import Any
 from ptc_agent.config.agent import CredentialSource
 
 from src.server.services.features import effective_flags_for_user
+from src.server.services.household_llm_pool import (
+    FAMILY_MODEL_PREFIX,
+    FamilyModelAccessError,
+    get_household_context,
+    resolve_family_model_key,
+)
 
 from .availability import (
     _MODEL_PREF_KEYS,
     _cleanup_stale_model_preferences,
     _raise_byok_key_required,
     _raise_model_removed,
+    _raise_no_model_available,
 )
 
 # Same hard-coded logger name request_prep uses — existing log routing keys off it.
@@ -65,6 +72,121 @@ def resolved_model_name(config: Any, requested_model: str | None) -> str | None:
         if isinstance(manifest_model, str) and manifest_model.strip():
             return manifest_model.strip()
     return requested_model
+
+
+def resolve_household_llm_client(
+    endpoint: dict[str, Any], *, cache_key: str | None = None
+) -> Any:
+    """Build a family-endpoint client without retaining its decrypted key.
+
+    The endpoint service has already authorized the household and decrypted the
+    key for this request. ``create_llm_from_custom`` preserves the selected
+    manifest provider's SDK, headers, and custom model-id behavior.
+    """
+    from src.llms.llm import create_llm_from_custom
+
+    return create_llm_from_custom(
+        {
+            "name": endpoint["display_name"],
+            "model_id": endpoint["model_id"],
+            "provider": endpoint["provider"],
+        },
+        # ``None`` would make the generic factory consult the server's
+        # provider environment variable. An explicit empty key preserves
+        # password-less local endpoints without leaking into platform/BYOK.
+        api_key=endpoint.get("api_key") or "",
+        base_url=endpoint.get("base_url"),
+        cache_key=cache_key,
+    )
+
+
+def _household_runtime_metadata(endpoint: dict[str, Any]) -> dict[str, str]:
+    """Return the allow-listed provenance safe for config and run metadata."""
+    return {
+        "credential_source": CredentialSource.HOUSEHOLD.value,
+        "household_id": str(endpoint["household_id"]),
+        "family_endpoint_id": str(endpoint["endpoint_id"]),
+        "display_name": str(endpoint["display_name"]),
+        "provider": str(endpoint["provider"]),
+        "model_id": str(endpoint["model_id"]),
+    }
+
+
+async def _student_household_context(user_id: str) -> dict[str, str] | None:
+    """Return a student household context, preserving non-family resolution."""
+    try:
+        context = await get_household_context(user_id)
+    except FamilyModelAccessError:
+        return None
+    return context if context.get("role") == "student" else None
+
+
+async def _resolve_student_household_config(
+    base_config: Any,
+    user_id: str,
+    request_model: str | None,
+    *,
+    thread_id: str | None,
+    enabled_subagents: list[str] | None,
+) -> Any | None:
+    """Resolve the sealed student runtime path, or ``None`` for other users."""
+    from ptc_agent.config import LLMConfig
+
+    context = await _student_household_context(user_id)
+    if context is None:
+        return None
+
+    # A student can only name a member of their own household pool. This
+    # happens before user preferences, BYOK, OAuth, or platform fallback.
+    if request_model is not None and not request_model.startswith(FAMILY_MODEL_PREFIX):
+        _raise_no_model_available()
+
+    try:
+        endpoint = await resolve_family_model_key(user_id, request_model)
+    except FamilyModelAccessError:
+        # Membership changes racing the initial context lookup must never leak
+        # into a normal-model fallback path.
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=403,
+            detail={"message": "Household model is unavailable.", "type": "no_model_available"},
+        ) from None
+
+    if endpoint is None:
+        # An explicitly named endpoint is unavailable or belongs elsewhere;
+        # make it indistinguishable from a missing resource. Absent selection
+        # remains a 409 so the student client can show its no-model state.
+        _raise_no_model_available(
+            status_code=404 if request_model and request_model.startswith(FAMILY_MODEL_PREFIX) else 409
+        )
+
+    model_id = str(endpoint["model_id"])
+    client = resolve_household_llm_client(endpoint, cache_key=thread_id)
+    config = base_config.model_copy(deep=True)
+    # Student roles deliberately share this same household endpoint. No
+    # personal fallback/role model may materialize through the normal path.
+    config.llm = LLMConfig(
+        name=model_id,
+        flash=model_id,
+        compaction=model_id,
+        fetch=model_id,
+        fallback=None,
+    )
+    config.llm_client = client
+    config.credential_source = CredentialSource.HOUSEHOLD
+    config.resolved_model = model_id
+    config.llm_runtime_metadata = _household_runtime_metadata(endpoint)
+    config.cache_key = thread_id
+    subagents = enabled_subagents if enabled_subagents is not None else config.subagents.enabled
+    config.subsidiary_llm_clients = {
+        "compaction": client,
+        "fetch": client,
+        **{f"subagent:{name}": client for name in subagents},
+    }
+    config.fallback_llm_clients = None
+    config.fallback_llm_names = None
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -829,6 +951,16 @@ async def resolve_llm_config(
     their own credential resolution; ``None`` falls back to the config default.
     """
     from ptc_agent.config import LLMConfig
+
+    student_config = await _resolve_student_household_config(
+        base_config,
+        user_id,
+        request_model,
+        thread_id=thread_id,
+        enabled_subagents=enabled_subagents,
+    )
+    if student_config is not None:
+        return student_config
 
     if is_byok is None:
         from src.server.database.api_keys import is_byok_active

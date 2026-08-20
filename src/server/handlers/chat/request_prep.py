@@ -321,6 +321,28 @@ def apply_fetch_override(config) -> None:
             fetch_llm_client_override.set(fetch_client)
 
 
+def apply_llm_runtime_metadata(config: Any, query_metadata: dict) -> None:
+    """Copy only safe resolved-model provenance into durable run metadata."""
+    metadata = getattr(config, "llm_runtime_metadata", None)
+    if not isinstance(metadata, dict):
+        return
+    allowed = (
+        "credential_source",
+        "household_id",
+        "family_endpoint_id",
+        "display_name",
+        "provider",
+        "model_id",
+    )
+    safe = {
+        key: metadata[key]
+        for key in allowed
+        if isinstance(metadata.get(key), str) and metadata[key]
+    }
+    if safe:
+        query_metadata["llm_runtime"] = safe
+
+
 async def ensure_thread(
     request: ChatRequest,
     thread_id: str,

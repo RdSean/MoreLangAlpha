@@ -466,6 +466,21 @@ class TestPlatformKeyFallbackSignal:
         mock_logger.info.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_household_suppresses_platform_key_fallback_signal(self):
+        """HOUSEHOLD has an already-resolved family credential, like BYOK."""
+        agent_config = _make_agent_config()
+        mock_logger = MagicMock()
+        service = LLMService(agent_config=agent_config, logger=mock_logger)
+
+        await self._run(
+            service,
+            credential_source=CredentialSource.HOUSEHOLD,
+            llm_client=MagicMock(name="household_client"),
+        )
+
+        mock_logger.info.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_user_id_none_system_path_suppresses_signal(self):
         """user_id=None (system task) → no resolution → no platform log."""
         agent_config = _make_agent_config(flash="sys-flash-model")

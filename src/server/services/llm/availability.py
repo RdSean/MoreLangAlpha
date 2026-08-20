@@ -17,6 +17,19 @@ from typing import NoReturn
 logger = logging.getLogger("src.server.handlers.chat_handler")
 
 
+def _raise_no_model_available(*, status_code: int = 409) -> NoReturn:
+    """Raise the safe, action-oriented error for an unselected family model."""
+    from fastapi import HTTPException
+
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "message": "No household model is available for this account.",
+            "type": "no_model_available",
+        },
+    )
+
+
 
 def _raise_byok_key_required(model_name: str) -> None:
     """Raise a user-facing HTTPException pointing the user to Settings.

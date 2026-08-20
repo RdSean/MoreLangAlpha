@@ -103,6 +103,7 @@ class LLMService:
             if resolved_config.credential_source not in (
                 CredentialSource.OAUTH,
                 CredentialSource.BYOK,
+                CredentialSource.HOUSEHOLD,
             ):
                 self._logger.info(
                     "llm_service.platform_key_fallback",

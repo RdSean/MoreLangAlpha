@@ -40,6 +40,7 @@ class CredentialSource(StrEnum):
 
     OAUTH = "oauth"
     BYOK = "byok"
+    HOUSEHOLD = "household"
     PLATFORM = "platform"
     NONE = "none"
 
@@ -269,6 +270,9 @@ class AgentConfig(BaseModel):
     # Non-secret model identity represented by the resolved client. This can
     # differ from ``llm`` when a platform model profile serves the request.
     resolved_model: str | None = Field(default=None, exclude=True)
+    # Safe credential/model provenance copied into run metadata. Never store
+    # decrypted credentials here: config instances can reach checkpoints.
+    llm_runtime_metadata: dict[str, str] | None = Field(default=None, exclude=True)
     subsidiary_llm_clients: dict[str, Any] = Field(default_factory=dict, exclude=True)
     fallback_llm_clients: list[Any] | None = Field(default=None, exclude=True)  # Pre-resolved fallback instances
     # Display names aligned index-for-index with ``fallback_llm_clients``

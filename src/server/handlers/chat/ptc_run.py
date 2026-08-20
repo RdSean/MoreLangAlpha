@@ -63,6 +63,7 @@ from .request_prep import (
     _resolve_fork,
     _resolve_timezone,
     apply_fetch_override,
+    apply_llm_runtime_metadata,
     build_graph_config,
     ensure_thread,
     init_tracking,
@@ -256,6 +257,7 @@ async def astream_ptc_workflow(
         resolved_model = getattr(config, "resolved_model", None)
         if resolved_model:
             query_metadata["resolved_llm_model"] = resolved_model
+        apply_llm_runtime_metadata(config, query_metadata)
         if request.origin:
             # Per-turn initiator, mirroring the thread-level metadata['origin']
             # (threads go mixed: a pinned automation thread also takes manual
