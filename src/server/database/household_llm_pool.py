@@ -74,15 +74,35 @@ async def get_endpoint_for_runtime(
     household_id: str, endpoint_id: str
 ) -> dict[str, Any] | None:
     """Fetch one enabled endpoint and decrypt its key for server-side use."""
-    enc_key = _get_encryption_key()
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
                 SELECT endpoint_id, household_id, display_name, provider, model_id,
                        base_url, enabled, sort_order, created_by, created_at, updated_at,
-                       CASE WHEN api_key IS NULL THEN NULL
-                            ELSE pgp_sym_decrypt(api_key, %s) END AS api_key
+                       (api_key IS NOT NULL) AS has_api_key
+                FROM household_llm_endpoints
+                WHERE household_id = %s AND endpoint_id = %s AND enabled = TRUE
+                """,
+                (household_id, endpoint_id),
+            )
+            row = await cur.fetchone()
+            if not row:
+                return None
+            if not row.get("has_api_key", False):
+                result = dict(row)
+                result.pop("has_api_key", None)
+                result["api_key"] = None
+                result["endpoint_id"] = str(result["endpoint_id"])
+                result["household_id"] = str(result["household_id"])
+                return result
+
+            enc_key = _get_encryption_key()
+            await cur.execute(
+                """
+                SELECT endpoint_id, household_id, display_name, provider, model_id,
+                       base_url, enabled, sort_order, created_by, created_at, updated_at,
+                       pgp_sym_decrypt(api_key, %s) AS api_key
                 FROM household_llm_endpoints
                 WHERE household_id = %s AND endpoint_id = %s AND enabled = TRUE
                 """,
@@ -110,36 +130,56 @@ async def create_household_endpoint(
     sort_order: int = 0,
 ) -> dict[str, Any]:
     """Create an endpoint, encrypting the supplied key in PostgreSQL."""
-    enc_key = _get_encryption_key()
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
-            await cur.execute(
-                """
-                INSERT INTO household_llm_endpoints
-                    (household_id, display_name, provider, model_id, base_url,
-                     api_key, enabled, sort_order, created_by)
-                VALUES (%s, %s, %s, %s, %s,
-                        CASE WHEN %s::text IS NULL THEN NULL
-                             ELSE pgp_sym_encrypt(%s::text, %s::text) END,
-                        %s, %s, %s)
-                RETURNING endpoint_id, household_id, display_name, provider, model_id,
-                          base_url, enabled, sort_order, created_by, created_at, updated_at,
-                          (api_key IS NOT NULL) AS has_api_key
-                """,
-                (
-                    household_id,
-                    display_name,
-                    provider,
-                    model_id,
-                    base_url,
-                    api_key,
-                    api_key,
-                    enc_key,
-                    enabled,
-                    sort_order,
-                    created_by,
-                ),
-            )
+            if api_key is None:
+                await cur.execute(
+                    """
+                    INSERT INTO household_llm_endpoints
+                        (household_id, display_name, provider, model_id, base_url,
+                         api_key, enabled, sort_order, created_by)
+                    VALUES (%s, %s, %s, %s, %s, NULL, %s, %s, %s)
+                    RETURNING endpoint_id, household_id, display_name, provider, model_id,
+                              base_url, enabled, sort_order, created_by, created_at, updated_at,
+                              (api_key IS NOT NULL) AS has_api_key
+                    """,
+                    (
+                        household_id,
+                        display_name,
+                        provider,
+                        model_id,
+                        base_url,
+                        enabled,
+                        sort_order,
+                        created_by,
+                    ),
+                )
+            else:
+                enc_key = _get_encryption_key()
+                await cur.execute(
+                    """
+                    INSERT INTO household_llm_endpoints
+                        (household_id, display_name, provider, model_id, base_url,
+                         api_key, enabled, sort_order, created_by)
+                    VALUES (%s, %s, %s, %s, %s,
+                            pgp_sym_encrypt(%s::text, %s::text), %s, %s, %s)
+                    RETURNING endpoint_id, household_id, display_name, provider, model_id,
+                              base_url, enabled, sort_order, created_by, created_at, updated_at,
+                              (api_key IS NOT NULL) AS has_api_key
+                    """,
+                    (
+                        household_id,
+                        display_name,
+                        provider,
+                        model_id,
+                        base_url,
+                        api_key,
+                        enc_key,
+                        enabled,
+                        sort_order,
+                        created_by,
+                    ),
+                )
             row = await cur.fetchone()
     return _endpoint_summary(row) or {}
 
@@ -170,13 +210,13 @@ async def update_household_endpoint(
         if value is not FIELD_UNSET:
             assignments.append(f"{column} = %s")
             values.append(value)
-    enc_key: str | None = None
     if api_key is not API_KEY_UNSET:
-        assignments.append(
-            "api_key = CASE WHEN %s::text IS NULL THEN NULL ELSE pgp_sym_encrypt(%s::text, %s::text) END"
-        )
-        enc_key = _get_encryption_key()
-        values.extend([api_key, api_key, enc_key])
+        if api_key is None:
+            assignments.append("api_key = NULL")
+        else:
+            assignments.append("api_key = pgp_sym_encrypt(%s::text, %s::text)")
+            enc_key = _get_encryption_key()
+            values.extend([api_key, enc_key])
     if not assignments:
         async with get_db_connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cur:
@@ -255,8 +295,9 @@ async def set_household_default(
                 if endpoint_id is not None:
                     await cur.execute(
                         """
-                        SELECT 1 FROM household_llm_endpoints
+                        SELECT endpoint_id FROM household_llm_endpoints
                         WHERE household_id = %s AND endpoint_id = %s AND enabled = TRUE
+                        FOR UPDATE
                         """,
                         (household_id, endpoint_id),
                     )

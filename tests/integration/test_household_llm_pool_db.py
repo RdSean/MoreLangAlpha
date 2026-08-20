@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from tests.integration.conftest import _ALL_TABLES
@@ -362,3 +365,185 @@ async def test_pool_service_encrypts_keys_and_enforces_household_access(
         )
     with pytest.raises(PermissionError):
         await pool_service.list_parent_pool("not-a-household-member")
+
+
+async def test_null_key_endpoint_needs_no_encryption_environment_and_clears_disabled_default(
+    cleanup_tables, db_conn, monkeypatch
+):
+    """Local endpoints do not need pgcrypto configuration and cannot stay default when disabled."""
+    from src.server.database import education_members, household_llm_pool as pool_db
+    from src.server.services import household_llm_pool as pool_service
+
+    monkeypatch.delenv("BYOK_ENCRYPTION_KEY", raising=False)
+
+    @asynccontextmanager
+    async def test_connection():
+        yield db_conn
+
+    monkeypatch.setattr(pool_db, "get_db_connection", test_connection)
+    monkeypatch.setattr(education_members, "get_db_connection", test_connection)
+
+    household_id = uuid4()
+    parent_id = f"local-parent-{uuid4()}"
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            "INSERT INTO users (user_id, name) VALUES (%s, %s)",
+            (parent_id, "Local Parent"),
+        )
+        await cur.execute(
+            "INSERT INTO education_households (household_id, name) VALUES (%s, %s)",
+            (household_id, "Local household"),
+        )
+        await cur.execute(
+            """
+            INSERT INTO education_memberships
+                (household_id, user_id, role, display_name)
+            VALUES (%s, %s, 'parent', %s)
+            """,
+            (household_id, parent_id, "Local Parent"),
+        )
+
+    endpoint = await pool_service.create_endpoint(
+        parent_id,
+        {
+            "display_name": "Local Ollama",
+            "provider": "ollama",
+            "model_id": "llama3",
+            "base_url": "http://localhost:11434",
+        },
+    )
+    runtime = await pool_db.get_endpoint_for_runtime(
+        str(household_id), endpoint["endpoint_id"]
+    )
+    assert runtime is not None
+    assert runtime["api_key"] is None
+
+    await pool_service.set_household_default(parent_id, endpoint["endpoint_id"])
+    await pool_service.update_endpoint(
+        parent_id, endpoint["endpoint_id"], {"enabled": False}
+    )
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            "SELECT default_endpoint_id FROM household_llm_settings WHERE household_id = %s",
+            (household_id,),
+        )
+        assert (await cur.fetchone())["default_endpoint_id"] is None
+
+
+async def test_default_selection_locks_endpoint_against_concurrent_disable(
+    cleanup_tables, db_conn, monkeypatch, test_db_uri
+):
+    """A disable cannot interleave after default validation and before its write."""
+    from src.server.database import household_llm_pool as pool_db
+
+    household_id = uuid4()
+    parent_id = f"race-parent-{uuid4()}"
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            "INSERT INTO users (user_id, name) VALUES (%s, %s)",
+            (parent_id, "Race Parent"),
+        )
+        await cur.execute(
+            "INSERT INTO education_households (household_id, name) VALUES (%s, %s)",
+            (household_id, "Race household"),
+        )
+        endpoint = await cur.execute(
+            """
+            INSERT INTO household_llm_endpoints
+                (household_id, display_name, provider, model_id, created_by)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING endpoint_id
+            """,
+            (household_id, "Race endpoint", "ollama", "llama3", parent_id),
+        )
+        endpoint_id = (await endpoint.fetchone())["endpoint_id"]
+
+    candidate_checked = asyncio.Event()
+    allow_default_write = asyncio.Event()
+    active_connection: ContextVar[object | None] = ContextVar(
+        "active_household_pool_connection", default=None
+    )
+
+    class PausingCursor:
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        async def execute(self, query, params=None):
+            result = await self._cursor.execute(query, params)
+            normalized = " ".join(query.upper().split())
+            if (
+                "SELECT ENDPOINT_ID FROM HOUSEHOLD_LLM_ENDPOINTS" in normalized
+                and "FOR UPDATE" in normalized
+            ):
+                candidate_checked.set()
+                await allow_default_write.wait()
+            return result
+
+        def __getattr__(self, name):
+            return getattr(self._cursor, name)
+
+    class PausingConnection:
+        def __init__(self, connection):
+            self._connection = connection
+
+        @asynccontextmanager
+        async def cursor(self, **kwargs):
+            async with self._connection.cursor(**kwargs) as cursor:
+                yield PausingCursor(cursor)
+
+        @asynccontextmanager
+        async def transaction(self):
+            async with self._connection.transaction():
+                yield
+
+    @asynccontextmanager
+    async def routed_connection():
+        connection = active_connection.get()
+        assert connection is not None
+        yield connection
+
+    monkeypatch.setattr(pool_db, "get_db_connection", routed_connection)
+
+    async with (
+        await psycopg.AsyncConnection.connect(
+            test_db_uri, autocommit=True, row_factory=dict_row
+        ) as default_connection,
+        await psycopg.AsyncConnection.connect(
+            test_db_uri, autocommit=True, row_factory=dict_row
+        ) as disable_connection,
+    ):
+
+        async def set_default():
+            token = active_connection.set(PausingConnection(default_connection))
+            try:
+                return await pool_db.set_household_default(
+                    str(household_id), str(endpoint_id)
+                )
+            finally:
+                active_connection.reset(token)
+
+        async def disable_endpoint():
+            token = active_connection.set(disable_connection)
+            try:
+                return await pool_db.update_household_endpoint(
+                    str(household_id), str(endpoint_id), enabled=False
+                )
+            finally:
+                active_connection.reset(token)
+
+        default_task = asyncio.create_task(set_default())
+        await candidate_checked.wait()
+        disable_task = asyncio.create_task(disable_endpoint())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(disable_task), timeout=0.2)
+
+        allow_default_write.set()
+        await default_task
+        await disable_task
+
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            "SELECT default_endpoint_id FROM household_llm_settings WHERE household_id = %s",
+            (household_id,),
+        )
+        assert (await cur.fetchone())["default_endpoint_id"] is None

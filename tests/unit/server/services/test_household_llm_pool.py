@@ -185,3 +185,26 @@ async def test_malformed_endpoint_identifiers_are_rejected_before_database_looku
     with pytest.raises(service.FamilyModelAccessError):
         await service.set_student_preference("student", "not-a-uuid")
     get_runtime.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_parent_mutations_reject_malformed_endpoint_identifiers_before_database_lookup(
+    monkeypatch, membership
+):
+    update = AsyncMock(side_effect=AssertionError("must not query malformed UUID"))
+    delete = AsyncMock(side_effect=AssertionError("must not query malformed UUID"))
+    set_default = AsyncMock(side_effect=AssertionError("must not query malformed UUID"))
+    monkeypatch.setattr(service, "update_household_endpoint", update)
+    monkeypatch.setattr(service, "delete_household_endpoint", delete)
+    monkeypatch.setattr(service, "set_household_default_row", set_default)
+
+    with pytest.raises(service.FamilyModelAccessError):
+        await service.update_endpoint("parent-1", "not-a-uuid", {})
+    with pytest.raises(service.FamilyModelAccessError):
+        await service.delete_endpoint("parent-1", "not-a-uuid")
+    with pytest.raises(service.FamilyModelAccessError):
+        await service.set_household_default("parent-1", "not-a-uuid")
+
+    update.assert_not_awaited()
+    delete.assert_not_awaited()
+    set_default.assert_not_awaited()

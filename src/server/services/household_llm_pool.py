@@ -30,6 +30,13 @@ class NoFamilyModelAvailableError(LookupError):
     """The household has no enabled endpoint to run."""
 
 
+def _normalize_endpoint_id(endpoint_id: str) -> str:
+    try:
+        return str(UUID(str(endpoint_id)))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise FamilyModelAccessError("Endpoint identifier is invalid") from exc
+
+
 async def get_household_context(user_id: str) -> dict[str, str]:
     """Return the authenticated user's household membership context."""
     membership = await get_membership_for_user(user_id)
@@ -74,6 +81,7 @@ async def update_endpoint(
     parent_id: str, endpoint_id: str, fields: dict[str, Any]
 ) -> dict[str, Any] | None:
     household_id = await require_parent_household(parent_id)
+    endpoint_id = _normalize_endpoint_id(endpoint_id)
     kwargs: dict[str, Any] = {}
     for name in (
         "display_name",
@@ -97,6 +105,7 @@ async def update_endpoint(
 
 async def delete_endpoint(parent_id: str, endpoint_id: str) -> bool:
     household_id = await require_parent_household(parent_id)
+    endpoint_id = _normalize_endpoint_id(endpoint_id)
     if not await delete_household_endpoint(household_id, endpoint_id):
         raise FamilyModelAccessError("Endpoint is unavailable in this household")
     return True
@@ -106,6 +115,8 @@ async def set_household_default(
     parent_id: str, endpoint_id: str | None
 ) -> dict[str, Any]:
     household_id = await require_parent_household(parent_id)
+    if endpoint_id is not None:
+        endpoint_id = _normalize_endpoint_id(endpoint_id)
     result = await set_household_default_row(household_id, endpoint_id)
     if endpoint_id is not None and result.get("default_endpoint_id") is None:
         raise FamilyModelAccessError("Endpoint is unavailable in this household")
@@ -124,10 +135,7 @@ async def set_student_preference(
     if context["role"] != "student":
         raise FamilyModelAccessError("Only student accounts can set a model preference")
     if endpoint_id is not None:
-        try:
-            endpoint_id = str(UUID(str(endpoint_id)))
-        except (TypeError, ValueError, AttributeError) as exc:
-            raise FamilyModelAccessError("Endpoint identifier is invalid") from exc
+        endpoint_id = _normalize_endpoint_id(endpoint_id)
         endpoint = await get_endpoint_for_runtime(context["household_id"], endpoint_id)
         if endpoint is None:
             raise FamilyModelAccessError("Endpoint is unavailable in this household")
