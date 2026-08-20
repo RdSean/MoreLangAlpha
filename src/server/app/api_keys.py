@@ -29,6 +29,10 @@ from src.server.database.api_keys import (
     delete_api_key,
     invalidate_byok_cache,
 )
+from src.server.services.household_llm_pool import (
+    FamilyModelAccessError,
+    get_household_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +40,24 @@ router = APIRouter(tags=["API Keys"])
 
 # Module-level cache for BYOK-eligible providers (loaded once on first access)
 _BYOK_PROVIDERS_CACHE: list[str] | None = None
+
+
+async def _require_personal_model_configuration_access(user_id: str) -> None:
+    """Block student accounts from legacy personal-model configuration.
+
+    Students resolve only the household pool. Accounts outside a household and
+    household parents retain the existing BYOK behavior.
+    """
+    try:
+        context = await get_household_context(user_id)
+    except FamilyModelAccessError:
+        return
+
+    if context.get("role") == "student":
+        raise HTTPException(
+            status_code=403,
+            detail="Student accounts use household models and cannot manage personal model settings.",
+        )
 
 
 def _get_supported_providers() -> list[str]:
@@ -148,6 +170,7 @@ async def _get_custom_providers(user_id: str) -> list:
 @router.get("/api/v1/users/me/api-keys")
 async def get_api_keys(user_id: CurrentUserId):
     """Get user's BYOK configuration (keys are masked)."""
+    await _require_personal_model_configuration_access(user_id)
     data = await get_user_api_keys(user_id)
     custom_providers = await _get_custom_providers(user_id)
     return _format_response(
@@ -217,6 +240,8 @@ async def update_api_keys(body: UpdateApiKeysRequest, user_id: CurrentUserId):
     - byok_enabled: toggle the global switch
     - api_keys: { "openai": "sk-..." } to set, { "openai": null } to delete
     """
+    await _require_personal_model_configuration_access(user_id)
+
     # Toggle BYOK if requested
     if body.byok_enabled is not None:
         await set_byok_enabled(user_id, body.byok_enabled)
@@ -268,6 +293,7 @@ async def update_api_keys(body: UpdateApiKeysRequest, user_id: CurrentUserId):
 @router.delete("/api/v1/users/me/api-keys/{provider}")
 async def remove_api_key(provider: str, user_id: CurrentUserId):
     """Remove one provider's API key."""
+    await _require_personal_model_configuration_access(user_id)
     custom_providers = await _get_custom_providers(user_id)
     allowed = _get_allowed_providers(custom_providers)
     if provider not in allowed:
@@ -492,6 +518,8 @@ async def test_api_key(body: TestApiKeyRequest, user_id: CurrentUserId):
     Rate limited to 1 request per 10 seconds per user (Redis SET NX EX 10).
     Timeout: 5 seconds hard cap.
     """
+    await _require_personal_model_configuration_access(user_id)
+
     import httpx
 
     # Validate provider against known providers (all flat providers + custom)
@@ -591,6 +619,8 @@ async def list_provider_models(provider: str, user_id: CurrentUserId):
     All three expose an OpenAI-compatible ``GET /v1/models`` regardless of which SDK
     is used for inference, so we always use that format here.
     """
+    await _require_personal_model_configuration_access(user_id)
+
     import httpx
 
     from src.llms.llm import LLM as LLMFactory
