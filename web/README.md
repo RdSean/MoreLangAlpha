@@ -27,6 +27,16 @@ pnpm dev --host 0.0.0.0 --port 5177
 The development server must be reachable on the LAN at
 `http://<host-ip>:5177`.
 
+For microphone access from a LAN IP, use the local HTTPS mode. The first visit
+will show a development-certificate warning that must be accepted once:
+
+```bash
+VITE_DEV_HTTPS=true VITE_PROXY_BACKEND=http://127.0.0.1:8002 \
+  pnpm dev --host 0.0.0.0 --port 5188
+```
+
+Then open `https://<host-ip>:5188`.
+
 ## Main routes
 
 | Path | Page |
