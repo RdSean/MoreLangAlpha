@@ -43,11 +43,13 @@ class MockRecognition {
 
 const track = { stop: vi.fn() };
 const processor = { connect: vi.fn(), disconnect: vi.fn(), onaudioprocess: null as ((event: AudioProcessingEvent) => void) | null };
+const gain = { gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() };
 const audioContext = {
   sampleRate: 16_000,
   destination: {},
   createMediaStreamSource: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn() })),
   createScriptProcessor: vi.fn(() => processor),
+  createGain: vi.fn(() => gain),
   close: vi.fn().mockResolvedValue(undefined),
 };
 
@@ -66,6 +68,7 @@ describe('useVoiceInput', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -102,7 +105,34 @@ describe('useVoiceInput', () => {
     act(() => result.current.stopListening());
 
     expect(MockWebSocket.instances[0].send).toHaveBeenCalledWith(JSON.stringify({ type: 'stop' }));
-    expect(MockWebSocket.instances[0].close).toHaveBeenCalledOnce();
     expect(track.stop).toHaveBeenCalledOnce();
+    expect(MockWebSocket.instances[0].close).not.toHaveBeenCalled();
+
+    act(() => MockWebSocket.instances[0].message({ type: 'done' }));
+    expect(MockWebSocket.instances[0].close).toHaveBeenCalledOnce();
+  });
+
+  it('ends quietly when the backend reports no speech', async () => {
+    const { result } = renderHook(() => useVoiceInput({ message: '', setMessage: vi.fn(), isLoading: false }));
+
+    act(() => result.current.toggleListening());
+    await act(async () => MockWebSocket.instances[0].open());
+    act(() => MockWebSocket.instances[0].message({ type: 'error', code: 'no_speech' }));
+
+    expect(MockRecognition.instances).toHaveLength(0);
+    expect(result.current.isListening).toBe(false);
+  });
+
+  it('stops recording after one minute', async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useVoiceInput({ message: '', setMessage: vi.fn(), isLoading: false }));
+
+    act(() => result.current.toggleListening());
+    await act(async () => MockWebSocket.instances[0].open());
+    act(() => vi.advanceTimersByTime(60_000));
+
+    expect(MockWebSocket.instances[0].send).toHaveBeenCalledWith(JSON.stringify({ type: 'stop' }));
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(result.current.isListening).toBe(false);
   });
 });

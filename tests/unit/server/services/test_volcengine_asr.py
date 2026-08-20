@@ -72,3 +72,4 @@ def test_decode_server_result_and_map_error_without_provider_text() -> None:
         "type": "error",
         "code": "service_unavailable",
     }
+    assert map_upstream_error(1013, "silence") == {"type": "error", "code": "no_speech"}

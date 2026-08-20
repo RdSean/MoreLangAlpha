@@ -6,6 +6,7 @@ import { PcmPacketizer } from './voice-input.pcm';
 
 const browserSpeechSupported = typeof window !== 'undefined'
   && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+const MAX_RECORDING_MS = 60_000;
 const backendSpeechSupported = typeof window !== 'undefined'
   && !!window.WebSocket
   && !!navigator.mediaDevices?.getUserMedia
@@ -42,6 +43,7 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
   const contextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
   const packetizerRef = useRef<PcmPacketizer | null>(null);
   const socketOpenRef = useRef(false);
   const stoppingRef = useRef(false);
@@ -66,8 +68,10 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
     socketRef.current = null;
     socketOpenRef.current = false;
     processorRef.current?.disconnect();
+    gainRef.current?.disconnect();
     sourceRef.current?.disconnect();
     processorRef.current = null;
+    gainRef.current = null;
     sourceRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -127,7 +131,12 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
     socketRef.current = socket;
     let receivedText = false;
     const fallback = () => {
-      if (stoppingRef.current) return;
+      if (stoppingRef.current) {
+        stopBackend(false);
+        stoppingRef.current = false;
+        setIsListening(false);
+        return;
+      }
       stopBackend(false);
       if (!receivedText) startBrowser();
       else {
@@ -148,16 +157,20 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
         const context = new AudioContext();
         const source = context.createMediaStreamSource(stream);
         const processor = context.createScriptProcessor(4096, 1, 1);
+        const gain = context.createGain();
+        gain.gain.value = 0;
         const packetizer = new PcmPacketizer(context.sampleRate);
         processor.onaudioprocess = (event) => {
           packetizer.push(event.inputBuffer.getChannelData(0)).forEach((packet) => socket.send(packet));
         };
         source.connect(processor);
-        processor.connect(context.destination);
+        processor.connect(gain);
+        gain.connect(context.destination);
         streamRef.current = stream;
         contextRef.current = context;
         sourceRef.current = source;
         processorRef.current = processor;
+        gainRef.current = gain;
         packetizerRef.current = packetizer;
         setIsListening(true);
       } catch {
@@ -166,7 +179,7 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
     };
     socket.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data) as { type?: string; text?: string };
+        const data = JSON.parse(event.data) as { type?: string; text?: string; code?: string };
         if (data.type === 'partial' && data.text != null) {
           receivedText = true;
           partialTranscriptRef.current = data.text;
@@ -177,9 +190,16 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
           partialTranscriptRef.current = '';
           publishTranscript();
         } else if (data.type === 'error') {
-          fallback();
+          if (data.code === 'no_speech') {
+            stopBackend(false);
+            stoppingRef.current = false;
+            setIsListening(false);
+          } else {
+            fallback();
+          }
         } else if (data.type === 'done') {
           stopBackend(false);
+          stoppingRef.current = false;
           setIsListening(false);
         }
       } catch {
@@ -194,10 +214,24 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
 
   const stopListening = useCallback(() => {
     stoppingRef.current = true;
-    stopBackend(true);
+    if (socketRef.current && socketOpenRef.current) {
+      const tail = packetizerRef.current?.flush();
+      if (tail) socketRef.current.send(tail);
+      socketRef.current.send(JSON.stringify({ type: 'stop' }));
+      processorRef.current?.disconnect();
+      gainRef.current?.disconnect();
+      sourceRef.current?.disconnect();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      void contextRef.current?.close();
+      contextRef.current = null;
+      packetizerRef.current = null;
+    } else {
+      stopBackend(false);
+      stoppingRef.current = false;
+    }
     stopBrowser();
     setIsListening(false);
-    stoppingRef.current = false;
   }, [stopBackend, stopBrowser]);
 
   const toggleListening = useCallback(() => {
@@ -215,6 +249,12 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
   useEffect(() => {
     if (isLoading) stopListening();
   }, [isLoading, stopListening]);
+
+  useEffect(() => {
+    if (!isListening) return undefined;
+    const timeout = window.setTimeout(stopListening, MAX_RECORDING_MS);
+    return () => window.clearTimeout(timeout);
+  }, [isListening, stopListening]);
 
   useEffect(() => () => stopListening(), [stopListening]);
 

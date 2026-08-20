@@ -96,8 +96,10 @@ def map_upstream_error(code: object, _message: object = None) -> dict[str, str]:
         safe_code = "service_unavailable"
     elif code in (1003, 1004):
         safe_code = "rate_limited"
-    elif code in (1010, 1011, 1012, 1013):
+    elif code in (1010, 1011, 1012):
         safe_code = "invalid_audio"
+    elif code == 1013:
+        safe_code = "no_speech"
     elif code in (1020, 1021):
         safe_code = "timed_out"
     else:

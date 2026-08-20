@@ -25,4 +25,12 @@ describe('voice input PCM helpers', () => {
     expect(packets).toHaveLength(1);
     expect(packets[0]).toHaveLength(3_200);
   });
+
+  it('flushes a final packet shorter than 100 ms', () => {
+    const packetizer = new PcmPacketizer(16_000);
+
+    expect(packetizer.push(new Float32Array(800))).toEqual([]);
+
+    expect(packetizer.flush()).toHaveLength(1_600);
+  });
 });
