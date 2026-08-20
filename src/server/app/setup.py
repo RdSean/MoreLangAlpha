@@ -887,6 +887,7 @@ from src.server.app.education.textbooks import router as education_textbooks_rou
 from src.server.app.users import router as users_router
 from src.server.app.features import router as features_router
 from src.server.app.api_keys import router as api_keys_router
+from src.server.app.family_llm import router as family_llm_router
 from src.server.app.automations import router as automations_router
 from src.server.app.oauth import router as oauth_router
 from src.server.app.public import router as public_router
@@ -910,6 +911,7 @@ app.include_router(
 )  # /api/v1/workspaces/{id}/sandbox/* - Sandbox stats & packages
 app.include_router(cache_router)  # /api/v1/cache/* - Cache management
 app.include_router(auth_router)  # /api/v1/auth/* - Local accounts and household membership
+app.include_router(family_llm_router)  # /api/v1/family/* - Household model pool
 app.include_router(education_assets_router)  # /api/v1/education/assets/* - Private attachments
 app.include_router(education_tasks_router)  # /api/v1/education/tasks/* - Homework workflow
 app.include_router(education_textbooks_router)  # /api/v1/education/textbooks + learning - Versioned textbook learning
