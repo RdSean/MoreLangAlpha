@@ -15,8 +15,10 @@ import {
   clearFamilyLlmDefault,
   createFamilyLlmEndpoint,
   deleteFamilyLlmEndpoint,
+  getFamilyLlmAvailability,
   getFamilyLlmPool,
   setFamilyLlmDefault,
+  setFamilyLlmPreference,
   updateFamilyLlmEndpoint,
 } from '../api';
 
@@ -75,5 +77,16 @@ describe('family LLM settings API', () => {
     await updateFamilyLlmEndpoint('endpoint-1', { api_key: '' });
 
     expect(request.patch).toHaveBeenCalledWith('/api/v1/family/llm-pool/endpoint-1', { api_key: '' });
+  });
+
+  it('uses the safe family availability and preference endpoints for a student', async () => {
+    request.get.mockResolvedValue({ data: { endpoints: [], selected_endpoint_id: null } });
+    request.put.mockResolvedValue({ data: { endpoints: [], selected_endpoint_id: 'endpoint-2' } });
+
+    await getFamilyLlmAvailability();
+    await setFamilyLlmPreference('endpoint-2');
+
+    expect(request.get).toHaveBeenCalledWith('/api/v1/family/llm-availability');
+    expect(request.put).toHaveBeenCalledWith('/api/v1/family/llm-preference', { endpoint_id: 'endpoint-2' });
   });
 });

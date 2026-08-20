@@ -142,6 +142,8 @@ export interface ChatViewProps {
   initialTaskId?: string;
   onBack: () => void;
   workspaceName?: string;
+  /** Students only select from their household's server-provided model pool. */
+  isStudent?: boolean;
   isActive?: boolean;
   onThreadResolved?: (oldThreadId: string, newThreadId: string) => void;
   // Warming state from the entry-time /events stream (useWarmWorkspaceSandbox).

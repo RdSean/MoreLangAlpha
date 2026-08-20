@@ -40,6 +40,12 @@ export interface ModelOptions {
   widgetSnapshots?: WidgetContextSnapshot[];
 }
 
+/** A student-visible household model. The opaque key is the only run identity. */
+export interface FamilyModelOption {
+  modelKey: string;
+  displayName: string;
+}
+
 export interface ReadyAttachment {
   file: File;
   dataUrl: string | null;

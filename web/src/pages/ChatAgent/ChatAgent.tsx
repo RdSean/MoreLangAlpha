@@ -14,6 +14,7 @@ import { useWarmWorkspaceSandbox } from './hooks/useWarmWorkspaceSandbox';
 import { warmWorkspace } from './utils/warmWorkspace';
 import { isValidUuid } from './utils/uuid';
 import { shouldLeaveThreadRoute } from './utils/threadRouteGuard';
+import { useAuth } from '@/contexts/AuthContext';
 import ChatView from './components/ChatView';
 import './ChatAgent.css';
 
@@ -68,6 +69,7 @@ function ChatAgent(): React.ReactElement | null {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
+  const { member } = useAuth();
   const isMobile = useIsMobile();
   const state = location.state as LocationState | null;
 
@@ -374,6 +376,7 @@ function ChatAgent(): React.ReactElement | null {
           initialTaskId={isEntryActive ? taskId : entry.initialTaskId}
           onBack={handleBackToThreadGallery}
           workspaceName={entry.workspaceName}
+          isStudent={member?.role === 'student'}
           isActive={isEntryActive}
           warmingState={entry.workspaceId === workspaceId ? warmingState : false}
           onThreadResolved={(oldTid, newTid) => {

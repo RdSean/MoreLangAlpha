@@ -73,6 +73,24 @@ export interface FamilyLlmPool {
   default_endpoint_id: string | null;
 }
 
+export interface FamilyLlmAvailabilityEndpoint {
+  endpoint_id: string;
+  display_name: string;
+  provider: string;
+  model_id: string;
+  enabled: boolean;
+  sort_order: number;
+  model_key: string;
+}
+
+export interface FamilyLlmAvailability {
+  endpoints: FamilyLlmAvailabilityEndpoint[];
+  selected_endpoint_id: string | null;
+  selected_source: 'preference' | 'default' | null;
+  preference_endpoint_id: string | null;
+  default_endpoint_id: string | null;
+}
+
 export interface FamilyLlmEndpointInput {
   display_name: string;
   provider: string;
@@ -143,6 +161,18 @@ export async function setFamilyLlmDefault(endpointId: string | null): Promise<Pi
 
 export async function clearFamilyLlmDefault(): Promise<Pick<FamilyLlmPool, 'default_endpoint_id'>> {
   return setFamilyLlmDefault(null);
+}
+
+export async function getFamilyLlmAvailability(): Promise<FamilyLlmAvailability> {
+  const { data } = await api.get<FamilyLlmAvailability>('/api/v1/family/llm-availability');
+  return data;
+}
+
+export async function setFamilyLlmPreference(endpointId: string | null): Promise<FamilyLlmAvailability> {
+  const { data } = await api.put<FamilyLlmAvailability>('/api/v1/family/llm-preference', {
+    endpoint_id: endpointId,
+  });
+  return data;
 }
 
 export async function getFamilyChildWorkspace(studentUserId: string): Promise<FlashWorkspaceSummary> {

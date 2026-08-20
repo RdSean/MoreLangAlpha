@@ -19,7 +19,7 @@ import { getModelMetadata } from '../../pages/ChatAgent/utils/api';
 import { ChatInputRegistry, ContextBus } from '@/lib/contextBus';
 import type { WidgetContextSnapshot } from '@/types/widgetContext';
 import './chat-input.css';
-import type { ModelOptions, ReadyAttachment, SlashCommand, Workspace } from './chat-input.types';
+import type { FamilyModelOption, ModelOptions, ReadyAttachment, SlashCommand, Workspace } from './chat-input.types';
 import { getSlashCommandIcon, isLargePaste } from './chat-input.helpers';
 import {
   ChatInputWidgetDeck, FilePreviewCard, MentionAutocompleteList, SlashCommandList,
@@ -86,6 +86,11 @@ export interface ChatInputProps {
   displayModel?: string | null;
   /** Reports the live model selection (fires on mount and every change). */
   onModelChange?: ((model: string | null) => void) | null;
+  /** When present, this is a student-facing household model selector. */
+  familyModels?: FamilyModelOption[];
+  familyModelStatus?: 'loading' | 'empty' | 'error';
+  onFamilyModelSelect?: ((modelKey: string) => void | Promise<void>) | null;
+  onRefreshFamilyModels?: (() => void) | null;
   threadModels?: string[];
   dropdownDirection?: 'up' | 'down';
   minRows?: number;
@@ -119,6 +124,10 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   initialModel = null,
   displayModel = null,
   onModelChange = null,
+  familyModels,
+  familyModelStatus,
+  onFamilyModelSelect = null,
+  onRefreshFamilyModels = null,
   // All models used in this thread (shown in primary menu)
   threadModels: threadModelsProp = [],
   // Dropdown direction: 'up' (default, for bottom-positioned inputs) or 'down' (for mid-page inputs like ThreadGallery)
@@ -140,19 +149,26 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const { attachedFiles, setAttachedFiles, isDragging, handleFiles, removeFile, onDragOver, onDragLeave, onDrop, handlePaste } = useFileAttachments({ mode });
   const [planMode, setPlanMode] = useState(false);
 
-  // Model selector state — use flash model preference when in flash mode
+  const isFamilyModelMode = familyModels !== undefined;
+  // Household students receive their selection from the server, never from a
+  // user-level Flash preference. Other accounts retain the existing behavior.
   const modePreferredModel = mode === 'fast' ? (preferredFlashModel || preferredModel) : preferredModel;
-  const effectiveInitialModel = initialModel || modePreferredModel;
+  const effectiveInitialModel = isFamilyModelMode ? initialModel : (initialModel || modePreferredModel);
   const [selectedModel, setSelectedModel] = useState<string | null>(effectiveInitialModel);
   const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
   const [fastMode, setFastMode] = useState(false);
 
   const [modelMetadata, setModelMetadata] = useState<Record<string, ModelMetadataEntry>>({});
 
-  // Sync selectedModel when initialModel or preferredModel changes
+  // Sync from a family availability refresh, including a disabled or deleted
+  // preference that has fallen back to the server-provided default.
   useEffect(() => {
-    if (effectiveInitialModel) setSelectedModel(effectiveInitialModel);
-  }, [effectiveInitialModel]);
+    if (isFamilyModelMode) {
+      setSelectedModel(initialModel);
+    } else if (effectiveInitialModel) {
+      setSelectedModel(effectiveInitialModel);
+    }
+  }, [effectiveInitialModel, initialModel, isFamilyModelMode]);
 
   // Mirror the live selection to the host (ChatView gates the fallback
   // suggestion pill on the model the next send will actually use).
@@ -165,6 +181,19 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
 
   const isCodexModel = selectedModel ? modelMetadata[selectedModel]?.sdk === 'codex' : false;
   const supportsXhigh = supportsXhighEffort(selectedModel);
+  const familyModelLabels = useMemo(
+    () => Object.fromEntries((familyModels ?? []).map((model) => [model.modelKey, model.displayName])),
+    [familyModels],
+  );
+  const hasAvailableFamilyModelSelection = !isFamilyModelMode || Boolean(
+    selectedModel && familyModels?.some((model) => model.modelKey === selectedModel),
+  );
+  const familyModelBlocked = isFamilyModelMode && (
+    familyModelStatus === 'loading'
+    || familyModelStatus === 'empty'
+    || familyModelStatus === 'error'
+    || !hasAvailableFamilyModelSelection
+  );
 
   // Widget context deck state. Snapshots arrive via ContextBus.attach (when
   // the user clicks "+" on any widget on the page) or via addWidgetSnapshot
@@ -202,7 +231,11 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   // Expose addContext method for external callers (e.g. FilePanel, message selection)
   useImperativeHandle(ref, () => ({
     getModelOptions() {
-      return { model: selectedModel, reasoningEffort, fastMode };
+      return {
+        model: selectedModel,
+        reasoningEffort: isFamilyModelMode ? null : reasoningEffort,
+        fastMode: isFamilyModelMode ? false : fastMode,
+      };
     },
     addContext({ path, snippet, label, lineStart, lineEnd, lineCount, source }) {
       if (snippet) {
@@ -241,7 +274,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     setModel(model) {
       if (model) setSelectedModel(model);
     },
-  }), [selectedModel, reasoningEffort, fastMode, setMentionedFiles]);
+  }), [selectedModel, reasoningEffort, fastMode, isFamilyModelMode, setMentionedFiles]);
 
   // Subscribe to ContextBus so this input mirrors the global widget-context
   // deck. Multiple chat inputs can be visible simultaneously (hero card +
@@ -372,7 +405,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const hasContent = message.trim() || attachedFiles.length > 0 || mentionedFiles.some((f) => f.snippet) || widgetSnapshots.length > 0;
 
   const handleSend = useCallback(() => {
-    if (!hasContent || disabled) return;
+    if (!hasContent || disabled || familyModelBlocked) return;
 
     // System action commands (/compact, /offload) are standalone: they run on
     // send rather than starting a chat turn. If any are present, fire them and
@@ -425,8 +458,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     }
     onSend(finalMessage, planMode, readyAttachments, slashCommands, {
       model: selectedModel,
-      reasoningEffort,
-      fastMode,
+      reasoningEffort: isFamilyModelMode ? null : reasoningEffort,
+      fastMode: isFamilyModelMode ? false : fastMode,
       widgetSnapshots: widgetSnapshots.length ? widgetSnapshots : undefined,
     });
     setMessage('');
@@ -444,9 +477,22 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [hasContent, disabled, message, planMode, attachedFiles, setAttachedFiles, onSend, onAction,
+  }, [hasContent, disabled, familyModelBlocked, message, planMode, attachedFiles, setAttachedFiles, onSend, onAction,
     mentionedFiles, resetMentions, slashCommands, resetSlash,
-    selectedModel, reasoningEffort, fastMode, widgetSnapshots, t]);
+    selectedModel, reasoningEffort, fastMode, isFamilyModelMode, widgetSnapshots, t]);
+
+  const handleModelSelection = useCallback((model: string) => {
+    if (!isFamilyModelMode) {
+      setSelectedModel(model);
+      return;
+    }
+    if (model === selectedModel) return;
+    setSelectedModel(model);
+    if (!onFamilyModelSelect) return;
+    void Promise.resolve(onFamilyModelSelect(model)).catch(() => {
+      setSelectedModel(initialModel);
+    });
+  }, [initialModel, isFamilyModelMode, onFamilyModelSelect, selectedModel]);
 
   // --- Keyboard & Language Detection ---
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -770,7 +816,13 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                   <span key={item.id} data-measure={item.id}>{item.inline({ measureOnly: true })}</span>
                 ))}
                 <span data-measure="model">
-                  <ModelTriggerMeasure selectedModel={displayModel || selectedModel} fastMode={fastMode} isCodexModel={isCodexModel} />
+                  <ModelTriggerMeasure
+                    selectedModel={isFamilyModelMode ? selectedModel : (displayModel || selectedModel)}
+                    fastMode={isFamilyModelMode ? false : fastMode}
+                    isCodexModel={isFamilyModelMode ? false : isCodexModel}
+                    modelLabels={isFamilyModelMode ? familyModelLabels : undefined}
+                    emptyLabel={isFamilyModelMode ? '选择模型' : undefined}
+                  />
                 </span>
               </div>
             </div>
@@ -779,8 +831,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             <div className="flex flex-row items-center min-w-0 gap-1">
               <ChatInputModelMenu
                 selectedModel={selectedModel}
-                displayModel={displayModel}
-                onSelectModel={setSelectedModel}
+                displayModel={isFamilyModelMode ? null : displayModel}
+                onSelectModel={handleModelSelection}
                 threadModels={threadModelsProp}
                 validModelNames={validModelNames}
                 moreModelsItems={moreModelsItems}
@@ -793,6 +845,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 supportsXhigh={supportsXhigh}
                 dropdownDirection={dropdownDirection}
                 containerRef={chatContainerRef}
+                familyModels={familyModels}
+                familyModelLabels={isFamilyModelMode ? familyModelLabels : undefined}
+                familyModelPlaceholder={isFamilyModelMode ? '选择模型' : undefined}
               />
               {/* Voice Input Button (Show only if enabled in user settings) */}
               {speechSupported && !isLoading && !!otherPref?.voice_input_enabled && (
@@ -834,11 +889,11 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               ) : (
                 <button
                   onClick={(e) => { e.stopPropagation(); handleSend(); }}
-                  disabled={!hasContent || disabled}
+                  disabled={!hasContent || disabled || familyModelBlocked}
                   className="inline-flex flex-none items-center justify-center h-8 w-8 rounded-xl transition-colors active:scale-95 disabled:cursor-default"
                   style={{
-                    backgroundColor: !hasContent || disabled ? 'var(--color-bg-elevated)' : 'var(--color-btn-primary-bg)',
-                    color: !hasContent || disabled ? 'var(--color-text-quaternary)' : 'var(--color-btn-primary-text)',
+                    backgroundColor: !hasContent || disabled || familyModelBlocked ? 'var(--color-bg-elevated)' : 'var(--color-btn-primary-bg)',
+                    color: !hasContent || disabled || familyModelBlocked ? 'var(--color-text-quaternary)' : 'var(--color-btn-primary-text)',
                   }}
                   type="button"
                   aria-label="Send message"
@@ -848,6 +903,32 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               )}
             </div>
           </div>
+          {isFamilyModelMode && familyModelBlocked && (
+            <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-tertiary)' }} role="status">
+              <span>
+                {familyModelStatus === 'loading'
+                  ? '正在加载可用模型'
+                  : familyModelStatus === 'error'
+                    ? '无法加载可用模型'
+                    : familyModelStatus === 'empty'
+                      ? '暂无可用模型'
+                      : '请选择模型'}
+              </span>
+              {onRefreshFamilyModels && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRefreshFamilyModels();
+                  }}
+                  className="text-xs underline underline-offset-2 hover:opacity-80"
+                  style={{ color: 'var(--color-accent-primary)' }}
+                >
+                  刷新可用模型
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

@@ -63,6 +63,26 @@ export function useSetFamilyLlmDefault() {
   });
 }
 
+export function useFamilyLlmAvailability(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.settings.family.availability(),
+    queryFn: familyAccountsApi.getFamilyLlmAvailability,
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+export function useSetFamilyLlmPreference() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: familyAccountsApi.setFamilyLlmPreference,
+    onSuccess: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.family.availability() }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.family.preference() }),
+    ]),
+  });
+}
+
 export function useFamilyChildWorkspace(studentUserId: string | null, enabled = true) {
   return useQuery({
     queryKey: queryKeys.settings.family.workspace(studentUserId ?? ''),

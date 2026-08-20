@@ -77,9 +77,11 @@ import { useChatScroll } from './chatView/useChatScroll';
 import { useSubagentTabs } from './chatView/useSubagentTabs';
 import { publishSidebarAgents, clearSidebarAgents } from './sidebarAgentsBridge';
 import { useRightPanel } from './chatView/useRightPanel';
+import { useFamilyLlmAvailability, useSetFamilyLlmPreference } from '@/pages/Settings/queries';
+import { buildFamilyModelAvailability } from './chatView/familyModelAvailability';
 
 
-function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName: initialWorkspaceName, isActive = true, onThreadResolved, warmingState = false }: ChatViewProps): React.ReactElement | null {
+function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName: initialWorkspaceName, isStudent = false, isActive = true, onThreadResolved, warmingState = false }: ChatViewProps): React.ReactElement | null {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -88,6 +90,13 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   const navigate = useNavigate();
   const { preferences } = usePreferences();
   const { mutateAsync: updatePreferencesAsync } = useUpdatePreferences();
+  const familyModelQuery = useFamilyLlmAvailability(isStudent);
+  const { mutateAsync: setFamilyLlmPreferenceAsync } = useSetFamilyLlmPreference();
+  const familyModelAvailability = buildFamilyModelAvailability(
+    familyModelQuery.data,
+    familyModelQuery.isLoading,
+    familyModelQuery.isError,
+  );
   const queryClient = useQueryClient();
   const initialMessageSentRef = useRef(false);
   // Determine agent mode: flash workspaces use flash mode, otherwise ptc
@@ -98,7 +107,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   // The mode's currently-configured model — fallback initializer for the
   // suggestion pill's nextSendModel, mirroring ChatInput's own modePreferredModel.
   const otherPreference = (preferences as Record<string, Record<string, unknown>> | null | undefined)?.other_preference;
-  const activePreferredModel = isFlashMode
+  const activePreferredModel = isStudent ? null : isFlashMode
     ? ((otherPreference?.preferred_flash_model as string | undefined) || (otherPreference?.preferred_model as string | undefined) || null)
     : ((otherPreference?.preferred_model as string | undefined) || null);
   // Live model selection reported by ChatInput (null until it reports in).
@@ -323,6 +332,19 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
       toast({ description: t('chat.modelSwitchFailed'), variant: 'destructive' });
     }
   }, [isFlashMode, updatePreferencesAsync, clearFallbackSuggestion, t]);
+
+  const handleFamilyModelSelect = useCallback(async (modelKey: string) => {
+    const endpoint = familyModelQuery.data?.endpoints.find((item) => item.model_key === modelKey);
+    if (!endpoint) {
+      throw new Error('Selected household model is no longer available');
+    }
+    try {
+      await setFamilyLlmPreferenceAsync(endpoint.endpoint_id);
+    } catch (error) {
+      toast({ description: '无法保存模型偏好', variant: 'destructive' });
+      throw error;
+    }
+  }, [familyModelQuery.data, setFamilyLlmPreferenceAsync]);
 
   // Spinner state merges the in-conversation signal (chat SSE `workspace_status`
   // events, set when this client's message owns the start) with the entry-time
@@ -1604,15 +1626,17 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
                       </div>
                     )}
                     <ModelStatusPill modelStatus={modelStatus} isLoading={isLoading} />
-                    <FallbackSuggestionPill
-                      fallbackSuggestion={fallbackSuggestion}
-                      isLoading={isLoading}
-                      inputModel={inputModel}
-                      lastThreadModel={lastThreadModel}
-                      activePreferredModel={activePreferredModel}
-                      onSwitchModel={handleSwitchModel}
-                      onDismiss={clearFallbackSuggestion}
-                    />
+                    {!isStudent && (
+                      <FallbackSuggestionPill
+                        fallbackSuggestion={fallbackSuggestion}
+                        isLoading={isLoading}
+                        inputModel={inputModel}
+                        lastThreadModel={lastThreadModel}
+                        activePreferredModel={activePreferredModel}
+                        onSwitchModel={handleSwitchModel}
+                        onDismiss={clearFallbackSuggestion}
+                      />
+                    )}
                     {/* Report-back pending: a follow-up turn will land here —
                         a flash summary of dispatched PTC thread(s), or a PTC
                         notification for an unseen subagent result. Suppressed
@@ -1692,10 +1716,16 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
                       files={workspaceFiles}
                       tokenUsage={tokenUsage}
                       onAction={handleAction}
-                      initialModel={lastThreadModel}
-                      displayModel={lastThreadResolvedModel}
+                      initialModel={isStudent ? familyModelAvailability.initialModel : lastThreadModel}
+                      displayModel={isStudent ? null : lastThreadResolvedModel}
                       onModelChange={setInputModel}
-                      threadModels={threadModels}
+                      threadModels={isStudent ? [] : threadModels}
+                      familyModels={isStudent ? familyModelAvailability.models : undefined}
+                      familyModelStatus={isStudent && familyModelAvailability.status !== 'ready'
+                        ? familyModelAvailability.status
+                        : undefined}
+                      onFamilyModelSelect={isStudent ? handleFamilyModelSelect : null}
+                      onRefreshFamilyModels={isStudent ? () => { void familyModelQuery.refetch(); } : null}
                       mode={isFlashMode ? 'fast' : 'ptc'}
                     />
                   </>

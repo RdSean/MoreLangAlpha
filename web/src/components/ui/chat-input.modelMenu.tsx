@@ -11,22 +11,30 @@ import {
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { getModelDisplayName } from './chat-input.helpers';
 import { derivePrimaryModels } from './chat-input.models';
+import type { FamilyModelOption } from './chat-input.types';
 
 /** Pill geometry for the model trigger — shared with the measure chip so the
  *  fold budget can never drift from what actually renders. */
 const TRIGGER_CLASS = 'inline-flex min-w-0 items-center gap-1 rounded-full py-1.5 px-2.5 text-[0.8125rem] font-medium border border-transparent whitespace-nowrap';
 
 function TriggerBody({
-  selectedModel, fastMode, isCodexModel, accent,
+  selectedModel, fastMode, isCodexModel, accent, modelLabels, emptyLabel,
 }: {
   selectedModel: string | null;
   fastMode: boolean;
   isCodexModel: boolean;
   accent?: boolean;
+  modelLabels?: Record<string, string>;
+  emptyLabel?: string;
 }) {
+  const modelLabel = selectedModel
+    ? modelLabels
+      ? modelLabels[selectedModel] || emptyLabel || 'Model'
+      : getModelDisplayName(selectedModel)
+    : emptyLabel || 'Model';
   return (
     <>
-      <span className="min-w-0 max-w-[120px] truncate">{getModelDisplayName(selectedModel) || 'Model'}</span>
+      <span className="min-w-0 max-w-[120px] truncate">{modelLabel}</span>
       {fastMode && isCodexModel && (
         <Rocket className="h-3 w-3 flex-none" style={accent ? { color: 'var(--color-accent-light)' } : undefined} />
       )}
@@ -40,6 +48,8 @@ export function ModelTriggerMeasure(props: {
   selectedModel: string | null;
   fastMode: boolean;
   isCodexModel: boolean;
+  modelLabels?: Record<string, string>;
+  emptyLabel?: string;
 }) {
   return <button type="button" tabIndex={-1} className={TRIGGER_CLASS}><TriggerBody {...props} /></button>;
 }
@@ -66,6 +76,9 @@ export function ChatInputModelMenu({
   supportsXhigh,
   dropdownDirection,
   containerRef,
+  familyModels,
+  familyModelLabels,
+  familyModelPlaceholder,
 }: {
   selectedModel: string | null;
   displayModel?: string | null;
@@ -84,12 +97,67 @@ export function ChatInputModelMenu({
   dropdownDirection: 'up' | 'down';
   /** Mobile portals into the composer so the menu can't escape the sheet. */
   containerRef: RefObject<HTMLElement | null>;
+  /** When present, students select only server-provided household models. */
+  familyModels?: FamilyModelOption[];
+  familyModelLabels?: Record<string, string>;
+  familyModelPlaceholder?: string;
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMoreModels, setShowMoreModels] = useState(false);
+
+  if (familyModels !== undefined) {
+    if (familyModels.length === 0) return null;
+    return (
+      <DropdownMenu modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            className={`model-selector-trigger ${TRIGGER_CLASS} cursor-pointer transition-colors outline-none`}
+            onClick={(event) => {
+              event.stopPropagation();
+              // Radix opens pointer interactions on pointerdown. A keyboard or
+              // synthetic click has no pointer sequence, so open it explicitly.
+              if (event.detail === 0 && !menuOpen) setMenuOpen(true);
+            }}
+            type="button"
+            title="选择模型"
+          >
+            <TriggerBody
+              selectedModel={selectedModel}
+              fastMode={false}
+              isCodexModel={false}
+              accent
+              modelLabels={familyModelLabels}
+              emptyLabel={familyModelPlaceholder}
+            />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          side={dropdownDirection === 'down' ? 'bottom' : 'top'}
+          className="w-60"
+          container={isMobile ? containerRef.current : undefined}
+          data-click-outside-ignore
+          onClick={(event) => event.stopPropagation()}
+          style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border-muted)' }}
+        >
+          {familyModels.map((model) => (
+            <DropdownMenuItem
+              key={model.modelKey}
+              onSelect={() => onSelectModel(model.modelKey)}
+              className="text-[0.8125rem] justify-between"
+              style={{ color: 'var(--color-text-primary)' }}
+            >
+              <span>{model.displayName}</span>
+              {model.modelKey === selectedModel && <Check className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--color-accent-primary)' }} />}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
 
   // Show if there's anything to pick (quick-access list or current selection),
   // or if the user has stars to manage even when they all filter out (keeps
