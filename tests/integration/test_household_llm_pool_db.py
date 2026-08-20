@@ -551,3 +551,147 @@ async def test_default_selection_locks_endpoint_against_concurrent_disable(
             (household_id,),
         )
         assert (await cur.fetchone())["default_endpoint_id"] is None
+
+
+async def test_household_pool_acceptance_for_two_students(
+    cleanup_tables, db_conn, monkeypatch
+):
+    """Students share endpoints while retaining independent selections and fallbacks."""
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from src.server.app.api_keys import router as api_keys_router
+    from src.server.database import education_members, household_llm_pool as pool_db
+    from src.server.services import household_llm_pool as pool_service
+    from src.server.utils.api import get_current_user_id
+
+    monkeypatch.setenv("BYOK_ENCRYPTION_KEY", "household-acceptance-test-key")
+
+    @asynccontextmanager
+    async def test_connection():
+        yield db_conn
+
+    monkeypatch.setattr(pool_db, "get_db_connection", test_connection)
+    monkeypatch.setattr(education_members, "get_db_connection", test_connection)
+
+    household_a = uuid4()
+    household_b = uuid4()
+    parent_a = f"acceptance-parent-a-{uuid4()}"
+    parent_b = f"acceptance-parent-b-{uuid4()}"
+    student_a = f"acceptance-student-a-{uuid4()}"
+    student_b = f"acceptance-student-b-{uuid4()}"
+    async with db_conn.cursor() as cur:
+        await cur.executemany(
+            "INSERT INTO users (user_id, name) VALUES (%s, %s)",
+            [
+                (parent_a, "Parent A"),
+                (parent_b, "Parent B"),
+                (student_a, "Student A"),
+                (student_b, "Student B"),
+            ],
+        )
+        await cur.executemany(
+            "INSERT INTO education_households (household_id, name) VALUES (%s, %s)",
+            [(household_a, "Household A"), (household_b, "Household B")],
+        )
+        await cur.executemany(
+            """
+            INSERT INTO education_memberships
+                (household_id, user_id, role, display_name)
+            VALUES (%s, %s, %s, %s)
+            """,
+            [
+                (household_a, parent_a, "parent", "Parent A"),
+                (household_a, student_a, "student", "Student A"),
+                (household_a, student_b, "student", "Student B"),
+                (household_b, parent_b, "parent", "Parent B"),
+            ],
+        )
+
+    deepseek = await pool_service.create_endpoint(
+        parent_a,
+        {
+            "display_name": "Family DeepSeek Flash",
+            "provider": "deepseek",
+            "model_id": "deepseek-chat",
+            "base_url": "https://family.example/v1",
+            "api_key": "family-deepseek-secret",
+        },
+    )
+    anthropic = await pool_service.create_endpoint(
+        parent_a,
+        {
+            "display_name": "Family Anthropic",
+            "provider": "anthropic",
+            "model_id": "claude-test",
+            "api_key": "family-anthropic-secret",
+        },
+    )
+    foreign_endpoint = await pool_service.create_endpoint(
+        parent_b,
+        {
+            "display_name": "Other household model",
+            "provider": "deepseek",
+            "model_id": "other-model",
+        },
+    )
+    await pool_service.set_household_default(parent_a, deepseek["endpoint_id"])
+
+    first_a = await pool_db.get_household_availability(str(household_a), student_a)
+    first_b = await pool_db.get_household_availability(str(household_a), student_b)
+    assert first_a["endpoints"] == first_b["endpoints"]
+    assert {endpoint["endpoint_id"] for endpoint in first_a["endpoints"]} == {
+        deepseek["endpoint_id"],
+        anthropic["endpoint_id"],
+    }
+    assert "family-deepseek-secret" not in str(first_a)
+    assert "family.example" not in str(first_a)
+
+    await pool_service.set_student_preference(student_a, anthropic["endpoint_id"])
+    assert (
+        await pool_service.resolve_student_model(student_a)
+    )["endpoint_id"] == anthropic["endpoint_id"]
+    assert (
+        await pool_service.resolve_student_model(student_b)
+    )["endpoint_id"] == deepseek["endpoint_id"]
+
+    # Changing a household default does not overwrite a student's saved choice.
+    await pool_service.set_household_default(parent_a, anthropic["endpoint_id"])
+    assert (
+        await pool_service.resolve_student_model(student_a)
+    )["endpoint_id"] == anthropic["endpoint_id"]
+    await pool_service.set_household_default(parent_a, deepseek["endpoint_id"])
+
+    await pool_service.update_endpoint(
+        parent_a, anthropic["endpoint_id"], {"enabled": False}
+    )
+    assert (
+        await pool_service.resolve_student_model(student_a)
+    )["endpoint_id"] == deepseek["endpoint_id"]
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            "SELECT endpoint_id FROM student_llm_preferences WHERE user_id = %s",
+            (student_a,),
+        )
+        assert (await cur.fetchone())["endpoint_id"] is None
+
+    await pool_service.delete_endpoint(parent_a, deepseek["endpoint_id"])
+    empty_pool = await pool_db.get_household_availability(str(household_a), student_b)
+    assert empty_pool["endpoints"] == []
+    assert await pool_service.resolve_student_model(student_a) is None
+    assert await pool_service.resolve_student_model(student_b) is None
+
+    with pytest.raises(pool_service.FamilyModelAccessError):
+        await pool_service.set_student_preference(student_a, foreign_endpoint["endpoint_id"])
+
+    app = FastAPI()
+    app.include_router(api_keys_router)
+    app.dependency_overrides[get_current_user_id] = lambda: student_a
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        api_key_response = await client.put(
+            "/api/v1/users/me/api-keys",
+            json={"api_keys": {"openai": "student-personal-key"}},
+        )
+    assert api_key_response.status_code == 403
