@@ -14,6 +14,21 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Old test databases may contain an abandoned, completely empty household
+    # created by a failed setup flow. It has no member from which an owner can
+    # be derived, and deleting this orphan is safe because all household-owned
+    # rows are cascade-scoped to it. Households with any members are retained
+    # and must still contain a parent so the owner backfill cannot guess.
+    op.execute(
+        """
+        DELETE FROM education_households AS households
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM education_memberships AS memberships
+            WHERE memberships.household_id = households.household_id
+        )
+        """
+    )
     op.execute(
         """
         ALTER TABLE education_households
