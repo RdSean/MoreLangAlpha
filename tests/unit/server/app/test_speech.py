@@ -23,7 +23,7 @@ CONFIG = VolcengineAsrConfig(
 def _server_response(text: str, *, definite: bool) -> bytes:
     body = {"code": 1000, "result": [{"utterances": [{"text": text, "definite": definite}]}]}
     payload = gzip.compress(json.dumps(body).encode())
-    return bytes((0x10, 0x90, 0x11, 0)) + struct.pack("!I", len(payload)) + payload
+    return bytes((0x11, 0x90, 0x11, 0)) + struct.pack("!I", len(payload)) + payload
 
 
 class FakeWebSocket:
@@ -74,9 +74,15 @@ async def test_transcribe_stream_forwards_pcm_and_returns_live_events(monkeypatc
         {"type": "websocket.receive", "text": json.dumps({"type": "stop"})},
     ])
     upstream = FakeUpstream()
+    connect_kwargs: dict[str, object] = {}
+
+    def connect(*_args, **kwargs):
+        connect_kwargs.update(kwargs)
+        return upstream
+
     monkeypatch.setattr(speech, "authenticate_websocket", AsyncMock(return_value="user-1"))
     monkeypatch.setattr(speech, "get_volcengine_asr_config", lambda: CONFIG)
-    monkeypatch.setattr(speech.websockets, "connect", lambda *_args, **_kwargs: upstream)
+    monkeypatch.setattr(speech.websockets, "connect", connect)
 
     await speech.transcribe_stream(browser)
 
@@ -87,6 +93,7 @@ async def test_transcribe_stream_forwards_pcm_and_returns_live_events(monkeypatc
         {"type": "done"},
     ]
     assert len(upstream.sent) == 3
+    assert connect_kwargs["proxy"] is None
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,6 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from src.config.settings import get_volcengine_asr_config
 from src.server.auth.ws_auth import authenticate_websocket
 from src.server.services.volcengine_asr import (
-    USER_AGENT,
     build_audio_request,
     build_authorization_header,
     build_full_request,
@@ -62,14 +61,12 @@ async def transcribe_stream(websocket: WebSocket) -> None:
             await websocket.close(code=1003)
             return
 
-        headers = {
-            "Authorization": build_authorization_header(config),
-            "User-Agent": USER_AGENT,
-        }
+        headers = {"Authorization": build_authorization_header(config)}
         async with websockets.connect(
             config.ws_url,
             additional_headers=headers,
             user_agent_header=None,
+            proxy=None,
         ) as upstream:
             await upstream.send(build_full_request(config, request_id=str(uuid4()), user_id=user_id))
             if not await _send_upstream_event(websocket, await upstream.recv()):

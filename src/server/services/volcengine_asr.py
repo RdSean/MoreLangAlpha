@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import base64
 import gzip
-import hashlib
-import hmac
 import json
 import struct
-from urllib.parse import urlsplit
 
 from src.config.settings import VolcengineAsrConfig
 
@@ -17,12 +13,9 @@ AUDIO_ONLY_REQUEST = 0x2
 FULL_SERVER_RESPONSE = 0x9
 SERVER_ERROR = 0xF
 LAST_AUDIO_PACKET = 0x2
-USER_AGENT = "LangAlpha-ASR/1.0"
-
-
 def _pack_frame(message_type: int, payload: bytes, *, flags: int = 0, json_payload: bool = False) -> bytes:
     serialization = 0x1 if json_payload else 0x0
-    header = bytes((0x10, (message_type << 4) | flags, (serialization << 4) | 0x1, 0x0))
+    header = bytes((0x11, (message_type << 4) | flags, (serialization << 4) | 0x1, 0x0))
     return header + struct.pack("!I", len(payload)) + payload
 
 
@@ -55,26 +48,32 @@ def build_audio_request(pcm: bytes, *, is_last: bool = False) -> bytes:
 
 
 def build_authorization_header(config: VolcengineAsrConfig) -> str:
-    if not config.access_secret:
-        return f"Bearer; {config.access_token}"
-
-    path = urlsplit(config.ws_url).path or "/"
-    canonical = f"GET {path} HTTP/1.1\n{USER_AGENT}\n".encode()
-    digest = hmac.new(config.access_secret.encode(), canonical, hashlib.sha256).digest()
-    mac = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-    return f'HMAC256; access_token="{config.access_token}"; mac="{mac}"; h="User-Agent"'
+    """Use the provider's documented token-authentication default."""
+    return f"Bearer; {config.access_token}"
 
 
 def decode_server_frame(frame: bytes) -> dict[str, object]:
     if len(frame) < 8:
         raise ValueError("short ASR frame")
+    header_size = (frame[0] & 0x0F) * 4
+    if header_size < 4 or len(frame) < header_size:
+        raise ValueError("invalid ASR header")
     message_type = frame[1] >> 4
-    payload_size = struct.unpack("!I", frame[4:8])[0]
-    payload = frame[8 : 8 + payload_size]
+    payload = frame[header_size:]
+    if message_type == SERVER_ERROR:
+        if len(payload) < 8:
+            raise ValueError("short ASR error frame")
+        error_code, message_size = struct.unpack("!II", payload[:8])
+        if len(payload[8:]) != message_size:
+            raise ValueError("truncated ASR error frame")
+        return map_upstream_error(error_code)
+
+    if len(payload) < 4:
+        raise ValueError("short ASR response payload")
+    payload_size = struct.unpack("!I", payload[:4])[0]
+    payload = payload[4 : 4 + payload_size]
     if len(payload) != payload_size:
         raise ValueError("truncated ASR frame")
-    if message_type == SERVER_ERROR:
-        return {"type": "error", "code": "protocol_error"}
     if message_type != FULL_SERVER_RESPONSE:
         raise ValueError("unsupported ASR response")
 
@@ -92,7 +91,9 @@ def decode_server_frame(frame: bytes) -> dict[str, object]:
 
 
 def map_upstream_error(code: object, _message: object = None) -> dict[str, str]:
-    if code in (1002, 1005, 1099):
+    if code == 45000030:
+        safe_code = "resource_not_granted"
+    elif code in (1002, 1005, 1099):
         safe_code = "service_unavailable"
     elif code in (1003, 1004):
         safe_code = "rate_limited"
