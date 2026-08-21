@@ -85,11 +85,12 @@ async def register_parent_account(
                     await cur.execute(
                         """
                         INSERT INTO education_households (
-                            household_id, name, timezone, created_at, updated_at
+                            household_id, name, timezone, model_owner_user_id,
+                            created_at, updated_at
                         )
-                        VALUES (%s, %s, %s, NOW(), NOW())
+                        VALUES (%s, %s, %s, %s, NOW(), NOW())
                         """,
-                        (household_id, household_name, timezone_name),
+                        (household_id, household_name, timezone_name, user_id),
                     )
                     await cur.execute(
                         """
