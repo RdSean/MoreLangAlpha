@@ -8,7 +8,9 @@ from typing import Any
 _RUNTIME_KEYS = (
     "credential_source",
     "household_id",
-    "family_endpoint_id",
+    "model_owner_user_id",
+    "student_user_id",
+    "model_key",
     "display_name",
     "provider",
     "model_id",

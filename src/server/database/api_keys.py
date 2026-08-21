@@ -50,6 +50,16 @@ async def get_user_api_keys(user_id: str) -> Dict[str, Any]:
             return {"byok_enabled": byok_enabled, "keys": keys, "base_urls": base_urls}
 
 
+async def get_owner_api_keys(owner_user_id: str) -> Dict[str, Any]:
+    """Return the designated household owner's model credentials.
+
+    This named wrapper makes the ownership boundary explicit at call sites;
+    credentials still use the canonical user API-key query and are never
+    copied into household tables or student records.
+    """
+    return await get_user_api_keys(owner_user_id)
+
+
 async def set_byok_enabled(user_id: str, enabled: bool) -> bool:
     """
     Set the global BYOK toggle on the users table.
