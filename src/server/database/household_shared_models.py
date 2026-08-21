@@ -6,7 +6,6 @@ from typing import Any
 
 from psycopg.rows import dict_row
 
-from src.server.database.education_members import list_household_membership_context
 from src.server.database.pool import get_db_connection
 
 
@@ -15,11 +14,19 @@ class HouseholdMembershipError(PermissionError):
 
 
 async def get_household_owner(household_id: str) -> str | None:
-    """Return the designated model owner's user ID, if configured."""
+    """Return the designated owner only while it remains a same-household parent."""
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
-                "SELECT model_owner_user_id FROM education_households WHERE household_id = %s",
+                """
+                SELECT households.model_owner_user_id
+                FROM education_households AS households
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = households.household_id
+                 AND memberships.user_id = households.model_owner_user_id
+                 AND memberships.role = 'parent'
+                WHERE households.household_id = %s
+                """,
                 (household_id,),
             )
             row = await cur.fetchone()
@@ -27,7 +34,7 @@ async def get_household_owner(household_id: str) -> str | None:
 
 
 async def get_household_owner_for_user(user_id: str) -> dict[str, Any] | None:
-    """Resolve a member's household and designated owner in one query."""
+    """Resolve a member's household and validated designated owner."""
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
@@ -37,6 +44,10 @@ async def get_household_owner_for_user(user_id: str) -> dict[str, Any] | None:
                 FROM education_memberships AS memberships
                 JOIN education_households AS households
                   ON households.household_id = memberships.household_id
+                JOIN education_memberships AS owners
+                  ON owners.household_id = households.household_id
+                 AND owners.user_id = households.model_owner_user_id
+                 AND owners.role = 'parent'
                 WHERE memberships.user_id = %s
                 ORDER BY memberships.created_at ASC
                 LIMIT 1
@@ -179,7 +190,6 @@ __all__ = [
     "get_household_owner",
     "get_household_owner_for_user",
     "get_student_model_preference",
-    "list_household_membership_context",
     "upsert_student_model_preference",
     "verify_household_model_owner",
 ]

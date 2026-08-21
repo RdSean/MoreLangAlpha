@@ -38,6 +38,94 @@ def upgrade() -> None:
     )
     op.execute(
         """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM education_households
+                WHERE model_owner_user_id IS NULL
+            ) THEN
+                RAISE EXCEPTION 'Every education household must have a parent model owner';
+            END IF;
+        END $$
+        """
+    )
+    op.execute(
+        """
+        ALTER TABLE education_households
+            ALTER COLUMN model_owner_user_id SET NOT NULL
+        """
+    )
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION validate_education_household_model_owner()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $fn$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM education_memberships
+                WHERE household_id = NEW.household_id
+                  AND user_id = NEW.model_owner_user_id
+                  AND role = 'parent'
+            ) THEN
+                RAISE EXCEPTION 'Household model owner must be a parent member of the same household';
+            END IF;
+            RETURN NEW;
+        END;
+        $fn$
+        """
+    )
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION validate_education_household_owner_membership()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $fn$
+        DECLARE
+            affected_household UUID;
+        BEGIN
+            affected_household := COALESCE(NEW.household_id, OLD.household_id);
+            IF EXISTS (
+                SELECT 1 FROM education_households AS households
+                WHERE households.household_id = affected_household
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM education_memberships AS memberships
+                      WHERE memberships.household_id = households.household_id
+                        AND memberships.user_id = households.model_owner_user_id
+                        AND memberships.role = 'parent'
+                  )
+            ) THEN
+                RAISE EXCEPTION 'Household model owner must remain a parent member of the same household';
+            END IF;
+            RETURN NULL;
+        END;
+        $fn$
+        """
+    )
+    op.execute(
+        """
+        CREATE CONSTRAINT TRIGGER education_household_model_owner_check
+        AFTER INSERT OR UPDATE OF model_owner_user_id, household_id
+        ON education_households
+        DEFERRABLE INITIALLY DEFERRED
+        FOR EACH ROW
+        EXECUTE FUNCTION validate_education_household_model_owner()
+        """
+    )
+    op.execute(
+        """
+        CREATE CONSTRAINT TRIGGER education_household_owner_membership_check
+        AFTER INSERT OR UPDATE OF household_id, user_id, role OR DELETE
+        ON education_memberships
+        DEFERRABLE INITIALLY DEFERRED
+        FOR EACH ROW
+        EXECUTE FUNCTION validate_education_household_owner_membership()
+        """
+    )
+    op.execute(
+        """
         CREATE TABLE student_llm_preferences (
             user_id VARCHAR(255) PRIMARY KEY
                 REFERENCES users(user_id) ON DELETE CASCADE,
@@ -87,4 +175,8 @@ def downgrade() -> None:
     )
     op.execute("DROP INDEX IF EXISTS idx_student_llm_preferences_household_user")
     op.execute("DROP TABLE IF EXISTS student_llm_preferences")
+    op.execute("DROP TRIGGER IF EXISTS education_household_model_owner_check ON education_households")
+    op.execute("DROP TRIGGER IF EXISTS education_household_owner_membership_check ON education_memberships")
+    op.execute("DROP FUNCTION IF EXISTS validate_education_household_owner_membership()")
+    op.execute("DROP FUNCTION IF EXISTS validate_education_household_model_owner()")
     op.execute("ALTER TABLE education_households DROP COLUMN IF EXISTS model_owner_user_id")
