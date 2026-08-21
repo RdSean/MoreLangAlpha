@@ -337,6 +337,41 @@ async def test_update_preferences_user_not_found(client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model_preference",
+    [
+        {"preferred_model": "deepseek-chat"},
+        {"preferred_flash_model": "deepseek-chat"},
+        {"custom_providers": [{"name": "student-provider"}]},
+        {"custom_models": [{"name": "student-model"}]},
+    ],
+)
+async def test_student_cannot_write_personal_model_preferences(
+    client, model_preference
+):
+    """Students may keep ordinary preferences but never personal model state."""
+    user = _user()
+    with (
+        patch(f"{DB}.db_get_user", new_callable=AsyncMock, return_value=user),
+        patch(
+            f"{DB}.get_membership_for_user",
+            new_callable=AsyncMock,
+            create=True,
+            return_value={"household_id": "household-1", "role": "student"},
+        ),
+        patch(f"{DB}.upsert_user_preferences", new_callable=AsyncMock) as upsert,
+    ):
+        response = await client.put(
+            "/api/v1/users/me/preferences",
+            json={"other_preference": model_preference},
+        )
+
+    assert response.status_code == 403
+    assert "household models" in response.json()["detail"]
+    upsert.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("bad_value", ["not-an-engine", {"engine": "serper"}, 123])
 async def test_update_preferences_invalid_search_provider_rejected(client, bad_value):
     """Unknown engine strings and non-string values both get a clean 400."""

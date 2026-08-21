@@ -334,12 +334,12 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   }, [isFlashMode, updatePreferencesAsync, clearFallbackSuggestion, t]);
 
   const handleFamilyModelSelect = useCallback(async (modelKey: string) => {
-    const endpoint = familyModelQuery.data?.endpoints.find((item) => item.model_key === modelKey);
-    if (!endpoint) {
+    const model = familyModelQuery.data?.models.find((item) => item.model_key === modelKey);
+    if (!model) {
       throw new Error('Selected household model is no longer available');
     }
     try {
-      await setFamilyLlmPreferenceAsync(endpoint.endpoint_id);
+      await setFamilyLlmPreferenceAsync(model.model_key);
     } catch (error) {
       toast({ description: '无法保存模型偏好', variant: 'destructive' });
       throw error;

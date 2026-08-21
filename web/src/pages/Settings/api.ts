@@ -57,59 +57,23 @@ export interface CreatedChildAccount {
   household_id: string;
 }
 
-export interface FamilyLlmEndpoint {
-  endpoint_id: string;
-  display_name: string;
-  provider: string;
-  model_id: string;
-  base_url: string | null;
-  masked_api_key: string | null;
-  enabled: boolean;
-  sort_order: number;
-}
-
-export interface FamilyLlmPool {
-  endpoints: FamilyLlmEndpoint[];
-  default_endpoint_id: string | null;
-}
-
-export interface FamilyLlmAvailabilityEndpoint {
-  endpoint_id: string;
-  display_name: string;
-  provider: string;
-  model_id: string;
-  enabled: boolean;
-  sort_order: number;
+export interface FamilyLlmAvailabilityModel {
   model_key: string;
+  display_name: string;
+  provider: string;
+  model_id: string;
+  capabilities?: {
+    input_modalities: string[];
+  };
 }
 
 export interface FamilyLlmAvailability {
-  endpoints: FamilyLlmAvailabilityEndpoint[];
-  selected_endpoint_id: string | null;
+  models: FamilyLlmAvailabilityModel[];
+  default_model_key: string | null;
+  selected_model_key: string | null;
   selected_source: 'preference' | 'default' | null;
-  preference_endpoint_id: string | null;
-  default_endpoint_id: string | null;
-}
-
-export interface FamilyLlmEndpointInput {
-  display_name: string;
-  provider: string;
-  model_id: string;
-  base_url?: string | null;
-  api_key?: string;
-  enabled: boolean;
-  sort_order: number;
-}
-
-export interface FamilyLlmEndpointUpdate {
-  display_name?: string;
-  provider?: string;
-  model_id?: string;
-  base_url?: string | null;
-  /** Undefined keeps the encrypted value; an empty string explicitly clears it. */
-  api_key?: string;
-  enabled?: boolean;
-  sort_order?: number;
+  has_available_models: boolean;
+  empty_reason: 'no_available_models' | null;
 }
 
 export async function listFamilyChildren(): Promise<FamilyChild[]> {
@@ -122,55 +86,14 @@ export async function createChildAccount(input: CreateChildAccountInput): Promis
   return data;
 }
 
-export async function getFamilyLlmPool(): Promise<FamilyLlmPool> {
-  const { data } = await api.get<FamilyLlmPool>('/api/v1/family/llm-pool');
-  return data;
-}
-
-export async function createFamilyLlmEndpoint(input: FamilyLlmEndpointInput): Promise<FamilyLlmEndpoint> {
-  const { data } = await api.post<FamilyLlmEndpoint>('/api/v1/family/llm-pool', input);
-  return data;
-}
-
-export async function updateFamilyLlmEndpoint(
-  endpointId: string,
-  input: FamilyLlmEndpointUpdate,
-): Promise<FamilyLlmEndpoint> {
-  // Sending an undefined key would be ambiguous in JSON. Omit it to preserve
-  // the stored encrypted value; the empty string intentionally clears it.
-  const { api_key: apiKey, ...fields } = input;
-  const payload = apiKey === undefined ? fields : { ...fields, api_key: apiKey };
-  const { data } = await api.patch<FamilyLlmEndpoint>(
-    `/api/v1/family/llm-pool/${encodeURIComponent(endpointId)}`,
-    payload,
-  );
-  return data;
-}
-
-export async function deleteFamilyLlmEndpoint(endpointId: string): Promise<void> {
-  await api.delete(`/api/v1/family/llm-pool/${encodeURIComponent(endpointId)}`);
-}
-
-export async function setFamilyLlmDefault(endpointId: string | null): Promise<Pick<FamilyLlmPool, 'default_endpoint_id'>> {
-  const { data } = await api.put<Pick<FamilyLlmPool, 'default_endpoint_id'>>(
-    '/api/v1/family/llm-pool/default',
-    { endpoint_id: endpointId },
-  );
-  return data;
-}
-
-export async function clearFamilyLlmDefault(): Promise<Pick<FamilyLlmPool, 'default_endpoint_id'>> {
-  return setFamilyLlmDefault(null);
-}
-
 export async function getFamilyLlmAvailability(): Promise<FamilyLlmAvailability> {
   const { data } = await api.get<FamilyLlmAvailability>('/api/v1/family/llm-availability');
   return data;
 }
 
-export async function setFamilyLlmPreference(endpointId: string | null): Promise<FamilyLlmAvailability> {
+export async function setFamilyLlmPreference(modelKey: string | null): Promise<FamilyLlmAvailability> {
   const { data } = await api.put<FamilyLlmAvailability>('/api/v1/family/llm-preference', {
-    endpoint_id: endpointId,
+    model_key: modelKey,
   });
   return data;
 }

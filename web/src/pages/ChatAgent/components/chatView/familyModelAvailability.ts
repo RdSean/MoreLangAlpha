@@ -17,17 +17,17 @@ export function buildFamilyModelAvailability(
     return { initialModel: null, models: [], status: 'error' };
   }
 
-  const endpoints = availability?.endpoints ?? [];
-  const selectedEndpoint = endpoints.find(
-    (endpoint) => endpoint.endpoint_id === availability?.selected_endpoint_id,
+  const models = availability?.models ?? [];
+  const selectedModel = models.find(
+    (model) => model.model_key === availability?.selected_model_key,
   ) ?? null;
 
   return {
-    initialModel: selectedEndpoint?.model_key ?? null,
-    models: endpoints.map((endpoint) => ({
-      modelKey: endpoint.model_key,
-      displayName: endpoint.display_name,
+    initialModel: selectedModel?.model_key ?? null,
+    models: models.map((model) => ({
+      modelKey: model.model_key,
+      displayName: model.display_name,
     })),
-    status: isLoading ? 'loading' : endpoints.length > 0 ? 'ready' : 'empty',
+    status: isLoading ? 'loading' : models.length > 0 ? 'ready' : 'empty',
   };
 }

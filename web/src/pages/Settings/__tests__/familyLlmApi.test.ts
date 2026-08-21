@@ -12,14 +12,8 @@ const request = vi.hoisted(() => ({
 vi.mock('@/api/client', () => ({ api: request }));
 
 import {
-  clearFamilyLlmDefault,
-  createFamilyLlmEndpoint,
-  deleteFamilyLlmEndpoint,
   getFamilyLlmAvailability,
-  getFamilyLlmPool,
-  setFamilyLlmDefault,
   setFamilyLlmPreference,
-  updateFamilyLlmEndpoint,
 } from '../api';
 
 describe('family LLM settings API', () => {
@@ -31,62 +25,26 @@ describe('family LLM settings API', () => {
     request.delete.mockReset();
   });
 
-  it('uses the parent pool endpoints with explicit payloads', async () => {
-    request.get.mockResolvedValue({ data: { endpoints: [], default_endpoint_id: null } });
-    request.post.mockResolvedValue({ data: { endpoint_id: 'endpoint-1' } });
-    request.patch.mockResolvedValue({ data: { endpoint_id: 'endpoint-1' } });
-    request.put.mockResolvedValue({ data: { default_endpoint_id: 'endpoint-1' } });
-    request.delete.mockResolvedValue({ data: undefined });
-
-    await getFamilyLlmPool();
-    await createFamilyLlmEndpoint({
-      display_name: '家庭 DeepSeek Flash',
-      provider: 'deepseek',
-      model_id: 'deepseek-chat',
-      base_url: 'https://api.deepseek.com',
-      api_key: 'secret-key',
-      enabled: true,
-      sort_order: 0,
+  it('uses only the owner-backed availability and student preference endpoints', async () => {
+    request.get.mockResolvedValue({
+      data: {
+        models: [{ model_key: 'deepseek-chat', display_name: 'DeepSeek Flash', provider: 'deepseek', model_id: 'deepseek-chat' }],
+        default_model_key: 'deepseek-chat',
+        selected_model_key: 'deepseek-chat',
+        selected_source: 'default',
+        has_available_models: true,
+        empty_reason: null,
+      },
     });
-    await updateFamilyLlmEndpoint('endpoint-1', {
-      display_name: '新版 Flash',
-      provider: 'deepseek',
-      model_id: 'deepseek-chat',
-      base_url: 'https://api.deepseek.com',
-      enabled: true,
-      sort_order: 0,
-    });
-    await setFamilyLlmDefault('endpoint-1');
-    await clearFamilyLlmDefault();
-    await deleteFamilyLlmEndpoint('endpoint-1');
-
-    expect(request.get).toHaveBeenCalledWith('/api/v1/family/llm-pool');
-    expect(request.post).toHaveBeenCalledWith('/api/v1/family/llm-pool', expect.objectContaining({ api_key: 'secret-key' }));
-    expect(request.patch).toHaveBeenCalledWith(
-      '/api/v1/family/llm-pool/endpoint-1',
-      expect.not.objectContaining({ api_key: expect.anything() }),
-    );
-    expect(request.put).toHaveBeenNthCalledWith(1, '/api/v1/family/llm-pool/default', { endpoint_id: 'endpoint-1' });
-    expect(request.put).toHaveBeenNthCalledWith(2, '/api/v1/family/llm-pool/default', { endpoint_id: null });
-    expect(request.delete).toHaveBeenCalledWith('/api/v1/family/llm-pool/endpoint-1');
-  });
-
-  it('allows an edit to explicitly clear a stored API key', async () => {
-    request.patch.mockResolvedValue({ data: { endpoint_id: 'endpoint-1' } });
-
-    await updateFamilyLlmEndpoint('endpoint-1', { api_key: '' });
-
-    expect(request.patch).toHaveBeenCalledWith('/api/v1/family/llm-pool/endpoint-1', { api_key: '' });
-  });
-
-  it('uses the safe family availability and preference endpoints for a student', async () => {
-    request.get.mockResolvedValue({ data: { endpoints: [], selected_endpoint_id: null } });
-    request.put.mockResolvedValue({ data: { endpoints: [], selected_endpoint_id: 'endpoint-2' } });
+    request.put.mockResolvedValue({ data: { models: [], selected_model_key: 'claude-sonnet-5' } });
 
     await getFamilyLlmAvailability();
-    await setFamilyLlmPreference('endpoint-2');
+    await setFamilyLlmPreference('claude-sonnet-5');
 
     expect(request.get).toHaveBeenCalledWith('/api/v1/family/llm-availability');
-    expect(request.put).toHaveBeenCalledWith('/api/v1/family/llm-preference', { endpoint_id: 'endpoint-2' });
+    expect(request.put).toHaveBeenCalledWith('/api/v1/family/llm-preference', { model_key: 'claude-sonnet-5' });
+    expect(request.post).not.toHaveBeenCalled();
+    expect(request.patch).not.toHaveBeenCalled();
+    expect(request.delete).not.toHaveBeenCalled();
   });
 });

@@ -18,6 +18,7 @@ from src.server.database.user import (
     update_user as db_update_user,
     upsert_user_preferences,
 )
+from src.server.database.education_members import get_membership_for_user
 from ptc_agent.agent.graph import invalidate_user_profile_cache
 from src.server.models.user import (
     UserBase,
@@ -32,6 +33,18 @@ from src.server.utils.api import CurrentUserId, handle_api_exceptions, raise_not
 logger = logging.getLogger(__name__)
 
 _VALID_MODALITIES = frozenset({"text", "image", "pdf"})
+_STUDENT_MODEL_PREFERENCE_KEYS = frozenset({
+    "compaction_model",
+    "compaction_profile",
+    "custom_models",
+    "custom_providers",
+    "fallback_models",
+    "fetch_model",
+    "preferred_flash_model",
+    "preferred_model",
+    "starred_models",
+    "summarization_model",
+})
 
 router = APIRouter(prefix="/api/v1", tags=["Users"])
 
@@ -324,6 +337,14 @@ async def update_preferences(
     # key deletion from the JSONB column.
     agent_pref = request.agent_preference.model_dump(exclude_unset=True) if request.agent_preference else None
     other_pref = request.other_preference.model_dump(exclude_unset=True) if request.other_preference else None
+
+    if other_pref and _STUDENT_MODEL_PREFERENCE_KEYS.intersection(other_pref):
+        membership = await get_membership_for_user(user_id)
+        if membership and membership.get("role") == "student":
+            raise HTTPException(
+                status_code=403,
+                detail="Student accounts use household models and cannot manage personal model settings.",
+            )
 
     # Validate custom_providers BEFORE custom_models (models may reference providers)
     if other_pref and "custom_providers" in other_pref:

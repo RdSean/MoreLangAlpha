@@ -11,58 +11,6 @@ export function useFamilyChildren(enabled = true) {
   });
 }
 
-function invalidateFamilyLlmQueries(queryClient: ReturnType<typeof useQueryClient>) {
-  return Promise.all([
-    queryClient.invalidateQueries({ queryKey: queryKeys.settings.family.llmPool() }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.settings.family.availability() }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.settings.family.preference() }),
-  ]);
-}
-
-export function useFamilyLlmPool(enabled = true) {
-  return useQuery({
-    queryKey: queryKeys.settings.family.llmPool(),
-    queryFn: familyAccountsApi.getFamilyLlmPool,
-    enabled,
-    staleTime: 30_000,
-  });
-}
-
-export function useCreateFamilyLlmEndpoint() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: familyAccountsApi.createFamilyLlmEndpoint,
-    onSuccess: () => invalidateFamilyLlmQueries(queryClient),
-  });
-}
-
-export function useUpdateFamilyLlmEndpoint() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ endpointId, input }: {
-      endpointId: string;
-      input: familyAccountsApi.FamilyLlmEndpointUpdate;
-    }) => familyAccountsApi.updateFamilyLlmEndpoint(endpointId, input),
-    onSuccess: () => invalidateFamilyLlmQueries(queryClient),
-  });
-}
-
-export function useDeleteFamilyLlmEndpoint() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: familyAccountsApi.deleteFamilyLlmEndpoint,
-    onSuccess: () => invalidateFamilyLlmQueries(queryClient),
-  });
-}
-
-export function useSetFamilyLlmDefault() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: familyAccountsApi.setFamilyLlmDefault,
-    onSuccess: () => invalidateFamilyLlmQueries(queryClient),
-  });
-}
-
 export function useFamilyLlmAvailability(enabled = true) {
   return useQuery({
     queryKey: queryKeys.settings.family.availability(),

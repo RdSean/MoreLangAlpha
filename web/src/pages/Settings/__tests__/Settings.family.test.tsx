@@ -13,9 +13,8 @@ vi.mock('@/hooks/useUser', () => ({ useUser: () => ({ isLoading: false }) }));
 vi.mock('@/hooks/usePreferences', () => ({ usePreferences: () => ({ isLoading: false }) }));
 vi.mock('../panels/UserInfoTab', () => ({ UserInfoTab: () => <div /> }));
 vi.mock('../panels/PreferencesTab', () => ({ PreferencesTab: () => <div /> }));
-vi.mock('../panels/ModelTab', () => ({ ModelTab: () => <div /> }));
+vi.mock('../panels/ModelTab', () => ({ ModelTab: () => <div>模型管理内容</div> }));
 vi.mock('../panels/ExperimentsTab', () => ({ ExperimentsTab: () => <div /> }));
-vi.mock('../panels/HouseholdModelPoolTab', () => ({ HouseholdModelPoolTab: () => <div>家庭模型池内容</div> }));
 vi.mock('../queries', () => ({
   useFamilyChildren: () => ({ data: state.children, isLoading: false, isError: false, refetch: vi.fn() }),
   useCreateChildAccount: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -59,12 +58,20 @@ describe('Settings family account route', () => {
     expect(screen.queryByLabelText('只读对话内容')).not.toBeInTheDocument();
   });
 
-  it('does not expose the household model management tab to a student', () => {
+  it('uses the existing model settings tab as the parent-only management surface', () => {
+    renderSettings('/settings?tab=model');
+
+    expect(screen.getByRole('button', { name: 'Model' })).toBeInTheDocument();
+    expect(screen.getByText('模型管理内容')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '家庭模型池' })).not.toBeInTheDocument();
+  });
+
+  it('does not expose model management to a student', () => {
     state.member = { user_id: 'student-1', name: '小明', role: 'student' };
 
-    renderSettings('/settings?tab=family-models');
+    renderSettings('/settings?tab=model');
 
-    expect(screen.queryByRole('button', { name: '家庭模型池' })).not.toBeInTheDocument();
-    expect(screen.queryByText('家庭模型池内容')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Model' })).not.toBeInTheDocument();
+    expect(screen.queryByText('模型管理内容')).not.toBeInTheDocument();
   });
 });

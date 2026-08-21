@@ -21,8 +21,8 @@ vi.mock('@/hooks/useAllModels', () => ({
 vi.mock('@/lib/modelCapabilities', () => ({ supportsXhighEffort: () => false }));
 
 const familyModels = [
-  { modelKey: 'family:endpoint-1', displayName: '家庭 DeepSeek Flash' },
-  { modelKey: 'family:endpoint-2', displayName: '家庭 Claude' },
+  { modelKey: 'deepseek-chat', displayName: '家庭 DeepSeek Flash' },
+  { modelKey: 'claude-sonnet-5', displayName: '家庭 Claude' },
 ];
 
 function renderInput(props: Record<string, unknown> = {}) {
@@ -43,7 +43,7 @@ describe('ChatInput family model selection', () => {
 
   it('uses the server default without writing a student preference on first load', () => {
     const onFamilyModelSelect = vi.fn();
-    renderInput({ initialModel: 'family:endpoint-1', onFamilyModelSelect });
+    renderInput({ initialModel: 'deepseek-chat', onFamilyModelSelect });
 
     expect(screen.getByRole('button', { name: '家庭 DeepSeek Flash' })).toBeInTheDocument();
     expect(onFamilyModelSelect).not.toHaveBeenCalled();
@@ -51,12 +51,12 @@ describe('ChatInput family model selection', () => {
 
   it('shows only family models and saves a student selection with the opaque model key', () => {
     const onFamilyModelSelect = vi.fn();
-    renderInput({ initialModel: 'family:endpoint-1', onFamilyModelSelect });
+    renderInput({ initialModel: 'deepseek-chat', onFamilyModelSelect });
 
     fireEvent.click(screen.getByRole('button', { name: '家庭 DeepSeek Flash' }));
     fireEvent.click(screen.getByRole('menuitem', { name: '家庭 Claude' }));
 
-    expect(onFamilyModelSelect).toHaveBeenCalledWith('family:endpoint-2');
+    expect(onFamilyModelSelect).toHaveBeenCalledWith('claude-sonnet-5');
     expect(screen.queryByText('管理模型')).not.toBeInTheDocument();
     expect(screen.queryByText('Sonnet 5')).not.toBeInTheDocument();
   });
@@ -70,17 +70,17 @@ describe('ChatInput family model selection', () => {
     expect(screen.queryByText('Sonnet 5')).not.toBeInTheDocument();
   });
 
-  it('does not reveal a stale opaque key after the selected family endpoint is removed', () => {
+  it('does not reveal a stale model key after the selected family model is removed', () => {
     const onSend = vi.fn();
     renderInput({
       onSend,
-      initialModel: 'family:removed-endpoint',
-      familyModels: [{ modelKey: 'family:endpoint-2', displayName: '家庭 Claude' }],
+      initialModel: 'removed-model',
+      familyModels: [{ modelKey: 'claude-sonnet-5', displayName: '家庭 Claude' }],
     });
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'hello' } });
     expect(screen.getByRole('button', { name: '选择模型' })).toBeInTheDocument();
-    expect(screen.queryByText(/family:removed-endpoint/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/removed-model/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled();
     expect(onSend).not.toHaveBeenCalled();
   });

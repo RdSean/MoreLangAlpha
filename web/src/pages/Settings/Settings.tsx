@@ -11,7 +11,6 @@ import { ModelTab } from './panels/ModelTab';
 import { ExperimentsTab } from './panels/ExperimentsTab';
 import { FamilyAccountsTab } from './panels/FamilyAccountsTab';
 import { FamilyChildConversations } from './panels/FamilyChildConversations';
-import { HouseholdModelPoolTab } from './panels/HouseholdModelPoolTab';
 import { useFamilyChildren } from './queries';
 import './Settings.css';
 
@@ -29,6 +28,7 @@ function Settings() {
   useScrollMemory(pageRef, 'page:settings');
   const isLoading = isUserLoading || isPrefsLoading;
   const isParent = member?.role === 'parent';
+  const isStudent = member?.role === 'student';
   const familyChildren = useFamilyChildren(
     activeTab === 'family' && Boolean(studentUserId) && isParent,
   );
@@ -86,7 +86,7 @@ function Settings() {
           >
             {t('settings.preferences')}
           </button>
-          <button
+          {!isStudent && <button
             type="button"
             onClick={() => handleTabChange('model')}
             className="px-4 py-2 text-sm font-medium whitespace-nowrap flex-shrink-0"
@@ -96,7 +96,7 @@ function Settings() {
             }}
           >
             {t('settings.model')}
-          </button>
+          </button>}
           <button
             type="button"
             onClick={() => handleTabChange('experiments')}
@@ -119,17 +119,6 @@ function Settings() {
           >
             家庭账户
           </button>}
-          {isParent && <button
-            type="button"
-            onClick={() => handleTabChange('family-models')}
-            className="px-4 py-2 text-sm font-medium whitespace-nowrap flex-shrink-0"
-            style={{
-              color: activeTab === 'family-models' ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
-              borderBottom: activeTab === 'family-models' ? '2px solid var(--color-accent-primary)' : '2px solid transparent',
-            }}
-          >
-            家庭模型池
-          </button>}
         </div>
 
         <div className="settings-content">
@@ -143,7 +132,7 @@ function Settings() {
 
           {!isLoading && activeTab === 'preferences' && <PreferencesTab />}
 
-          {!isLoading && activeTab === 'model' && <ModelTab />}
+          {!isLoading && activeTab === 'model' && !isStudent && <ModelTab />}
 
           {/* Text-heavy tab: cap the measure so descriptions stay readable
               instead of spanning the full settings container. */}
@@ -158,7 +147,6 @@ function Settings() {
             onBack={closeChild}
           />}
 
-          {!isLoading && activeTab === 'family-models' && isParent && <HouseholdModelPoolTab />}
         </div>
       </div>
     </div>
