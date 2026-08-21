@@ -29,10 +29,7 @@ from src.server.database.api_keys import (
     delete_api_key,
     invalidate_byok_cache,
 )
-from src.server.services.household_llm_pool import (
-    FamilyModelAccessError,
-    get_household_context,
-)
+from src.server.database.household_shared_models import get_household_owner_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +42,12 @@ _BYOK_PROVIDERS_CACHE: list[str] | None = None
 async def _require_personal_model_configuration_access(user_id: str) -> None:
     """Block student accounts from legacy personal-model configuration.
 
-    Students resolve only the household pool. Accounts outside a household and
+    Students resolve only the household owner's models. Accounts outside a household and
     household parents retain the existing BYOK behavior.
     """
-    try:
-        context = await get_household_context(user_id)
-    except FamilyModelAccessError:
-        return
+    context = await get_household_owner_for_user(user_id)
 
-    if context.get("role") == "student":
+    if context and context.get("role") == "student":
         raise HTTPException(
             status_code=403,
             detail="Student accounts use household models and cannot manage personal model settings.",

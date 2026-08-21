@@ -24,15 +24,14 @@ def upgrade() -> None:
     op.execute(
         """
         UPDATE education_households AS households
-        SET model_owner_user_id = parents.user_id
-        FROM LATERAL (
+        SET model_owner_user_id = (
             SELECT memberships.user_id
             FROM education_memberships AS memberships
             WHERE memberships.household_id = households.household_id
               AND memberships.role = 'parent'
             ORDER BY memberships.created_at ASC
             LIMIT 1
-        ) AS parents
+        )
         WHERE households.model_owner_user_id IS NULL
         """
     )

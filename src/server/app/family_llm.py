@@ -1,317 +1,164 @@
-"""Household-owned LLM endpoint management and student availability APIs."""
+"""Read-only household model availability and student selection APIs."""
 
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Any
-from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.server.database.auth_accounts import ParentMembershipRequiredError
-from src.server.services.household_llm_pool import (
-    FamilyModelAccessError,
-    HouseholdEndpointDisabledError,
-    create_endpoint,
-    delete_endpoint,
-    get_household_availability,
-    get_household_context,
-    get_parent_pool_availability,
-    list_parent_pool,
-    public_model_key,
-    set_household_default,
-    set_student_preference,
-    update_endpoint,
+from src.server.database.household_shared_models import (
+    clear_student_model_preference,
+    get_household_owner_for_user,
+    get_student_model_preference,
+    upsert_student_model_preference,
+)
+from src.server.services.household_shared_models import (
+    HouseholdModelAccessError,
+    get_household_model_availability,
 )
 from src.server.utils.api import CurrentUserId
 
 
-class SecretSafeValidationRoute(APIRoute):
-    """Remove request values from validation responses on credential routes."""
-
-    def get_route_handler(self):
-        original_handler = super().get_route_handler()
-
-        async def secret_safe_handler(request: Request) -> Response:
-            try:
-                return await original_handler(request)
-            except RequestValidationError as exc:
-                errors = [
-                    {
-                        key: error[key]
-                        for key in ("loc", "msg", "type")
-                        if key in error
-                    }
-                    for error in exc.errors()
-                ]
-                return JSONResponse(status_code=422, content={"detail": errors})
-
-        return secret_safe_handler
+router = APIRouter(prefix="/api/v1/family", tags=["Family Models"])
 
 
-router = APIRouter(
-    prefix="/api/v1/family",
-    tags=["Family LLM Pool"],
-    route_class=SecretSafeValidationRoute,
-)
+class StudentPreferenceRequest(BaseModel):
+    """A student's optional selection from the current owner-backed models."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_key: str | None = Field(..., max_length=255)
+
+    @field_validator("model_key")
+    @classmethod
+    def normalize_model_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("model_key must not be empty")
+        return value
 
 
-class _RequestModel(BaseModel):
-    """Avoid echoing a submitted credential in validation error responses."""
-
-    model_config = ConfigDict(hide_input_in_errors=True)
-
-
-def _required_text(value: str | None) -> str:
-    if not isinstance(value, str):
-        raise ValueError("A non-empty value is required")
-    value = value.strip()
-    if not value:
-        raise ValueError("A non-empty value is required")
-    return value
+async def _member_context(user_id: str) -> dict[str, Any]:
+    context = await get_household_owner_for_user(user_id)
+    if context is None:
+        raise HTTPException(status_code=403, detail="Household membership required")
+    return context
 
 
-def _validate_base_url(value: str | None) -> str | None:
-    if value is None:
-        return None
-    value = value.strip()
-    if not value.startswith(("http://", "https://")):
-        raise ValueError("Base URL must start with http:// or https://")
-    return value
-
-
-def _validate_api_key(value: Any) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise HTTPException(status_code=422, detail="API key must be a string")
-    if len(value) > 4096:
-        # Do not let FastAPI's generic validation renderer echo credentials.
-        raise HTTPException(status_code=422, detail="API key must be at most 4096 characters")
-    if value and not value.isascii():
-        raise HTTPException(status_code=422, detail="API key must contain only ASCII characters")
-    return value
-
-
-class EndpointCreateRequest(_RequestModel):
-    display_name: str = Field(min_length=1, max_length=128)
-    provider: str = Field(min_length=1, max_length=64)
-    model_id: str = Field(min_length=1, max_length=255)
-    base_url: str | None = Field(default=None, max_length=2048)
-    api_key: str | None = None
-    enabled: bool = True
-    sort_order: int = Field(default=0, ge=-10_000, le=10_000)
-
-    _display_name = field_validator("display_name")(_required_text)
-    _provider = field_validator("provider")(_required_text)
-    _model_id = field_validator("model_id")(_required_text)
-    _base_url = field_validator("base_url")(_validate_base_url)
-    _api_key = field_validator("api_key", mode="before")(_validate_api_key)
-
-
-class EndpointUpdateRequest(_RequestModel):
-    display_name: str | None = Field(default=None, min_length=1, max_length=128)
-    provider: str | None = Field(default=None, min_length=1, max_length=64)
-    model_id: str | None = Field(default=None, min_length=1, max_length=255)
-    base_url: str | None = Field(default=None, max_length=2048)
-    api_key: str | None = None
-    enabled: bool | None = None
-    sort_order: int | None = Field(default=None, ge=-10_000, le=10_000)
-
-    _display_name = field_validator("display_name")(_required_text)
-    _provider = field_validator("provider")(_required_text)
-    _model_id = field_validator("model_id")(_required_text)
-    _base_url = field_validator("base_url")(_validate_base_url)
-    _api_key = field_validator("api_key", mode="before")(_validate_api_key)
-
-
-class DefaultEndpointRequest(_RequestModel):
-    endpoint_id: UUID | None
-
-
-class StudentPreferenceRequest(_RequestModel):
-    endpoint_id: UUID | None
-
-
-@lru_cache(maxsize=1)
-def _available_providers() -> frozenset[str]:
-    """Return manifest-backed providers that can be configured by a family."""
-    from src.llms.llm import ModelConfig
-
-    return frozenset(
-        name
-        for name, info in ModelConfig().flat_providers.items()
-        if not info.get("platform")
-    )
-
-
-def _require_available_provider(provider: str) -> None:
-    if provider not in _available_providers():
-        raise HTTPException(status_code=422, detail="Unsupported LLM provider")
-
-
-def _parent_endpoint_summary(endpoint: dict[str, Any]) -> dict[str, Any]:
-    """Return the explicit parent projection, never a plaintext credential."""
-    return {
-        "endpoint_id": str(endpoint["endpoint_id"]),
-        "display_name": endpoint["display_name"],
-        "provider": endpoint["provider"],
-        "model_id": endpoint["model_id"],
-        "base_url": endpoint.get("base_url"),
-        "masked_api_key": endpoint.get("masked_api_key")
-        or endpoint.get("masked_key"),
-        "enabled": bool(endpoint.get("enabled", True)),
-        "sort_order": endpoint.get("sort_order", 0),
-    }
-
-
-def _availability_projection(availability: dict[str, Any]) -> dict[str, Any]:
-    """Strip endpoint internals and add the stable public model key."""
-    endpoints: list[dict[str, Any]] = []
-    for endpoint in availability.get("endpoints", []):
-        endpoint_id = str(endpoint["endpoint_id"])
-        endpoints.append(
-            {
-                "endpoint_id": endpoint_id,
-                "display_name": endpoint["display_name"],
-                "provider": endpoint["provider"],
-                "model_id": endpoint["model_id"],
-                "enabled": bool(endpoint.get("enabled", True)),
-                "sort_order": endpoint.get("sort_order", 0),
-                "model_key": public_model_key(endpoint_id),
-            }
-        )
-
-    preference = availability.get("preference")
-    default = availability.get("default")
-    selected = preference or default
-    selected_source = "preference" if preference else "default" if default else None
-    return {
-        "endpoints": endpoints,
-        "selected_endpoint_id": str(selected["endpoint_id"]) if selected else None,
-        "selected_source": selected_source,
-        "preference_endpoint_id": str(preference["endpoint_id"])
-        if preference
-        else None,
-        "default_endpoint_id": str(default["endpoint_id"]) if default else None,
-    }
-
-
-def _parent_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, ParentMembershipRequiredError):
-        return HTTPException(status_code=403, detail="Parent membership required")
-    return HTTPException(status_code=404, detail="Household endpoint not found")
-
-
-def _member_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, ParentMembershipRequiredError):
-        return HTTPException(status_code=403, detail="Parent membership required")
-    return HTTPException(status_code=403, detail="Household membership required")
-
-
-@router.get("/llm-pool")
-async def get_pool(user_id: CurrentUserId):
+async def _owner_availability(user_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    context = await _member_context(user_id)
     try:
-        endpoints = await list_parent_pool(user_id)
-        availability = await get_parent_pool_availability(user_id)
-    except (ParentMembershipRequiredError, FamilyModelAccessError) as exc:
-        raise _parent_error(exc) from exc
-    default = availability.get("default")
-    return {
-        "endpoints": [_parent_endpoint_summary(endpoint) for endpoint in endpoints],
-        "default_endpoint_id": str(default["endpoint_id"]) if default else None,
-    }
-
-
-@router.post("/llm-pool", status_code=status.HTTP_201_CREATED)
-async def create_pool_endpoint(body: EndpointCreateRequest, user_id: CurrentUserId):
-    _require_available_provider(body.provider)
-    try:
-        endpoint = await create_endpoint(user_id, body.model_dump())
-    except (ParentMembershipRequiredError, FamilyModelAccessError) as exc:
-        raise _parent_error(exc) from exc
-    return _parent_endpoint_summary(endpoint)
-
-
-@router.patch("/llm-pool/{endpoint_id}")
-async def patch_pool_endpoint(
-    endpoint_id: UUID, body: EndpointUpdateRequest, user_id: CurrentUserId
-):
-    fields = body.model_dump(exclude_unset=True)
-    if "provider" in fields:
-        _require_available_provider(fields["provider"])
-    try:
-        endpoint = await update_endpoint(user_id, str(endpoint_id), fields)
-    except (ParentMembershipRequiredError, FamilyModelAccessError) as exc:
-        raise _parent_error(exc) from exc
-    return _parent_endpoint_summary(endpoint)
-
-
-@router.delete("/llm-pool/{endpoint_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_pool_endpoint(endpoint_id: UUID, user_id: CurrentUserId) -> Response:
-    try:
-        await delete_endpoint(user_id, str(endpoint_id))
-    except (ParentMembershipRequiredError, FamilyModelAccessError) as exc:
-        raise _parent_error(exc) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.put("/llm-pool/default")
-async def update_pool_default(body: DefaultEndpointRequest, user_id: CurrentUserId):
-    endpoint_id = str(body.endpoint_id) if body.endpoint_id is not None else None
-    try:
-        result = await set_household_default(user_id, endpoint_id)
-    except ParentMembershipRequiredError as exc:
-        raise _parent_error(exc) from exc
-    except HouseholdEndpointDisabledError as exc:
+        availability = await get_household_model_availability(user_id)
+    except HouseholdModelAccessError as exc:
         raise HTTPException(
-            status_code=409, detail="The requested default endpoint is disabled"
+            status_code=403, detail="Household model owner is unavailable"
         ) from exc
-    except FamilyModelAccessError as exc:
-        raise HTTPException(
-            status_code=404, detail="Household endpoint not found"
-        ) from exc
-    return {"default_endpoint_id": result.get("default_endpoint_id")}
-
-
-async def _availability_for_member(user_id: str) -> tuple[dict[str, str], dict[str, Any]]:
-    try:
-        context = await get_household_context(user_id)
-    except (ParentMembershipRequiredError, FamilyModelAccessError) as exc:
-        raise _member_error(exc) from exc
-    availability = await get_household_availability(
-        context["household_id"], user_id if context["role"] == "student" else None
-    )
     return context, availability
+
+
+async def _availability_projection(
+    user_id: str,
+    context: dict[str, Any],
+    availability: dict[str, Any],
+    *,
+    selected_override: str | None | object = ...,
+) -> dict[str, Any]:
+    """Add the member-specific selection without exposing owner internals."""
+    models = _public_models(availability.get("models") or [])
+    available_keys = {
+        str(model["model_key"])
+        for model in models
+        if isinstance(model, dict) and model.get("model_key")
+    }
+    default_model_key = availability.get("default_model_key")
+    if default_model_key not in available_keys:
+        default_model_key = None
+
+    selected_model_key = default_model_key
+    selected_source = "default" if selected_model_key else None
+    if context.get("role") == "student":
+        if selected_override is ...:
+            preference = await get_student_model_preference(
+                user_id, str(context["household_id"])
+            )
+            preferred_key = preference.get("model_key") if preference else None
+        else:
+            preferred_key = selected_override
+        if preferred_key in available_keys:
+            selected_model_key = preferred_key
+            selected_source = "preference"
+
+    has_available_models = bool(models)
+    return {
+        "models": models,
+        "default_model_key": default_model_key,
+        "selected_model_key": selected_model_key,
+        "selected_source": selected_source,
+        "has_available_models": has_available_models,
+        "empty_reason": None if has_available_models else "no_available_models",
+    }
+
+
+def _public_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Copy only fields that are safe for members to receive."""
+    public_models: list[dict[str, Any]] = []
+    for model in models:
+        if not isinstance(model, dict) or not model.get("model_key"):
+            continue
+        public_model = {
+            "model_key": str(model["model_key"]),
+            "display_name": str(model.get("display_name") or model["model_key"]),
+            "provider": str(model.get("provider") or "unknown"),
+            "model_id": str(model.get("model_id") or model["model_key"]),
+        }
+        capabilities = model.get("capabilities")
+        if isinstance(capabilities, dict):
+            input_modalities = capabilities.get("input_modalities")
+            if isinstance(input_modalities, list):
+                public_model["capabilities"] = {
+                    "input_modalities": [
+                        str(modality) for modality in input_modalities
+                    ]
+                }
+        public_models.append(public_model)
+    return public_models
 
 
 @router.get("/llm-availability")
 async def get_llm_availability(user_id: CurrentUserId):
-    _, availability = await _availability_for_member(user_id)
-    return _availability_projection(availability)
+    """Return the designated parent's usable models for a household member."""
+    context, availability = await _owner_availability(user_id)
+    return await _availability_projection(user_id, context, availability)
 
 
 @router.put("/llm-preference")
 async def update_llm_preference(body: StudentPreferenceRequest, user_id: CurrentUserId):
-    try:
-        context = await get_household_context(user_id)
-    except (ParentMembershipRequiredError, FamilyModelAccessError) as exc:
-        raise _member_error(exc) from exc
-    if context["role"] != "student":
-        raise HTTPException(status_code=403, detail="Only student accounts can set a model preference")
-    endpoint_id = str(body.endpoint_id) if body.endpoint_id is not None else None
-    try:
-        await set_student_preference(user_id, endpoint_id)
-    except HouseholdEndpointDisabledError as exc:
+    """Save or clear the authenticated student's selection only."""
+    context, availability = await _owner_availability(user_id)
+    if context.get("role") != "student":
         raise HTTPException(
-            status_code=409, detail="The requested endpoint is disabled"
-        ) from exc
-    except FamilyModelAccessError as exc:
-        # Unknown and cross-household IDs are indistinguishable by design.
-        raise HTTPException(status_code=404, detail="Household endpoint not found") from exc
-    availability = await get_household_availability(context["household_id"], user_id)
-    return _availability_projection(availability)
+            status_code=403, detail="Only student accounts can set a model preference"
+        )
+
+    model_key = body.model_key
+    available_keys = {
+        str(model["model_key"])
+        for model in availability.get("models") or []
+        if isinstance(model, dict) and model.get("model_key")
+    }
+    if model_key is not None and model_key not in available_keys:
+        # Do not distinguish disabled, deleted, or foreign model keys.
+        raise HTTPException(status_code=404, detail="Household model is unavailable")
+
+    household_id = str(context["household_id"])
+    if model_key is None:
+        await clear_student_model_preference(user_id, household_id)
+    else:
+        await upsert_student_model_preference(user_id, household_id, model_key)
+
+    return await _availability_projection(
+        user_id, context, availability, selected_override=model_key
+    )

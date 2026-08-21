@@ -27,12 +27,12 @@ HANDLER = "src.server.services.llm.config"
 @pytest.fixture(autouse=True)
 def _non_household_by_default():
     """Credential matrix cases exercise the existing non-student path."""
-    from src.server.services.household_llm_pool import FamilyModelAccessError
+    from src.server.services.household_shared_models import HouseholdModelAccessError
 
     with patch(
         f"{HANDLER}.get_household_context",
         new_callable=AsyncMock,
-        side_effect=FamilyModelAccessError("not a household member"),
+        side_effect=HouseholdModelAccessError("not a household member"),
     ):
         yield
 

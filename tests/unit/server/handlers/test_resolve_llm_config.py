@@ -31,12 +31,12 @@ from src.server.services.household_shared_models import HouseholdModelUnavailabl
 @pytest.fixture(autouse=True)
 def _non_household_by_default():
     """Keep legacy resolver cases on their existing non-household path."""
-    from src.server.services.household_llm_pool import FamilyModelAccessError
+    from src.server.services.household_shared_models import HouseholdModelAccessError
 
     with patch(
         f"{HANDLER}.get_household_context",
         new_callable=AsyncMock,
-        side_effect=FamilyModelAccessError("not a household member"),
+        side_effect=HouseholdModelAccessError("not a household member"),
         create=True,
     ):
         yield
@@ -161,7 +161,7 @@ class TestModelPriority:
 
 
 # ---------------------------------------------------------------------------
-# Student household model pool
+# Student household shared models
 # ---------------------------------------------------------------------------
 
 
@@ -726,7 +726,7 @@ class TestReasoningEffort:
             patch("src.llms.llm.LLM.get_model_config", return_value=mock_mc),
             patch("src.llms.llm.create_llm", return_value=mock_llm) as mock_create,
         ):
-            config = await resolve_llm_config(
+            await resolve_llm_config(
                 base_config, "user-1", None, False, reasoning_effort="high"
             )
         # Should use per-request "high", not pref "low"
@@ -751,7 +751,7 @@ class TestReasoningEffort:
             patch("src.llms.llm.LLM.get_model_config", return_value=mock_mc),
             patch("src.llms.llm.create_llm", return_value=mock_llm) as mock_create,
         ):
-            config = await resolve_llm_config(
+            await resolve_llm_config(
                 base_config, "user-1", None, False, reasoning_effort=None
             )
         mock_create.assert_called_once()
@@ -802,7 +802,7 @@ class TestBYOKResolution:
             ) as mock_resolve,
             patch("src.llms.llm.LLM.get_model_config", return_value=mock_mc),
         ):
-            config = await resolve_llm_config(
+            await resolve_llm_config(
                 base_config, "user-1", None, False
             )
         mock_resolve.assert_not_awaited()

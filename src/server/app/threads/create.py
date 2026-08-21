@@ -116,7 +116,7 @@ async def create_thread_endpoint(
 
         require_workspace_owner(workspace, user_id=x_user_id)
 
-    # Student accounts use only the household model pool. Resolve before the
+    # Student accounts use only the household owner's shared models. Resolve before the
     # Flash workspace upsert and thread/title creation so an empty pool leaves
     # no durable artifacts behind.
     from src.server.services.education_access import is_student_account
