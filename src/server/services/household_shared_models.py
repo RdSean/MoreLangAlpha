@@ -196,7 +196,7 @@ async def get_household_model_availability(member_id: str) -> dict[str, Any]:
         "household_id": str(context["household_id"]),
         "model_owner_user_id": str(context["model_owner_user_id"]),
         "models": public_models,
-        "default_model_key": preferred if preferred in entries else (public_models[0]["model_key"] if public_models else None),
+        "default_model_key": preferred if preferred in entries else None,
     }
 
 
@@ -213,8 +213,6 @@ async def resolve_household_model(member_id: str, model_key: str | None) -> dict
         model_key = (
             student_preference.get("model_key") if student_preference else None
         ) or preferences.get("preferred_model") or preferences.get("preferred_flash_model")
-        if model_key not in entries:
-            model_key = next(iter(entries), None)
     if not model_key or model_key not in entries:
         raise HouseholdModelUnavailableError("Household model is unavailable")
     return {

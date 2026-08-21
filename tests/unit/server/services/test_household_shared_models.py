@@ -92,6 +92,33 @@ async def test_availability_omits_catalog_models_without_owner_credentials():
 
 
 @pytest.mark.asyncio
+async def test_owner_models_without_default_do_not_select_an_arbitrary_model():
+    from src.server.services.household_shared_models import (
+        HouseholdModelUnavailableError,
+        get_household_model_availability,
+        resolve_household_model,
+    )
+
+    with (
+        patch(f"{SERVICE}.get_household_model_owner", new_callable=AsyncMock, return_value={
+            "household_id": "household-1", "model_owner_user_id": "owner-1"
+        }),
+        patch(f"{SERVICE}.get_owner_api_keys", new_callable=AsyncMock, return_value={
+            "byok_enabled": True, "keys": {"openai": "owner-secret"}, "base_urls": {}
+        }),
+        patch(f"{SERVICE}.get_user_preferences", new_callable=AsyncMock, return_value={"other_preference": {}}),
+        patch(f"{SERVICE}.get_student_model_preference", new_callable=AsyncMock, return_value=None),
+        patch("src.llms.llm.LLM.get_model_config", return_value=_manifest()),
+    ):
+        availability = await get_household_model_availability("student-1")
+        with pytest.raises(HouseholdModelUnavailableError):
+            await resolve_household_model("student-1", None)
+
+    assert availability["models"]
+    assert availability["default_model_key"] is None
+
+
+@pytest.mark.asyncio
 async def test_runtime_resolution_returns_owner_credential_for_public_model_key():
     from src.server.services.household_shared_models import resolve_household_model
 
