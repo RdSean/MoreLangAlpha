@@ -59,7 +59,6 @@ AUTOMATION_WEBHOOK_SECRET: str = os.getenv("AUTOMATION_WEBHOOK_SECRET", "")
 # exposed to browsers; the speech relay reads these constants through settings.
 VOLCENGINE_ASR_APP_ID: str = os.getenv("VOLCENGINE_ASR_APP_ID", "")
 VOLCENGINE_ASR_ACCESS_TOKEN: str = os.getenv("VOLCENGINE_ASR_ACCESS_TOKEN", "")
-VOLCENGINE_ASR_ACCESS_SECRET: str = os.getenv("VOLCENGINE_ASR_ACCESS_SECRET", "")
 VOLCENGINE_ASR_CLUSTER: str = os.getenv("VOLCENGINE_ASR_CLUSTER", "")
 VOLCENGINE_ASR_WS_URL: str = os.getenv(
     "VOLCENGINE_ASR_WS_URL", "wss://openspeech.bytedance.com/api/v2/asr"

@@ -21,7 +21,6 @@ from src.server.services.volcengine_asr import (
 CONFIG = VolcengineAsrConfig(
     app_id="test-app",
     access_token="test-token",
-    access_secret="test-secret",
     cluster="test-cluster",
     ws_url="wss://asr.example.test/api/v2/asr",
 )
@@ -43,9 +42,11 @@ def test_full_request_uses_raw_pcm_16khz_mono_and_gzip() -> None:
         "format": "raw",
         "codec": "raw",
         "rate": 16000,
+        "language": "zh-CN",
         "bits": 16,
         "channel": 1,
     }
+    assert body["request"]["workflow"] == "audio_in,resample,partition,vad,fe,decode,itn,nlu_punctuate"
 
 
 def test_last_audio_packet_has_last_packet_flag() -> None:

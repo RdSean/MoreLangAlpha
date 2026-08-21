@@ -14,7 +14,6 @@ from src.config.settings import VolcengineAsrConfig
 CONFIG = VolcengineAsrConfig(
     app_id="test-app",
     access_token="test-token",
-    access_secret="test-secret",
     cluster="test-cluster",
     ws_url="wss://asr.example.test/api/v2/asr",
 )

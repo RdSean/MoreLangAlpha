@@ -37,7 +37,6 @@ class VolcengineAsrConfig:
     app_id: str
     access_token: str = field(repr=False)
     cluster: str
-    access_secret: str = field(default="", repr=False)
     ws_url: str = "wss://openspeech.bytedance.com/api/v2/asr"
 
 
@@ -52,7 +51,6 @@ def get_volcengine_asr_config() -> VolcengineAsrConfig | None:
     return VolcengineAsrConfig(
         app_id=app_id,
         access_token=access_token,
-        access_secret=env.VOLCENGINE_ASR_ACCESS_SECRET.strip(),
         cluster=cluster,
         ws_url=env.VOLCENGINE_ASR_WS_URL.strip()
         or "wss://openspeech.bytedance.com/api/v2/asr",

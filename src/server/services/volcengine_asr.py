@@ -13,6 +13,10 @@ AUDIO_ONLY_REQUEST = 0x2
 FULL_SERVER_RESPONSE = 0x9
 SERVER_ERROR = 0xF
 LAST_AUDIO_PACKET = 0x2
+DEFAULT_LANGUAGE = "zh-CN"
+DEFAULT_WORKFLOW = "audio_in,resample,partition,vad,fe,decode,itn,nlu_punctuate"
+
+
 def _pack_frame(message_type: int, payload: bytes, *, flags: int = 0, json_payload: bool = False) -> bytes:
     serialization = 0x1 if json_payload else 0x0
     header = bytes((0x11, (message_type << 4) | flags, (serialization << 4) | 0x1, 0x0))
@@ -23,11 +27,19 @@ def build_full_request(config: VolcengineAsrConfig, *, request_id: str, user_id:
     body = {
         "app": {"appid": config.app_id, "token": config.access_token, "cluster": config.cluster},
         "user": {"uid": user_id},
-        "audio": {"format": "raw", "codec": "raw", "rate": 16000, "bits": 16, "channel": 1},
+        "audio": {
+            "format": "raw",
+            "codec": "raw",
+            "rate": 16000,
+            "language": DEFAULT_LANGUAGE,
+            "bits": 16,
+            "channel": 1,
+        },
         "request": {
             "reqid": request_id,
             "sequence": 1,
             "nbest": 1,
+            "workflow": DEFAULT_WORKFLOW,
             "show_utterances": True,
             "result_type": "single",
         },
