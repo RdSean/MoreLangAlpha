@@ -61,7 +61,6 @@ async def create_usage_record(
                 total_credits,
                 is_byok,
                 household_id,
-                llm_endpoint_id,
                 credential_source,
                 model_snapshot,
                 created_at
@@ -80,7 +79,6 @@ async def create_usage_record(
                 %(total_credits)s,
                 %(is_byok)s,
                 %(household_id)s,
-                %(llm_endpoint_id)s,
                 %(credential_source)s,
                 %(model_snapshot)s,
                 %(created_at)s
@@ -101,7 +99,6 @@ async def create_usage_record(
                 "total_credits": usage_data["total_credits"],
                 "is_byok": usage_data.get("is_byok", False),
                 "household_id": usage_data.get("household_id"),
-                "llm_endpoint_id": usage_data.get("llm_endpoint_id"),
                 "credential_source": usage_data.get("credential_source"),
                 "model_snapshot": (
                     Json(usage_data["model_snapshot"])

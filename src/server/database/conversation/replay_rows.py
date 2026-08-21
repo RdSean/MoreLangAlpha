@@ -76,7 +76,7 @@ async def get_replay_thread_data(
             # credit_usage event represents the main workflow only.
             await cur.execute(
                 """SELECT conversation_response_id, msg_type, token_usage,
-                          total_credits, household_id, llm_endpoint_id,
+                          total_credits, household_id,
                           credential_source, model_snapshot, created_at
                    FROM conversation_usages
                    WHERE conversation_thread_id = %s

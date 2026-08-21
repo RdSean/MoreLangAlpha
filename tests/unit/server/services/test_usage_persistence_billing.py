@@ -197,7 +197,7 @@ class TestPersistUsageEffectiveByok:
         family_runtime = {
             "credential_source": "household",
             "household_id": "11111111-1111-1111-1111-111111111111",
-            "family_endpoint_id": "22222222-2222-2222-2222-222222222222",
+            "model_key": "deepseek-chat",
             "display_name": "Family DeepSeek Flash",
             "provider": "deepseek",
             "model_id": "deepseek-chat",
@@ -212,9 +212,9 @@ class TestPersistUsageEffectiveByok:
         )
 
         assert data["household_id"] == family_runtime["household_id"]
-        assert data["llm_endpoint_id"] == family_runtime["family_endpoint_id"]
         assert data["credential_source"] == "household"
         assert data["model_snapshot"] == {
+            "model_key": "deepseek-chat",
             "display_name": "Family DeepSeek Flash",
             "provider": "deepseek",
             "model_id": "deepseek-chat",
@@ -236,7 +236,7 @@ class TestPersistUsageEffectiveByok:
             llm_runtime_metadata={
                 "credential_source": "household",
                 "household_id": "11111111-1111-1111-1111-111111111111",
-                "family_endpoint_id": "22222222-2222-2222-2222-222222222222",
+                "model_key": "deepseek-chat",
                 "display_name": "Local Flash",
                 "provider": "openai",
                 "model_id": "local-model",
@@ -334,9 +334,9 @@ async def test_usage_record_binds_household_snapshot_columns(mock_connection, mo
             "total_credits": 0.0,
             "is_byok": True,
             "household_id": "11111111-1111-1111-1111-111111111111",
-            "llm_endpoint_id": "22222222-2222-2222-2222-222222222222",
             "credential_source": "household",
             "model_snapshot": {
+                "model_key": "deepseek-chat",
                 "display_name": "Family DeepSeek Flash",
                 "provider": "deepseek",
                 "model_id": "deepseek-chat",
@@ -347,8 +347,9 @@ async def test_usage_record_binds_household_snapshot_columns(mock_connection, mo
     )
 
     sql, params = mock_cursor.execute.await_args.args
-    for field in ("household_id", "llm_endpoint_id", "credential_source", "model_snapshot"):
+    for field in ("household_id", "credential_source", "model_snapshot"):
         assert field in sql
+    assert "llm_endpoint_id" not in sql
     assert params["credential_source"] == "household"
     assert "family-secret-key" not in str(params)
     assert "family.example" not in str(params)

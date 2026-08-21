@@ -324,11 +324,10 @@ class UsagePersistenceService:
             if is_household:
                 household_usage = {
                     "household_id": runtime.get("household_id"),
-                    "llm_endpoint_id": runtime.get("family_endpoint_id"),
                     "credential_source": "household",
                     "model_snapshot": {
                         key: runtime[key]
-                        for key in ("display_name", "provider", "model_id")
+                        for key in ("model_key", "display_name", "provider", "model_id")
                         if key in runtime
                     },
                 }
