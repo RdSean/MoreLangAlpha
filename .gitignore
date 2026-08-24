@@ -65,6 +65,7 @@ Thumbs.db
 # Node
 node_modules/
 .pnpm-store/
+web/.vite-dev-https/
 
 # Testing
 .pytest_cache/

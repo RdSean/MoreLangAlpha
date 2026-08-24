@@ -9,8 +9,10 @@ agent_config.yaml via AgentConfig (ptc_agent.config).
 import logging
 import math
 import os
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from src.config import env
 from src.config.core import get_infrastructure_config
 from src.config.models import WorkflowOrchestrationConfig
 
@@ -26,6 +28,33 @@ from src.config.env import (  # noqa: F401
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class VolcengineAsrConfig:
+    """Deployment credentials and endpoint for the server-side ASR relay."""
+
+    app_id: str
+    access_token: str = field(repr=False)
+    cluster: str
+    ws_url: str = "wss://openspeech.bytedance.com/api/v2/asr"
+
+
+def get_volcengine_asr_config() -> VolcengineAsrConfig | None:
+    """Return ASR configuration only when the required deployment values exist."""
+    app_id = env.VOLCENGINE_ASR_APP_ID.strip()
+    access_token = env.VOLCENGINE_ASR_ACCESS_TOKEN.strip()
+    cluster = env.VOLCENGINE_ASR_CLUSTER.strip()
+    if not app_id or not access_token or not cluster:
+        return None
+
+    return VolcengineAsrConfig(
+        app_id=app_id,
+        access_token=access_token,
+        cluster=cluster,
+        ws_url=env.VOLCENGINE_ASR_WS_URL.strip()
+        or "wss://openspeech.bytedance.com/api/v2/asr",
+    )
 
 
 def background_dispatch_requires_token() -> bool:

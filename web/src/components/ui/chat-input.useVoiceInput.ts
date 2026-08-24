@@ -2,12 +2,32 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useToast } from './use-toast';
+import { PcmPacketizer } from './voice-input.pcm';
 
-export const speechSupported = typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+const browserSpeechSupported = typeof window !== 'undefined'
+  && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+const MAX_RECORDING_MS = 60_000;
+const backendSpeechSupported = typeof window !== 'undefined'
+  && !!window.WebSocket
+  && !!navigator.mediaDevices?.getUserMedia
+  && !!window.AudioContext;
 
-/** Voice input (Web Speech API) for the chat composer: appends interim +
- * final transcripts onto the message, stops when a turn starts loading and
- * on unmount. `stopListening` is for the host's type/IME interrupt paths. */
+export const speechSupported = browserSpeechSupported || backendSpeechSupported;
+
+function speechWebSocketUrl() {
+  const base = import.meta.env.VITE_API_BASE_URL || window.location.origin;
+  const url = new URL('/ws/v1/speech/transcribe', base);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.toString();
+}
+
+function canUseBackendSpeech() {
+  return !!window.WebSocket
+    && !!navigator.mediaDevices?.getUserMedia
+    && !!window.AudioContext;
+}
+
+/** Voice input with a backend PCM stream and browser-recognition fallback. */
 export function useVoiceInput({ message, setMessage, isLoading }: {
   message: string;
   setMessage: Dispatch<SetStateAction<string>>;
@@ -15,130 +35,233 @@ export function useVoiceInput({ message, setMessage, isLoading }: {
 }) {
   const { t, i18n } = useTranslation();
   const { toast } = useToast();
-
   const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const isStartingRef = useRef(false);
-  const finalTranscriptRef = useRef('');
-  const baseMessageRef = useRef('');
+  const [speechMode, setSpeechMode] = useState<'backend' | 'browser'>(() => (
+    canUseBackendSpeech() ? 'backend' : 'browser'
+  ));
   const messageRef = useRef(message);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const contextRef = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
+  const packetizerRef = useRef<PcmPacketizer | null>(null);
+  const socketOpenRef = useRef(false);
+  const stoppingRef = useRef(false);
+  const baseMessageRef = useRef('');
+  const finalTranscriptRef = useRef('');
+  const partialTranscriptRef = useRef('');
 
-  // Sync message ref
   useEffect(() => { messageRef.current = message; }, [message]);
 
-  // Stop recognition when loading starts (ghost text fix)
-  useEffect(() => {
-    if (isLoading && recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-      setIsListening(false);
+  const publishTranscript = useCallback(() => {
+    setMessage(baseMessageRef.current + finalTranscriptRef.current + partialTranscriptRef.current);
+  }, [setMessage]);
+
+  const stopBackend = useCallback((sendStop: boolean) => {
+    const socket = socketRef.current;
+    if (socket && sendStop && socketOpenRef.current) {
+      const tail = packetizerRef.current?.flush();
+      if (tail) socket.send(tail);
+      socket.send(JSON.stringify({ type: 'stop' }));
     }
-  }, [isLoading]);
+    socket?.close();
+    socketRef.current = null;
+    socketOpenRef.current = false;
+    processorRef.current?.disconnect();
+    gainRef.current?.disconnect();
+    sourceRef.current?.disconnect();
+    processorRef.current = null;
+    gainRef.current = null;
+    sourceRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    void contextRef.current?.close();
+    contextRef.current = null;
+    packetizerRef.current = null;
+  }, []);
 
-  const toggleListening = useCallback(() => {
-    if (isStartingRef.current) return;
+  const stopBrowser = useCallback(() => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+  }, []);
 
-    // ALWAYS stop existing instance if it exists (prevents orphaned instances on rapid clicks)
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-    }
-
-    if (isListening) {
-      setIsListening(false);
-      return;
-    }
-
+  const startBrowser = useCallback(() => {
+    setSpeechMode('browser');
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionAPI) {
-      console.warn("Speech recognition is not supported in this browser.");
+      toast({ title: t('chat.voice.serviceError'), variant: 'destructive' });
+      setIsListening(false);
       return;
     }
-
-    try {
-      const recognition = new SpeechRecognitionAPI();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      // Derived purely from current UI locale
-      recognition.lang = i18n.language.startsWith('zh') ? 'zh-CN' : 'en-US';
-
-      // Capture message BEFORE starting recognition
-      const startMessage = messageRef.current.trim();
-      baseMessageRef.current = startMessage ? startMessage + ' ' : '';
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        isStartingRef.current = false;
-        finalTranscriptRef.current = ''; // Reset for new session
-      };
-
-      recognition.onresult = (event: SpeechRecognitionEvent) => {
-        if (recognitionRef.current !== recognition) return;
-        let interimTranscript = '';
-        // Start from resultIndex to avoid re-processing or duplicating old results
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const result = event.results[i];
-          if (result.isFinal) {
-            finalTranscriptRef.current += result[0].transcript;
-          } else {
-            interimTranscript += result[0].transcript;
-          }
-        }
-        setMessage(baseMessageRef.current + finalTranscriptRef.current + interimTranscript);
-      };
-
-      recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-        if (recognitionRef.current !== recognition) return;
-        if (event.error !== 'no-speech' && event.error !== 'aborted') {
-          console.error('Speech recognition error:', event.error);
-          if (event.error === 'not-allowed') {
-            toast({
-              title: t('chat.voice.permissionDenied'),
-              variant: 'destructive',
-            });
-          } else if (event.error === 'service-not-allowed' || event.error === 'network') {
-            toast({
-              title: t('chat.voice.serviceError'),
-              variant: 'destructive',
-            });
-          }
-        }
-        setIsListening(false);
-        isStartingRef.current = false;
-        recognitionRef.current = null;
-      };
-
-      recognition.onend = () => {
-        if (recognitionRef.current !== recognition) return;
-        isStartingRef.current = false; // Release lock in case onstart never fired
-        setIsListening(false);
-        recognitionRef.current = null;
-      };
-
-      recognitionRef.current = recognition;
-      isStartingRef.current = true;
-      recognition.start();
-    } catch (err) {
-      console.error('Failed to start speech recognition:', err);
-      isStartingRef.current = false;
-      recognitionRef.current = null; // Prevent stale ref if start() throws
+    const recognition = new SpeechRecognitionAPI();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = i18n.language.startsWith('zh') ? 'zh-CN' : 'en-US';
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let interim = '';
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        if (event.results[index].isFinal) finalTranscriptRef.current += event.results[index][0].transcript;
+        else interim += event.results[index][0].transcript;
+      }
+      partialTranscriptRef.current = interim;
+      publishTranscript();
+    };
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      if (event.error === 'not-allowed') toast({ title: t('chat.voice.permissionDenied'), variant: 'destructive' });
+      else if (event.error !== 'aborted' && event.error !== 'no-speech') {
+        toast({ title: t('chat.voice.serviceError'), variant: 'destructive' });
+      }
       setIsListening(false);
-    }
-  }, [isListening, toast, t, i18n.language, setMessage]);
+      recognitionRef.current = null;
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [i18n.language, publishTranscript, t, toast]);
 
-  // Clean up recognition on unmount
-  useEffect(() => {
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.abort(); // Terminate immediately without firing callbacks
-        recognitionRef.current = null;
+  const startBackend = useCallback(() => {
+    if (!canUseBackendSpeech()) {
+      startBrowser();
+      return;
+    }
+    setSpeechMode('backend');
+    const socket = new WebSocket(speechWebSocketUrl());
+    socketRef.current = socket;
+    let receivedText = false;
+    const fallback = () => {
+      if (stoppingRef.current) {
+        stopBackend(false);
+        stoppingRef.current = false;
+        setIsListening(false);
+        return;
+      }
+      stopBackend(false);
+      if (!receivedText) startBrowser();
+      else {
+        toast({ title: t('chat.voice.serviceError'), variant: 'destructive' });
+        setIsListening(false);
       }
     };
-  }, []);
+
+    socket.onopen = async () => {
+      socketOpenRef.current = true;
+      socket.send(JSON.stringify({ type: 'start' }));
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+        if (socketRef.current !== socket) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        const context = new AudioContext();
+        const source = context.createMediaStreamSource(stream);
+        const processor = context.createScriptProcessor(4096, 1, 1);
+        const gain = context.createGain();
+        gain.gain.value = 0;
+        const packetizer = new PcmPacketizer(context.sampleRate);
+        processor.onaudioprocess = (event) => {
+          packetizer.push(event.inputBuffer.getChannelData(0)).forEach((packet) => socket.send(packet));
+        };
+        source.connect(processor);
+        processor.connect(gain);
+        gain.connect(context.destination);
+        streamRef.current = stream;
+        contextRef.current = context;
+        sourceRef.current = source;
+        processorRef.current = processor;
+        gainRef.current = gain;
+        packetizerRef.current = packetizer;
+        setIsListening(true);
+      } catch {
+        fallback();
+      }
+    };
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as { type?: string; text?: string; code?: string };
+        if (data.type === 'partial' && data.text != null) {
+          receivedText = true;
+          partialTranscriptRef.current = data.text;
+          publishTranscript();
+        } else if (data.type === 'final' && data.text != null) {
+          receivedText = true;
+          finalTranscriptRef.current += data.text;
+          partialTranscriptRef.current = '';
+          publishTranscript();
+        } else if (data.type === 'error') {
+          if (data.code === 'no_speech') {
+            stopBackend(false);
+            stoppingRef.current = false;
+            setIsListening(false);
+          } else {
+            fallback();
+          }
+        } else if (data.type === 'done') {
+          stopBackend(false);
+          stoppingRef.current = false;
+          setIsListening(false);
+        }
+      } catch {
+        fallback();
+      }
+    };
+    socket.onerror = fallback;
+    socket.onclose = () => {
+      if (socketRef.current === socket) fallback();
+    };
+  }, [publishTranscript, startBrowser, stopBackend, t, toast]);
 
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-  }, []);
+    stoppingRef.current = true;
+    if (socketRef.current && socketOpenRef.current) {
+      const tail = packetizerRef.current?.flush();
+      if (tail) socketRef.current.send(tail);
+      socketRef.current.send(JSON.stringify({ type: 'stop' }));
+      processorRef.current?.disconnect();
+      gainRef.current?.disconnect();
+      sourceRef.current?.disconnect();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      void contextRef.current?.close();
+      contextRef.current = null;
+      packetizerRef.current = null;
+    } else {
+      stopBackend(false);
+      stoppingRef.current = false;
+    }
+    stopBrowser();
+    setIsListening(false);
+  }, [stopBackend, stopBrowser]);
 
-  return { isListening, toggleListening, stopListening };
+  const toggleListening = useCallback(() => {
+    if (isListening || socketRef.current || recognitionRef.current) {
+      stopListening();
+      return;
+    }
+    const current = messageRef.current.trim();
+    baseMessageRef.current = current ? `${current} ` : '';
+    finalTranscriptRef.current = '';
+    partialTranscriptRef.current = '';
+    startBackend();
+  }, [isListening, startBackend, stopListening]);
+
+  useEffect(() => {
+    if (isLoading) stopListening();
+  }, [isLoading, stopListening]);
+
+  useEffect(() => {
+    if (!isListening) return undefined;
+    const timeout = window.setTimeout(stopListening, MAX_RECORDING_MS);
+    return () => window.clearTimeout(timeout);
+  }, [isListening, stopListening]);
+
+  useEffect(() => () => stopListening(), [stopListening]);
+
+  return { isListening, speechMode, toggleListening, stopListening };
 }

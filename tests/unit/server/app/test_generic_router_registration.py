@@ -79,6 +79,10 @@ def test_default_api_has_no_finance_or_market_routes():
     ]
 
 
+def test_speech_relay_route_is_registered():
+    assert "/ws/v1/speech/transcribe" in {route.path for route in app.routes}
+
+
 def test_retired_finance_packages_are_not_shipped():
     """A disabled import path is not a removed product capability."""
     project_root = Path(__file__).parents[4]
