@@ -42,9 +42,9 @@ class ReviewEducationTaskRequest(BaseModel):
 
 
 class EducationTaskResponse(BaseModel):
-    task_id: str
-    task_rule_id: str
-    household_id: str
+    task_id: UUID
+    task_rule_id: UUID
+    household_id: UUID
     assigned_student_id: str
     occurrence_date: date
     due_at: datetime
@@ -57,18 +57,18 @@ class EducationTaskResponse(BaseModel):
 
 
 class EducationSubmissionResponse(BaseModel):
-    submission_id: str
-    task_id: str
+    submission_id: UUID
+    task_id: UUID
     sequence: int
     submission_text: str
     submitted_by_user_id: str | None = None
-    idempotency_key: str | None = None
+    idempotency_key: UUID | None = None
     created_at: datetime | None = None
 
 
 class EducationReviewResponse(BaseModel):
-    review_id: str
-    submission_id: str
+    review_id: UUID
+    submission_id: UUID
     decision: Literal["revision_requested", "completed"]
     feedback_text: str
     reviewed_by_user_id: str | None = None

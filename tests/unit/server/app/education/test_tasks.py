@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -69,10 +70,39 @@ async def test_parent_creates_a_materialized_task_instance(client):
 
 
 @pytest.mark.asyncio
+async def test_task_creation_serializes_database_uuid_values(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    persisted_task = {
+        **TASK,
+        "task_id": UUID(TASK["task_id"]),
+        "task_rule_id": UUID(TASK["task_rule_id"]),
+        "household_id": UUID(TASK["household_id"]),
+    }
+    with patch("src.server.app.education.router.create_task", new=AsyncMock(return_value=persisted_task)):
+        response = await client.post(
+            "/api/v1/education/tasks",
+            json={
+                "assigned_student_id": "student-1",
+                "title": "Read chapter one",
+                "due_at": "2026-08-09T09:00:00Z",
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()["task_id"] == TASK["task_id"]
+
+
+@pytest.mark.asyncio
 async def test_student_submits_with_an_idempotency_key(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "student-1"
-    submission = {"submission_id": "s-1", "task_id": TASK["task_id"], "sequence": 1, "submission_text": "Done"}
+    submission = {
+        "submission_id": "f7621c7f-32d9-4f91-ae5e-68b4a48ae449",
+        "task_id": TASK["task_id"],
+        "sequence": 1,
+        "submission_text": "Done",
+    }
     with patch("src.server.app.education.router.submit_task", new=AsyncMock(return_value=submission)) as submit:
         response = await client.post(
             f"/api/v1/education/tasks/{TASK['task_id']}/submissions",
@@ -88,7 +118,12 @@ async def test_student_submits_with_an_idempotency_key(client):
 async def test_parent_review_accepts_text_feedback_only(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
-    review = {"review_id": "r-1", "submission_id": "s-1", "decision": "revision_requested", "feedback_text": "Please add examples."}
+    review = {
+        "review_id": "f0227a9a-2d6c-4554-b89a-c1e2fecd1a91",
+        "submission_id": "f7621c7f-32d9-4f91-ae5e-68b4a48ae449",
+        "decision": "revision_requested",
+        "feedback_text": "Please add examples.",
+    }
     with patch("src.server.app.education.router.review_task", new=AsyncMock(return_value=review)) as review_task:
         response = await client.post(
             f"/api/v1/education/tasks/{TASK['task_id']}/reviews",
