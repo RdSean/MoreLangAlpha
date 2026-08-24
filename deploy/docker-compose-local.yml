@@ -1,8 +1,13 @@
-# Local machine deployment override.
-# This file is intentionally separate from the backend .env: the MinIO data
-# path is a Docker host concern and must not be passed into application services.
+# Optional Mac development override. Do not include this file to keep the
+# default deploy/volumes/* paths. It is intentionally separate from backend .env.
 
 services:
+  postgres:
+    volumes:
+      - /Users/seanlee/Downloads/LangOneMore/postgres:/var/lib/postgresql/data
+  redis:
+    volumes:
+      - /Users/seanlee/Downloads/LangOneMore/redis:/data
   minio:
     volumes:
-      - /Users/seanlee/Downloads/LangOneMore:/data
+      - /Users/seanlee/Downloads/LangOneMore/minio:/data
