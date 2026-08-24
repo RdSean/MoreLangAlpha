@@ -51,9 +51,10 @@ def test_env_overrides_timeouts(monkeypatch):
     assert cfg.read_timeout == 11
 
 
-def test_default_addressing_style_is_virtual():
+def test_default_addressing_style_is_virtual(monkeypatch):
     """Default addressing is virtual — most cloud S3-compatible providers need it,
     and it avoids boto3's path-style default doubling keys against the endpoint."""
+    monkeypatch.delenv("STORAGE_ADDRESSING_STYLE", raising=False)
     mod = _reload_module()
     mod._reset_client_for_test()
     captured: dict = {}

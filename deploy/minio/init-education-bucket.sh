@@ -6,6 +6,7 @@ set -eu
 
 : "${MINIO_ROOT_USER:?Set MINIO_ROOT_USER before enabling the education-storage profile}"
 : "${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD before enabling the education-storage profile}"
+: "${STORAGE_BUCKET_NAME:?Set STORAGE_BUCKET_NAME before enabling the education-storage profile}"
 
 attempt=0
 until mc alias set education "$MINIO_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
@@ -17,4 +18,4 @@ until mc alias set education "$MINIO_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_P
   sleep 1
 done
 
-mc mb --ignore-existing "education/$EDUCATION_ASSET_BUCKET" >/dev/null
+mc mb --ignore-existing "education/$STORAGE_BUCKET_NAME" >/dev/null
