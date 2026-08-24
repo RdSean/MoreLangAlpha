@@ -1,0 +1,7 @@
+# Copy and adapt this file for a NAS deployment. Keep the NAS path outside the
+# repository and grant the Docker daemon access to it.
+
+services:
+  minio:
+    volumes:
+      - /mnt/tank/langalpha/minio:/data

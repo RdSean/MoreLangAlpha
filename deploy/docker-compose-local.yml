@@ -1,0 +1,8 @@
+# Local machine deployment override.
+# This file is intentionally separate from the backend .env: the MinIO data
+# path is a Docker host concern and must not be passed into application services.
+
+services:
+  minio:
+    volumes:
+      - /Users/seanlee/Downloads/LangOneMore:/data

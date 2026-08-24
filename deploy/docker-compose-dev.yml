@@ -1,0 +1,67 @@
+# LangAlpha development services: backend and Vite frontend.
+# Middleware must already be running on the langalpha-middleware network.
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dev
+      args:
+        INSTALL_OBSERVABILITY: ${INSTALL_OBSERVABILITY:-${OTEL_EXPORTER_OTLP_ENDPOINT:+true}}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+    pids_limit: 8192
+    mem_limit: 8g
+    memswap_limit: 8g
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    env_file:
+      - ../.env
+    environment:
+      BYOK_ENCRYPTION_KEY: ${BYOK_ENCRYPTION_KEY:-langalpha-local-dev-encryption-key}
+      DB_HOST: postgres
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-redis}@redis:6379/0"
+    volumes:
+      - ../src:/app/src
+      - ../server.py:/app/server.py
+      - ../agent_config.yaml:/app/agent_config.yaml
+      - ../Dockerfile.sandbox:/app/Dockerfile.sandbox:ro
+      - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - ../config.yaml:/app/config.yaml
+      - ../mcp_servers:/app/mcp_servers
+      - ../skills:/app/skills
+      - ../scripts:/app/scripts
+      - ../alembic.ini:/app/alembic.ini
+      - ../migrations:/app/migrations
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install -g pnpm@10 && pnpm install --frozen-lockfile && pnpm dev --host 0.0.0.0"
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-5177}:5177"
+    environment:
+      VITE_PROXY_BACKEND: http://backend:8000
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ../web:/app
+      - langalpha-dev-frontend-node-modules:/app/node_modules
+      - langalpha-dev-frontend-pnpm-store:/app/.pnpm-store
+
+networks:
+  default:
+    name: langalpha-middleware
+    external: true
+
+volumes:
+  langalpha-dev-frontend-node-modules:
+  langalpha-dev-frontend-pnpm-store:
