@@ -53,7 +53,9 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-}
     volumes:
-      - langalpha-minio-data:/data
+      # Bind-mount so local development and NAS deployments can place MinIO data
+      # on a durable host directory instead of a Docker-managed named volume.
+      - ${MINIO_DATA_DIR:-./.local/minio-data}:/data
 
   minio-init:
     profiles: ["education-storage"]
@@ -137,6 +139,5 @@ services:
 volumes:
   langalpha-postgresql-data:
   langalpha-redis-data:
-  langalpha-minio-data:
   frontend_node_modules:
   frontend_pnpm_store:

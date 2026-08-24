@@ -5,6 +5,7 @@
 ### 教育附件存储配置
 
 - 统一使用 `STORAGE_BUCKET_NAME` 配置 MinIO 教育附件桶；Compose 初始化容器和应用运行时不再使用容易混淆的旧教育桶变量。
+- MinIO 数据改为通过 `MINIO_DATA_DIR` 挂载宿主机目录，默认回退到项目内 `.local/minio-data`，便于迁移到 NAS 上的 Docker 部署。
 
 ### 家庭作业创建
 
