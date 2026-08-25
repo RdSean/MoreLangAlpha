@@ -59,19 +59,36 @@ def test_tasks_and_rules_keep_nullable_classification_snapshots():
     assert "practice_source_code IS NULL OR type_code = 'practice'" in migration
 
 
-def test_workflow_migration_updates_completion_recurrence_submissions_and_reviews():
+def test_workflow_migration_keeps_legacy_writes_compatible_until_service_cutover():
     migration = _migration_source()
 
     assert "completed_at TIMESTAMPTZ" in migration
+    assert "mark_education_task_completed_on_submission" in migration
+    assert "AFTER INSERT ON education_task_submissions" in migration
+    assert "completed_at = COALESCE(tasks.completed_at, NEW.created_at)" in migration
     assert "idx_education_tasks_household_occurrence" in migration
+    assert "submission_kind VARCHAR(16) NOT NULL DEFAULT 'check_in'" in migration
+    assert "WHEN sequence = 1 THEN 'check_in'" in migration
+    assert "ELSE 'revision'" in migration
+    assert "DROP CONSTRAINT IF EXISTS education_task_reviews_submission_id_key" in migration
+    assert "'feedback', 'revision_requested', 'completed'" in migration
+    assert "CHECK (status IN ('open', 'completed', 'cancelled'))" not in migration
+    assert "CHECK (status IN ('open', 'submitted', 'revision_requested', 'completed', 'cancelled'))" in migration
+    assert "existing submitted/revision_requested states stay valid" in migration
+    assert "WHEN 'submitted' THEN 'completed'" not in migration
+    assert "WHEN 'revision_requested' THEN 'completed'" not in migration
+
+
+def test_workflow_migration_validates_weekly_iso_days_and_restores_review_uniqueness():
+    migration = _migration_source()
+
     assert "'once', 'daily', 'weekdays', 'weekly'" in migration
     assert "recurrence ->> 'frequency'" in migration
-    assert "submission_kind VARCHAR(16)" in migration
-    assert "'check_in'" in migration
-    assert "'revision'" in migration
-    assert "DROP CONSTRAINT IF EXISTS education_task_reviews_submission_id_key" in migration
-    assert "'feedback', 'revision_requested'" in migration
-    assert "WHEN 'completed' THEN 'feedback'" in migration
-    assert "WHEN 'submitted' THEN 'completed'" in migration
-    assert "WHEN 'revision_requested' THEN 'completed'" in migration
-    assert "'open', 'completed', 'cancelled'" in migration
+    assert "CREATE OR REPLACE FUNCTION education_weekdays_are_valid" in migration
+    assert "education_weekdays_are_valid(recurrence -> 'weekdays')" in migration
+    assert "jsonb_array_length(weekdays) = 0" in migration
+    assert "jsonb_array_elements_text(weekdays)" in migration
+    assert "'1', '2', '3', '4', '5', '6', '7'" in migration
+    assert "Downgrading loses append-only review history" in migration
+    assert "ROW_NUMBER() OVER" in migration
+    assert "ADD CONSTRAINT education_task_reviews_submission_id_key" in migration

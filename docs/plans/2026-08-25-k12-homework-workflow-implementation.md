@@ -38,9 +38,9 @@ Expected: FAIL because migration `035` does not exist.
 
 Create the student profile table and backfill one nullable profile row for each existing student membership. Add foreign keys from task snapshots to the seeded dictionary tables. Keep new snapshot columns nullable so old test data and old tasks can be upgraded without inventing classifications; new service code must require them for newly created tasks.
 
-Add `completed_at`. Convert old task statuses with an existing submission (`submitted`, `revision_requested`) to `completed`, using the latest submission timestamp as the completion time. Preserve `open` and `cancelled` tasks. Replace the task status check with `open`, `completed`, `cancelled`.
+Add `completed_at` and backfill it from the latest existing submission. Keep the legacy `submitted`, `revision_requested` status values and legacy `completed` review decision valid during this migration so the running service remains writable. A submission trigger records the first completion timestamp without changing the legacy task state. Add `submission_kind` with a non-null `check_in` default, then backfill later rows as `revision`.
 
-Add `submission_kind` with a backfill of `check_in` for sequence 1 and `revision` for later rows. Remove the review `submission_id` unique constraint and migrate the old `completed` decision to `feedback`; constrain decisions to `feedback` and `revision_requested`.
+Remove the review `submission_id` unique constraint so feedback can become append-only, but temporarily allow `feedback`, `revision_requested`, and legacy `completed` decisions. The strict task-status and review-decision cutover belongs with the Task 3 service change in a new `036` migration, after all writes use the new contract.
 
 **Step 4: Run migration tests**
 
@@ -101,6 +101,7 @@ git commit -m "feat: add student grade and homework dictionaries"
 - Modify: `src/server/services/education_tasks.py`
 - Modify: `src/server/app/education/models.py`
 - Modify: `src/server/app/education/router.py`
+- Create: `migrations/versions/036_finalize_education_homework_workflow.py`
 - Test: `tests/unit/server/services/test_education_tasks.py`
 
 **Step 1: Write failing state-machine tests**
@@ -124,6 +125,8 @@ Expected: FAIL against the old submitted/review transition.
 **Step 3: Implement service and database changes**
 
 Validate dictionary relationships in SQL and service boundaries. Extend recurrence materialization for weekdays and selected weekly weekdays. Add a dedicated check-in operation that creates the first immutable submission and atomically marks the task completed. Keep a separate append-submission operation for later revisions. Preserve idempotency and household asset ownership checks.
+
+Add migration `036` only after the service no longer writes legacy values: convert remaining legacy task states to `completed`, convert legacy review decision `completed` to `feedback`, restrict task status to `open` / `completed` / `cancelled`, and restrict review decisions to `feedback` / `revision_requested`. Remove the temporary completion trigger once the service owns the atomic state transition.
 
 **Step 4: Verify**
 
@@ -334,4 +337,3 @@ Document the independent completion semantics, multi-asset timeline, student gra
 git add CHANGELOG.md
 git commit -m "docs: record homework workflow release"
 ```
-
