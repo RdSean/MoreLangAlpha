@@ -2,15 +2,34 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
+from pathlib import Path
 from uuid import uuid4
 
+from alembic import command
+from alembic.config import Config
 import psycopg.errors
 from psycopg.types.json import Jsonb
 import pytest
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+
+async def _run_alembic(test_db_uri: str, revision: str, *, downgrade: bool) -> None:
+    project_root = Path(__file__).parents[2]
+    config = Config(str(project_root / "alembic.ini"))
+    config.set_main_option("script_location", str(project_root / "migrations"))
+    config.set_main_option(
+        "sqlalchemy.url",
+        test_db_uri.replace("postgresql://", "postgresql+psycopg://", 1),
+    )
+    await asyncio.to_thread(
+        command.downgrade if downgrade else command.upgrade,
+        config,
+        revision,
+    )
 
 
 async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_conn):
@@ -31,7 +50,7 @@ async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_co
     async with db_conn.transaction():
         async with db_conn.cursor() as cur:
             await cur.execute("SELECT version_num FROM alembic_version")
-            assert (await cur.fetchone())["version_num"] == "036"
+            assert (await cur.fetchone())["version_num"] == "037"
 
             await cur.executemany(
                 "INSERT INTO users (user_id, name) VALUES (%s, %s)",
@@ -76,6 +95,26 @@ async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_co
                 )
             await cur.execute("ROLLBACK TO SAVEPOINT invalid_weekdays")
 
+            for invalid_weekdays in ([None], ["1", None]):
+                await cur.execute("SAVEPOINT invalid_weekday_element")
+                with pytest.raises(psycopg.errors.CheckViolation):
+                    await cur.execute(
+                        """
+                        INSERT INTO education_task_rules (
+                            task_rule_id, household_id, created_by_user_id,
+                            assigned_student_id, title, recurrence, timezone
+                        ) VALUES (%s, %s, %s, %s, 'Invalid weekday element', %s::jsonb, 'Asia/Tokyo')
+                        """,
+                        (
+                            uuid4(),
+                            household_id,
+                            parent_id,
+                            student_id,
+                            Jsonb({**recurrence, "weekdays": invalid_weekdays}),
+                        ),
+                    )
+                await cur.execute("ROLLBACK TO SAVEPOINT invalid_weekday_element")
+
             await cur.execute(
                 """
                 INSERT INTO education_task_rules (
@@ -115,3 +154,137 @@ async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_co
                 """,
                 (review_id, submission_id, parent_id),
             )
+
+
+async def test_036_downgrade_converts_legacy_task_states(db_conn, test_db_uri):
+    parent_id = f"downgrade-parent-{uuid4()}"
+    student_id = f"downgrade-student-{uuid4()}"
+    household_id = uuid4()
+    submitted_rule_id = uuid4()
+    revision_rule_id = uuid4()
+    submitted_task_id = uuid4()
+    revision_task_id = uuid4()
+    submission_id = uuid4()
+    recurrence = {
+        "frequency": "once",
+        "start_date": date.today().isoformat(),
+        "due_time": "18:00",
+    }
+
+    await db_conn.execute("BEGIN")
+    async with db_conn.cursor() as cur:
+        await cur.execute("SELECT version_num FROM alembic_version")
+        assert (await cur.fetchone())["version_num"] == "037"
+        await cur.executemany(
+            "INSERT INTO users (user_id, name) VALUES (%s, %s)",
+            [(parent_id, "Downgrade Parent"), (student_id, "Downgrade Student")],
+        )
+        await cur.execute(
+            """
+            INSERT INTO education_households (household_id, name, model_owner_user_id)
+            VALUES (%s, 'Downgrade compatibility', %s)
+            """,
+            (household_id, parent_id),
+        )
+        await cur.executemany(
+            """
+            INSERT INTO education_memberships
+                (household_id, user_id, role, display_name)
+            VALUES (%s, %s, %s, %s)
+            """,
+            [
+                (household_id, parent_id, "parent", "Downgrade Parent"),
+                (household_id, student_id, "student", "Downgrade Student"),
+            ],
+        )
+        await cur.executemany(
+            """
+            INSERT INTO education_task_rules (
+                task_rule_id, household_id, created_by_user_id,
+                assigned_student_id, title, recurrence, timezone
+            ) VALUES (%s, %s, %s, %s, %s, %s::jsonb, 'Asia/Tokyo')
+            """,
+            [
+                (
+                    submitted_rule_id,
+                    household_id,
+                    parent_id,
+                    student_id,
+                    "Submitted legacy task",
+                    Jsonb(recurrence),
+                ),
+                (
+                    revision_rule_id,
+                    household_id,
+                    parent_id,
+                    student_id,
+                    "Revision legacy task",
+                    Jsonb(recurrence),
+                ),
+            ],
+        )
+        await cur.executemany(
+            """
+            INSERT INTO education_tasks (
+                task_id, task_rule_id, household_id, assigned_student_id,
+                occurrence_date, due_at, title, status
+            ) VALUES (%s, %s, %s, %s, CURRENT_DATE, NOW(), %s, %s)
+            """,
+            [
+                (
+                    submitted_task_id,
+                    submitted_rule_id,
+                    household_id,
+                    student_id,
+                    "Submitted legacy task",
+                    "open",
+                ),
+                (
+                    revision_task_id,
+                    revision_rule_id,
+                    household_id,
+                    student_id,
+                    "Revision legacy task",
+                    "revision_requested",
+                ),
+            ],
+        )
+        await cur.execute(
+            """
+            INSERT INTO education_task_submissions (
+                submission_id, task_id, submitted_by_user_id, sequence, submission_text
+            ) VALUES (%s, %s, %s, 1, '')
+            """,
+            (submission_id, submitted_task_id, student_id),
+        )
+        await cur.execute(
+            """
+            UPDATE education_tasks
+            SET status = 'submitted', completed_at = NULL
+            WHERE task_id = %s
+            """,
+            (submitted_task_id,),
+        )
+    await db_conn.execute("COMMIT")
+
+    try:
+        await _run_alembic(test_db_uri, "035", downgrade=True)
+
+        async with db_conn.cursor() as cur:
+            await cur.execute("SELECT version_num FROM alembic_version")
+            assert (await cur.fetchone())["version_num"] == "035"
+            await cur.execute(
+                """
+                SELECT task_id, status, completed_at
+                FROM education_tasks
+                WHERE task_id = ANY(%s::uuid[])
+                ORDER BY task_id
+                """,
+                ([submitted_task_id, revision_task_id],),
+            )
+            tasks = {row["task_id"]: row for row in await cur.fetchall()}
+            assert tasks[submitted_task_id]["status"] == "completed"
+            assert tasks[submitted_task_id]["completed_at"] is not None
+            assert tasks[revision_task_id]["status"] == "open"
+    finally:
+        await _run_alembic(test_db_uri, "head", downgrade=False)

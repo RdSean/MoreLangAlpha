@@ -161,7 +161,48 @@ def downgrade() -> None:
     op.execute(
         """
         ALTER TABLE education_tasks
-            DROP CONSTRAINT IF EXISTS education_tasks_status_check,
+            DROP CONSTRAINT IF EXISTS education_tasks_status_check
+        """
+    )
+    # Downgrading 036 is source-safe in this unmerged feature branch: no
+    # released database version depends on this downgrade body, and normalizing
+    # legacy states before restoring 035's strict constraint prevents rollback
+    # from failing on rows written while the compatibility bridge was active.
+    op.execute(
+        """
+        UPDATE education_tasks AS tasks
+        SET status = CASE tasks.status
+                WHEN 'submitted' THEN 'completed'
+                WHEN 'revision_requested' THEN 'completed'
+                ELSE tasks.status
+            END,
+            completed_at = COALESCE(
+                tasks.completed_at,
+                (
+                    SELECT MAX(submissions.created_at)
+                    FROM education_task_submissions AS submissions
+                    WHERE submissions.task_id = tasks.task_id
+                ),
+                tasks.created_at
+            )
+        WHERE tasks.status IN ('submitted', 'revision_requested')
+          AND EXISTS (
+              SELECT 1
+              FROM education_task_submissions AS submissions
+              WHERE submissions.task_id = tasks.task_id
+          )
+        """
+    )
+    op.execute(
+        """
+        UPDATE education_tasks
+        SET status = 'open'
+        WHERE status IN ('submitted', 'revision_requested')
+        """
+    )
+    op.execute(
+        """
+        ALTER TABLE education_tasks
             ADD CONSTRAINT education_tasks_status_check
                 CHECK (status IN ('open', 'completed', 'cancelled'))
         """

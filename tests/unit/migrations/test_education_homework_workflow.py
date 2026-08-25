@@ -20,6 +20,13 @@ def _workflow_compatibility_repair_source() -> str:
     ).read_text()
 
 
+def _workflow_weekday_repair_source() -> str:
+    return (
+        Path(__file__).parents[3]
+        / "migrations/versions/037_repair_education_weekday_validation.py"
+    ).read_text()
+
+
 def test_homework_workflow_migration_follows_seeded_dictionaries():
     migration_path = (
         Path(__file__).parents[3]
@@ -85,6 +92,10 @@ def test_workflow_repair_keeps_legacy_writes_compatible_until_service_cutover():
     assert "DROP CONSTRAINT IF EXISTS education_task_reviews_submission_id_key" in migration
     assert "'feedback', 'revision_requested', 'completed'" in migration
     assert "CHECK (status IN ('open', 'submitted', 'revision_requested', 'completed', 'cancelled'))" in migration
+    assert "Downgrading 036 is source-safe" in migration
+    assert "WHEN 'submitted' THEN 'completed'" in migration
+    assert "WHEN 'revision_requested' THEN 'completed'" in migration
+    assert "WHERE tasks.status IN ('submitted', 'revision_requested')" in migration
 
 
 def test_workflow_repair_validates_weekly_iso_days_and_restores_review_uniqueness():
@@ -100,3 +111,18 @@ def test_workflow_repair_validates_weekly_iso_days_and_restores_review_uniquenes
     assert "Downgrading loses append-only review history" in migration
     assert "ROW_NUMBER() OVER" in migration
     assert "ADD CONSTRAINT education_task_reviews_submission_id_key" in migration
+
+
+def test_weekday_repair_rejects_json_null_array_elements():
+    migration = _workflow_weekday_repair_source()
+    migration_globals = runpy.run_path(
+        str(
+            Path(__file__).parents[3]
+            / "migrations/versions/037_repair_education_weekday_validation.py"
+        )
+    )
+
+    assert migration_globals["revision"] == "037"
+    assert migration_globals["down_revision"] == "036"
+    assert "CREATE OR REPLACE FUNCTION education_weekdays_are_valid" in migration
+    assert "weekday.value IS NULL" in migration
