@@ -6,10 +6,17 @@ from pathlib import Path
 import runpy
 
 
-def _migration_source() -> str:
+def _workflow_schema_migration_source() -> str:
     return (
         Path(__file__).parents[3]
         / "migrations/versions/035_add_education_homework_workflow.py"
+    ).read_text()
+
+
+def _workflow_compatibility_repair_source() -> str:
+    return (
+        Path(__file__).parents[3]
+        / "migrations/versions/036_repair_education_homework_workflow.py"
     ).read_text()
 
 
@@ -26,7 +33,7 @@ def test_homework_workflow_migration_follows_seeded_dictionaries():
 
 
 def test_student_profiles_are_scoped_to_student_memberships_and_grades():
-    migration = _migration_source()
+    migration = _workflow_schema_migration_source()
 
     assert "CREATE TABLE education_student_profiles" in migration
     assert "user_id VARCHAR(255) NOT NULL" in migration
@@ -40,7 +47,7 @@ def test_student_profiles_are_scoped_to_student_memberships_and_grades():
 
 
 def test_tasks_and_rules_keep_nullable_classification_snapshots():
-    migration = _migration_source()
+    migration = _workflow_schema_migration_source()
 
     for table in ("education_task_rules", "education_tasks"):
         assert f"ALTER TABLE {table}" in migration
@@ -59,28 +66,29 @@ def test_tasks_and_rules_keep_nullable_classification_snapshots():
     assert "practice_source_code IS NULL OR type_code = 'practice'" in migration
 
 
-def test_workflow_migration_keeps_legacy_writes_compatible_until_service_cutover():
-    migration = _migration_source()
+def test_workflow_repair_keeps_legacy_writes_compatible_until_service_cutover():
+    migration = _workflow_compatibility_repair_source()
 
-    assert "completed_at TIMESTAMPTZ" in migration
+    migration_path = (
+        Path(__file__).parents[3]
+        / "migrations/versions/036_repair_education_homework_workflow.py"
+    )
+    migration_globals = runpy.run_path(str(migration_path))
+
+    assert migration_globals["revision"] == "036"
+    assert migration_globals["down_revision"] == "035"
+
     assert "mark_education_task_completed_on_submission" in migration
     assert "AFTER INSERT ON education_task_submissions" in migration
     assert "completed_at = COALESCE(tasks.completed_at, NEW.created_at)" in migration
-    assert "idx_education_tasks_household_occurrence" in migration
-    assert "submission_kind VARCHAR(16) NOT NULL DEFAULT 'check_in'" in migration
-    assert "WHEN sequence = 1 THEN 'check_in'" in migration
-    assert "ELSE 'revision'" in migration
+    assert "ALTER COLUMN submission_kind SET DEFAULT 'check_in'" in migration
     assert "DROP CONSTRAINT IF EXISTS education_task_reviews_submission_id_key" in migration
     assert "'feedback', 'revision_requested', 'completed'" in migration
-    assert "CHECK (status IN ('open', 'completed', 'cancelled'))" not in migration
     assert "CHECK (status IN ('open', 'submitted', 'revision_requested', 'completed', 'cancelled'))" in migration
-    assert "existing submitted/revision_requested states stay valid" in migration
-    assert "WHEN 'submitted' THEN 'completed'" not in migration
-    assert "WHEN 'revision_requested' THEN 'completed'" not in migration
 
 
-def test_workflow_migration_validates_weekly_iso_days_and_restores_review_uniqueness():
-    migration = _migration_source()
+def test_workflow_repair_validates_weekly_iso_days_and_restores_review_uniqueness():
+    migration = _workflow_compatibility_repair_source()
 
     assert "'once', 'daily', 'weekdays', 'weekly'" in migration
     assert "recurrence ->> 'frequency'" in migration

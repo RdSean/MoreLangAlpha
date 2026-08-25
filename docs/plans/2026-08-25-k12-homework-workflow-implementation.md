@@ -40,7 +40,7 @@ Create the student profile table and backfill one nullable profile row for each 
 
 Add `completed_at` and backfill it from the latest existing submission. Keep the legacy `submitted`, `revision_requested` status values and legacy `completed` review decision valid during this migration so the running service remains writable. A submission trigger records the first completion timestamp without changing the legacy task state. Add `submission_kind` with a non-null `check_in` default, then backfill later rows as `revision`.
 
-Remove the review `submission_id` unique constraint so feedback can become append-only, but temporarily allow `feedback`, `revision_requested`, and legacy `completed` decisions. The strict task-status and review-decision cutover belongs with the Task 3 service change in a new `036` migration, after all writes use the new contract.
+The forward repair migration `036` restores write compatibility for databases that have already applied this initial schema: it adds the `submission_kind` default, completion trigger, legacy status/review-decision allowances, and strict weekly weekday validation. The strict task-status and review-decision cutover belongs with the Task 3 service change in a new `037` migration, after all writes use the new contract.
 
 **Step 4: Run migration tests**
 
@@ -101,7 +101,7 @@ git commit -m "feat: add student grade and homework dictionaries"
 - Modify: `src/server/services/education_tasks.py`
 - Modify: `src/server/app/education/models.py`
 - Modify: `src/server/app/education/router.py`
-- Create: `migrations/versions/036_finalize_education_homework_workflow.py`
+- Create: `migrations/versions/037_finalize_education_homework_workflow.py`
 - Test: `tests/unit/server/services/test_education_tasks.py`
 
 **Step 1: Write failing state-machine tests**
@@ -126,7 +126,7 @@ Expected: FAIL against the old submitted/review transition.
 
 Validate dictionary relationships in SQL and service boundaries. Extend recurrence materialization for weekdays and selected weekly weekdays. Add a dedicated check-in operation that creates the first immutable submission and atomically marks the task completed. Keep a separate append-submission operation for later revisions. Preserve idempotency and household asset ownership checks.
 
-Add migration `036` only after the service no longer writes legacy values: convert remaining legacy task states to `completed`, convert legacy review decision `completed` to `feedback`, restrict task status to `open` / `completed` / `cancelled`, and restrict review decisions to `feedback` / `revision_requested`. Remove the temporary completion trigger once the service owns the atomic state transition.
+Add migration `037` only after the service no longer writes legacy values: convert remaining legacy task states to `completed`, convert legacy review decision `completed` to `feedback`, restrict task status to `open` / `completed` / `cancelled`, and restrict review decisions to `feedback` / `revision_requested`. Remove the temporary completion trigger once the service owns the atomic state transition.
 
 **Step 4: Verify**
 

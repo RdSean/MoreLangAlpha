@@ -65,3 +65,13 @@ def test_homework_workflow_migration_follows_seeded_dictionaries():
 
     assert migration["revision"] == "035"
     assert migration["down_revision"] == "034"
+
+
+def test_homework_workflow_repair_follows_initial_workflow_schema():
+    migration_dir = Path(__file__).parents[3] / "migrations/versions"
+    migration = runpy.run_path(
+        str(migration_dir / "036_repair_education_homework_workflow.py")
+    )
+
+    assert migration["revision"] == "036"
+    assert migration["down_revision"] == "035"
