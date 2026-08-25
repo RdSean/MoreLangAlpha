@@ -54,3 +54,14 @@ def test_household_shared_models_migration_follows_teaching_archive_staging():
 
     assert migration["revision"] == "033"
     assert migration["down_revision"] == "032"
+
+
+def test_homework_workflow_migration_follows_seeded_dictionaries():
+    """The workflow upgrade depends on the homework dictionary foreign keys."""
+    migration_dir = Path(__file__).parents[3] / "migrations/versions"
+    migration = runpy.run_path(
+        str(migration_dir / "035_add_education_homework_workflow.py")
+    )
+
+    assert migration["revision"] == "035"
+    assert migration["down_revision"] == "034"
