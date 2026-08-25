@@ -94,6 +94,22 @@ async def test_task_creation_serializes_database_uuid_values(client):
 
 
 @pytest.mark.asyncio
+async def test_task_list_serializes_migrated_feedback_review_decision(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    migrated_task = {
+        **TASK,
+        "latest_review_decision": "feedback",
+        "latest_feedback_text": "Legacy completed review",
+    }
+    with patch("src.server.app.education.router.list_tasks", new=AsyncMock(return_value=[migrated_task])):
+        response = await client.get("/api/v1/education/tasks")
+
+    assert response.status_code == 200
+    assert response.json()[0]["latest_review_decision"] == "feedback"
+
+
+@pytest.mark.asyncio
 async def test_student_submits_with_an_idempotency_key(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "student-1"

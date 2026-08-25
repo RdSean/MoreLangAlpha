@@ -27,6 +27,13 @@ def _workflow_weekday_repair_source() -> str:
     ).read_text()
 
 
+def _workflow_revalidation_source() -> str:
+    return (
+        Path(__file__).parents[3]
+        / "migrations/versions/038_revalidate_education_homework_recurrence.py"
+    ).read_text()
+
+
 def test_homework_workflow_migration_follows_seeded_dictionaries():
     migration_path = (
         Path(__file__).parents[3]
@@ -126,3 +133,20 @@ def test_weekday_repair_rejects_json_null_array_elements():
     assert migration_globals["down_revision"] == "036"
     assert "CREATE OR REPLACE FUNCTION education_weekdays_are_valid" in migration
     assert "weekday.value IS NULL" in migration
+
+
+def test_revalidation_migration_rejects_dirty_weekly_recurrences_before_rebuild():
+    migration = _workflow_revalidation_source()
+    migration_globals = runpy.run_path(
+        str(
+            Path(__file__).parents[3]
+            / "migrations/versions/038_revalidate_education_homework_recurrence.py"
+        )
+    )
+
+    assert migration_globals["revision"] == "038"
+    assert migration_globals["down_revision"] == "037"
+    assert "Cannot apply migration 038: invalid weekly recurrence metadata exists" in migration
+    assert "NOT education_weekdays_are_valid(recurrence -> 'weekdays')" in migration
+    assert "DROP CONSTRAINT IF EXISTS education_task_rules_recurrence_frequency_check" in migration
+    assert "ADD CONSTRAINT education_task_rules_recurrence_frequency_check" in migration

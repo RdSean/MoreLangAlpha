@@ -11,7 +11,7 @@ export interface EducationTask {
   description: string;
   status: EducationTaskStatus;
   created_at?: string;
-  latest_review_decision?: 'revision_requested' | 'completed';
+  latest_review_decision?: 'feedback' | 'revision_requested' | 'completed';
   latest_feedback_text?: string;
 }
 

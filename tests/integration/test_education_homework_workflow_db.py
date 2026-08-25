@@ -12,6 +12,7 @@ from alembic.config import Config
 import psycopg.errors
 from psycopg.types.json import Jsonb
 import pytest
+from sqlalchemy.exc import DBAPIError
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -50,7 +51,7 @@ async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_co
     async with db_conn.transaction():
         async with db_conn.cursor() as cur:
             await cur.execute("SELECT version_num FROM alembic_version")
-            assert (await cur.fetchone())["version_num"] == "037"
+            assert (await cur.fetchone())["version_num"] == "038"
 
             await cur.executemany(
                 "INSERT INTO users (user_id, name) VALUES (%s, %s)",
@@ -174,7 +175,7 @@ async def test_036_downgrade_converts_legacy_task_states(db_conn, test_db_uri):
     await db_conn.execute("BEGIN")
     async with db_conn.cursor() as cur:
         await cur.execute("SELECT version_num FROM alembic_version")
-        assert (await cur.fetchone())["version_num"] == "037"
+        assert (await cur.fetchone())["version_num"] == "038"
         await cur.executemany(
             "INSERT INTO users (user_id, name) VALUES (%s, %s)",
             [(parent_id, "Downgrade Parent"), (student_id, "Downgrade Student")],
@@ -286,5 +287,163 @@ async def test_036_downgrade_converts_legacy_task_states(db_conn, test_db_uri):
             assert tasks[submitted_task_id]["status"] == "completed"
             assert tasks[submitted_task_id]["completed_at"] is not None
             assert tasks[revision_task_id]["status"] == "open"
+    finally:
+        await _run_alembic(test_db_uri, "head", downgrade=False)
+
+
+async def test_038_upgrade_rejects_dirty_weekly_recurrence_from_036(db_conn, test_db_uri):
+    parent_id = f"dirty-parent-{uuid4()}"
+    student_id = f"dirty-student-{uuid4()}"
+    household_id = uuid4()
+    rule_id = uuid4()
+    dirty_recurrence = {
+        "frequency": "weekly",
+        "start_date": date.today().isoformat(),
+        "due_time": "18:00",
+        "weekdays": ["1", None],
+    }
+
+    await _run_alembic(test_db_uri, "036", downgrade=True)
+    try:
+        async with db_conn.transaction():
+            async with db_conn.cursor() as cur:
+                await cur.executemany(
+                    "INSERT INTO users (user_id, name) VALUES (%s, %s)",
+                    [(parent_id, "Dirty Parent"), (student_id, "Dirty Student")],
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_households (household_id, name, model_owner_user_id)
+                    VALUES (%s, 'Dirty recurrence', %s)
+                    """,
+                    (household_id, parent_id),
+                )
+                await cur.executemany(
+                    """
+                    INSERT INTO education_memberships
+                        (household_id, user_id, role, display_name)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    [
+                        (household_id, parent_id, "parent", "Dirty Parent"),
+                        (household_id, student_id, "student", "Dirty Student"),
+                    ],
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_task_rules (
+                        task_rule_id, household_id, created_by_user_id,
+                        assigned_student_id, title, recurrence, timezone
+                    ) VALUES (%s, %s, %s, %s, 'Dirty recurrence', %s::jsonb, 'Asia/Tokyo')
+                    """,
+                    (rule_id, household_id, parent_id, student_id, Jsonb(dirty_recurrence)),
+                )
+
+        with pytest.raises(DBAPIError, match="invalid weekly recurrence metadata"):
+            await _run_alembic(test_db_uri, "038", downgrade=False)
+    finally:
+        async with db_conn.cursor() as cur:
+            await cur.execute("DELETE FROM education_task_rules WHERE task_rule_id = %s", (rule_id,))
+        await _run_alembic(test_db_uri, "head", downgrade=False)
+
+
+async def test_legacy_completed_review_upgrades_and_serializes_in_task_list(db_conn, test_db_uri):
+    from src.server.app.education.models import EducationTaskResponse
+
+    parent_id = f"legacy-parent-{uuid4()}"
+    student_id = f"legacy-student-{uuid4()}"
+    household_id = uuid4()
+    rule_id = uuid4()
+    task_id = uuid4()
+    submission_id = uuid4()
+    review_id = uuid4()
+    recurrence = {
+        "frequency": "once",
+        "start_date": date.today().isoformat(),
+        "due_time": "18:00",
+    }
+
+    await _run_alembic(test_db_uri, "034", downgrade=True)
+    try:
+        async with db_conn.transaction():
+            async with db_conn.cursor() as cur:
+                await cur.executemany(
+                    "INSERT INTO users (user_id, name) VALUES (%s, %s)",
+                    [(parent_id, "Legacy Parent"), (student_id, "Legacy Student")],
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_households (household_id, name, model_owner_user_id)
+                    VALUES (%s, 'Legacy review', %s)
+                    """,
+                    (household_id, parent_id),
+                )
+                await cur.executemany(
+                    """
+                    INSERT INTO education_memberships
+                        (household_id, user_id, role, display_name)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    [
+                        (household_id, parent_id, "parent", "Legacy Parent"),
+                        (household_id, student_id, "student", "Legacy Student"),
+                    ],
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_task_rules (
+                        task_rule_id, household_id, created_by_user_id,
+                        assigned_student_id, title, recurrence, timezone
+                    ) VALUES (%s, %s, %s, %s, 'Legacy task', %s::jsonb, 'Asia/Tokyo')
+                    """,
+                    (rule_id, household_id, parent_id, student_id, Jsonb(recurrence)),
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_tasks (
+                        task_id, task_rule_id, household_id, assigned_student_id,
+                        occurrence_date, due_at, title, status
+                    ) VALUES (%s, %s, %s, %s, CURRENT_DATE, NOW(), 'Legacy task', 'submitted')
+                    """,
+                    (task_id, rule_id, household_id, student_id),
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_task_submissions (
+                        submission_id, task_id, submitted_by_user_id, sequence, submission_text
+                    ) VALUES (%s, %s, %s, 1, '')
+                    """,
+                    (submission_id, task_id, student_id),
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_task_reviews (
+                        review_id, submission_id, reviewed_by_user_id, decision, feedback_text
+                    ) VALUES (%s, %s, %s, 'completed', 'Legacy completed review')
+                    """,
+                    (review_id, submission_id, parent_id),
+                )
+
+        await _run_alembic(test_db_uri, "head", downgrade=False)
+        async with db_conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT tasks.task_id, tasks.task_rule_id, tasks.household_id,
+                       tasks.assigned_student_id, tasks.occurrence_date, tasks.due_at,
+                       tasks.title, tasks.description, tasks.status, tasks.created_at,
+                       reviews.decision AS latest_review_decision,
+                       reviews.feedback_text AS latest_feedback_text
+                FROM education_tasks AS tasks
+                JOIN education_task_submissions AS submissions ON submissions.task_id = tasks.task_id
+                JOIN education_task_reviews AS reviews ON reviews.submission_id = submissions.submission_id
+                WHERE tasks.task_id = %s
+                """,
+                (task_id,),
+            )
+            task = dict(await cur.fetchone())
+
+        response = EducationTaskResponse.model_validate(task)
+        assert response.latest_review_decision == "feedback"
+        assert response.model_dump(mode="json")["latest_review_decision"] == "feedback"
     finally:
         await _run_alembic(test_db_uri, "head", downgrade=False)
