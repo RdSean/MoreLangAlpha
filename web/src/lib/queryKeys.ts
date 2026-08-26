@@ -85,6 +85,7 @@ export const queryKeys = {
   },
   education: {
     all: ['education'],
+    dictionaries: () => [...queryKeys.education.all, 'dictionaries'],
     tasks: () => [...queryKeys.education.all, 'tasks'],
     assets: () => [...queryKeys.education.all, 'assets'],
     textbooks: () => [...queryKeys.education.all, 'textbooks'],

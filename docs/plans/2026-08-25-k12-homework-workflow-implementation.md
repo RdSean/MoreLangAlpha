@@ -128,6 +128,8 @@ Validate dictionary relationships in SQL and service boundaries. Extend recurren
 
 Add migration `039` only after the service no longer writes legacy values: convert remaining legacy task states to `completed`, convert legacy review decision `completed` to `feedback`, restrict task status to `open` / `completed` / `cancelled`, and restrict review decisions to `feedback` / `revision_requested`. Remove the temporary completion trigger once the service owns the atomic state transition.
 
+**Forward repair after Task 3:** Do not rewrite applied migration `039`. Migration `040_repair_open_education_tasks_with_submissions.py` repairs compatibility-period rows that remained `open` despite having submissions, by marking them `completed` and using the earliest submission timestamp when `completed_at` is absent. Its integration coverage must seed the row at revision `038` and upgrade through head.
+
 **Step 4: Verify**
 
 Run the focused service tests, existing education task tests, and `uv run ruff check src/server/database/education_tasks.py src/server/services/education_tasks.py src/server/app/education`.

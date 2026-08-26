@@ -14,6 +14,14 @@ export function useEducationTasks() {
   });
 }
 
+export function useEducationHomeworkDictionaries() {
+  return useQuery({
+    queryKey: queryKeys.education.dictionaries(),
+    queryFn: educationApi.getEducationHomeworkDictionaries,
+    staleTime: Infinity,
+  });
+}
+
 export function useEducationAssets() {
   return useQuery({
     queryKey: queryKeys.education.assets(),
@@ -36,8 +44,9 @@ export function useEducationTaskMutations() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
   return {
     create: useMutation({ mutationFn: educationApi.createEducationTask, onSuccess: invalidate }),
-    submit: useMutation({ mutationFn: ({ taskId, ...input }: { taskId: string } & Parameters<typeof educationApi.submitEducationTask>[1]) => educationApi.submitEducationTask(taskId, input), onSuccess: invalidate }),
-    review: useMutation({ mutationFn: ({ taskId, decision, feedbackText }: { taskId: string; decision: 'revision_requested' | 'completed'; feedbackText: string }) => educationApi.reviewEducationTask(taskId, decision, feedbackText), onSuccess: invalidate }),
+    checkIn: useMutation({ mutationFn: ({ taskId, ...input }: { taskId: string } & Parameters<typeof educationApi.checkInEducationTask>[1]) => educationApi.checkInEducationTask(taskId, input), onSuccess: invalidate }),
+    appendRevision: useMutation({ mutationFn: ({ taskId, ...input }: { taskId: string } & Parameters<typeof educationApi.appendEducationTaskRevision>[1]) => educationApi.appendEducationTaskRevision(taskId, input), onSuccess: invalidate }),
+    review: useMutation({ mutationFn: ({ taskId, decision, feedbackText }: { taskId: string; decision: 'feedback' | 'revision_requested'; feedbackText: string }) => educationApi.reviewEducationTask(taskId, decision, feedbackText), onSuccess: invalidate }),
     cancel: useMutation({ mutationFn: educationApi.cancelEducationTask, onSuccess: invalidate }),
   };
 }

@@ -51,7 +51,7 @@ async def test_homework_final_workflow_rejects_legacy_writes(db_conn):
     async with db_conn.transaction():
         async with db_conn.cursor() as cur:
             await cur.execute("SELECT version_num FROM alembic_version")
-            assert (await cur.fetchone())["version_num"] == "039"
+            assert (await cur.fetchone())["version_num"] == "040"
 
             await cur.executemany(
                 "INSERT INTO users (user_id, name) VALUES (%s, %s)",
@@ -172,6 +172,93 @@ async def test_homework_final_workflow_rejects_legacy_writes(db_conn):
                     (review_id, submission_id, parent_id),
                 )
             await cur.execute("ROLLBACK TO SAVEPOINT legacy_review_decision")
+
+
+async def test_038_open_task_with_submission_upgrades_to_completed_at_head(db_conn, test_db_uri):
+    parent_id = f"open-parent-{uuid4()}"
+    student_id = f"open-student-{uuid4()}"
+    household_id = uuid4()
+    rule_id = uuid4()
+    task_id = uuid4()
+    submission_id = uuid4()
+    recurrence = {
+        "frequency": "once",
+        "start_date": date.today().isoformat(),
+        "due_time": "18:00",
+    }
+
+    await _run_alembic(test_db_uri, "038", downgrade=True)
+    try:
+        async with db_conn.transaction():
+            async with db_conn.cursor() as cur:
+                await cur.executemany(
+                    "INSERT INTO users (user_id, name) VALUES (%s, %s)",
+                    [(parent_id, "Open Parent"), (student_id, "Open Student")],
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_households (household_id, name, model_owner_user_id)
+                    VALUES (%s, 'Open submission repair', %s)
+                    """,
+                    (household_id, parent_id),
+                )
+                await cur.executemany(
+                    """
+                    INSERT INTO education_memberships
+                        (household_id, user_id, role, display_name)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    [
+                        (household_id, parent_id, "parent", "Open Parent"),
+                        (household_id, student_id, "student", "Open Student"),
+                    ],
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_task_rules (
+                        task_rule_id, household_id, created_by_user_id,
+                        assigned_student_id, title, recurrence, timezone
+                    ) VALUES (%s, %s, %s, %s, 'Open legacy task', %s::jsonb, 'Asia/Tokyo')
+                    """,
+                    (rule_id, household_id, parent_id, student_id, Jsonb(recurrence)),
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_tasks (
+                        task_id, task_rule_id, household_id, assigned_student_id,
+                        occurrence_date, due_at, title, status
+                    ) VALUES (%s, %s, %s, %s, CURRENT_DATE, NOW(), 'Open legacy task', 'open')
+                    """,
+                    (task_id, rule_id, household_id, student_id),
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_task_submissions (
+                        submission_id, task_id, submitted_by_user_id, sequence, submission_text
+                    ) VALUES (%s, %s, %s, 1, 'Done')
+                    RETURNING created_at
+                    """,
+                    (submission_id, task_id, student_id),
+                )
+                submission_created_at = (await cur.fetchone())["created_at"]
+                # This simulates the old service path that preserved `open`
+                # after inserting its submission despite the temporary trigger.
+                await cur.execute(
+                    "UPDATE education_tasks SET status = 'open', completed_at = NULL WHERE task_id = %s",
+                    (task_id,),
+                )
+
+        await _run_alembic(test_db_uri, "head", downgrade=False)
+        async with db_conn.cursor() as cur:
+            await cur.execute(
+                "SELECT status, completed_at FROM education_tasks WHERE task_id = %s",
+                (task_id,),
+            )
+            task = await cur.fetchone()
+        assert task["status"] == "completed"
+        assert task["completed_at"] == submission_created_at
+    finally:
+        await _run_alembic(test_db_uri, "head", downgrade=False)
 
 
 async def test_036_downgrade_converts_legacy_task_states(db_conn, test_db_uri):

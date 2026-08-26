@@ -100,6 +100,12 @@ async def create_task(
 
     timezone_name = context["timezone"]
     local_due = due_at.astimezone(ZoneInfo(timezone_name))
+    if (
+        frequency == "weekly"
+        and normalized_weekdays is not None
+        and str(local_due.isoweekday()) not in normalized_weekdays
+    ):
+        raise EducationTaskError("The initial due date must be one of the selected weekly weekdays")
     recurrence: dict[str, Any] = {
         "frequency": frequency,
         "start_date": local_due.date().isoformat(),

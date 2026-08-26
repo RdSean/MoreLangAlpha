@@ -1,8 +1,13 @@
 import { api } from '@/api/client';
-import type { CreateEducationTaskInput, EducationAsset, EducationMember, EducationTask, LearningAnswer, LearningAssignment, LearningChatSpace, ParentLearningRecords, ParentLearningTranscript, StudentLearning, SubmitEducationTaskInput, TeachingChapterAsset, TeachingJob, TeachingPackageAssets, TeachingReviewAssetKind, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookPublication } from './types';
+import type { CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, LearningAnswer, LearningAssignment, LearningChatSpace, ParentLearningRecords, ParentLearningTranscript, StudentLearning, SubmitEducationTaskInput, TeachingChapterAsset, TeachingJob, TeachingPackageAssets, TeachingReviewAssetKind, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookPublication } from './types';
 
 export async function listEducationTasks(): Promise<EducationTask[]> {
   const { data } = await api.get<EducationTask[]>('/api/v1/education/tasks');
+  return data;
+}
+
+export async function getEducationHomeworkDictionaries(): Promise<EducationHomeworkDictionaries> {
+  const { data } = await api.get<EducationHomeworkDictionaries>('/api/v1/education/dictionaries');
   return data;
 }
 
@@ -21,11 +26,15 @@ export async function createEducationTask(input: CreateEducationTaskInput): Prom
   return data;
 }
 
-export async function submitEducationTask(taskId: string, input: SubmitEducationTaskInput): Promise<void> {
-  await api.post(`/api/v1/education/tasks/${taskId}/submissions`, input);
+export async function checkInEducationTask(taskId: string, input: SubmitEducationTaskInput): Promise<void> {
+  await api.post(`/api/v1/education/tasks/${taskId}/check-in`, input);
 }
 
-export async function reviewEducationTask(taskId: string, decision: 'revision_requested' | 'completed', feedbackText: string): Promise<void> {
+export async function appendEducationTaskRevision(taskId: string, input: SubmitEducationTaskInput): Promise<void> {
+  await api.post(`/api/v1/education/tasks/${taskId}/revisions`, input);
+}
+
+export async function reviewEducationTask(taskId: string, decision: 'feedback' | 'revision_requested', feedbackText: string): Promise<void> {
   await api.post(`/api/v1/education/tasks/${taskId}/reviews`, {
     decision,
     feedback_text: feedbackText,

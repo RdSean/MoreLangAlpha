@@ -41,6 +41,13 @@ def _workflow_finalization_source() -> str:
     ).read_text()
 
 
+def _workflow_open_submission_repair_source() -> str:
+    return (
+        Path(__file__).parents[3]
+        / "migrations/versions/040_repair_open_education_tasks_with_submissions.py"
+    ).read_text()
+
+
 def test_homework_workflow_migration_follows_seeded_dictionaries():
     migration_path = (
         Path(__file__).parents[3]
@@ -177,3 +184,19 @@ def test_finalization_migration_removes_legacy_states_and_completion_trigger():
     assert "tasks.status IN ('submitted', 'revision_requested', 'completed')" in migration
     assert "FOREIGN KEY (subject_code, type_code)" in migration
     assert "REFERENCES education_subject_homework_types(subject_code, type_code)" in migration
+
+
+def test_open_submission_repair_completes_legacy_open_tasks_from_first_submission():
+    migration = _workflow_open_submission_repair_source()
+    migration_globals = runpy.run_path(
+        str(
+            Path(__file__).parents[3]
+            / "migrations/versions/040_repair_open_education_tasks_with_submissions.py"
+        )
+    )
+
+    assert migration_globals["revision"] == "040"
+    assert migration_globals["down_revision"] == "039"
+    assert "WHERE tasks.status = 'open'" in migration
+    assert "SET status = 'completed'" in migration
+    assert "MIN(submissions.created_at)" in migration

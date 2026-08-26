@@ -9,12 +9,25 @@ const state = vi.hoisted(() => ({
   members: [] as Array<{ user_id: string; name: string; role: 'parent' | 'student' }>,
   tasks: [] as Array<Record<string, unknown>>,
   create: vi.fn(),
-  submit: vi.fn(),
+  checkIn: vi.fn(),
+  appendRevision: vi.fn(),
   review: vi.fn(),
   cancel: vi.fn(),
   upload: vi.fn(),
   membersEnabled: vi.fn(),
 }));
+
+const dictionaries = {
+  subjects: [
+    { code: 'chinese', name: '语文', color: '#D95D39', sort_order: 1, homework_types: [{ code: 'read', name: '阅读', sort_order: 1 }] },
+    { code: 'math', name: '数学', color: '#277DA1', sort_order: 2, homework_types: [{ code: 'practice', name: '练习', sort_order: 1 }] },
+  ],
+  grade_levels: [],
+  practice_sources: [
+    { code: 'schoolwork', name: '校内作业', sort_order: 1 },
+    { code: 'homework', name: '校外作业', sort_order: 2 },
+  ],
+};
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ member: state.member }),
@@ -26,6 +39,7 @@ vi.mock('../api', () => ({
 
 vi.mock('../queries', () => ({
   useEducationTasks: () => ({ data: state.tasks, isLoading: false }),
+  useEducationHomeworkDictionaries: () => ({ data: dictionaries, isLoading: false }),
   useEducationMembers: (enabled: boolean) => {
     state.membersEnabled(enabled);
     return { data: state.members };
@@ -33,13 +47,14 @@ vi.mock('../queries', () => ({
   useLearningAssignments: () => ({ data: [], isLoading: false }),
   useEducationTaskMutations: () => ({
     create: { mutateAsync: state.create, isPending: false },
-    submit: { mutateAsync: state.submit, isPending: false },
+    checkIn: { mutateAsync: state.checkIn, isPending: false },
+    appendRevision: { mutateAsync: state.appendRevision, isPending: false },
     review: { mutateAsync: state.review, isPending: false },
     cancel: { mutateAsync: state.cancel, isPending: false },
   }),
 }));
 
-const task = (status: 'open' | 'submitted' | 'revision_requested' | 'completed' | 'cancelled') => ({
+const task = (status: 'open' | 'completed' | 'cancelled') => ({
   task_id: 'task-1',
   task_rule_id: 'rule-1',
   household_id: 'household-1',
@@ -56,7 +71,8 @@ beforeEach(() => {
   state.members = [];
   state.tasks = [];
   state.create.mockReset().mockResolvedValue(undefined);
-  state.submit.mockReset().mockResolvedValue(undefined);
+  state.checkIn.mockReset().mockResolvedValue(undefined);
+  state.appendRevision.mockReset().mockResolvedValue(undefined);
   state.review.mockReset().mockResolvedValue(undefined);
   state.cancel.mockReset().mockResolvedValue(undefined);
   state.upload.mockReset().mockResolvedValue({ asset_id: 'asset-1' });
@@ -65,10 +81,10 @@ beforeEach(() => {
 });
 
 describe('EducationPage', () => {
-  it('lets a parent create a task for a household student', async () => {
+  it('creates a classified practice task with its required source', async () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student' }];
-    state.tasks = [task('submitted')];
+    state.tasks = [task('completed')];
 
     render(<MemoryRouter><EducationPage /></MemoryRouter>);
 
@@ -78,21 +94,26 @@ describe('EducationPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
     fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
-    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '新的阅读任务' } });
+    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'math' } });
+    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'practice' } });
+    fireEvent.change(screen.getByLabelText('练习来源'), { target: { value: 'schoolwork' } });
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '新的练习任务' } });
     fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
 
     await waitFor(() => expect(state.create).toHaveBeenCalledWith(expect.objectContaining({
       assigned_student_id: 'student-1',
-      title: '新的阅读任务',
+      subject_code: 'math',
+      type_code: 'practice',
+      practice_source_code: 'schoolwork',
       frequency: 'once',
       material_asset_ids: [],
     })));
   });
 
-  it('sends text-only parent feedback for a submitted task', async () => {
+  it('sends allowed text-only parent feedback for a completed task', async () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
-    state.tasks = [task('submitted')];
+    state.tasks = [task('completed')];
 
     render(<MemoryRouter><EducationPage /></MemoryRouter>);
 
@@ -107,48 +128,37 @@ describe('EducationPage', () => {
     }));
   });
 
-  it('limits students to submission and resubmission actions', async () => {
+  it('lets a student check in an open task without text or attachments', async () => {
     state.member = { user_id: 'student-1', name: '学生', role: 'student' };
-    state.tasks = [task('revision_requested')];
+    state.tasks = [task('open')];
 
     render(<MemoryRouter><EducationPage /></MemoryRouter>);
 
-    expect(screen.getByRole('heading', { name: '我的作业' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '创建作业' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '反馈' })).not.toBeInTheDocument();
-    expect(state.membersEnabled).toHaveBeenCalledWith(false);
+    fireEvent.click(screen.getByRole('button', { name: '完成打卡' }));
 
-    fireEvent.click(screen.getByRole('button', { name: '提交作业' }));
-    fireEvent.change(screen.getByPlaceholderText('写下完成情况'), { target: { value: '已根据反馈修改。' } });
-    const attachment = new File(['完成内容'], 'homework.pdf', { type: 'application/pdf' });
-    fireEvent.change(screen.getByLabelText('附件'), { target: { files: [attachment] } });
-    fireEvent.click(screen.getByRole('button', { name: '提交' }));
-
-    await waitFor(() => expect(state.upload).toHaveBeenCalledWith(attachment));
-    await waitFor(() => expect(state.submit).toHaveBeenCalledWith({
+    await waitFor(() => expect(state.checkIn).toHaveBeenCalledWith({
       taskId: 'task-1',
-      submission_text: '已根据反馈修改。',
+      submission_text: '',
       idempotency_key: 'submission-idempotency-key',
-      asset_ids: ['asset-1'],
+      asset_ids: [],
     }));
   });
 
-  it('submits from an HTTP context without crypto.randomUUID', async () => {
+  it('lets a student append a meaningful revision after completion', async () => {
     state.member = { user_id: 'student-1', name: '学生', role: 'student' };
-    state.tasks = [task('open')];
-    vi.stubGlobal('crypto', {});
+    state.tasks = [task('completed')];
 
     render(<MemoryRouter><EducationPage /></MemoryRouter>);
 
-    fireEvent.click(screen.getByRole('button', { name: '提交作业' }));
-    fireEvent.change(screen.getByPlaceholderText('写下完成情况'), { target: { value: '已完成。' } });
-    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+    fireEvent.click(screen.getByRole('button', { name: '补充提交' }));
+    fireEvent.change(screen.getByPlaceholderText('补充说明或修改内容'), { target: { value: '已补充内容。' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交补充' }));
 
-    await waitFor(() => expect(state.submit).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(state.appendRevision).toHaveBeenCalledWith({
       taskId: 'task-1',
-      submission_text: '已完成。',
-      idempotency_key: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+      submission_text: '已补充内容。',
+      idempotency_key: 'submission-idempotency-key',
       asset_ids: [],
-    })));
+    }));
   });
 });

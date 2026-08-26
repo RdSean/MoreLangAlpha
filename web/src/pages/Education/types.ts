@@ -1,4 +1,4 @@
-export type EducationTaskStatus = 'open' | 'submitted' | 'revision_requested' | 'completed' | 'cancelled';
+export type EducationTaskStatus = 'open' | 'completed' | 'cancelled';
 
 export interface EducationTask {
   task_id: string;
@@ -9,9 +9,14 @@ export interface EducationTask {
   due_at: string;
   title: string;
   description: string;
+  subject_code?: string | null;
+  type_code?: string | null;
+  practice_source_code?: string | null;
+  grade_code?: string | null;
   status: EducationTaskStatus;
+  completed_at?: string | null;
   created_at?: string;
-  latest_review_decision?: 'feedback' | 'revision_requested' | 'completed';
+  latest_review_decision?: 'feedback' | 'revision_requested';
   latest_feedback_text?: string;
 }
 
@@ -26,7 +31,11 @@ export interface CreateEducationTaskInput {
   title: string;
   description: string;
   due_at: string;
-  frequency: 'once' | 'daily';
+  subject_code: string;
+  type_code: string;
+  practice_source_code?: string | null;
+  frequency: 'once' | 'daily' | 'weekdays' | 'weekly';
+  weekdays?: number[] | null;
   material_asset_ids: string[];
 }
 
@@ -34,6 +43,26 @@ export interface SubmitEducationTaskInput {
   submission_text: string;
   idempotency_key: string;
   asset_ids: string[];
+}
+
+export interface EducationHomeworkType {
+  code: string;
+  name: string;
+  sort_order: number;
+}
+
+export interface EducationSubjectDictionary {
+  code: string;
+  name: string;
+  color: string;
+  sort_order: number;
+  homework_types: EducationHomeworkType[];
+}
+
+export interface EducationHomeworkDictionaries {
+  subjects: EducationSubjectDictionary[];
+  grade_levels: Array<{ code: string; name: string; stage: string; sort_order: number }>;
+  practice_sources: Array<{ code: string; name: string; sort_order: number }>;
 }
 
 export interface EducationAsset {

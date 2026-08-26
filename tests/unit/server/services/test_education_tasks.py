@@ -205,6 +205,26 @@ async def test_weekly_task_requires_a_nonempty_unique_iso_weekday_list(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_weekly_task_requires_its_initial_due_date_to_be_selected(monkeypatch):
+    _stub_create_context(monkeypatch)
+
+    with pytest.raises(EducationTaskError, match="initial due date"):
+        await education_tasks.create_task(
+            parent_user_id="parent-1",
+            assigned_student_id="student-1",
+            title="Practice",
+            description="",
+            due_at=datetime(2026, 8, 30, 9, tzinfo=timezone.utc),  # Sunday in Asia/Tokyo
+            subject_code="math",
+            type_code="practice",
+            practice_source_code="schoolwork",
+            frequency="weekly",
+            weekdays=[1, 3, 5],
+            material_asset_ids=[],
+        )
+
+
+@pytest.mark.asyncio
 async def test_check_in_allows_an_empty_initial_submission_and_forwards_idempotency_key(monkeypatch):
     monkeypatch.setattr(
         education_tasks,

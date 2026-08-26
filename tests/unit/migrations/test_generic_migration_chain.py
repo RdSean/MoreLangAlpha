@@ -105,3 +105,13 @@ def test_homework_state_cutover_follows_compatibility_migrations():
 
     assert migration["revision"] == "039"
     assert migration["down_revision"] == "038"
+
+
+def test_open_submission_repair_follows_homework_state_cutover():
+    migration_dir = Path(__file__).parents[3] / "migrations/versions"
+    migration = runpy.run_path(
+        str(migration_dir / "040_repair_open_education_tasks_with_submissions.py")
+    )
+
+    assert migration["revision"] == "040"
+    assert migration["down_revision"] == "039"
