@@ -15,21 +15,20 @@ const state = vi.hoisted(() => ({
   cancel: vi.fn(),
   upload: vi.fn(),
   membersEnabled: vi.fn(),
+  dictionaries: {
+    subjects: [
+      { code: 'chinese', name: '语文', color: '#D95D39', sort_order: 1, homework_types: [{ code: 'read', name: '阅读', sort_order: 1 }] },
+      { code: 'math', name: '数学', color: '#277DA1', sort_order: 2, homework_types: [{ code: 'practice', name: '练习', sort_order: 1 }] },
+    ],
+    grade_levels: [
+      { code: 'g4', name: '四年级', stage: 'primary', sort_order: 4 },
+    ],
+    practice_sources: [
+      { code: 'schoolwork', name: '校内作业', sort_order: 1 },
+      { code: 'homework', name: '校外作业', sort_order: 2 },
+    ],
+  } as Record<string, unknown> | undefined,
 }));
-
-const dictionaries = {
-  subjects: [
-    { code: 'chinese', name: '语文', color: '#D95D39', sort_order: 1, homework_types: [{ code: 'read', name: '阅读', sort_order: 1 }] },
-    { code: 'math', name: '数学', color: '#277DA1', sort_order: 2, homework_types: [{ code: 'practice', name: '练习', sort_order: 1 }] },
-  ],
-  grade_levels: [
-    { code: 'g4', name: '四年级', stage: 'primary', sort_order: 4 },
-  ],
-  practice_sources: [
-    { code: 'schoolwork', name: '校内作业', sort_order: 1 },
-    { code: 'homework', name: '校外作业', sort_order: 2 },
-  ],
-};
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ member: state.member }),
@@ -41,7 +40,7 @@ vi.mock('../api', () => ({
 
 vi.mock('../queries', () => ({
   useEducationTasks: () => ({ data: state.tasks, isLoading: false }),
-  useEducationHomeworkDictionaries: () => ({ data: dictionaries, isLoading: false }),
+  useEducationHomeworkDictionaries: () => ({ data: state.dictionaries, isLoading: !state.dictionaries }),
   useEducationMembers: (enabled: boolean) => {
     state.membersEnabled(enabled);
     return { data: state.members };
@@ -79,6 +78,19 @@ beforeEach(() => {
   state.cancel.mockReset().mockResolvedValue(undefined);
   state.upload.mockReset().mockResolvedValue({ asset_id: 'asset-1' });
   state.membersEnabled.mockReset();
+  state.dictionaries = {
+    subjects: [
+      { code: 'chinese', name: '语文', color: '#D95D39', sort_order: 1, homework_types: [{ code: 'read', name: '阅读', sort_order: 1 }] },
+      { code: 'math', name: '数学', color: '#277DA1', sort_order: 2, homework_types: [{ code: 'practice', name: '练习', sort_order: 1 }] },
+    ],
+    grade_levels: [
+      { code: 'g4', name: '四年级', stage: 'primary', sort_order: 4 },
+    ],
+    practice_sources: [
+      { code: 'schoolwork', name: '校内作业', sort_order: 1 },
+      { code: 'homework', name: '校外作业', sort_order: 2 },
+    ],
+  };
   vi.stubGlobal('crypto', { randomUUID: () => 'submission-idempotency-key' });
 });
 
@@ -123,7 +135,23 @@ describe('EducationPage', () => {
     fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
 
     expect(screen.getByText('当前年级：未设置年级')).toBeInTheDocument();
-    expect(screen.getByText('请先在“设置 > 家庭账户”中为该学生设置当前年级。')).toBeInTheDocument();
+    expect(screen.getByText('请先在‘设置 > 家庭账户’中为该学生设置当前年级。')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '创建作业' }).at(-1)).toBeDisabled();
+  });
+
+  it('waits for dictionaries instead of treating an existing student grade as unset', () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
+    state.dictionaries = undefined;
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
+
+    expect(screen.getByText('正在加载作业字典…')).toBeInTheDocument();
+    expect(screen.queryByText('当前年级：未设置年级')).not.toBeInTheDocument();
+    expect(screen.queryByText('请先在‘设置 > 家庭账户’中为该学生设置当前年级。')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: '创建作业' }).at(-1)).toBeDisabled();
   });
 

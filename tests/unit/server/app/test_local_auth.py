@@ -190,7 +190,7 @@ async def test_parent_member_list_includes_only_same_household_student_grade(cli
 
     assert response.status_code == 200
     assert response.json() == [
-        {**PARENT, "grade_code": None},
+        PARENT,
         same_household_student,
     ]
 

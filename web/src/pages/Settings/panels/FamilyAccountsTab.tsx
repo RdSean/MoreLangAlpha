@@ -27,16 +27,18 @@ function FamilyChildRow({ child, grades, onOpenChild }: {
   const profileQuery = useFamilyChildEducationProfile(child.user_id);
   const updateProfile = useUpdateFamilyChildEducationProfile();
   const gradeCode = profileQuery.data?.grade_code ?? null;
+  const isGradeDictionaryReady = Boolean(grades.length);
+  const isGradeReady = !profileQuery.isLoading && isGradeDictionaryReady;
   const gradeName = grades.find((grade) => grade.code === gradeCode)?.name ?? '未设置年级';
 
   return <article className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
     <div className="flex min-w-0 items-start gap-3">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: 'var(--color-accent-soft)', color: 'var(--color-accent-primary)' }}><UserRound className="size-4" aria-hidden="true" /></span>
-      <div className="min-w-0"><h4 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{child.name}</h4><p className="mt-0.5 font-mono text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{child.username ?? '未设置登录名'}</p><p className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>Flash 空间：{child.flash_workspace.status === 'flash' ? '可用' : child.flash_workspace.status ?? '未知'}</p>{profileQuery.isLoading ? <p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>正在加载年级…</p> : <p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>当前年级：{gradeName}</p>}</div>
+      <div className="min-w-0"><h4 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{child.name}</h4><p className="mt-0.5 font-mono text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{child.username ?? '未设置登录名'}</p><p className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>Flash 空间：{child.flash_workspace.status === 'flash' ? '可用' : child.flash_workspace.status ?? '未知'}</p>{!isGradeReady ? <p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>正在加载年级…</p> : <p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>当前年级：{gradeName}</p>}</div>
     </div>
     <div className="flex flex-wrap items-center gap-2">
       <label className="sr-only" htmlFor={`child-grade-${child.user_id}`}>{child.name}的当前年级</label>
-      <select id={`child-grade-${child.user_id}`} value={gradeCode ?? ''} onChange={(event) => void updateProfile.mutateAsync({ studentUserId: child.user_id, gradeCode: event.target.value || null })} disabled={profileQuery.isLoading || updateProfile.isPending} className="h-9 min-w-28 rounded-md border border-input bg-background px-2 text-sm"><option value="">未设置年级</option>{grades.map((grade) => <option value={grade.code} key={grade.code}>{grade.name}</option>)}</select>
+      <select id={`child-grade-${child.user_id}`} value={gradeCode ?? ''} onChange={(event) => void updateProfile.mutateAsync({ studentUserId: child.user_id, gradeCode: event.target.value || null })} disabled={!isGradeReady || updateProfile.isPending} className="h-9 min-w-28 rounded-md border border-input bg-background px-2 text-sm">{!isGradeDictionaryReady && gradeCode && <option value={gradeCode}>正在加载年级…</option>}<option value="">未设置年级</option>{grades.map((grade) => <option value={grade.code} key={grade.code}>{grade.name}</option>)}</select>
       <Button size="sm" variant="outline" onClick={() => onOpenChild(child.user_id)}><MessageSquarePlus className="mr-2 size-4" aria-hidden="true" />查看对话</Button>
     </div>
   </article>;

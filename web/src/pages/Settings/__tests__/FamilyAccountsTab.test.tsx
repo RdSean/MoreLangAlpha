@@ -14,16 +14,16 @@ const state = vi.hoisted(() => ({
   updateProfile: vi.fn(),
   profile: { household_id: 'household-1', user_id: 'student-1', grade_code: 'g4' } as Record<string, unknown> | undefined,
   profileLoading: false,
+  dictionaries: {
+    subjects: [],
+    grade_levels: [
+      { code: 'g4', name: '四年级', stage: 'primary', sort_order: 4 },
+      { code: 'g5', name: '五年级', stage: 'primary', sort_order: 5 },
+    ],
+    practice_sources: [],
+  } as Record<string, unknown> | undefined,
+  dictionariesLoading: false,
 }));
-
-const dictionaries = {
-  subjects: [],
-  grade_levels: [
-    { code: 'g4', name: '四年级', stage: 'primary', sort_order: 4 },
-    { code: 'g5', name: '五年级', stage: 'primary', sort_order: 5 },
-  ],
-  practice_sources: [],
-};
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ member: state.member }),
@@ -34,7 +34,7 @@ vi.mock('../queries', () => ({
   useCreateChildAccount: () => ({ mutateAsync: state.create, isPending: false }),
   useFamilyChildEducationProfile: () => ({ data: state.profile, isLoading: state.profileLoading }),
   useUpdateFamilyChildEducationProfile: () => ({ mutateAsync: state.updateProfile, isPending: false }),
-  useEducationHomeworkDictionaries: () => ({ data: dictionaries, isLoading: false }),
+  useEducationHomeworkDictionaries: () => ({ data: state.dictionaries, isLoading: state.dictionariesLoading }),
 }));
 
 function renderTab() {
@@ -57,6 +57,15 @@ beforeEach(() => {
   state.updateProfile.mockReset().mockResolvedValue({ household_id: 'household-1', user_id: 'student-1', grade_code: 'g5' });
   state.profile = { household_id: 'household-1', user_id: 'student-1', grade_code: 'g4' };
   state.profileLoading = false;
+  state.dictionaries = {
+    subjects: [],
+    grade_levels: [
+      { code: 'g4', name: '四年级', stage: 'primary', sort_order: 4 },
+      { code: 'g5', name: '五年级', stage: 'primary', sort_order: 5 },
+    ],
+    practice_sources: [],
+  };
+  state.dictionariesLoading = false;
 });
 
 describe('FamilyAccountsTab', () => {
@@ -111,7 +120,7 @@ describe('FamilyAccountsTab', () => {
     state.profileLoading = true;
     renderTab();
 
-    expect(screen.getByText('正在加载年级…')).toBeInTheDocument();
+    expect(screen.getByText('正在加载年级…', { selector: 'p' })).toBeInTheDocument();
 
     state.profileLoading = false;
   });
@@ -121,5 +130,16 @@ describe('FamilyAccountsTab', () => {
     renderTab();
 
     expect(screen.getByText('当前年级：未设置年级')).toBeInTheDocument();
+  });
+
+  it('waits for grade dictionary data before showing or editing an existing grade', () => {
+    state.dictionaries = undefined;
+    state.dictionariesLoading = true;
+    renderTab();
+
+    expect(screen.getByText('正在加载年级…', { selector: 'p' })).toBeInTheDocument();
+    expect(screen.queryByText('当前年级：未设置年级')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('小明的当前年级')).toBeDisabled();
+    expect(screen.getByLabelText('小明的当前年级')).toHaveValue('g4');
   });
 });

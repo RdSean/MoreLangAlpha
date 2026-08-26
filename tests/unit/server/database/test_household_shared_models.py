@@ -99,7 +99,6 @@ async def test_parent_member_list_projects_same_household_student_grade_without_
             "role": "parent",
             "household_id": "household-1",
             "username": "parent@example.test",
-            "grade_code": None,
         },
         {
             "user_id": "student-1",

@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer
 
 from src.server.auth.local_sessions import (
     SESSION_COOKIE_NAME,
@@ -73,6 +73,13 @@ class MemberResponse(BaseModel):
 
 class HouseholdMemberResponse(MemberResponse):
     grade_code: str | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_household_member(self, handler):
+        serialized = handler(self)
+        if self.role != "student":
+            serialized.pop("grade_code", None)
+        return serialized
 
 
 class FlashWorkspaceSummaryResponse(BaseModel):

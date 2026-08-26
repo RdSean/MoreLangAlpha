@@ -33,7 +33,7 @@ def _member_from_row(row: dict[str, Any]) -> dict[str, Any]:
     }
     if row.get("login_identifier"):
         member["username"] = row["login_identifier"]
-    if "grade_code" in row:
+    if row["role"] == "student" and "grade_code" in row:
         member["grade_code"] = row["grade_code"]
     return member
 
