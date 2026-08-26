@@ -28,6 +28,25 @@ async def get_household_context_for_parent(user_id: str) -> dict[str, Any] | Non
     return dict(row) if row else None
 
 
+async def get_calendar_context_for_user(user_id: str) -> dict[str, Any] | None:
+    """Return the role and timezone needed for a household calendar read."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT memberships.household_id, memberships.role, households.timezone
+                FROM education_memberships AS memberships
+                JOIN education_households AS households
+                  ON households.household_id = memberships.household_id
+                WHERE memberships.user_id = %s
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def is_student_in_household(*, household_id: str, user_id: str) -> bool:
     async with get_db_connection() as conn:
         async with conn.cursor() as cur:
@@ -467,6 +486,80 @@ async def list_tasks_for_user(user_id: str) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+async def list_calendar_task_records(
+    *, household_id: str, assigned_student_id: str | None,
+    start_date: date, end_date: date,
+) -> list[dict[str, Any]]:
+    """Read stable task summaries for a bounded calendar window.
+
+    Cancelled tasks remain in history but are not shown as work on a calendar.
+    """
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT tasks.task_id, tasks.task_rule_id, tasks.household_id,
+                       tasks.assigned_student_id, tasks.occurrence_date, tasks.due_at,
+                       tasks.title, tasks.description, tasks.subject_code,
+                       subjects.color AS subject_color, tasks.type_code,
+                       tasks.practice_source_code, tasks.grade_code, tasks.status,
+                       tasks.completed_at, tasks.created_at
+                FROM education_tasks AS tasks
+                LEFT JOIN education_subjects AS subjects ON subjects.code = tasks.subject_code
+                WHERE tasks.household_id = %s
+                  AND tasks.occurrence_date BETWEEN %s AND %s
+                  AND tasks.status <> 'cancelled'
+                  AND (%s::text IS NULL OR tasks.assigned_student_id = %s)
+                ORDER BY tasks.occurrence_date ASC, tasks.due_at ASC,
+                         tasks.created_at ASC, tasks.task_id ASC
+                """,
+                (household_id, start_date, end_date, assigned_student_id, assigned_student_id),
+            )
+            rows = await cur.fetchall()
+    return [dict(row) for row in rows]
+
+
+async def get_calendar_progress_counts(
+    *, household_id: str, assigned_student_id: str | None, today: date,
+    week_start: date, week_end: date, start_date: date, end_date: date,
+    now: datetime,
+) -> dict[str, int]:
+    """Return header progress counts in the caller's household calendar scope."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT
+                    COUNT(*) FILTER (WHERE tasks.occurrence_date = %s) AS today_count,
+                    COUNT(*) FILTER (
+                        WHERE tasks.occurrence_date BETWEEN %s AND %s
+                    ) AS week_count,
+                    COUNT(*) FILTER (
+                        WHERE tasks.status = 'open' AND tasks.due_at < %s
+                    ) AS overdue_count,
+                    COUNT(*) FILTER (
+                        WHERE tasks.status = 'completed'
+                          AND tasks.occurrence_date BETWEEN %s AND %s
+                    ) AS completed_count
+                FROM education_tasks AS tasks
+                WHERE tasks.household_id = %s
+                  AND tasks.status <> 'cancelled'
+                  AND (%s::text IS NULL OR tasks.assigned_student_id = %s)
+                """,
+                (
+                    today, week_start, week_end, now, start_date, end_date,
+                    household_id, assigned_student_id, assigned_student_id,
+                ),
+            )
+            row = await cur.fetchone()
+    return {
+        "today_count": int(row["today_count"]),
+        "week_count": int(row["week_count"]),
+        "overdue_count": int(row["overdue_count"]),
+        "completed_count": int(row["completed_count"]),
+    }
+
+
 async def get_task_detail_for_user(*, task_id: str, user_id: str) -> dict[str, Any] | None:
     """Return one task timeline only to a household parent or its assignee."""
     async with get_db_connection() as conn:
@@ -579,7 +672,7 @@ async def list_active_rule_timezones_for_user(user_id: str) -> list[dict[str, An
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
-                SELECT rules.task_rule_id, rules.timezone
+                SELECT rules.task_rule_id, rules.assigned_student_id, rules.timezone
                 FROM education_task_rules AS rules
                 JOIN education_memberships AS memberships ON memberships.household_id = rules.household_id
                 WHERE memberships.user_id = %s AND rules.status = 'active'

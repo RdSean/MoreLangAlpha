@@ -1,14 +1,16 @@
 """Role-bound FastAPI routes for materialized family homework tasks."""
 
+from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from src.server.app.education.models import (
     CheckInEducationTaskRequest,
     CreateEducationTaskRequest,
     EducationReviewResponse,
     EducationSubmissionResponse,
+    EducationTaskCalendarResponse,
     EducationTaskDetailResponse,
     EducationTaskResponse,
     EducationHomeworkDictionariesResponse,
@@ -29,6 +31,7 @@ from src.server.services.education_tasks import (
     cancel_task,
     check_in_task,
     create_task,
+    get_task_calendar,
     get_task_detail,
     list_tasks,
     review_task,
@@ -64,6 +67,28 @@ async def get_education_homework_dictionaries(user_id: CurrentUserId):
 @router.get("/tasks", response_model=list[EducationTaskResponse], response_model_exclude_none=True)
 async def list_education_tasks(user_id: CurrentUserId):
     return await list_tasks(user_id)
+
+
+@router.get(
+    "/tasks/calendar",
+    response_model=EducationTaskCalendarResponse,
+    response_model_exclude_none=True,
+)
+async def get_education_task_calendar(
+    user_id: CurrentUserId,
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    student_id: str | None = Query(default=None, min_length=1, max_length=255),
+):
+    try:
+        return await get_task_calendar(
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date,
+            student_id=student_id,
+        )
+    except EducationTaskError as exc:
+        raise _task_http_error(exc) from exc
 
 
 @router.get(

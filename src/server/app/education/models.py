@@ -164,6 +164,50 @@ class EducationTaskDetailResponse(EducationTaskResponse):
     submissions: list[EducationTaskSubmissionDetailResponse]
 
 
+class EducationCalendarTaskResponse(BaseModel):
+    task_id: UUID
+    task_rule_id: UUID
+    household_id: UUID
+    assigned_student_id: str
+    occurrence_date: date
+    due_at: datetime
+    title: str
+    description: str
+    subject_code: str | None = None
+    subject_color: str | None = None
+    type_code: str | None = None
+    practice_source_code: str | None = None
+    grade_code: str | None = None
+    status: str
+    completed_at: datetime | None = None
+    created_at: datetime | None = None
+    is_completed: bool
+    is_overdue: bool
+
+
+class EducationCalendarDayResponse(BaseModel):
+    date: date
+    task_count: int
+    completed_count: int
+    overdue_count: int
+    tasks: list[EducationCalendarTaskResponse]
+
+
+class EducationCalendarStatsResponse(BaseModel):
+    today_count: int
+    week_count: int
+    overdue_count: int
+    completed_count: int
+
+
+class EducationTaskCalendarResponse(BaseModel):
+    student_id: str | None = None
+    start_date: date
+    end_date: date
+    days: list[EducationCalendarDayResponse]
+    stats: EducationCalendarStatsResponse
+
+
 class CreateTextbookRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
 

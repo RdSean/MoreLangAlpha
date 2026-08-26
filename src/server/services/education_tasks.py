@@ -1,6 +1,6 @@
 """Homework completion, recurrence, and household authorization rules."""
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -10,10 +10,14 @@ from src.server.database.education_tasks import (
     cancel_task as cancel_task_record,
     check_in_task as check_in_task_record,
     create_task_rule_and_instance,
+    get_calendar_context_for_user,
+    get_calendar_progress_counts,
     get_household_context_for_parent,
     get_task_detail_for_user,
     get_task_creation_context,
+    is_student_in_household,
     list_active_rule_timezones_for_user,
+    list_calendar_task_records,
     list_tasks_for_user as list_task_records,
     materialize_task_rule_through,
     review_task as review_task_record,
@@ -45,6 +49,7 @@ _ASSET_OWNERSHIP_ERRORS = frozenset({
     "One or more material assets are outside the household",
     "One or more submission assets are outside the household",
 })
+_MAX_CALENDAR_RANGE_DAYS = 62
 
 
 def _task_asset_error(exc: ValueError) -> EducationTaskAssetError | None:
@@ -296,3 +301,113 @@ async def list_tasks(user_id: str) -> list[dict[str, Any]]:
             task_rule_id=str(rule["task_rule_id"]), through_date=local_today
         )
     return await list_task_records(user_id)
+
+
+def _validate_calendar_range(*, start_date: date, end_date: date) -> None:
+    if end_date < start_date:
+        raise EducationTaskError("end_date must not be before start_date")
+    if (end_date - start_date).days >= _MAX_CALENDAR_RANGE_DAYS:
+        raise EducationTaskError("Calendar date range cannot exceed 62 days")
+
+
+async def _resolve_calendar_student_scope(
+    *, user_id: str, student_id: str | None,
+) -> tuple[dict[str, Any], str | None]:
+    context = await get_calendar_context_for_user(user_id)
+    if not context:
+        raise EducationTaskPermissionError("Only household members can view homework calendars")
+
+    role = context["role"]
+    household_id = str(context["household_id"])
+    if role == "student":
+        if student_id is not None and student_id != user_id:
+            raise EducationTaskPermissionError("Students can only view their own homework calendar")
+        return context, user_id
+    if role != "parent":
+        raise EducationTaskPermissionError("Only household members can view homework calendars")
+    if student_id is not None and not await is_student_in_household(
+        household_id=household_id, user_id=student_id
+    ):
+        # Do not reveal whether a student exists outside the parent's household.
+        raise EducationTaskNotFoundError("Student account not found")
+    return context, student_id
+
+
+async def get_task_calendar(
+    *, user_id: str, start_date: date, end_date: date, student_id: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Return a bounded, role-scoped calendar and progress summary.
+
+    Parents may narrow to one same-household student, or omit the student for a
+    household overview. Students always receive only their own tasks. ``now``
+    is injectable to preserve deterministic timezone and overdue tests.
+    """
+    _validate_calendar_range(start_date=start_date, end_date=end_date)
+    context, assigned_student_id = await _resolve_calendar_student_scope(
+        user_id=user_id, student_id=student_id
+    )
+    timezone = ZoneInfo(context["timezone"])
+    current_time = now or datetime.now(timezone)
+    if current_time.tzinfo is None or current_time.utcoffset() is None:
+        raise EducationTaskError("Calendar clock must include a timezone")
+    local_today = current_time.astimezone(timezone).date()
+    week_start = local_today - timedelta(days=local_today.isoweekday() - 1)
+    week_end = week_start + timedelta(days=6)
+
+    for rule in await list_active_rule_timezones_for_user(user_id):
+        if assigned_student_id is None or rule.get("assigned_student_id") == assigned_student_id:
+            await materialize_task_rule_through(
+                task_rule_id=str(rule["task_rule_id"]), through_date=end_date
+            )
+
+    household_id = str(context["household_id"])
+    task_records = await list_calendar_task_records(
+        household_id=household_id,
+        assigned_student_id=assigned_student_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    progress = await get_calendar_progress_counts(
+        household_id=household_id,
+        assigned_student_id=assigned_student_id,
+        today=local_today,
+        week_start=week_start,
+        week_end=week_end,
+        start_date=start_date,
+        end_date=end_date,
+        now=current_time,
+    )
+
+    tasks_by_date: dict[date, list[dict[str, Any]]] = {}
+    for task in task_records:
+        is_overdue = task["status"] == "open" and task["due_at"] < current_time
+        tasks_by_date.setdefault(task["occurrence_date"], []).append(
+            {
+                **task,
+                "is_completed": task["status"] == "completed",
+                "is_overdue": is_overdue,
+            }
+        )
+
+    days: list[dict[str, Any]] = []
+    day = start_date
+    while day <= end_date:
+        tasks = tasks_by_date.get(day, [])
+        days.append(
+            {
+                "date": day,
+                "task_count": len(tasks),
+                "completed_count": sum(task["is_completed"] for task in tasks),
+                "overdue_count": sum(task["is_overdue"] for task in tasks),
+                "tasks": tasks,
+            }
+        )
+        day += timedelta(days=1)
+    return {
+        "student_id": assigned_student_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "days": days,
+        "stats": progress,
+    }
