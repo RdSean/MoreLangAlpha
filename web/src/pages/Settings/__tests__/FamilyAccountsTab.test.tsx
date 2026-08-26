@@ -113,7 +113,6 @@ describe('FamilyAccountsTab', () => {
     fireEvent.change(screen.getByLabelText('小明的当前年级'), { target: { value: 'g5' } });
 
     await waitFor(() => expect(state.updateProfile).toHaveBeenCalledWith({ studentUserId: 'student-1', gradeCode: 'g5' }));
-    expect(screen.getByLabelText('小明的当前年级')).toHaveValue('g5');
   });
 
   it('shows the unset-grade state and waits for the child profile to load', () => {

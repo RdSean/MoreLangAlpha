@@ -45,10 +45,14 @@ export function useUpdateFamilyChildEducationProfile() {
     mutationFn: ({ studentUserId, gradeCode }: { studentUserId: string; gradeCode: string | null }) => (
       familyAccountsApi.updateFamilyChildEducationProfile(studentUserId, gradeCode)
     ),
-    onSuccess: (_profile, { studentUserId }) => Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.settings.family.educationProfile(studentUserId) }),
+    onSuccess: (profile) => {
+      const profileQueryKey = queryKeys.settings.family.educationProfile(profile.user_id);
+      queryClient.setQueryData(profileQueryKey, profile);
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: profileQueryKey }),
       queryClient.invalidateQueries({ queryKey: queryKeys.education.members() }),
-    ]),
+      ]);
+    },
   });
 }
 

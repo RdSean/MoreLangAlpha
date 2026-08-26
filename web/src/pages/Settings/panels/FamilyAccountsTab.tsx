@@ -26,15 +26,10 @@ function FamilyChildRow({ child, grades, onOpenChild }: {
 }) {
   const profileQuery = useFamilyChildEducationProfile(child.user_id);
   const updateProfile = useUpdateFamilyChildEducationProfile();
-  const [updatedGrade, setUpdatedGrade] = useState<{ gradeCode: string | null } | null>(null);
-  const gradeCode = updatedGrade ? updatedGrade.gradeCode : profileQuery.data?.grade_code ?? null;
+  const gradeCode = profileQuery.data?.grade_code ?? null;
   const isGradeDictionaryReady = Boolean(grades.length);
   const isGradeReady = !profileQuery.isLoading && isGradeDictionaryReady;
   const gradeName = grades.find((grade) => grade.code === gradeCode)?.name ?? '未设置年级';
-  const updateGrade = async (nextGradeCode: string | null) => {
-    const profile = await updateProfile.mutateAsync({ studentUserId: child.user_id, gradeCode: nextGradeCode });
-    setUpdatedGrade({ gradeCode: profile.grade_code });
-  };
 
   return <article className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
     <div className="flex min-w-0 items-start gap-3">
@@ -43,7 +38,7 @@ function FamilyChildRow({ child, grades, onOpenChild }: {
     </div>
     <div className="flex flex-wrap items-center gap-2">
       <label className="sr-only" htmlFor={`child-grade-${child.user_id}`}>{child.name}的当前年级</label>
-      <select id={`child-grade-${child.user_id}`} value={gradeCode ?? ''} onChange={(event) => void updateGrade(event.target.value || null)} disabled={!isGradeReady || updateProfile.isPending} className="h-9 min-w-28 rounded-md border border-input bg-background px-2 text-sm">{!isGradeDictionaryReady && gradeCode && <option value={gradeCode}>正在加载年级…</option>}<option value="">未设置年级</option>{grades.map((grade) => <option value={grade.code} key={grade.code}>{grade.name}</option>)}</select>
+      <select id={`child-grade-${child.user_id}`} value={gradeCode ?? ''} onChange={(event) => void updateProfile.mutateAsync({ studentUserId: child.user_id, gradeCode: event.target.value || null })} disabled={!isGradeReady || updateProfile.isPending} className="h-9 min-w-28 rounded-md border border-input bg-background px-2 text-sm">{!isGradeDictionaryReady && gradeCode && <option value={gradeCode}>正在加载年级…</option>}<option value="">未设置年级</option>{grades.map((grade) => <option value={grade.code} key={grade.code}>{grade.name}</option>)}</select>
       <Button size="sm" variant="outline" onClick={() => onOpenChild(child.user_id)}><MessageSquarePlus className="mr-2 size-4" aria-hidden="true" />查看对话</Button>
     </div>
   </article>;
