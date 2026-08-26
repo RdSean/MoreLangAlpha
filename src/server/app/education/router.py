@@ -9,8 +9,13 @@ from src.server.app.education.models import (
     EducationReviewResponse,
     EducationSubmissionResponse,
     EducationTaskResponse,
+    EducationHomeworkDictionariesResponse,
     ReviewEducationTaskRequest,
     SubmitEducationTaskRequest,
+)
+from src.server.services.education_homework import (
+    EducationDictionaryPermissionError,
+    get_homework_dictionaries,
 )
 from src.server.services.education_tasks import (
     EducationTaskError,
@@ -27,7 +32,7 @@ from src.server.services.education_tasks import (
 from src.server.utils.api import CurrentUserId
 
 
-router = APIRouter(prefix="/api/v1/education/tasks", tags=["Education tasks"])
+router = APIRouter(prefix="/api/v1/education", tags=["Education tasks"])
 
 
 def _task_http_error(exc: EducationTaskError) -> HTTPException:
@@ -40,12 +45,20 @@ def _task_http_error(exc: EducationTaskError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
-@router.get("", response_model=list[EducationTaskResponse], response_model_exclude_none=True)
+@router.get("/dictionaries", response_model=EducationHomeworkDictionariesResponse)
+async def get_education_homework_dictionaries(user_id: CurrentUserId):
+    try:
+        return await get_homework_dictionaries(user_id)
+    except EducationDictionaryPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@router.get("/tasks", response_model=list[EducationTaskResponse], response_model_exclude_none=True)
 async def list_education_tasks(user_id: CurrentUserId):
     return await list_tasks(user_id)
 
 
-@router.post("", response_model=EducationTaskResponse, response_model_exclude_none=True, status_code=status.HTTP_201_CREATED)
+@router.post("/tasks", response_model=EducationTaskResponse, response_model_exclude_none=True, status_code=status.HTTP_201_CREATED)
 async def create_education_task(body: CreateEducationTaskRequest, user_id: CurrentUserId):
     try:
         return await create_task(
@@ -61,7 +74,7 @@ async def create_education_task(body: CreateEducationTaskRequest, user_id: Curre
         raise _task_http_error(exc) from exc
 
 
-@router.post("/{task_id}/submissions", response_model=EducationSubmissionResponse, response_model_exclude_none=True, status_code=status.HTTP_201_CREATED)
+@router.post("/tasks/{task_id}/submissions", response_model=EducationSubmissionResponse, response_model_exclude_none=True, status_code=status.HTTP_201_CREATED)
 async def create_education_submission(
     task_id: UUID, body: SubmitEducationTaskRequest, user_id: CurrentUserId
 ):
@@ -79,7 +92,7 @@ async def create_education_submission(
         raise _task_http_error(exc) from exc
 
 
-@router.post("/{task_id}/reviews", response_model=EducationReviewResponse, response_model_exclude_none=True, status_code=status.HTTP_201_CREATED)
+@router.post("/tasks/{task_id}/reviews", response_model=EducationReviewResponse, response_model_exclude_none=True, status_code=status.HTTP_201_CREATED)
 async def create_education_review(
     task_id: UUID, body: ReviewEducationTaskRequest, user_id: CurrentUserId
 ):
@@ -94,7 +107,7 @@ async def create_education_review(
         raise _task_http_error(exc) from exc
 
 
-@router.post("/{task_id}/cancel", response_model=EducationTaskResponse, response_model_exclude_none=True)
+@router.post("/tasks/{task_id}/cancel", response_model=EducationTaskResponse, response_model_exclude_none=True)
 async def cancel_education_task(task_id: UUID, user_id: CurrentUserId):
     try:
         return await cancel_task(parent_user_id=user_id, task_id=str(task_id))
@@ -102,7 +115,7 @@ async def cancel_education_task(task_id: UUID, user_id: CurrentUserId):
         raise _task_http_error(exc) from exc
 
 
-@router.post("/rules/{task_rule_id}/stop", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/tasks/rules/{task_rule_id}/stop", status_code=status.HTTP_204_NO_CONTENT)
 async def stop_education_task_rule(task_rule_id: UUID, user_id: CurrentUserId):
     try:
         await stop_task_rule(parent_user_id=user_id, task_rule_id=str(task_rule_id))

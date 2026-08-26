@@ -7,6 +7,49 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
 
+class EducationStudentProfileResponse(BaseModel):
+    household_id: str
+    user_id: str
+    grade_code: str | None = None
+
+
+class UpdateEducationStudentProfileRequest(BaseModel):
+    grade_code: str | None = Field(default=..., max_length=4)
+
+
+class EducationHomeworkTypeResponse(BaseModel):
+    code: str
+    name: str
+    sort_order: int
+
+
+class EducationSubjectDictionaryResponse(BaseModel):
+    code: str
+    name: str
+    color: str
+    sort_order: int
+    homework_types: list[EducationHomeworkTypeResponse]
+
+
+class EducationGradeLevelResponse(BaseModel):
+    code: str
+    name: str
+    stage: str
+    sort_order: int
+
+
+class EducationPracticeSourceResponse(BaseModel):
+    code: str
+    name: str
+    sort_order: int
+
+
+class EducationHomeworkDictionariesResponse(BaseModel):
+    subjects: list[EducationSubjectDictionaryResponse]
+    grade_levels: list[EducationGradeLevelResponse]
+    practice_sources: list[EducationPracticeSourceResponse]
+
+
 class CreateEducationTaskRequest(BaseModel):
     assigned_student_id: str = Field(min_length=1, max_length=255)
     title: str = Field(min_length=1, max_length=255)

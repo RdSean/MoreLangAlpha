@@ -33,13 +33,20 @@ from src.server.database.auth_accounts import (
 )
 from src.server.models.conversation import WorkspaceThreadListItem, WorkspaceThreadsListResponse
 from src.server.services.family_accounts import (
+    FamilyGradeNotFoundError,
     FamilyMemberNotFoundError,
     FamilyThreadNotFoundError,
     FamilyWorkspaceNotFoundError,
     get_family_child_replay,
+    get_family_child_education_profile,
     get_family_child_workspace,
     list_family_child_threads,
     list_family_children,
+    update_family_child_education_profile,
+)
+from src.server.app.education.models import (
+    EducationStudentProfileResponse,
+    UpdateEducationStudentProfileRequest,
 )
 from src.server.utils.api import CurrentUserId
 
@@ -327,6 +334,40 @@ async def get_child_workspace(student_user_id: str, user_id: CurrentUserId):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except FamilyWorkspaceNotFoundError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get(
+    "/children/{student_user_id}/education-profile",
+    response_model=EducationStudentProfileResponse,
+)
+async def get_child_education_profile(student_user_id: str, user_id: CurrentUserId):
+    try:
+        return await get_family_child_education_profile(user_id, student_user_id)
+    except ParentMembershipRequiredError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FamilyMemberNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch(
+    "/children/{student_user_id}/education-profile",
+    response_model=EducationStudentProfileResponse,
+)
+async def update_child_education_profile(
+    student_user_id: str,
+    body: UpdateEducationStudentProfileRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        return await update_family_child_education_profile(
+            user_id, student_user_id, grade_code=body.grade_code
+        )
+    except ParentMembershipRequiredError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FamilyMemberNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FamilyGradeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/children/{student_user_id}/threads", response_model=WorkspaceThreadsListResponse)

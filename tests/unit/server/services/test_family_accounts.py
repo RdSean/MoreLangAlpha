@@ -146,3 +146,52 @@ async def test_replay_rejects_thread_from_another_workspace(monkeypatch):
 
     with pytest.raises(family_accounts.FamilyThreadNotFoundError):
         await family_accounts.get_family_child_replay("parent-1", "student-1", "thread-1")
+
+
+@pytest.mark.asyncio
+async def test_parent_reads_and_updates_a_same_household_students_grade(monkeypatch):
+    monkeypatch.setattr(
+        family_accounts,
+        "list_household_members_for_parent",
+        AsyncMock(return_value=[PARENT, STUDENT]),
+    )
+    profile = {"household_id": "household-1", "user_id": "student-1", "grade_code": "g5"}
+    monkeypatch.setattr(
+        family_accounts,
+        "get_student_grade_profile",
+        AsyncMock(return_value=profile),
+    )
+    update = AsyncMock(return_value=profile)
+    monkeypatch.setattr(family_accounts, "upsert_student_grade_profile", update)
+
+    assert await family_accounts.get_family_child_education_profile("parent-1", "student-1") == profile
+    assert (
+        await family_accounts.update_family_child_education_profile(
+            "parent-1", "student-1", grade_code="g5"
+        )
+        == profile
+    )
+    update.assert_awaited_once_with(
+        household_id="household-1", user_id="student-1", grade_code="g5"
+    )
+
+
+@pytest.mark.asyncio
+async def test_student_and_cross_household_callers_cannot_manage_student_grade(monkeypatch):
+    monkeypatch.setattr(
+        family_accounts,
+        "list_household_members_for_parent",
+        AsyncMock(side_effect=ParentMembershipRequiredError("parent required")),
+    )
+    with pytest.raises(ParentMembershipRequiredError):
+        await family_accounts.get_family_child_education_profile("student-1", "student-1")
+
+    monkeypatch.setattr(
+        family_accounts,
+        "list_household_members_for_parent",
+        AsyncMock(return_value=[PARENT, OTHER_HOUSEHOLD_STUDENT]),
+    )
+    with pytest.raises(family_accounts.FamilyMemberNotFoundError):
+        await family_accounts.update_family_child_education_profile(
+            "parent-1", "student-2", grade_code="g6"
+        )

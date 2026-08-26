@@ -10,6 +10,10 @@ from src.server.database.conversation import (
     get_replay_thread_data,
     get_workspace_threads,
 )
+from src.server.database.education_homework import (
+    get_student_grade_profile,
+    upsert_student_grade_profile,
+)
 from src.server.database.workspace import get_or_create_flash_workspace
 
 
@@ -23,6 +27,10 @@ class FamilyThreadNotFoundError(LookupError):
 
 class FamilyWorkspaceNotFoundError(LookupError):
     """The deterministic Flash workspace cannot be used for this student."""
+
+
+class FamilyGradeNotFoundError(LookupError):
+    """The requested grade code is not present in the K12 dictionary."""
 
 
 def _require_student_flash_workspace(
@@ -89,6 +97,34 @@ async def get_family_child_workspace(
     return _flash_summary(workspace)
 
 
+async def get_family_child_education_profile(
+    parent_user_id: str, student_user_id: str
+) -> dict[str, Any]:
+    """Read one same-household student's grade profile for parent settings."""
+    student = await _require_student(parent_user_id, student_user_id)
+    profile = await get_student_grade_profile(
+        household_id=str(student["household_id"]), user_id=student_user_id
+    )
+    if not profile:
+        raise FamilyMemberNotFoundError("Student account not found")
+    return profile
+
+
+async def update_family_child_education_profile(
+    parent_user_id: str, student_user_id: str, *, grade_code: str | None
+) -> dict[str, Any]:
+    """Set a same-household student's current grade from the seeded dictionary."""
+    student = await _require_student(parent_user_id, student_user_id)
+    profile = await upsert_student_grade_profile(
+        household_id=str(student["household_id"]),
+        user_id=student_user_id,
+        grade_code=grade_code,
+    )
+    if not profile:
+        raise FamilyGradeNotFoundError("Grade level not found")
+    return profile
+
+
 async def list_family_child_threads(
     parent_user_id: str,
     student_user_id: str,
@@ -132,11 +168,14 @@ async def get_family_child_replay(
 
 __all__ = [
     "FamilyMemberNotFoundError",
+    "FamilyGradeNotFoundError",
     "FamilyThreadNotFoundError",
     "FamilyWorkspaceNotFoundError",
     "ParentMembershipRequiredError",
     "get_family_child_replay",
+    "get_family_child_education_profile",
     "get_family_child_workspace",
     "list_family_child_threads",
     "list_family_children",
+    "update_family_child_education_profile",
 ]
