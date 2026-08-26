@@ -112,8 +112,8 @@ async def test_calendar_uses_subject_colours_and_stable_due_time_order(db_conn, 
     assert day["completed_count"] == 1
     assert day["overdue_count"] == 1
     assert calendar["stats"] == {
-        "today_count": 2,
-        "week_count": 2,
+        "today_count": 1,
+        "week_count": 1,
         "overdue_count": 1,
         "completed_count": 1,
     }

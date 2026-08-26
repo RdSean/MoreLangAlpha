@@ -318,6 +318,20 @@ def _validate_calendar_horizon(*, end_date: date, local_today: date) -> None:
         raise EducationTaskError("Calendar end_date cannot be more than 12 months ahead")
 
 
+def _calendar_materialization_windows(
+    *, start_date: date, end_date: date, week_start: date, week_end: date,
+) -> list[tuple[date, date]]:
+    """Merge calendar and current-stat windows without bridging long gaps."""
+    windows = sorted(((start_date, end_date), (week_start, week_end)))
+    merged: list[tuple[date, date]] = []
+    for window_start, window_end in windows:
+        if merged and window_start <= merged[-1][1] + timedelta(days=1):
+            merged[-1] = (merged[-1][0], max(merged[-1][1], window_end))
+        else:
+            merged.append((window_start, window_end))
+    return merged
+
+
 async def _resolve_calendar_student_scope(
     *, user_id: str, student_id: str | None,
 ) -> tuple[dict[str, Any], str | None]:
@@ -363,13 +377,21 @@ async def get_task_calendar(
     week_start = local_today - timedelta(days=local_today.isoweekday() - 1)
     week_end = week_start + timedelta(days=6)
     _validate_calendar_horizon(end_date=end_date, local_today=local_today)
-    materialization_end_date = max(end_date, week_end)
+    materialization_windows = _calendar_materialization_windows(
+        start_date=start_date,
+        end_date=end_date,
+        week_start=week_start,
+        week_end=week_end,
+    )
 
     for rule in await list_active_rule_timezones_for_user(user_id):
         if assigned_student_id is None or rule.get("assigned_student_id") == assigned_student_id:
-            await materialize_task_rule_through(
-                task_rule_id=str(rule["task_rule_id"]), through_date=materialization_end_date
-            )
+            for materialization_start, materialization_end in materialization_windows:
+                await materialize_task_rule_through(
+                    task_rule_id=str(rule["task_rule_id"]),
+                    from_date=materialization_start,
+                    through_date=materialization_end,
+                )
 
     household_id = str(context["household_id"])
     task_records = await list_calendar_task_records(

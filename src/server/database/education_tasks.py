@@ -155,8 +155,41 @@ async def create_task_rule_and_instance(
     return task
 
 
-async def materialize_task_rule_through(*, task_rule_id: str, through_date: date) -> int:
-    """Create missing dated instances under a rule lock using ON CONFLICT idempotence."""
+def _task_occurrence_dates(
+    *, recurrence: dict[str, Any], from_date: date | None, through_date: date,
+) -> list[date]:
+    """Generate only the requested bounded occurrence window for one rule."""
+    start = date.fromisoformat(recurrence["start_date"])
+    window_start = max(start, from_date) if from_date is not None else start
+    if window_start > through_date:
+        return []
+
+    frequency = recurrence["frequency"]
+    if frequency == "once":
+        return [start] if window_start <= start <= through_date else []
+    dates = [
+        date.fromordinal(day)
+        for day in range(window_start.toordinal(), through_date.toordinal() + 1)
+    ]
+    if frequency == "daily":
+        return dates
+    if frequency == "weekdays":
+        return [occurrence for occurrence in dates if occurrence.isoweekday() <= 5]
+    if frequency == "weekly":
+        weekdays = {int(value) for value in recurrence["weekdays"]}
+        return [occurrence for occurrence in dates if occurrence.isoweekday() in weekdays]
+    raise ValueError("Unsupported task recurrence")
+
+
+async def materialize_task_rule_through(
+    *, task_rule_id: str, through_date: date, from_date: date | None = None,
+) -> int:
+    """Create missing bounded instances under a rule lock using ON CONFLICT idempotence.
+
+    Existing callers may omit ``from_date`` to preserve their established
+    materialization behavior. Calendar callers supply it to avoid replaying a
+    long-running daily rule from its original start date.
+    """
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
@@ -173,27 +206,9 @@ async def materialize_task_rule_through(*, task_rule_id: str, through_date: date
                 if not rule or rule["status"] != "active":
                     return 0
                 recurrence = rule["recurrence"]
-                start = date.fromisoformat(recurrence["start_date"])
-                frequency = recurrence["frequency"]
-                if frequency == "once":
-                    dates = [start] if start <= through_date else []
-                elif frequency == "daily":
-                    dates = [date.fromordinal(day) for day in range(start.toordinal(), through_date.toordinal() + 1)]
-                elif frequency == "weekdays":
-                    dates = [
-                        date.fromordinal(day)
-                        for day in range(start.toordinal(), through_date.toordinal() + 1)
-                        if date.fromordinal(day).isoweekday() <= 5
-                    ]
-                elif frequency == "weekly":
-                    weekdays = {int(value) for value in recurrence["weekdays"]}
-                    dates = [
-                        date.fromordinal(day)
-                        for day in range(start.toordinal(), through_date.toordinal() + 1)
-                        if date.fromordinal(day).isoweekday() in weekdays
-                    ]
-                else:
-                    raise ValueError("Unsupported task recurrence")
+                dates = _task_occurrence_dates(
+                    recurrence=recurrence, from_date=from_date, through_date=through_date
+                )
                 due_time = time.fromisoformat(recurrence["due_time"])
                 created = 0
                 for occurrence in dates:
@@ -530,9 +545,12 @@ async def get_calendar_progress_counts(
             await cur.execute(
                 """
                 SELECT
-                    COUNT(*) FILTER (WHERE tasks.occurrence_date = %s) AS today_count,
+                    COUNT(*) FILTER (
+                        WHERE tasks.occurrence_date = %s AND tasks.status = 'open'
+                    ) AS today_count,
                     COUNT(*) FILTER (
                         WHERE tasks.occurrence_date BETWEEN %s AND %s
+                          AND tasks.status = 'completed'
                     ) AS week_count,
                     COUNT(*) FILTER (
                         WHERE tasks.status = 'open' AND tasks.due_at < %s

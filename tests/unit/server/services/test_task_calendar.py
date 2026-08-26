@@ -1,11 +1,12 @@
 """Calendar aggregation and household authorization contracts for homework."""
 
 from datetime import date, datetime, timezone
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 
 from src.server.services import education_tasks
+from src.server.database import education_tasks as education_task_records
 from src.server.services.education_tasks import (
     EducationTaskError,
     EducationTaskNotFoundError,
@@ -176,7 +177,36 @@ async def test_historical_calendar_materializes_through_current_local_week(monke
         now=datetime(2026, 8, 20, 1, tzinfo=timezone.utc),
     )
 
-    assert materialize.await_args.kwargs["through_date"] == date(2026, 8, 23)
+    assert materialize.await_args_list == [
+        call(
+            task_rule_id="rule-1",
+            from_date=date(2026, 7, 1),
+            through_date=date(2026, 7, 2),
+        ),
+        call(
+            task_rule_id="rule-1",
+            from_date=date(2026, 8, 17),
+            through_date=date(2026, 8, 23),
+        ),
+    ]
+
+
+def test_old_daily_rule_generates_only_the_requested_materialization_window():
+    dates = education_task_records._task_occurrence_dates(
+        recurrence={"frequency": "daily", "start_date": "2020-01-01"},
+        from_date=date(2026, 8, 17),
+        through_date=date(2026, 8, 23),
+    )
+
+    assert dates == [
+        date(2026, 8, 17),
+        date(2026, 8, 18),
+        date(2026, 8, 19),
+        date(2026, 8, 20),
+        date(2026, 8, 21),
+        date(2026, 8, 22),
+        date(2026, 8, 23),
+    ]
 
 
 @pytest.mark.asyncio
