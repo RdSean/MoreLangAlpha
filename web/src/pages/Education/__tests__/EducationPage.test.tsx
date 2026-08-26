@@ -161,6 +161,48 @@ describe('EducationPage', () => {
     expect(state.upload).toHaveBeenCalledWith(second);
   });
 
+  it('rejects a weekly task when its first due date is outside the selected weekdays', async () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
+    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
+    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '不匹配的每周阅读' } });
+    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-09T10:00' } });
+    fireEvent.change(screen.getByLabelText('重复方式'), { target: { value: 'weekly' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '周一' }));
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('首次截止时间必须落在所选的每周日期。');
+    expect(state.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects more than twenty parent materials before starting uploads', async () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
+    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
+    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '附件过多' } });
+    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
+    fireEvent.change(screen.getByLabelText('材料附件'), {
+      target: { files: Array.from({ length: 21 }, (_, index) => new File(['x'], `${index}.jpg`, { type: 'image/jpeg' })) },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('最多可上传 20 份附件。');
+    expect(state.upload).not.toHaveBeenCalled();
+    expect(state.create).not.toHaveBeenCalled();
+  });
+
   it('blocks creation and guides the parent when the selected student has no grade', () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: null }];
@@ -215,6 +257,8 @@ describe('EducationPage', () => {
     render(<MemoryRouter><EducationPage /></MemoryRouter>);
 
     fireEvent.click(screen.getByRole('button', { name: '完成打卡' }));
+    expect(screen.getByRole('heading', { name: '完成打卡' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '确认打卡' }));
 
     await waitFor(() => expect(state.checkIn).toHaveBeenCalledWith({
       taskId: 'task-1',
@@ -222,6 +266,89 @@ describe('EducationPage', () => {
       idempotency_key: 'submission-idempotency-key',
       asset_ids: [],
     }));
+  });
+
+  it('sends optional first check-in text and multiple attachments', async () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    state.tasks = [task('open')];
+    state.upload
+      .mockResolvedValueOnce({ asset_id: 'asset-1' })
+      .mockResolvedValueOnce({ asset_id: 'asset-2' });
+    const first = new File(['first'], 'first.jpg', { type: 'image/jpeg' });
+    const second = new File(['second'], 'second.pdf', { type: 'application/pdf' });
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '完成打卡' }));
+    fireEvent.change(screen.getByPlaceholderText('可选的完成说明'), { target: { value: '已经读完。' } });
+    fireEvent.change(screen.getByLabelText('附件'), { target: { files: [first, second] } });
+    fireEvent.click(screen.getByRole('button', { name: '确认打卡' }));
+
+    await waitFor(() => expect(state.checkIn).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      submission_text: '已经读完。',
+      idempotency_key: 'submission-idempotency-key',
+      asset_ids: ['asset-1', 'asset-2'],
+    }));
+  });
+
+  it('rejects more than twenty first check-in attachments before starting uploads', async () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    state.tasks = [task('open')];
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '完成打卡' }));
+    fireEvent.change(screen.getByLabelText('附件'), {
+      target: { files: Array.from({ length: 21 }, (_, index) => new File(['x'], `${index}.jpg`, { type: 'image/jpeg' })) },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认打卡' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('最多可上传 20 份附件。');
+    expect(state.upload).not.toHaveBeenCalled();
+    expect(state.checkIn).not.toHaveBeenCalled();
+  });
+
+  it('rejects more than twenty revision attachments before starting uploads', async () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    state.tasks = [task('completed')];
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '补充提交' }));
+    fireEvent.change(screen.getByLabelText('附件'), {
+      target: { files: Array.from({ length: 21 }, (_, index) => new File(['x'], `${index}.jpg`, { type: 'image/jpeg' })) },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '提交补充' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('最多可上传 20 份附件。');
+    expect(state.upload).not.toHaveBeenCalled();
+    expect(state.appendRevision).not.toHaveBeenCalled();
+  });
+
+  it('shows the server detail when a homework mutation fails', async () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    state.tasks = [task('open')];
+    state.checkIn.mockRejectedValue({ response: { data: { detail: '该作业已取消。' } } });
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '完成打卡' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认打卡' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('该作业已取消。');
+  });
+
+  it('shows cancellation errors instead of leaving a rejected mutation unhandled', async () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.tasks = [task('open')];
+    state.cancel.mockRejectedValue({ response: { data: { detail: '作业已经完成，不能取消。' } } });
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '取消作业' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('作业已经完成，不能取消。');
   });
 
   it('lets a student append a meaningful revision after completion', async () => {
