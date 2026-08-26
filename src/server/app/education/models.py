@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class EducationStudentProfileResponse(BaseModel):
-    household_id: str
+    household_id: UUID
     user_id: str
     grade_code: str | None = None
 

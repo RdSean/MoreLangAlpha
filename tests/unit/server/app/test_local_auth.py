@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -180,7 +181,8 @@ async def test_parent_can_list_existing_child_without_a_local_username(client):
 async def test_parent_can_read_and_update_a_childs_education_profile(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-user"
-    profile = {"household_id": "household-1", "user_id": "child-user", "grade_code": "g4"}
+    household_id = UUID("11056628-0d77-4c02-a1da-e692b65e629b")
+    profile = {"household_id": household_id, "user_id": "child-user", "grade_code": "g4"}
     with patch(
         "src.server.app.auth.get_family_child_education_profile",
         new=AsyncMock(return_value=profile),
@@ -194,8 +196,9 @@ async def test_parent_can_read_and_update_a_childs_education_profile(client):
         )
 
     assert read.status_code == 200
-    assert read.json() == profile
+    assert read.json() == {**profile, "household_id": str(household_id)}
     assert updated.status_code == 200
+    assert updated.json() == {**profile, "household_id": str(household_id)}
     get_profile.assert_awaited_once_with("parent-user", "child-user")
     assert update_profile.await_args.args == ("parent-user", "child-user")
     assert update_profile.await_args.kwargs == {"grade_code": "g4"}
