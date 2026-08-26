@@ -122,6 +122,64 @@ async def test_calendar_rejects_reversed_or_oversized_ranges():
 
 
 @pytest.mark.asyncio
+async def test_calendar_rejects_far_future_before_materializing_rules(monkeypatch):
+    monkeypatch.setattr(
+        education_tasks, "get_calendar_context_for_user", AsyncMock(return_value=_STUDENT_CONTEXT)
+    )
+    rules = AsyncMock(return_value=[])
+    monkeypatch.setattr(education_tasks, "list_active_rule_timezones_for_user", rules)
+
+    with pytest.raises(EducationTaskError, match="12 months"):
+        await education_tasks.get_task_calendar(
+            user_id="student-1",
+            start_date=date(3000, 1, 1),
+            end_date=date(3000, 1, 2),
+            now=datetime(2026, 8, 2, 0, 30, tzinfo=timezone.utc),
+        )
+
+    rules.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_historical_calendar_materializes_through_current_local_week(monkeypatch):
+    monkeypatch.setattr(
+        education_tasks, "get_calendar_context_for_user", AsyncMock(return_value=_STUDENT_CONTEXT)
+    )
+    monkeypatch.setattr(
+        education_tasks,
+        "list_active_rule_timezones_for_user",
+        AsyncMock(
+            return_value=[
+                {
+                    "task_rule_id": "rule-1",
+                    "assigned_student_id": "student-1",
+                    "timezone": "America/Los_Angeles",
+                }
+            ]
+        ),
+    )
+    materialize = AsyncMock(return_value=0)
+    monkeypatch.setattr(education_tasks, "materialize_task_rule_through", materialize)
+    monkeypatch.setattr(education_tasks, "list_calendar_task_records", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        education_tasks,
+        "get_calendar_progress_counts",
+        AsyncMock(
+            return_value={"today_count": 0, "week_count": 0, "overdue_count": 0, "completed_count": 0}
+        ),
+    )
+
+    await education_tasks.get_task_calendar(
+        user_id="student-1",
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 2),
+        now=datetime(2026, 8, 20, 1, tzinfo=timezone.utc),
+    )
+
+    assert materialize.await_args.kwargs["through_date"] == date(2026, 8, 23)
+
+
+@pytest.mark.asyncio
 async def test_calendar_uses_household_timezone_for_today_and_week_boundaries(monkeypatch):
     monkeypatch.setattr(
         education_tasks, "get_calendar_context_for_user", AsyncMock(return_value=_STUDENT_CONTEXT)

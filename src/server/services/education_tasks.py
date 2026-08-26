@@ -50,6 +50,9 @@ _ASSET_OWNERSHIP_ERRORS = frozenset({
     "One or more submission assets are outside the household",
 })
 _MAX_CALENDAR_RANGE_DAYS = 62
+# Calendar browsing can materialize recurring instances, so bound its absolute
+# horizon as well as each individual request window.
+_MAX_CALENDAR_FUTURE_DAYS = 366
 
 
 def _task_asset_error(exc: ValueError) -> EducationTaskAssetError | None:
@@ -310,6 +313,11 @@ def _validate_calendar_range(*, start_date: date, end_date: date) -> None:
         raise EducationTaskError("Calendar date range cannot exceed 62 days")
 
 
+def _validate_calendar_horizon(*, end_date: date, local_today: date) -> None:
+    if end_date > local_today + timedelta(days=_MAX_CALENDAR_FUTURE_DAYS):
+        raise EducationTaskError("Calendar end_date cannot be more than 12 months ahead")
+
+
 async def _resolve_calendar_student_scope(
     *, user_id: str, student_id: str | None,
 ) -> tuple[dict[str, Any], str | None]:
@@ -354,11 +362,13 @@ async def get_task_calendar(
     local_today = current_time.astimezone(timezone).date()
     week_start = local_today - timedelta(days=local_today.isoweekday() - 1)
     week_end = week_start + timedelta(days=6)
+    _validate_calendar_horizon(end_date=end_date, local_today=local_today)
+    materialization_end_date = max(end_date, week_end)
 
     for rule in await list_active_rule_timezones_for_user(user_id):
         if assigned_student_id is None or rule.get("assigned_student_id") == assigned_student_id:
             await materialize_task_rule_through(
-                task_rule_id=str(rule["task_rule_id"]), through_date=end_date
+                task_rule_id=str(rule["task_rule_id"]), through_date=materialization_end_date
             )
 
     household_id = str(context["household_id"])
