@@ -10,12 +10,11 @@ from src.config.env import (
     EDUCATION_ASSET_MAX_BYTES,
 )
 from src.server.database.education_assets import (
+    claim_unreferenced_education_asset,
     get_education_asset_for_user,
-    get_unreferenced_education_asset,
     get_staged_education_asset,
     insert_education_asset,
     list_education_assets_for_parent,
-    delete_unreferenced_education_asset,
 )
 from src.server.database.education_members import get_membership_for_user
 from src.utils.storage import delete_object, get_signed_url, upload_bytes
@@ -196,20 +195,19 @@ async def create_education_asset(
 
 async def delete_education_asset(*, user_id: str, asset_id: str) -> None:
     """Remove an unreferenced creator-owned staged attachment and its private object."""
-    asset = await get_unreferenced_education_asset(
+    async with claim_unreferenced_education_asset(
         asset_id=asset_id, created_by_user_id=user_id,
-    )
-    if not asset:
-        return
-    storage_key = asset["storage_key"]
-    if not storage_key.startswith("education/"):
-        raise EducationAssetPersistenceError("Education attachment key is invalid")
-    deleted = await asyncio.to_thread(delete_object, storage_key)
-    if not deleted:
-        raise EducationAssetStorageError("Attachment cleanup is unavailable")
-    await delete_unreferenced_education_asset(
-        asset_id=asset_id, created_by_user_id=user_id,
-    )
+    ) as (asset, delete_metadata):
+        if not asset:
+            return
+        storage_key = asset["storage_key"]
+        if not storage_key.startswith("education/"):
+            raise EducationAssetPersistenceError("Education attachment key is invalid")
+        deleted = await asyncio.to_thread(delete_object, storage_key)
+        if not deleted:
+            raise EducationAssetStorageError("Attachment cleanup is unavailable")
+        if delete_metadata:
+            await delete_metadata()
 
 
 async def list_parent_education_assets(*, user_id: str) -> list[dict]:

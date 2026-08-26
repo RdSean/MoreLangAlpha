@@ -1,5 +1,6 @@
 """Contract tests for household-scoped education attachments."""
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
@@ -133,32 +134,54 @@ async def test_create_asset_reuses_a_staged_upload_without_reuploading_bytes(mon
 
 @pytest.mark.asyncio
 async def test_creator_deletes_storage_before_removing_unreferenced_metadata(monkeypatch):
-    find_record = AsyncMock(return_value=ASSET)
-    remove_record = AsyncMock(return_value=ASSET)
-    removed_keys: list[str] = []
-    monkeypatch.setattr(education_assets, "get_unreferenced_education_asset", find_record)
-    monkeypatch.setattr(education_assets, "delete_unreferenced_education_asset", remove_record)
-    monkeypatch.setattr(education_assets, "delete_object", lambda key: removed_keys.append(key) or True)
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def claimed_asset(**_kwargs):
+        async def delete_metadata():
+            events.append("metadata")
+            return ASSET
+
+        yield ASSET, delete_metadata
+
+    monkeypatch.setattr(education_assets, "claim_unreferenced_education_asset", claimed_asset)
+    monkeypatch.setattr(education_assets, "delete_object", lambda _key: events.append("storage") or True)
 
     await education_assets.delete_education_asset(user_id="student-1", asset_id=ASSET_ID)
 
-    find_record.assert_awaited_once_with(asset_id=ASSET_ID, created_by_user_id="student-1")
-    assert removed_keys == [ASSET["storage_key"]]
-    remove_record.assert_awaited_once_with(asset_id=ASSET_ID, created_by_user_id="student-1")
+    assert events == ["storage", "metadata"]
 
 
 @pytest.mark.asyncio
 async def test_failed_storage_cleanup_preserves_metadata_for_a_retry(monkeypatch):
-    find_record = AsyncMock(return_value=ASSET)
     remove_record = AsyncMock()
-    monkeypatch.setattr(education_assets, "get_unreferenced_education_asset", find_record)
-    monkeypatch.setattr(education_assets, "delete_unreferenced_education_asset", remove_record)
+
+    @asynccontextmanager
+    async def claimed_asset(**_kwargs):
+        yield ASSET, remove_record
+
+    monkeypatch.setattr(education_assets, "claim_unreferenced_education_asset", claimed_asset)
     monkeypatch.setattr(education_assets, "delete_object", lambda *_args: False)
 
     with pytest.raises(education_assets.EducationAssetStorageError, match="cleanup"):
         await education_assets.delete_education_asset(user_id="student-1", asset_id=ASSET_ID)
 
     remove_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_does_not_delete_storage_when_its_locked_claim_is_no_longer_unreferenced(monkeypatch):
+    @asynccontextmanager
+    async def no_longer_unreferenced(**_kwargs):
+        yield None, None
+
+    removed_keys: list[str] = []
+    monkeypatch.setattr(education_assets, "claim_unreferenced_education_asset", no_longer_unreferenced)
+    monkeypatch.setattr(education_assets, "delete_object", lambda key: removed_keys.append(key) or True)
+
+    await education_assets.delete_education_asset(user_id="student-1", asset_id=ASSET_ID)
+
+    assert removed_keys == []
 
 
 @pytest.mark.asyncio

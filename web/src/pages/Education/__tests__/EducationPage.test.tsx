@@ -152,6 +152,19 @@ describe('EducationPage', () => {
     })));
   });
 
+  it('renders task deadlines in the household timezone instead of the browser timezone', () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    state.tasks = [task('open')];
+    state.dictionaries = { ...state.dictionaries!, timezone: 'America/New_York' };
+    const expected = new Intl.DateTimeFormat(undefined, {
+      timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    }).format(new Date('2026-08-10T01:00:00.000Z'));
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    expect(screen.getByText(`截止 ${expected}`)).toBeInTheDocument();
+  });
+
   it('creates a weekly task with the selected weekdays and all parent materials', async () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
@@ -254,6 +267,32 @@ describe('EducationPage', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
 
     await waitFor(() => expect(state.deleteAsset).toHaveBeenCalledWith('asset-1'));
+  });
+
+  it('keeps a create dialog and staged attachments open while its request is pending', async () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
+    let resolveCreate: (() => void) | undefined;
+    state.create.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveCreate = resolve; }));
+    const attachment = new File(['first'], 'first.pdf', { type: 'application/pdf' });
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
+    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
+    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '处理中作业' } });
+    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
+    fireEvent.change(screen.getByLabelText('材料附件'), { target: { files: [attachment] } });
+    fireEvent.click(screen.getAllByRole('button', { name: '创建作业' }).at(-1)!);
+    await waitFor(() => expect(state.create).toHaveBeenCalledOnce());
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.getByRole('heading', { name: '创建作业' })).toBeInTheDocument();
+    expect(state.deleteAsset).not.toHaveBeenCalled();
+    resolveCreate?.();
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '创建作业' })).not.toBeInTheDocument());
   });
 
   it('rejects more than twenty parent materials before starting uploads', async () => {
@@ -401,6 +440,45 @@ describe('EducationPage', () => {
     await waitFor(() => expect(state.deleteAsset).toHaveBeenCalledWith('asset-1'));
   });
 
+  it('retries staged attachment cleanup after a failed check-in closes', async () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    state.tasks = [task('open')];
+    state.checkIn.mockRejectedValue({ response: { status: 400, data: { detail: '该作业已取消。' } } });
+    state.deleteAsset.mockRejectedValueOnce(new Error('storage unavailable')).mockResolvedValueOnce(undefined);
+    const attachment = new File(['first'], 'first.pdf', { type: 'application/pdf' });
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '完成打卡' }));
+    fireEvent.change(screen.getByLabelText('附件'), { target: { files: [attachment] } });
+    fireEvent.click(screen.getByRole('button', { name: '确认打卡' }));
+    await waitFor(() => expect(state.deleteAsset).toHaveBeenCalledTimes(1));
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(state.deleteAsset).toHaveBeenCalledTimes(2));
+  });
+
+  it('keeps a check-in dialog and staged attachments open while its request is pending', async () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    state.tasks = [task('open')];
+    let resolveCheckIn: (() => void) | undefined;
+    state.checkIn.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveCheckIn = resolve; }));
+    const attachment = new File(['first'], 'first.pdf', { type: 'application/pdf' });
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '完成打卡' }));
+    fireEvent.change(screen.getByLabelText('附件'), { target: { files: [attachment] } });
+    fireEvent.click(screen.getByRole('button', { name: '确认打卡' }));
+    await waitFor(() => expect(state.checkIn).toHaveBeenCalledOnce());
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.getByRole('heading', { name: '完成打卡' })).toBeInTheDocument();
+    expect(state.deleteAsset).not.toHaveBeenCalled();
+    resolveCheckIn?.();
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '完成打卡' })).not.toBeInTheDocument());
+  });
+
   it('rejects more than twenty first check-in attachments before starting uploads', async () => {
     state.member = { user_id: 'student-1', name: '学生', role: 'student' };
     state.tasks = [task('open')];
@@ -476,5 +554,27 @@ describe('EducationPage', () => {
       idempotency_key: 'submission-idempotency-key',
       asset_ids: [],
     }));
+  });
+
+  it('keeps a revision dialog and staged attachments open while its request is pending', async () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    state.tasks = [task('completed')];
+    let resolveRevision: (() => void) | undefined;
+    state.appendRevision.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveRevision = resolve; }));
+    const attachment = new File(['first'], 'first.pdf', { type: 'application/pdf' });
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '补充提交' }));
+    fireEvent.change(screen.getByPlaceholderText('补充说明或修改内容'), { target: { value: '补充说明' } });
+    fireEvent.change(screen.getByLabelText('附件'), { target: { files: [attachment] } });
+    fireEvent.click(screen.getByRole('button', { name: '提交补充' }));
+    await waitFor(() => expect(state.appendRevision).toHaveBeenCalledOnce());
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.getByRole('heading', { name: '补充提交' })).toBeInTheDocument();
+    expect(state.deleteAsset).not.toHaveBeenCalled();
+    resolveRevision?.();
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '补充提交' })).not.toBeInTheDocument());
   });
 });
