@@ -13,6 +13,7 @@ from src.server.utils.api import get_current_user_id
 
 
 DICTIONARIES = {
+    "timezone": "Asia/Tokyo",
     "subjects": [
         {
             "code": "chinese",

@@ -105,6 +105,39 @@ async def delete_unreferenced_education_asset(
     return dict(row) if row else None
 
 
+async def get_unreferenced_education_asset(
+    *, asset_id: str, created_by_user_id: str,
+) -> dict[str, Any] | None:
+    """Find creator-owned metadata that can be safely cleaned up and retried."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT assets.asset_id, assets.household_id, assets.created_by_user_id,
+                       assets.storage_key, assets.original_filename, assets.content_type,
+                       assets.size_bytes, assets.created_at
+                FROM education_assets AS assets
+                WHERE assets.asset_id = %s
+                  AND assets.created_by_user_id = %s
+                  AND NOT EXISTS (
+                      SELECT 1 FROM education_task_material_assets AS materials
+                      WHERE materials.asset_id = assets.asset_id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM education_task_submission_assets AS submissions
+                      WHERE submissions.asset_id = assets.asset_id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM education_textbook_sources AS sources
+                      WHERE sources.asset_id = assets.asset_id
+                  )
+                """,
+                (asset_id, created_by_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def get_education_asset_for_user(
     *, user_id: str, asset_id: str
 ) -> dict[str, Any] | None:

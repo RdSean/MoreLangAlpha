@@ -62,6 +62,7 @@ export interface EducationSubjectDictionary {
 }
 
 export interface EducationHomeworkDictionaries {
+  timezone: string;
   subjects: EducationSubjectDictionary[];
   grade_levels: Array<{ code: string; name: string; stage: string; sort_order: number }>;
   practice_sources: Array<{ code: string; name: string; sort_order: number }>;

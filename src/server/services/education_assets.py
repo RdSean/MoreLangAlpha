@@ -11,6 +11,7 @@ from src.config.env import (
 )
 from src.server.database.education_assets import (
     get_education_asset_for_user,
+    get_unreferenced_education_asset,
     get_staged_education_asset,
     insert_education_asset,
     list_education_assets_for_parent,
@@ -195,7 +196,7 @@ async def create_education_asset(
 
 async def delete_education_asset(*, user_id: str, asset_id: str) -> None:
     """Remove an unreferenced creator-owned staged attachment and its private object."""
-    asset = await delete_unreferenced_education_asset(
+    asset = await get_unreferenced_education_asset(
         asset_id=asset_id, created_by_user_id=user_id,
     )
     if not asset:
@@ -206,6 +207,9 @@ async def delete_education_asset(*, user_id: str, asset_id: str) -> None:
     deleted = await asyncio.to_thread(delete_object, storage_key)
     if not deleted:
         raise EducationAssetStorageError("Attachment cleanup is unavailable")
+    await delete_unreferenced_education_asset(
+        asset_id=asset_id, created_by_user_id=user_id,
+    )
 
 
 async def list_parent_education_assets(*, user_id: str) -> list[dict]:

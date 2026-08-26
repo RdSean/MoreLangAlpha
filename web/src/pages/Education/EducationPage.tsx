@@ -22,6 +22,31 @@ function localDate(value: string) {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 }
 
+function householdWallClockToIso(value: string, timeZone: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) throw new Error('截止时间无效。');
+  const [year, month, day, hour, minute] = match.slice(1).map(Number);
+  const wallClockUtc = Date.UTC(year, month - 1, day, hour, minute);
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  let instant = wallClockUtc;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(instant))
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, Number(part.value)]));
+    const localClockUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+    instant = wallClockUtc - (localClockUtc - instant);
+  }
+  return new Date(instant).toISOString();
+}
+
 const maxEducationAttachments = 20;
 
 function assertAttachmentLimit(files: File[]) {
@@ -121,6 +146,18 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
   const gradeName = dictionaries?.grade_levels.find((grade) => grade.code === selectedStudent?.grade_code)?.name ?? '未设置年级';
   const isPractice = typeCode === 'practice';
   const needsWeekdaySelection = frequency === 'weekly';
+  const householdTimezone = dictionaries?.timezone ?? 'UTC';
+
+  const discardStagedAttempt = async () => {
+    const attempt = stagedAttempt.current;
+    stagedAttempt.current = null;
+    requestKeyTracker.current.clear();
+    if (attempt) await cleanupStagedAssets(attempt);
+  };
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) void discardStagedAttempt();
+    setOpen(nextOpen);
+  };
 
   const updateFrequency = (nextFrequency: CreateEducationTaskInput['frequency']) => {
     setFrequency(nextFrequency);
@@ -142,6 +179,7 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
       const idempotencyKey = requestKeyTracker.current.take(fingerprint);
       attempt = stagedAttempt.current;
       if (!attempt || attempt.fingerprint !== fingerprint || attempt.idempotencyKey !== idempotencyKey) {
+        if (attempt) await discardStagedAttempt();
         attempt = { fingerprint, idempotencyKey, assetIds: [] };
         stagedAttempt.current = attempt;
       }
@@ -172,7 +210,7 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
     }
   };
 
-  return <Dialog open={open} onOpenChange={setOpen}>
+  return <Dialog open={open} onOpenChange={handleOpenChange}>
     <DialogTrigger asChild><Button><ClipboardPlus className="mr-2 size-4" aria-hidden="true" />创建作业</Button></DialogTrigger>
     <DialogContent variant="centered" className="max-w-lg">
       <DialogHeader><DialogTitle>创建作业</DialogTitle><DialogDescription>分配给家庭中的学生，并设定完成时间。</DialogDescription></DialogHeader>
@@ -186,7 +224,7 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
         {isPractice && <label className="grid gap-1.5 text-sm font-medium">练习来源<select value={practiceSourceCode} onChange={(event) => setPracticeSourceCode(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm" required><option value="" disabled>选择练习来源</option>{(dictionaries?.practice_sources ?? []).map((item) => <option value={item.code} key={item.code}>{item.name}</option>)}</select></label>}
         <label className="grid gap-1.5 text-sm font-medium">标题<Input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
         <label className="grid gap-1.5 text-sm font-medium">说明<Textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label>
-        <label className="grid gap-1.5 text-sm font-medium">截止时间<Input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} required /></label>
+        <label className="grid gap-1.5 text-sm font-medium"><span>截止时间</span><span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>家庭时区：{householdTimezone}</span><Input aria-label="截止时间" type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} required /></label>
         <label className="grid gap-1.5 text-sm font-medium">重复方式<select value={frequency} onChange={(event) => updateFrequency(event.target.value as CreateEducationTaskInput['frequency'])} className="h-10 rounded-md border border-input bg-background px-3 text-sm"><option value="once">一次</option><option value="daily">每天</option><option value="weekdays">工作日</option><option value="weekly">每周指定日期</option></select></label>
         {needsWeekdaySelection && <fieldset className="grid gap-2"><legend className="text-sm font-medium">每周日期</legend><div className="flex flex-wrap gap-x-4 gap-y-2">{weeklyDayOptions.map(([weekday, label]) => <label className="flex items-center gap-2 text-sm" key={weekday}><input type="checkbox" checked={weekdays.includes(weekday)} onChange={() => toggleWeekday(weekday)} />{label}</label>)}</div></fieldset>}
         <label className="grid gap-1.5 text-sm font-medium">材料附件<Input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />{files.length > 0 && <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>已选择 {files.length} 份附件</span>}</label>
@@ -207,6 +245,21 @@ function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'st
   const requestKeyTracker = useRef(createRequestKeyTracker());
   const stagedAttempt = useRef<StagedAttachmentAttempt | null>(null);
 
+  const discardStagedAttempt = async () => {
+    const attempt = stagedAttempt.current;
+    stagedAttempt.current = null;
+    requestKeyTracker.current.clear();
+    if (attempt) await cleanupStagedAssets(attempt);
+  };
+  const handleCheckInOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) void discardStagedAttempt();
+    setCheckInOpen(nextOpen);
+  };
+  const handleDialogOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) void discardStagedAttempt();
+    setDialogOpen(nextOpen);
+  };
+
   const submitWithAttachments = async (
     kind: 'check-in' | 'revision',
     submit: (idempotencyKey: string, assetIds: string[]) => Promise<void>,
@@ -216,6 +269,7 @@ function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'st
     const idempotencyKey = requestKeyTracker.current.take(fingerprint);
     let attempt = stagedAttempt.current;
     if (!attempt || attempt.fingerprint !== fingerprint || attempt.idempotencyKey !== idempotencyKey) {
+      if (attempt) await discardStagedAttempt();
       attempt = { fingerprint, idempotencyKey, assetIds: [] };
       stagedAttempt.current = attempt;
     }
@@ -268,7 +322,7 @@ function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'st
   const errorMessage = actionError && <p role="alert" className="text-sm" style={{ color: 'var(--color-loss)' }}>{actionError}</p>;
 
   if (role === 'student' && task.status === 'open') {
-    return <Dialog open={checkInOpen} onOpenChange={setCheckInOpen}>
+    return <Dialog open={checkInOpen} onOpenChange={handleCheckInOpenChange}>
       <DialogTrigger asChild><Button size="sm"><CheckCircle2 className="mr-2 size-4" aria-hidden="true" />完成打卡</Button></DialogTrigger>
       <DialogContent variant="centered" className="max-w-lg">
         <DialogHeader><DialogTitle>完成打卡</DialogTitle><DialogDescription>可直接确认完成，也可以补充文字和多份 PDF、图片附件。</DialogDescription></DialogHeader>
@@ -282,10 +336,10 @@ function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'st
     </Dialog>;
   };
   if (role === 'student' && task.status === 'completed') {
-    return <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogTrigger asChild><Button size="sm" variant="outline"><Send className="mr-2 size-4" aria-hidden="true" />补充提交</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg"><DialogHeader><DialogTitle>补充提交</DialogTitle><DialogDescription>可追加文字说明或多份 PDF、图片附件。</DialogDescription></DialogHeader><div className="grid gap-4"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="补充说明或修改内容" /><label className="grid gap-1.5 text-sm font-medium">附件<Input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>{errorMessage}<DialogFooter><Button onClick={() => void appendRevision()} disabled={mutations.appendRevision.isPending || (!text.trim() && files.length === 0)}>{mutations.appendRevision.isPending ? '正在提交' : '提交补充'}</Button></DialogFooter></div></DialogContent></Dialog>;
+    return <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}><DialogTrigger asChild><Button size="sm" variant="outline"><Send className="mr-2 size-4" aria-hidden="true" />补充提交</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg"><DialogHeader><DialogTitle>补充提交</DialogTitle><DialogDescription>可追加文字说明或多份 PDF、图片附件。</DialogDescription></DialogHeader><div className="grid gap-4"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="补充说明或修改内容" /><label className="grid gap-1.5 text-sm font-medium">附件<Input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>{errorMessage}<DialogFooter><Button onClick={() => void appendRevision()} disabled={mutations.appendRevision.isPending || (!text.trim() && files.length === 0)}>{mutations.appendRevision.isPending ? '正在提交' : '提交补充'}</Button></DialogFooter></div></DialogContent></Dialog>;
   }
   if (role === 'parent' && task.status === 'completed') {
-    return <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogTrigger asChild><Button size="sm" variant="outline"><RotateCcw className="mr-2 size-4" aria-hidden="true" />反馈</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg"><DialogHeader><DialogTitle>作业反馈</DialogTitle><DialogDescription>反馈不会改变学生已完成状态。</DialogDescription></DialogHeader><div className="grid gap-4"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="写下修改建议或完成反馈" />{errorMessage}<DialogFooter><Button variant="outline" onClick={() => void review('revision_requested')} disabled={!text.trim() || mutations.review.isPending}>请求修改</Button><Button onClick={() => void review('feedback')} disabled={!text.trim() || mutations.review.isPending}>保存反馈</Button></DialogFooter></div></DialogContent></Dialog>;
+    return <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}><DialogTrigger asChild><Button size="sm" variant="outline"><RotateCcw className="mr-2 size-4" aria-hidden="true" />反馈</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg"><DialogHeader><DialogTitle>作业反馈</DialogTitle><DialogDescription>反馈不会改变学生已完成状态。</DialogDescription></DialogHeader><div className="grid gap-4"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="写下修改建议或完成反馈" />{errorMessage}<DialogFooter><Button variant="outline" onClick={() => void review('revision_requested')} disabled={!text.trim() || mutations.review.isPending}>请求修改</Button><Button onClick={() => void review('feedback')} disabled={!text.trim() || mutations.review.isPending}>保存反馈</Button></DialogFooter></div></DialogContent></Dialog>;
   }
   return null;
 }
@@ -316,7 +370,7 @@ export default function EducationPage() {
   const learningAssignments = useLearningAssignments(role === 'student');
   const students = useMemo(() => (membersQuery.data ?? []).filter((item) => item.role === 'student'), [membersQuery.data]);
   const create = async ({ assignedStudentId, title, description, dueAt, subjectCode, typeCode, practiceSourceCode, frequency, weekdays, idempotencyKey, materialAssetIds }: ParentCreateInput) => {
-    const input: CreateEducationTaskInput = { idempotency_key: idempotencyKey, assigned_student_id: assignedStudentId, title, description, due_at: new Date(dueAt).toISOString(), subject_code: subjectCode, type_code: typeCode, practice_source_code: practiceSourceCode, frequency, weekdays, material_asset_ids: materialAssetIds };
+    const input: CreateEducationTaskInput = { idempotency_key: idempotencyKey, assigned_student_id: assignedStudentId, title, description, due_at: householdWallClockToIso(dueAt, dictionariesQuery.data?.timezone ?? 'UTC'), subject_code: subjectCode, type_code: typeCode, practice_source_code: practiceSourceCode, frequency, weekdays, material_asset_ids: materialAssetIds };
     await mutations.create.mutateAsync(input);
   };
 

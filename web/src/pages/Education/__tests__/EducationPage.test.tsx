@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   deleteAsset: vi.fn(),
   membersEnabled: vi.fn(),
   dictionaries: {
+    timezone: 'Asia/Tokyo',
     subjects: [
       { code: 'chinese', name: '语文', color: '#D95D39', sort_order: 1, homework_types: [{ code: 'read', name: '阅读', sort_order: 1 }] },
       { code: 'math', name: '数学', color: '#277DA1', sort_order: 2, homework_types: [{ code: 'practice', name: '练习', sort_order: 1 }] },
@@ -82,6 +83,7 @@ beforeEach(() => {
   state.deleteAsset.mockReset().mockResolvedValue(undefined);
   state.membersEnabled.mockReset();
   state.dictionaries = {
+    timezone: 'Asia/Tokyo',
     subjects: [
       { code: 'chinese', name: '语文', color: '#D95D39', sort_order: 1, homework_types: [{ code: 'read', name: '阅读', sort_order: 1 }] },
       { code: 'math', name: '数学', color: '#277DA1', sort_order: 2, homework_types: [{ code: 'practice', name: '练习', sort_order: 1 }] },
@@ -126,6 +128,27 @@ describe('EducationPage', () => {
       frequency: 'once',
       material_asset_ids: [],
       idempotency_key: 'submission-idempotency-key',
+    })));
+  });
+
+  it('interprets a deadline as household wall-clock time instead of browser local time', async () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
+    state.dictionaries = { ...state.dictionaries!, timezone: 'America/New_York' };
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
+    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
+    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '家庭时区作业' } });
+    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
+    expect(screen.getByText('家庭时区：America/New_York')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: '创建作业' }).at(-1)!);
+
+    await waitFor(() => expect(state.create).toHaveBeenCalledWith(expect.objectContaining({
+      due_at: '2026-08-10T14:00:00.000Z',
     })));
   });
 
@@ -209,6 +232,28 @@ describe('EducationPage', () => {
     await waitFor(() => expect(state.create).toHaveBeenCalledTimes(2));
     expect(state.upload).toHaveBeenCalledTimes(1);
     expect(state.create.mock.calls[1][0]).toEqual(state.create.mock.calls[0][0]);
+  });
+
+  it('cleans up parent materials when a failed create dialog is closed', async () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
+    state.create.mockRejectedValueOnce(new Error('network unavailable'));
+    const attachment = new File(['first'], 'first.pdf', { type: 'application/pdf' });
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
+    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
+    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '关闭后回收' } });
+    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
+    fireEvent.change(screen.getByLabelText('材料附件'), { target: { files: [attachment] } });
+    fireEvent.click(screen.getAllByRole('button', { name: '创建作业' }).at(-1)!);
+    expect(await screen.findByRole('alert')).toHaveTextContent('network unavailable');
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(state.deleteAsset).toHaveBeenCalledWith('asset-1'));
   });
 
   it('rejects more than twenty parent materials before starting uploads', async () => {

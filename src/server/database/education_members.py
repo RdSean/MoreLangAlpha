@@ -15,7 +15,7 @@ async def get_membership_for_user(user_id: str) -> dict[str, Any] | None:
                 """
                 SELECT memberships.household_id, memberships.user_id,
                        memberships.role, memberships.display_name,
-                       households.model_owner_user_id
+                       households.model_owner_user_id, households.timezone
                 FROM education_memberships AS memberships
                 JOIN education_households AS households
                   ON households.household_id = memberships.household_id
@@ -42,7 +42,7 @@ async def list_household_membership_context(household_id: str) -> list[dict[str,
                 """
                 SELECT memberships.household_id, memberships.user_id,
                        memberships.role, memberships.display_name,
-                       households.model_owner_user_id
+                       households.model_owner_user_id, households.timezone
                 FROM education_memberships AS memberships
                 JOIN education_households AS households
                   ON households.household_id = memberships.household_id

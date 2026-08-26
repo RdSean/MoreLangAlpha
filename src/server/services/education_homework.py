@@ -15,4 +15,5 @@ async def get_homework_dictionaries(user_id: str) -> dict[str, list[dict[str, An
     membership = await get_membership_for_user(user_id)
     if not membership or membership.get("role") not in {"parent", "student"}:
         raise EducationDictionaryPermissionError("Household membership is required")
-    return await list_homework_dictionaries()
+    dictionaries = await list_homework_dictionaries()
+    return {**dictionaries, "timezone": membership["timezone"]}

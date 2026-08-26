@@ -45,6 +45,7 @@ class EducationPracticeSourceResponse(BaseModel):
 
 
 class EducationHomeworkDictionariesResponse(BaseModel):
+    timezone: str
     subjects: list[EducationSubjectDictionaryResponse]
     grade_levels: list[EducationGradeLevelResponse]
     practice_sources: list[EducationPracticeSourceResponse]

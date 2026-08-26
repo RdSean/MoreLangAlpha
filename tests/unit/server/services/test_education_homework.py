@@ -13,13 +13,16 @@ async def test_household_members_can_read_homework_dictionaries(monkeypatch, rol
     monkeypatch.setattr(
         education_homework,
         "get_membership_for_user",
-        AsyncMock(return_value={"household_id": "household-1", "role": role}),
+        AsyncMock(return_value={"household_id": "household-1", "role": role, "timezone": "Asia/Tokyo"}),
     )
     dictionaries = {"subjects": [], "grade_levels": [], "practice_sources": []}
     read = AsyncMock(return_value=dictionaries)
     monkeypatch.setattr(education_homework, "list_homework_dictionaries", read)
 
-    assert await education_homework.get_homework_dictionaries("member-1") == dictionaries
+    assert await education_homework.get_homework_dictionaries("member-1") == {
+        **dictionaries,
+        "timezone": "Asia/Tokyo",
+    }
     read.assert_awaited_once()
 
 
