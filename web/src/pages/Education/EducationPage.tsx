@@ -22,10 +22,9 @@ function localDate(value: string) {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 }
 
-async function uploadSelectedFile(file: File | null): Promise<string[]> {
-  if (!file) return [];
-  const asset = await uploadEducationAsset(file);
-  return [asset.asset_id];
+async function uploadSelectedFiles(files: File[]): Promise<string[]> {
+  const assets = await Promise.all(files.map((file) => uploadEducationAsset(file)));
+  return assets.map((asset) => asset.asset_id);
 }
 
 type ParentCreateInput = {
@@ -36,8 +35,18 @@ type ParentCreateInput = {
   subjectCode: string;
   typeCode: string;
   practiceSourceCode: string | null;
-  file: File | null;
+  frequency: CreateEducationTaskInput['frequency'];
+  weekdays: number[] | null;
+  files: File[];
 };
+
+const weeklyDayOptions = [
+  [1, '周一'], [2, '周二'], [3, '周三'], [4, '周四'], [5, '周五'], [6, '周六'], [7, '周日'],
+] as const;
+
+function readableError(error: unknown) {
+  return error instanceof Error ? error.message : '操作失败，请重试。';
+}
 
 function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
   students: EducationMember[];
@@ -53,27 +62,48 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
   const [subjectCode, setSubjectCode] = useState('');
   const [typeCode, setTypeCode] = useState('');
   const [practiceSourceCode, setPracticeSourceCode] = useState('');
-  const [file, setFile] = useState<File | null>(null);
+  const [frequency, setFrequency] = useState<CreateEducationTaskInput['frequency']>('once');
+  const [weekdays, setWeekdays] = useState<number[]>([]);
+  const [files, setFiles] = useState<File[]>([]);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const subject = dictionaries?.subjects.find((item) => item.code === subjectCode);
   const selectedStudent = students.find((student) => student.user_id === assignedStudentId);
   const isDictionaryReady = Boolean(dictionaries);
   const hasStudentGrade = Boolean(selectedStudent?.grade_code);
   const gradeName = dictionaries?.grade_levels.find((grade) => grade.code === selectedStudent?.grade_code)?.name ?? '未设置年级';
   const isPractice = typeCode === 'practice';
+  const needsWeekdaySelection = frequency === 'weekly';
+
+  const updateFrequency = (nextFrequency: CreateEducationTaskInput['frequency']) => {
+    setFrequency(nextFrequency);
+    if (nextFrequency !== 'weekly') setWeekdays([]);
+  };
+  const toggleWeekday = (weekday: number) => {
+    setWeekdays((current) => current.includes(weekday)
+      ? current.filter((item) => item !== weekday)
+      : [...current, weekday].sort((left, right) => left - right));
+  };
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await onSubmit({
-      assignedStudentId,
-      title,
-      description,
-      dueAt,
-      subjectCode,
-      typeCode,
-      practiceSourceCode: isPractice ? practiceSourceCode : null,
-      file,
-    });
-    setOpen(false);
+    setSubmitError(null);
+    try {
+      await onSubmit({
+        assignedStudentId,
+        title,
+        description,
+        dueAt,
+        subjectCode,
+        typeCode,
+        practiceSourceCode: isPractice ? practiceSourceCode : null,
+        frequency,
+        weekdays: needsWeekdaySelection ? weekdays : null,
+        files,
+      });
+      setOpen(false);
+    } catch (error) {
+      setSubmitError(readableError(error));
+    }
   };
 
   return <Dialog open={open} onOpenChange={setOpen}>
@@ -91,8 +121,11 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
         <label className="grid gap-1.5 text-sm font-medium">标题<Input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
         <label className="grid gap-1.5 text-sm font-medium">说明<Textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label>
         <label className="grid gap-1.5 text-sm font-medium">截止时间<Input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} required /></label>
-        <label className="grid gap-1.5 text-sm font-medium">材料附件<Input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
-        <DialogFooter><Button type="submit" disabled={isPending || !isDictionaryReady || !assignedStudentId || !hasStudentGrade || !subjectCode || !typeCode || (isPractice && !practiceSourceCode)}>{isPending ? '正在创建' : '创建作业'}</Button></DialogFooter>
+        <label className="grid gap-1.5 text-sm font-medium">重复方式<select value={frequency} onChange={(event) => updateFrequency(event.target.value as CreateEducationTaskInput['frequency'])} className="h-10 rounded-md border border-input bg-background px-3 text-sm"><option value="once">一次</option><option value="daily">每天</option><option value="weekdays">工作日</option><option value="weekly">每周指定日期</option></select></label>
+        {needsWeekdaySelection && <fieldset className="grid gap-2"><legend className="text-sm font-medium">每周日期</legend><div className="flex flex-wrap gap-x-4 gap-y-2">{weeklyDayOptions.map(([weekday, label]) => <label className="flex items-center gap-2 text-sm" key={weekday}><input type="checkbox" checked={weekdays.includes(weekday)} onChange={() => toggleWeekday(weekday)} />{label}</label>)}</div></fieldset>}
+        <label className="grid gap-1.5 text-sm font-medium">材料附件<Input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />{files.length > 0 && <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>已选择 {files.length} 份附件</span>}</label>
+        {submitError && <p role="alert" className="text-sm" style={{ color: 'var(--color-loss)' }}>{submitError}</p>}
+        <DialogFooter><Button type="submit" disabled={isPending || !isDictionaryReady || !assignedStudentId || !hasStudentGrade || !subjectCode || !typeCode || (isPractice && !practiceSourceCode) || (needsWeekdaySelection && weekdays.length === 0)}>{isPending ? '正在创建' : '创建作业'}</Button></DialogFooter>
       </form>
     </DialogContent>
   </Dialog>;
@@ -101,22 +134,22 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
 function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'student' }) {
   const mutations = useEducationTaskMutations();
   const [text, setText] = useState('');
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [open, setOpen] = useState(false);
   const requestKeyTracker = useRef(createRequestKeyTracker());
 
-  const makeRequestKey = () => requestKeyTracker.current.take([task.task_id, text, file?.name, file?.size, file?.lastModified].join('\u0000'));
+  const makeRequestKey = () => requestKeyTracker.current.take([task.task_id, text, ...files.map((file) => `${file.name}:${file.size}:${file.lastModified}`)].join('\u0000'));
   const checkIn = async () => {
     await mutations.checkIn.mutateAsync({ taskId: task.task_id, submission_text: '', idempotency_key: makeRequestKey(), asset_ids: [] });
     requestKeyTracker.current.clear();
   };
   const appendRevision = async () => {
-    const assetIds = await uploadSelectedFile(file);
+    const assetIds = await uploadSelectedFiles(files);
     await mutations.appendRevision.mutateAsync({ taskId: task.task_id, submission_text: text, idempotency_key: makeRequestKey(), asset_ids: assetIds });
     requestKeyTracker.current.clear();
     setOpen(false);
     setText('');
-    setFile(null);
+    setFiles([]);
   };
   const review = async (decision: 'feedback' | 'revision_requested') => {
     await mutations.review.mutateAsync({ taskId: task.task_id, decision, feedbackText: text });
@@ -128,7 +161,7 @@ function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'st
     return <Button size="sm" onClick={() => void checkIn()} disabled={mutations.checkIn.isPending}><CheckCircle2 className="mr-2 size-4" aria-hidden="true" />{mutations.checkIn.isPending ? '正在打卡' : '完成打卡'}</Button>;
   }
   if (role === 'student' && task.status === 'completed') {
-    return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button size="sm" variant="outline"><Send className="mr-2 size-4" aria-hidden="true" />补充提交</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg"><DialogHeader><DialogTitle>补充提交</DialogTitle><DialogDescription>可追加文字说明或一份 PDF、图片附件。</DialogDescription></DialogHeader><div className="grid gap-4"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="补充说明或修改内容" /><label className="grid gap-1.5 text-sm font-medium">附件<Input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label><DialogFooter><Button onClick={() => void appendRevision()} disabled={mutations.appendRevision.isPending || (!text.trim() && !file)}>{mutations.appendRevision.isPending ? '正在提交' : '提交补充'}</Button></DialogFooter></div></DialogContent></Dialog>;
+    return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button size="sm" variant="outline"><Send className="mr-2 size-4" aria-hidden="true" />补充提交</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg"><DialogHeader><DialogTitle>补充提交</DialogTitle><DialogDescription>可追加文字说明或多份 PDF、图片附件。</DialogDescription></DialogHeader><div className="grid gap-4"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="补充说明或修改内容" /><label className="grid gap-1.5 text-sm font-medium">附件<Input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label><DialogFooter><Button onClick={() => void appendRevision()} disabled={mutations.appendRevision.isPending || (!text.trim() && files.length === 0)}>{mutations.appendRevision.isPending ? '正在提交' : '提交补充'}</Button></DialogFooter></div></DialogContent></Dialog>;
   }
   if (role === 'parent' && task.status === 'completed') {
     return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button size="sm" variant="outline"><RotateCcw className="mr-2 size-4" aria-hidden="true" />反馈</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg"><DialogHeader><DialogTitle>作业反馈</DialogTitle><DialogDescription>反馈不会改变学生已完成状态。</DialogDescription></DialogHeader><div className="grid gap-4"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="写下修改建议或完成反馈" /><DialogFooter><Button variant="outline" onClick={() => void review('revision_requested')} disabled={!text.trim() || mutations.review.isPending}>请求修改</Button><Button onClick={() => void review('feedback')} disabled={!text.trim() || mutations.review.isPending}>保存反馈</Button></DialogFooter></div></DialogContent></Dialog>;
@@ -152,9 +185,9 @@ export default function EducationPage() {
   const membersQuery = useEducationMembers(role === 'parent');
   const learningAssignments = useLearningAssignments(role === 'student');
   const students = useMemo(() => (membersQuery.data ?? []).filter((item) => item.role === 'student'), [membersQuery.data]);
-  const create = async ({ assignedStudentId, title, description, dueAt, subjectCode, typeCode, practiceSourceCode, file }: ParentCreateInput) => {
-    const materialAssetIds = await uploadSelectedFile(file);
-    const input: CreateEducationTaskInput = { assigned_student_id: assignedStudentId, title, description, due_at: new Date(dueAt).toISOString(), subject_code: subjectCode, type_code: typeCode, practice_source_code: practiceSourceCode, frequency: 'once', material_asset_ids: materialAssetIds };
+  const create = async ({ assignedStudentId, title, description, dueAt, subjectCode, typeCode, practiceSourceCode, frequency, weekdays, files }: ParentCreateInput) => {
+    const materialAssetIds = await uploadSelectedFiles(files);
+    const input: CreateEducationTaskInput = { assigned_student_id: assignedStudentId, title, description, due_at: new Date(dueAt).toISOString(), subject_code: subjectCode, type_code: typeCode, practice_source_code: practiceSourceCode, frequency, weekdays, material_asset_ids: materialAssetIds };
     await mutations.create.mutateAsync(input);
   };
 

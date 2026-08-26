@@ -74,6 +74,73 @@ export interface EducationAsset {
   created_at?: string;
 }
 
+export interface EducationTaskAsset extends EducationAsset {
+  download_endpoint: string;
+}
+
+export interface EducationTaskSubmission {
+  submission_id: string;
+  task_id: string;
+  sequence: number;
+  submission_text: string;
+  submitted_by_user_id?: string | null;
+  idempotency_key?: string | null;
+  submission_kind?: 'check_in' | 'revision' | null;
+  created_at?: string | null;
+}
+
+export interface EducationTaskReview {
+  review_id: string;
+  submission_id: string;
+  decision: 'feedback' | 'revision_requested';
+  feedback_text: string;
+  reviewed_by_user_id?: string | null;
+  created_at?: string | null;
+}
+
+export interface EducationTaskSubmissionDetail extends EducationTaskSubmission {
+  assets: EducationTaskAsset[];
+  reviews: EducationTaskReview[];
+}
+
+export interface EducationTaskDetail extends EducationTask {
+  parent_materials: EducationTaskAsset[];
+  submissions: EducationTaskSubmissionDetail[];
+}
+
+export interface EducationCalendarTask extends EducationTask {
+  subject_color?: string | null;
+  is_completed: boolean;
+  is_overdue: boolean;
+}
+
+export interface EducationTaskCalendarDay {
+  date: string;
+  task_count: number;
+  completed_count: number;
+  overdue_count: number;
+  tasks: EducationCalendarTask[];
+}
+
+export interface EducationTaskCalendar {
+  student_id?: string | null;
+  start_date: string;
+  end_date: string;
+  days: EducationTaskCalendarDay[];
+  stats: {
+    today_count: number;
+    week_count: number;
+    overdue_count: number;
+    completed_count: number;
+  };
+}
+
+export interface EducationTaskCalendarRequest {
+  start_date: string;
+  end_date: string;
+  student_id?: string;
+}
+
 export type TextbookVersionStatus = 'draft' | 'processing' | 'review' | 'published' | 'failed';
 
 export interface TextbookLibraryItem {

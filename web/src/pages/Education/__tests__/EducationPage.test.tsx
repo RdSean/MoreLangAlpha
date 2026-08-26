@@ -125,6 +125,42 @@ describe('EducationPage', () => {
     })));
   });
 
+  it('creates a weekly task with the selected weekdays and all parent materials', async () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
+    state.upload
+      .mockResolvedValueOnce({ asset_id: 'asset-1' })
+      .mockResolvedValueOnce({ asset_id: 'asset-2' });
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
+    expect(screen.getByText('当前年级：四年级')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
+    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '每周阅读' } });
+    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
+    fireEvent.change(screen.getByLabelText('重复方式'), { target: { value: 'weekly' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '周一' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '周三' }));
+    const first = new File(['first'], 'first.jpg', { type: 'image/jpeg' });
+    const second = new File(['second'], 'second.pdf', { type: 'application/pdf' });
+    fireEvent.change(screen.getByLabelText('材料附件'), { target: { files: [first, second] } });
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+
+    await waitFor(() => expect(state.create).toHaveBeenCalledWith(expect.objectContaining({
+      assigned_student_id: 'student-1',
+      subject_code: 'chinese',
+      type_code: 'read',
+      frequency: 'weekly',
+      weekdays: [1, 3],
+      material_asset_ids: ['asset-1', 'asset-2'],
+    })));
+    expect(state.upload).toHaveBeenCalledWith(first);
+    expect(state.upload).toHaveBeenCalledWith(second);
+  });
+
   it('blocks creation and guides the parent when the selected student has no grade', () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: null }];

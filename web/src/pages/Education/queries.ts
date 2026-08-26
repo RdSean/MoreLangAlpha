@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from './api';
-import type { TeachingJob, TeachingReviewAssetKind } from './types';
+import type { EducationTaskCalendarRequest, TeachingJob, TeachingReviewAssetKind } from './types';
 
 const terminalTeachingJobStatuses = new Set<TeachingJob['status']>(['completed', 'failed', 'cancelled']);
 
@@ -10,6 +10,24 @@ export function useEducationTasks() {
   return useQuery({
     queryKey: queryKeys.education.tasks(),
     queryFn: educationApi.listEducationTasks,
+    staleTime: 15_000,
+  });
+}
+
+export function useEducationTaskDetail(taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.education.task(taskId ?? ''),
+    queryFn: () => educationApi.getEducationTaskDetail(taskId ?? ''),
+    enabled: Boolean(taskId),
+    staleTime: 10_000,
+  });
+}
+
+export function useEducationTaskCalendar(params: EducationTaskCalendarRequest | undefined) {
+  return useQuery({
+    queryKey: queryKeys.education.calendar(params ?? {}),
+    queryFn: () => educationApi.getEducationTaskCalendar(params as EducationTaskCalendarRequest),
+    enabled: Boolean(params),
     staleTime: 15_000,
   });
 }
