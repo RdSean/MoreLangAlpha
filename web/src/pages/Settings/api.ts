@@ -57,6 +57,12 @@ export interface CreatedChildAccount {
   household_id: string;
 }
 
+export interface EducationStudentProfile {
+  household_id: string;
+  user_id: string;
+  grade_code: string | null;
+}
+
 export interface FamilyLlmAvailabilityModel {
   model_key: string;
   display_name: string;
@@ -83,6 +89,21 @@ export async function listFamilyChildren(): Promise<FamilyChild[]> {
 
 export async function createChildAccount(input: CreateChildAccountInput): Promise<CreatedChildAccount> {
   const { data } = await api.post<CreatedChildAccount>('/api/v1/auth/children', input);
+  return data;
+}
+
+export async function getFamilyChildEducationProfile(studentUserId: string): Promise<EducationStudentProfile> {
+  const { data } = await api.get<EducationStudentProfile>(`/api/v1/auth/children/${encodeURIComponent(studentUserId)}/education-profile`);
+  return data;
+}
+
+export async function updateFamilyChildEducationProfile(
+  studentUserId: string,
+  gradeCode: string | null,
+): Promise<EducationStudentProfile> {
+  const { data } = await api.patch<EducationStudentProfile>(`/api/v1/auth/children/${encodeURIComponent(studentUserId)}/education-profile`, {
+    grade_code: gradeCode,
+  });
   return data;
 }
 

@@ -32,7 +32,7 @@ export function useEducationAssets() {
 
 export function useEducationMembers(enabled: boolean) {
   return useQuery({
-    queryKey: [...queryKeys.education.all, 'members'],
+    queryKey: queryKeys.education.members(),
     queryFn: educationApi.listEducationMembers,
     enabled,
     staleTime: 30_000,

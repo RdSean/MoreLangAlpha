@@ -11,7 +11,19 @@ const state = vi.hoisted(() => ({
   children: [] as Array<Record<string, unknown>>,
   isLoading: false,
   create: vi.fn(),
+  updateProfile: vi.fn(),
+  profile: { household_id: 'household-1', user_id: 'student-1', grade_code: 'g4' } as Record<string, unknown> | undefined,
+  profileLoading: false,
 }));
+
+const dictionaries = {
+  subjects: [],
+  grade_levels: [
+    { code: 'g4', name: '四年级', stage: 'primary', sort_order: 4 },
+    { code: 'g5', name: '五年级', stage: 'primary', sort_order: 5 },
+  ],
+  practice_sources: [],
+};
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ member: state.member }),
@@ -20,6 +32,9 @@ vi.mock('@/contexts/AuthContext', () => ({
 vi.mock('../queries', () => ({
   useFamilyChildren: () => ({ data: state.children, isLoading: state.isLoading, isError: false, refetch: vi.fn() }),
   useCreateChildAccount: () => ({ mutateAsync: state.create, isPending: false }),
+  useFamilyChildEducationProfile: () => ({ data: state.profile, isLoading: state.profileLoading }),
+  useUpdateFamilyChildEducationProfile: () => ({ mutateAsync: state.updateProfile, isPending: false }),
+  useEducationHomeworkDictionaries: () => ({ data: dictionaries, isLoading: false }),
 }));
 
 function renderTab() {
@@ -39,6 +54,9 @@ beforeEach(() => {
     flash_workspace: { workspace_id: 'flash-1', name: 'Flash', status: 'flash' },
   }];
   state.create.mockReset().mockResolvedValue({});
+  state.updateProfile.mockReset().mockResolvedValue({ household_id: 'household-1', user_id: 'student-1', grade_code: 'g5' });
+  state.profile = { household_id: 'household-1', user_id: 'student-1', grade_code: 'g4' };
+  state.profileLoading = false;
 });
 
 describe('FamilyAccountsTab', () => {
@@ -77,5 +95,31 @@ describe('FamilyAccountsTab', () => {
     renderTab();
 
     expect(screen.getByText('未设置登录名')).toBeInTheDocument();
+  });
+
+  it('loads grade labels from the education dictionary and updates the selected child grade', async () => {
+    renderTab();
+
+    expect(screen.getByText('当前年级：四年级')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('小明的当前年级'), { target: { value: 'g5' } });
+
+    await waitFor(() => expect(state.updateProfile).toHaveBeenCalledWith({ studentUserId: 'student-1', gradeCode: 'g5' }));
+  });
+
+  it('shows the unset-grade state and waits for the child profile to load', () => {
+    state.profile = undefined;
+    state.profileLoading = true;
+    renderTab();
+
+    expect(screen.getByText('正在加载年级…')).toBeInTheDocument();
+
+    state.profileLoading = false;
+  });
+
+  it('shows an explicit unset-grade label', () => {
+    state.profile = { household_id: 'household-1', user_id: 'student-1', grade_code: null };
+    renderTab();
+
+    expect(screen.getByText('当前年级：未设置年级')).toBeInTheDocument();
   });
 });

@@ -24,6 +24,7 @@ export interface EducationMember {
   user_id: string;
   name: string;
   role: 'parent' | 'student';
+  grade_code?: string | null;
 }
 
 export interface CreateEducationTaskInput {

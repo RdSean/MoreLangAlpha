@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
+import { getEducationHomeworkDictionaries } from '@/pages/Education/api';
 import * as familyAccountsApi from './api';
 
 export function useFamilyChildren(enabled = true) {
@@ -17,6 +18,37 @@ export function useFamilyLlmAvailability(enabled = true) {
     queryFn: familyAccountsApi.getFamilyLlmAvailability,
     enabled,
     staleTime: 15_000,
+  });
+}
+
+export function useEducationHomeworkDictionaries(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.education.dictionaries(),
+    queryFn: getEducationHomeworkDictionaries,
+    enabled,
+    staleTime: Infinity,
+  });
+}
+
+export function useFamilyChildEducationProfile(studentUserId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.settings.family.educationProfile(studentUserId ?? ''),
+    queryFn: () => familyAccountsApi.getFamilyChildEducationProfile(studentUserId ?? ''),
+    enabled: Boolean(studentUserId) && enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useUpdateFamilyChildEducationProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ studentUserId, gradeCode }: { studentUserId: string; gradeCode: string | null }) => (
+      familyAccountsApi.updateFamilyChildEducationProfile(studentUserId, gradeCode)
+    ),
+    onSuccess: (_profile, { studentUserId }) => Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.family.educationProfile(studentUserId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.education.members() }),
+    ]),
   });
 }
 

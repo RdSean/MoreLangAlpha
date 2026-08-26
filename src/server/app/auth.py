@@ -71,6 +71,10 @@ class MemberResponse(BaseModel):
     household_id: str
 
 
+class HouseholdMemberResponse(MemberResponse):
+    grade_code: str | None = None
+
+
 class FlashWorkspaceSummaryResponse(BaseModel):
     workspace_id: str
     name: str
@@ -473,7 +477,7 @@ async def replay_child_thread(
     )
 
 
-@router.get("/members", response_model=list[MemberResponse])
+@router.get("/members", response_model=list[HouseholdMemberResponse])
 async def list_household_members(user_id: CurrentUserId):
     try:
         return await list_household_members_for_parent(user_id)

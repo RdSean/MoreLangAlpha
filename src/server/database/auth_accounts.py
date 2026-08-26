@@ -33,6 +33,8 @@ def _member_from_row(row: dict[str, Any]) -> dict[str, Any]:
     }
     if row.get("login_identifier"):
         member["username"] = row["login_identifier"]
+    if "grade_code" in row:
+        member["grade_code"] = row["grade_code"]
     return member
 
 
@@ -262,10 +264,14 @@ async def list_household_members_for_parent(parent_user_id: str) -> list[dict[st
                 """
                 SELECT users.user_id, users.email, memberships.household_id,
                        memberships.role, memberships.display_name,
-                       accounts.login_identifier
+                       accounts.login_identifier, profiles.grade_code
                 FROM education_memberships AS memberships
                 JOIN users ON users.user_id = memberships.user_id
                 LEFT JOIN local_auth_accounts AS accounts ON accounts.user_id = memberships.user_id
+                LEFT JOIN education_student_profiles AS profiles
+                  ON profiles.household_id = memberships.household_id
+                 AND profiles.user_id = memberships.user_id
+                 AND memberships.role = 'student'
                 WHERE memberships.household_id = %s
                 ORDER BY memberships.role ASC, memberships.created_at ASC
                 """,

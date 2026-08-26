@@ -59,6 +59,64 @@ async def test_register_parent_assigns_creator_as_model_owner():
     assert result["role"] == "parent"
 
 
+@pytest.mark.asyncio
+async def test_parent_member_list_projects_same_household_student_grade_without_cross_household_join():
+    cursor, fake_db = _fake_db(
+        fetchone_values=[{"household_id": "household-1"}]
+    )
+    cursor.fetchall = AsyncMock(
+        return_value=[
+            {
+                "user_id": "parent-1",
+                "email": "parent@example.test",
+                "household_id": "household-1",
+                "role": "parent",
+                "display_name": "Parent",
+                "login_identifier": "parent@example.test",
+                "grade_code": None,
+            },
+            {
+                "user_id": "student-1",
+                "email": None,
+                "household_id": "household-1",
+                "role": "student",
+                "display_name": "Student",
+                "login_identifier": "student.lee",
+                "grade_code": "g4",
+            },
+        ]
+    )
+    with patch("src.server.database.auth_accounts.get_db_connection", fake_db):
+        from src.server.database.auth_accounts import list_household_members_for_parent
+
+        members = await list_household_members_for_parent("parent-1")
+
+    assert members == [
+        {
+            "user_id": "parent-1",
+            "email": "parent@example.test",
+            "name": "Parent",
+            "role": "parent",
+            "household_id": "household-1",
+            "username": "parent@example.test",
+            "grade_code": None,
+        },
+        {
+            "user_id": "student-1",
+            "email": None,
+            "name": "Student",
+            "role": "student",
+            "household_id": "household-1",
+            "username": "student.lee",
+            "grade_code": "g4",
+        },
+    ]
+    members_query = cursor.execute.await_args_list[1]
+    assert "profiles.household_id = memberships.household_id" in members_query.args[0]
+    assert "WHERE memberships.household_id = %s" in members_query.args[0]
+    assert members_query.args[1] == ("household-1",)
+
+
 def test_household_pool_migration_uses_owner_and_public_model_key():
     migration = (
         Path(__file__).parents[4] / "migrations/versions/033_add_household_llm_pool.py"

@@ -86,6 +86,7 @@ export const queryKeys = {
   education: {
     all: ['education'],
     dictionaries: () => [...queryKeys.education.all, 'dictionaries'],
+    members: () => [...queryKeys.education.all, 'members'],
     tasks: () => [...queryKeys.education.all, 'tasks'],
     assets: () => [...queryKeys.education.all, 'assets'],
     textbooks: () => [...queryKeys.education.all, 'textbooks'],
@@ -101,6 +102,7 @@ export const queryKeys = {
     family: {
       all: ['settings', 'family'],
       children: () => [...queryKeys.settings.family.all, 'children'],
+      educationProfile: (studentUserId: string) => [...queryKeys.settings.family.all, 'education-profile', studentUserId],
       availability: () => [...queryKeys.settings.family.all, 'llm-availability'],
       preference: () => [...queryKeys.settings.family.all, 'llm-preference'],
       workspace: (studentUserId: string) => [...queryKeys.settings.family.all, 'workspace', studentUserId],

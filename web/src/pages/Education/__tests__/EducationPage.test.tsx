@@ -6,7 +6,7 @@ import EducationPage from '../EducationPage';
 
 const state = vi.hoisted(() => ({
   member: null as { user_id: string; name: string; role: 'parent' | 'student' } | null,
-  members: [] as Array<{ user_id: string; name: string; role: 'parent' | 'student' }>,
+  members: [] as Array<{ user_id: string; name: string; role: 'parent' | 'student'; grade_code?: string | null }>,
   tasks: [] as Array<Record<string, unknown>>,
   create: vi.fn(),
   checkIn: vi.fn(),
@@ -22,7 +22,9 @@ const dictionaries = {
     { code: 'chinese', name: '语文', color: '#D95D39', sort_order: 1, homework_types: [{ code: 'read', name: '阅读', sort_order: 1 }] },
     { code: 'math', name: '数学', color: '#277DA1', sort_order: 2, homework_types: [{ code: 'practice', name: '练习', sort_order: 1 }] },
   ],
-  grade_levels: [],
+  grade_levels: [
+    { code: 'g4', name: '四年级', stage: 'primary', sort_order: 4 },
+  ],
   practice_sources: [
     { code: 'schoolwork', name: '校内作业', sort_order: 1 },
     { code: 'homework', name: '校外作业', sort_order: 2 },
@@ -83,7 +85,7 @@ beforeEach(() => {
 describe('EducationPage', () => {
   it('creates a classified practice task with its required source', async () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
-    state.members = [{ user_id: 'student-1', name: '学生', role: 'student' }];
+    state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
     state.tasks = [task('completed')];
 
     render(<MemoryRouter><EducationPage /></MemoryRouter>);
@@ -109,6 +111,20 @@ describe('EducationPage', () => {
       frequency: 'once',
       material_asset_ids: [],
     })));
+  });
+
+  it('blocks creation and guides the parent when the selected student has no grade', () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: null }];
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
+
+    expect(screen.getByText('当前年级：未设置年级')).toBeInTheDocument();
+    expect(screen.getByText('请先在“设置 > 家庭账户”中为该学生设置当前年级。')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '创建作业' }).at(-1)).toBeDisabled();
   });
 
   it('sends allowed text-only parent feedback for a completed task', async () => {

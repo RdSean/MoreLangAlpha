@@ -55,6 +55,9 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
   const [practiceSourceCode, setPracticeSourceCode] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const subject = dictionaries?.subjects.find((item) => item.code === subjectCode);
+  const selectedStudent = students.find((student) => student.user_id === assignedStudentId);
+  const gradeName = dictionaries?.grade_levels.find((grade) => grade.code === selectedStudent?.grade_code)?.name ?? '未设置年级';
+  const hasStudentGrade = Boolean(selectedStudent?.grade_code);
   const isPractice = typeCode === 'practice';
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -78,6 +81,8 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
       <DialogHeader><DialogTitle>创建作业</DialogTitle><DialogDescription>分配给家庭中的学生，并设定完成时间。</DialogDescription></DialogHeader>
       <form className="grid gap-4" onSubmit={(event) => void submit(event)}>
         <label className="grid gap-1.5 text-sm font-medium">学生<select value={assignedStudentId} onChange={(event) => setAssignedStudentId(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm" required><option value="" disabled>选择学生</option>{students.map((student) => <option value={student.user_id} key={student.user_id}>{student.name}</option>)}</select></label>
+        {selectedStudent && <p className="text-sm" style={{ color: hasStudentGrade ? 'var(--color-text-secondary)' : 'var(--color-loss)' }}>当前年级：{gradeName}</p>}
+        {selectedStudent && !hasStudentGrade && <p className="text-sm" style={{ color: 'var(--color-loss)' }}>请先在“设置 &gt; 家庭账户”中为该学生设置当前年级。</p>}
         <label className="grid gap-1.5 text-sm font-medium">科目<select value={subjectCode} onChange={(event) => { setSubjectCode(event.target.value); setTypeCode(''); setPracticeSourceCode(''); }} className="h-10 rounded-md border border-input bg-background px-3 text-sm" required><option value="" disabled>选择科目</option>{(dictionaries?.subjects ?? []).map((item) => <option value={item.code} key={item.code}>{item.name}</option>)}</select></label>
         <label className="grid gap-1.5 text-sm font-medium">作业类型<select value={typeCode} onChange={(event) => { setTypeCode(event.target.value); setPracticeSourceCode(''); }} className="h-10 rounded-md border border-input bg-background px-3 text-sm" required disabled={!subject}><option value="" disabled>选择作业类型</option>{subject?.homework_types.map((item) => <option value={item.code} key={item.code}>{item.name}</option>)}</select></label>
         {isPractice && <label className="grid gap-1.5 text-sm font-medium">练习来源<select value={practiceSourceCode} onChange={(event) => setPracticeSourceCode(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm" required><option value="" disabled>选择练习来源</option>{(dictionaries?.practice_sources ?? []).map((item) => <option value={item.code} key={item.code}>{item.name}</option>)}</select></label>}
@@ -85,7 +90,7 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
         <label className="grid gap-1.5 text-sm font-medium">说明<Textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label>
         <label className="grid gap-1.5 text-sm font-medium">截止时间<Input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} required /></label>
         <label className="grid gap-1.5 text-sm font-medium">材料附件<Input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
-        <DialogFooter><Button type="submit" disabled={isPending || !assignedStudentId || !subjectCode || !typeCode || (isPractice && !practiceSourceCode)}>{isPending ? '正在创建' : '创建作业'}</Button></DialogFooter>
+        <DialogFooter><Button type="submit" disabled={isPending || !assignedStudentId || !hasStudentGrade || !subjectCode || !typeCode || (isPractice && !practiceSourceCode)}>{isPending ? '正在创建' : '创建作业'}</Button></DialogFooter>
       </form>
     </DialogContent>
   </Dialog>;

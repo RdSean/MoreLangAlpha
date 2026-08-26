@@ -178,6 +178,24 @@ async def test_parent_can_list_existing_child_without_a_local_username(client):
 
 
 @pytest.mark.asyncio
+async def test_parent_member_list_includes_only_same_household_student_grade(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-user"
+    same_household_student = {**CHILD, "grade_code": "g4"}
+    with patch(
+        "src.server.app.auth.list_household_members_for_parent",
+        new=AsyncMock(return_value=[PARENT, same_household_student]),
+    ):
+        response = await client.get("/api/v1/auth/members")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {**PARENT, "grade_code": None},
+        same_household_student,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_parent_can_read_and_update_a_childs_education_profile(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-user"
