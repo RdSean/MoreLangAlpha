@@ -95,3 +95,13 @@ def test_recurrence_revalidation_follows_weekday_validation_repair():
 
     assert migration["revision"] == "038"
     assert migration["down_revision"] == "037"
+
+
+def test_homework_state_cutover_follows_compatibility_migrations():
+    migration_dir = Path(__file__).parents[3] / "migrations/versions"
+    migration = runpy.run_path(
+        str(migration_dir / "039_finalize_education_homework_workflow.py")
+    )
+
+    assert migration["revision"] == "039"
+    assert migration["down_revision"] == "038"

@@ -34,6 +34,13 @@ def _workflow_revalidation_source() -> str:
     ).read_text()
 
 
+def _workflow_finalization_source() -> str:
+    return (
+        Path(__file__).parents[3]
+        / "migrations/versions/039_finalize_education_homework_workflow.py"
+    ).read_text()
+
+
 def test_homework_workflow_migration_follows_seeded_dictionaries():
     migration_path = (
         Path(__file__).parents[3]
@@ -150,3 +157,23 @@ def test_revalidation_migration_rejects_dirty_weekly_recurrences_before_rebuild(
     assert "NOT education_weekdays_are_valid(recurrence -> 'weekdays')" in migration
     assert "DROP CONSTRAINT IF EXISTS education_task_rules_recurrence_frequency_check" in migration
     assert "ADD CONSTRAINT education_task_rules_recurrence_frequency_check" in migration
+
+
+def test_finalization_migration_removes_legacy_states_and_completion_trigger():
+    migration = _workflow_finalization_source()
+    migration_globals = runpy.run_path(
+        str(
+            Path(__file__).parents[3]
+            / "migrations/versions/039_finalize_education_homework_workflow.py"
+        )
+    )
+
+    assert migration_globals["revision"] == "039"
+    assert migration_globals["down_revision"] == "038"
+    assert "DROP TRIGGER IF EXISTS education_task_submission_completion_mark" in migration
+    assert "DROP FUNCTION IF EXISTS mark_education_task_completed_on_submission()" in migration
+    assert "CHECK (status IN ('open', 'completed', 'cancelled'))" in migration
+    assert "CHECK (decision IN ('feedback', 'revision_requested'))" in migration
+    assert "tasks.status IN ('submitted', 'revision_requested', 'completed')" in migration
+    assert "FOREIGN KEY (subject_code, type_code)" in migration
+    assert "REFERENCES education_subject_homework_types(subject_code, type_code)" in migration

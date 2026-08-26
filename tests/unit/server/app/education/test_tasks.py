@@ -60,6 +60,8 @@ async def test_parent_creates_a_materialized_task_instance(client):
                 "title": "Read chapter one",
                 "description": "Write three observations.",
                 "due_at": "2026-08-09T09:00:00Z",
+                "subject_code": "chinese",
+                "type_code": "read",
                 "frequency": "once",
             },
         )
@@ -86,6 +88,8 @@ async def test_task_creation_serializes_database_uuid_values(client):
                 "assigned_student_id": "student-1",
                 "title": "Read chapter one",
                 "due_at": "2026-08-09T09:00:00Z",
+                "subject_code": "chinese",
+                "type_code": "read",
             },
         )
 
@@ -131,19 +135,66 @@ async def test_student_submits_with_an_idempotency_key(client):
 
 
 @pytest.mark.asyncio
+async def test_student_can_check_in_without_text_or_attachments(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "student-1"
+    submission = {
+        "submission_id": "f7621c7f-32d9-4f91-ae5e-68b4a48ae449",
+        "task_id": TASK["task_id"],
+        "sequence": 1,
+        "submission_text": "",
+        "submission_kind": "check_in",
+    }
+    with patch("src.server.app.education.router.check_in_task", new=AsyncMock(return_value=submission)) as check_in:
+        response = await client.post(
+            f"/api/v1/education/tasks/{TASK['task_id']}/check-in",
+            json={"idempotency_key": "ec4075f0-6e7a-4f3d-bf56-c04121bbb395"},
+        )
+
+    assert response.status_code == 201
+    assert response.json()["submission_kind"] == "check_in"
+    assert check_in.await_args.kwargs["submission_text"] == ""
+
+
+@pytest.mark.asyncio
+async def test_student_can_append_a_meaningful_revision(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "student-1"
+    submission = {
+        "submission_id": "f7621c7f-32d9-4f91-ae5e-68b4a48ae449",
+        "task_id": TASK["task_id"],
+        "sequence": 2,
+        "submission_text": "Updated work",
+        "submission_kind": "revision",
+    }
+    with patch(
+        "src.server.app.education.router.append_revision_submission",
+        new=AsyncMock(return_value=submission),
+    ) as append:
+        response = await client.post(
+            f"/api/v1/education/tasks/{TASK['task_id']}/revisions",
+            json={"submission_text": "Updated work"},
+        )
+
+    assert response.status_code == 201
+    assert response.json()["submission_kind"] == "revision"
+    assert append.await_args.kwargs["student_user_id"] == "student-1"
+
+
+@pytest.mark.asyncio
 async def test_parent_review_accepts_text_feedback_only(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
     review = {
         "review_id": "f0227a9a-2d6c-4554-b89a-c1e2fecd1a91",
         "submission_id": "f7621c7f-32d9-4f91-ae5e-68b4a48ae449",
-        "decision": "revision_requested",
+        "decision": "feedback",
         "feedback_text": "Please add examples.",
     }
     with patch("src.server.app.education.router.review_task", new=AsyncMock(return_value=review)) as review_task:
         response = await client.post(
             f"/api/v1/education/tasks/{TASK['task_id']}/reviews",
-            json={"decision": "revision_requested", "feedback_text": "Please add examples."},
+            json={"decision": "feedback", "feedback_text": "Please add examples."},
         )
 
     assert response.status_code == 201

@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, status
 
 from src.server.app.education.models import (
+    CheckInEducationTaskRequest,
     CreateEducationTaskRequest,
     EducationReviewResponse,
     EducationSubmissionResponse,
@@ -22,7 +23,9 @@ from src.server.services.education_tasks import (
     EducationTaskNotFoundError,
     EducationTaskPermissionError,
     EducationTaskTransitionError,
+    append_revision_submission,
     cancel_task,
+    check_in_task,
     create_task,
     list_tasks,
     review_task,
@@ -67,7 +70,11 @@ async def create_education_task(body: CreateEducationTaskRequest, user_id: Curre
             title=body.title,
             description=body.description,
             due_at=body.due_at,
+            subject_code=body.subject_code,
+            type_code=body.type_code,
+            practice_source_code=body.practice_source_code,
             frequency=body.frequency,
+            weekdays=body.weekdays,
             material_asset_ids=[str(asset_id) for asset_id in body.material_asset_ids],
         )
     except EducationTaskError as exc:
@@ -78,10 +85,40 @@ async def create_education_task(body: CreateEducationTaskRequest, user_id: Curre
 async def create_education_submission(
     task_id: UUID, body: SubmitEducationTaskRequest, user_id: CurrentUserId
 ):
-    if not body.submission_text.strip() and not body.asset_ids:
-        raise HTTPException(status_code=400, detail="A submission needs text or at least one attachment")
     try:
         return await submit_task(
+            student_user_id=user_id,
+            task_id=str(task_id),
+            submission_text=body.submission_text,
+            idempotency_key=str(body.idempotency_key) if body.idempotency_key else None,
+            asset_ids=[str(asset_id) for asset_id in body.asset_ids],
+        )
+    except EducationTaskError as exc:
+        raise _task_http_error(exc) from exc
+
+
+@router.post("/tasks/{task_id}/check-in", response_model=EducationSubmissionResponse, response_model_exclude_none=True, status_code=status.HTTP_201_CREATED)
+async def check_in_education_task(
+    task_id: UUID, body: CheckInEducationTaskRequest, user_id: CurrentUserId
+):
+    try:
+        return await check_in_task(
+            student_user_id=user_id,
+            task_id=str(task_id),
+            submission_text=body.submission_text,
+            idempotency_key=str(body.idempotency_key) if body.idempotency_key else None,
+            asset_ids=[str(asset_id) for asset_id in body.asset_ids],
+        )
+    except EducationTaskError as exc:
+        raise _task_http_error(exc) from exc
+
+
+@router.post("/tasks/{task_id}/revisions", response_model=EducationSubmissionResponse, response_model_exclude_none=True, status_code=status.HTTP_201_CREATED)
+async def create_education_revision(
+    task_id: UUID, body: SubmitEducationTaskRequest, user_id: CurrentUserId
+):
+    try:
+        return await append_revision_submission(
             student_user_id=user_id,
             task_id=str(task_id),
             submission_text=body.submission_text,

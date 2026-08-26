@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
 
 
 class EducationStudentProfileResponse(BaseModel):
@@ -55,7 +55,11 @@ class CreateEducationTaskRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     description: str = Field(default="", max_length=10_000)
     due_at: datetime
-    frequency: Literal["once", "daily"] = "once"
+    subject_code: str = Field(min_length=1, max_length=16)
+    type_code: str = Field(min_length=1, max_length=16)
+    practice_source_code: str | None = Field(default=None, max_length=16)
+    frequency: Literal["once", "daily", "weekdays", "weekly"] = "once"
+    weekdays: list[StrictInt] | None = Field(default=None, max_length=7)
     material_asset_ids: list[UUID] = Field(default_factory=list, max_length=20)
 
     @field_validator("title")
@@ -65,6 +69,17 @@ class CreateEducationTaskRequest(BaseModel):
             raise ValueError("title is required")
         return value.strip()
 
+    @model_validator(mode="after")
+    def validate_recurrence(self) -> "CreateEducationTaskRequest":
+        if self.frequency == "weekly":
+            if not self.weekdays or len(set(self.weekdays)) != len(self.weekdays) or any(
+                day not in range(1, 8) for day in self.weekdays
+            ):
+                raise ValueError("weekly tasks require a nonempty unique ISO weekday list")
+        elif self.weekdays:
+            raise ValueError("weekdays are only valid for weekly tasks")
+        return self
+
 
 class SubmitEducationTaskRequest(BaseModel):
     submission_text: str = Field(default="", max_length=10_000)
@@ -72,8 +87,12 @@ class SubmitEducationTaskRequest(BaseModel):
     asset_ids: list[UUID] = Field(default_factory=list, max_length=20)
 
 
+class CheckInEducationTaskRequest(SubmitEducationTaskRequest):
+    """The initial check-in deliberately permits no text or attachments."""
+
+
 class ReviewEducationTaskRequest(BaseModel):
-    decision: Literal["revision_requested", "completed"]
+    decision: Literal["feedback", "revision_requested"]
     feedback_text: str = Field(min_length=1, max_length=10_000)
 
     @field_validator("feedback_text")
@@ -93,9 +112,14 @@ class EducationTaskResponse(BaseModel):
     due_at: datetime
     title: str
     description: str
+    subject_code: str | None = None
+    type_code: str | None = None
+    practice_source_code: str | None = None
+    grade_code: str | None = None
     status: str
+    completed_at: datetime | None = None
     created_at: datetime | None = None
-    latest_review_decision: Literal["feedback", "revision_requested", "completed"] | None = None
+    latest_review_decision: Literal["feedback", "revision_requested"] | None = None
     latest_feedback_text: str | None = None
 
 
@@ -106,13 +130,14 @@ class EducationSubmissionResponse(BaseModel):
     submission_text: str
     submitted_by_user_id: str | None = None
     idempotency_key: UUID | None = None
+    submission_kind: Literal["check_in", "revision"] | None = None
     created_at: datetime | None = None
 
 
 class EducationReviewResponse(BaseModel):
     review_id: UUID
     submission_id: UUID
-    decision: Literal["revision_requested", "completed"]
+    decision: Literal["feedback", "revision_requested"]
     feedback_text: str
     reviewed_by_user_id: str | None = None
     created_at: datetime | None = None

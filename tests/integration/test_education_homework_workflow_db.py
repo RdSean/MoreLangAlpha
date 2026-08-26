@@ -33,7 +33,7 @@ async def _run_alembic(test_db_uri: str, revision: str, *, downgrade: bool) -> N
     )
 
 
-async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_conn):
+async def test_homework_final_workflow_rejects_legacy_writes(db_conn):
     parent_id = f"parent-{uuid4()}"
     student_id = f"student-{uuid4()}"
     household_id = uuid4()
@@ -51,7 +51,7 @@ async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_co
     async with db_conn.transaction():
         async with db_conn.cursor() as cur:
             await cur.execute("SELECT version_num FROM alembic_version")
-            assert (await cur.fetchone())["version_num"] == "038"
+            assert (await cur.fetchone())["version_num"] == "039"
 
             await cur.executemany(
                 "INSERT INTO users (user_id, name) VALUES (%s, %s)",
@@ -76,6 +76,13 @@ async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_co
                     (household_id, student_id, "student", "Student"),
                 ],
             )
+            await cur.execute(
+                """
+                INSERT INTO education_student_profiles (household_id, user_id, grade_code)
+                VALUES (%s, %s, 'g5')
+                """,
+                (household_id, student_id),
+            )
 
             await cur.execute("SAVEPOINT invalid_weekdays")
             with pytest.raises(psycopg.errors.CheckViolation):
@@ -83,8 +90,9 @@ async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_co
                     """
                     INSERT INTO education_task_rules (
                         task_rule_id, household_id, created_by_user_id,
-                        assigned_student_id, title, recurrence, timezone
-                    ) VALUES (%s, %s, %s, %s, 'Invalid weekdays', %s::jsonb, 'Asia/Tokyo')
+                        assigned_student_id, title, recurrence, timezone,
+                        subject_code, type_code, practice_source_code, grade_code
+                    ) VALUES (%s, %s, %s, %s, 'Invalid weekdays', %s::jsonb, 'Asia/Tokyo', 'math', 'practice', 'schoolwork', 'g5')
                     """,
                     (
                         uuid4(),
@@ -103,8 +111,9 @@ async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_co
                         """
                         INSERT INTO education_task_rules (
                             task_rule_id, household_id, created_by_user_id,
-                            assigned_student_id, title, recurrence, timezone
-                        ) VALUES (%s, %s, %s, %s, 'Invalid weekday element', %s::jsonb, 'Asia/Tokyo')
+                            assigned_student_id, title, recurrence, timezone,
+                            subject_code, type_code, practice_source_code, grade_code
+                        ) VALUES (%s, %s, %s, %s, 'Invalid weekday element', %s::jsonb, 'Asia/Tokyo', 'math', 'practice', 'schoolwork', 'g5')
                         """,
                         (
                             uuid4(),
@@ -120,8 +129,9 @@ async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_co
                 """
                 INSERT INTO education_task_rules (
                     task_rule_id, household_id, created_by_user_id,
-                    assigned_student_id, title, recurrence, timezone
-                ) VALUES (%s, %s, %s, %s, 'Compatibility task', %s::jsonb, 'Asia/Tokyo')
+                    assigned_student_id, title, recurrence, timezone,
+                    subject_code, type_code, practice_source_code, grade_code
+                ) VALUES (%s, %s, %s, %s, 'Finalized task', %s::jsonb, 'Asia/Tokyo', 'math', 'practice', 'schoolwork', 'g5')
                 """,
                 (rule_id, household_id, parent_id, student_id, Jsonb(recurrence)),
             )
@@ -129,8 +139,9 @@ async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_co
                 """
                 INSERT INTO education_tasks (
                     task_id, task_rule_id, household_id, assigned_student_id,
-                    occurrence_date, due_at, title
-                ) VALUES (%s, %s, %s, %s, CURRENT_DATE, NOW(), 'Compatibility task')
+                    occurrence_date, due_at, title, subject_code, type_code,
+                    practice_source_code, grade_code
+                ) VALUES (%s, %s, %s, %s, CURRENT_DATE, NOW(), 'Finalized task', 'math', 'practice', 'schoolwork', 'g5')
                 """,
                 (task_id, rule_id, household_id, student_id),
             )
@@ -145,16 +156,22 @@ async def test_homework_compatibility_bridge_accepts_legacy_service_writes(db_co
             )
             assert (await cur.fetchone())["submission_kind"] == "check_in"
             await cur.execute("SELECT completed_at FROM education_tasks WHERE task_id = %s", (task_id,))
-            assert (await cur.fetchone())["completed_at"] is not None
-            await cur.execute("UPDATE education_tasks SET status = 'submitted' WHERE task_id = %s", (task_id,))
-            await cur.execute(
-                """
-                INSERT INTO education_task_reviews (
-                    review_id, submission_id, reviewed_by_user_id, decision, feedback_text
-                ) VALUES (%s, %s, %s, 'completed', 'Legacy review')
-                """,
-                (review_id, submission_id, parent_id),
-            )
+            assert (await cur.fetchone())["completed_at"] is None
+            await cur.execute("SAVEPOINT legacy_task_status")
+            with pytest.raises(psycopg.errors.CheckViolation):
+                await cur.execute("UPDATE education_tasks SET status = 'submitted' WHERE task_id = %s", (task_id,))
+            await cur.execute("ROLLBACK TO SAVEPOINT legacy_task_status")
+            await cur.execute("SAVEPOINT legacy_review_decision")
+            with pytest.raises(psycopg.errors.CheckViolation):
+                await cur.execute(
+                    """
+                    INSERT INTO education_task_reviews (
+                        review_id, submission_id, reviewed_by_user_id, decision, feedback_text
+                    ) VALUES (%s, %s, %s, 'completed', 'Legacy review')
+                    """,
+                    (review_id, submission_id, parent_id),
+                )
+            await cur.execute("ROLLBACK TO SAVEPOINT legacy_review_decision")
 
 
 async def test_036_downgrade_converts_legacy_task_states(db_conn, test_db_uri):
@@ -172,10 +189,11 @@ async def test_036_downgrade_converts_legacy_task_states(db_conn, test_db_uri):
         "due_time": "18:00",
     }
 
+    await _run_alembic(test_db_uri, "036", downgrade=True)
     await db_conn.execute("BEGIN")
     async with db_conn.cursor() as cur:
         await cur.execute("SELECT version_num FROM alembic_version")
-        assert (await cur.fetchone())["version_num"] == "038"
+        assert (await cur.fetchone())["version_num"] == "036"
         await cur.executemany(
             "INSERT INTO users (user_id, name) VALUES (%s, %s)",
             [(parent_id, "Downgrade Parent"), (student_id, "Downgrade Student")],
