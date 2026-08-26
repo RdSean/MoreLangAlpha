@@ -79,31 +79,27 @@ def upgrade() -> None:
         """
     )
 
-    # Old rows may carry only individually valid subject and type codes. They
-    # have no settled classification if that pair is not in the dictionary.
+    # The old schema permits incomplete classifications and only validates
+    # subject/type codes independently. A category snapshot is useful only
+    # when all of its related fields form a valid complete classification.
     for table in ("education_task_rules", "education_tasks"):
         op.execute(
             f"""
             UPDATE {table} AS records
             SET subject_code = NULL,
                 type_code = NULL,
-                practice_source_code = NULL
-            WHERE records.subject_code IS NOT NULL
-              AND NOT EXISTS (
+                practice_source_code = NULL,
+                grade_code = NULL
+            WHERE records.subject_code IS NULL
+               OR records.type_code IS NULL
+               OR NOT EXISTS (
                   SELECT 1
                   FROM education_subject_homework_types AS mappings
                   WHERE mappings.subject_code = records.subject_code
                     AND mappings.type_code = records.type_code
               )
-            """
-        )
-        op.execute(
-            f"""
-            UPDATE {table}
-            SET subject_code = NULL,
-                type_code = NULL,
-                practice_source_code = NULL
-            WHERE type_code = 'practice' AND practice_source_code IS NULL
+               OR (records.type_code = 'practice' AND records.practice_source_code IS NULL)
+               OR (records.type_code <> 'practice' AND records.practice_source_code IS NOT NULL)
             """
         )
         op.execute(

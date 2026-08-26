@@ -184,6 +184,9 @@ def test_finalization_migration_removes_legacy_states_and_completion_trigger():
     assert "tasks.status IN ('submitted', 'revision_requested', 'completed')" in migration
     assert "FOREIGN KEY (subject_code, type_code)" in migration
     assert "REFERENCES education_subject_homework_types(subject_code, type_code)" in migration
+    assert "WHERE records.subject_code IS NULL" in migration
+    assert "OR records.type_code IS NULL" in migration
+    assert "grade_code = NULL" in migration
 
 
 def test_open_submission_repair_completes_legacy_open_tasks_from_first_submission():

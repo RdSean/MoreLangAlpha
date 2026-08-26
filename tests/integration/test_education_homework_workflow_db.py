@@ -261,6 +261,89 @@ async def test_038_open_task_with_submission_upgrades_to_completed_at_head(db_co
         await _run_alembic(test_db_uri, "head", downgrade=False)
 
 
+async def test_038_upgrade_normalizes_half_classification_snapshots(db_conn, test_db_uri):
+    parent_id = f"classification-parent-{uuid4()}"
+    student_id = f"classification-student-{uuid4()}"
+    household_id = uuid4()
+    rule_id = uuid4()
+    task_id = uuid4()
+    recurrence = {
+        "frequency": "once",
+        "start_date": date.today().isoformat(),
+        "due_time": "18:00",
+    }
+
+    await _run_alembic(test_db_uri, "038", downgrade=True)
+    try:
+        async with db_conn.transaction():
+            async with db_conn.cursor() as cur:
+                await cur.executemany(
+                    "INSERT INTO users (user_id, name) VALUES (%s, %s)",
+                    [(parent_id, "Classification Parent"), (student_id, "Classification Student")],
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_households (household_id, name, model_owner_user_id)
+                    VALUES (%s, 'Classification normalization', %s)
+                    """,
+                    (household_id, parent_id),
+                )
+                await cur.executemany(
+                    """
+                    INSERT INTO education_memberships
+                        (household_id, user_id, role, display_name)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    [
+                        (household_id, parent_id, "parent", "Classification Parent"),
+                        (household_id, student_id, "student", "Classification Student"),
+                    ],
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_task_rules (
+                        task_rule_id, household_id, created_by_user_id,
+                        assigned_student_id, title, recurrence, timezone,
+                        subject_code, type_code, grade_code
+                    ) VALUES (%s, %s, %s, %s, 'Half classification', %s::jsonb, 'Asia/Tokyo', NULL, 'read', 'g5')
+                    """,
+                    (rule_id, household_id, parent_id, student_id, Jsonb(recurrence)),
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_tasks (
+                        task_id, task_rule_id, household_id, assigned_student_id,
+                        occurrence_date, due_at, title, subject_code, type_code, grade_code
+                    ) VALUES (%s, %s, %s, %s, CURRENT_DATE, NOW(), 'Half classification', NULL, 'read', 'g5')
+                    """,
+                    (task_id, rule_id, household_id, student_id),
+                )
+
+        await _run_alembic(test_db_uri, "head", downgrade=False)
+        async with db_conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT subject_code, type_code, practice_source_code, grade_code
+                FROM education_task_rules WHERE task_rule_id = %s
+                """,
+                (rule_id,),
+            )
+            rule = await cur.fetchone()
+            await cur.execute(
+                """
+                SELECT subject_code, type_code, practice_source_code, grade_code
+                FROM education_tasks WHERE task_id = %s
+                """,
+                (task_id,),
+            )
+            task = await cur.fetchone()
+
+        assert tuple(rule.values()) == (None, None, None, None)
+        assert tuple(task.values()) == (None, None, None, None)
+    finally:
+        await _run_alembic(test_db_uri, "head", downgrade=False)
+
+
 async def test_036_downgrade_converts_legacy_task_states(db_conn, test_db_uri):
     parent_id = f"downgrade-parent-{uuid4()}"
     student_id = f"downgrade-student-{uuid4()}"

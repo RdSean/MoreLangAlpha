@@ -7,8 +7,10 @@ import pytest
 
 from src.server.services import education_tasks
 from src.server.services.education_tasks import (
+    EducationTaskAssetError,
     EducationTaskError,
     EducationTaskPermissionError,
+    EducationTaskTransitionError,
 )
 
 
@@ -183,6 +185,58 @@ async def test_task_creation_persists_student_grade_and_weekly_recurrence(monkey
     assert write.await_args.kwargs["recurrence"]["weekdays"] == ["1", "3", "5"]
 
 
+@pytest.mark.asyncio
+async def test_task_creation_reports_material_assets_outside_the_household(monkeypatch):
+    _stub_create_context(monkeypatch)
+    monkeypatch.setattr(
+        education_tasks,
+        "create_task_rule_and_instance",
+        AsyncMock(side_effect=ValueError("One or more material assets are outside the household")),
+    )
+
+    with pytest.raises(EducationTaskAssetError, match="material assets"):
+        await education_tasks.create_task(
+            parent_user_id="parent-1",
+            assigned_student_id="student-1",
+            title="Read",
+            description="",
+            due_at=datetime.now(timezone.utc),
+            subject_code="chinese",
+            type_code="read",
+            practice_source_code=None,
+            frequency="once",
+            weekdays=None,
+            material_asset_ids=["asset-1"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_task_creation_only_converts_known_asset_ownership_errors(monkeypatch):
+    _stub_create_context(monkeypatch)
+    monkeypatch.setattr(
+        education_tasks,
+        "create_task_rule_and_instance",
+        AsyncMock(side_effect=ValueError("Unexpected persistence error")),
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        await education_tasks.create_task(
+            parent_user_id="parent-1",
+            assigned_student_id="student-1",
+            title="Read",
+            description="",
+            due_at=datetime.now(timezone.utc),
+            subject_code="chinese",
+            type_code="read",
+            practice_source_code=None,
+            frequency="once",
+            weekdays=None,
+            material_asset_ids=[],
+        )
+
+    assert type(exc_info.value) is ValueError
+
+
 @pytest.mark.parametrize("weekdays", [None, [], [0], [8], [1, 1], [True]])
 @pytest.mark.asyncio
 async def test_weekly_task_requires_a_nonempty_unique_iso_weekday_list(monkeypatch, weekdays):
@@ -249,6 +303,52 @@ async def test_check_in_allows_an_empty_initial_submission_and_forwards_idempote
 
 
 @pytest.mark.asyncio
+async def test_check_in_reports_submission_assets_outside_the_household(monkeypatch):
+    monkeypatch.setattr(
+        education_tasks,
+        "get_membership_for_user",
+        AsyncMock(return_value={"role": "student", "household_id": "h-1"}),
+    )
+    monkeypatch.setattr(
+        education_tasks,
+        "check_in_task_record",
+        AsyncMock(side_effect=ValueError("One or more submission assets are outside the household")),
+    )
+
+    with pytest.raises(EducationTaskAssetError, match="submission assets"):
+        await education_tasks.check_in_task(
+            student_user_id="student-1",
+            task_id="task-1",
+            submission_text="",
+            idempotency_key=None,
+            asset_ids=["asset-1"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_check_in_keeps_task_state_errors_as_conflicts(monkeypatch):
+    monkeypatch.setattr(
+        education_tasks,
+        "get_membership_for_user",
+        AsyncMock(return_value={"role": "student", "household_id": "h-1"}),
+    )
+    monkeypatch.setattr(
+        education_tasks,
+        "check_in_task_record",
+        AsyncMock(side_effect=ValueError("Task cannot be checked in from completed")),
+    )
+
+    with pytest.raises(EducationTaskTransitionError, match="cannot be checked in"):
+        await education_tasks.check_in_task(
+            student_user_id="student-1",
+            task_id="task-1",
+            submission_text="",
+            idempotency_key=None,
+            asset_ids=[],
+        )
+
+
+@pytest.mark.asyncio
 async def test_completed_task_accepts_append_only_revision_without_changing_completion(monkeypatch):
     monkeypatch.setattr(
         education_tasks,
@@ -269,6 +369,29 @@ async def test_completed_task_accepts_append_only_revision_without_changing_comp
 
     assert result == persisted
     assert append.await_args.kwargs["submission_text"] == "Updated work"
+
+
+@pytest.mark.asyncio
+async def test_revision_reports_submission_assets_outside_the_household(monkeypatch):
+    monkeypatch.setattr(
+        education_tasks,
+        "get_membership_for_user",
+        AsyncMock(return_value={"role": "student", "household_id": "h-1"}),
+    )
+    monkeypatch.setattr(
+        education_tasks,
+        "append_revision_submission_record",
+        AsyncMock(side_effect=ValueError("One or more submission assets are outside the household")),
+    )
+
+    with pytest.raises(EducationTaskAssetError, match="submission assets"):
+        await education_tasks.append_revision_submission(
+            student_user_id="student-1",
+            task_id="task-1",
+            submission_text="Updated work",
+            idempotency_key=None,
+            asset_ids=["asset-1"],
+        )
 
 
 @pytest.mark.asyncio

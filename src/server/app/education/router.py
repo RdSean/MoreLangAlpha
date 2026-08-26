@@ -19,6 +19,7 @@ from src.server.services.education_homework import (
     get_homework_dictionaries,
 )
 from src.server.services.education_tasks import (
+    EducationTaskAssetError,
     EducationTaskError,
     EducationTaskNotFoundError,
     EducationTaskPermissionError,
@@ -45,6 +46,8 @@ def _task_http_error(exc: EducationTaskError) -> HTTPException:
         return HTTPException(status_code=404, detail="Homework task not found")
     if isinstance(exc, EducationTaskTransitionError):
         return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, EducationTaskAssetError):
+        return HTTPException(status_code=400, detail=str(exc))
     return HTTPException(status_code=400, detail=str(exc))
 
 

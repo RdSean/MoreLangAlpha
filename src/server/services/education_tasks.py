@@ -28,12 +28,28 @@ class EducationTaskTransitionError(EducationTaskError, ValueError):
     """A requested homework operation is invalid for the current task state."""
 
 
+class EducationTaskAssetError(EducationTaskError):
+    """Referenced homework attachments are unavailable in the household."""
+
+
 class EducationTaskPermissionError(EducationTaskError, PermissionError):
     """The caller is not allowed to perform this homework operation."""
 
 
 class EducationTaskNotFoundError(EducationTaskError, LookupError):
     """The requested task is absent or outside the caller's household scope."""
+
+
+_ASSET_OWNERSHIP_ERRORS = frozenset({
+    "One or more material assets are outside the household",
+    "One or more submission assets are outside the household",
+})
+
+
+def _task_asset_error(exc: ValueError) -> EducationTaskAssetError | None:
+    if str(exc) in _ASSET_OWNERSHIP_ERRORS:
+        return EducationTaskAssetError(str(exc))
+    return None
 
 
 def _required_text(value: str, field: str) -> str:
@@ -113,22 +129,27 @@ async def create_task(
     }
     if normalized_weekdays is not None:
         recurrence["weekdays"] = normalized_weekdays
-    return await create_task_rule_and_instance(
-        parent_user_id=parent_user_id,
-        household_id=household_id,
-        assigned_student_id=assigned_student_id,
-        title=_required_text(title, "title"),
-        description=description.strip(),
-        recurrence=recurrence,
-        timezone_name=timezone_name,
-        occurrence_date=local_due.date(),
-        due_at=local_due,
-        subject_code=subject_code,
-        type_code=type_code,
-        practice_source_code=practice_source_code,
-        grade_code=assignment["grade_code"],
-        material_asset_ids=material_asset_ids,
-    )
+    try:
+        return await create_task_rule_and_instance(
+            parent_user_id=parent_user_id,
+            household_id=household_id,
+            assigned_student_id=assigned_student_id,
+            title=_required_text(title, "title"),
+            description=description.strip(),
+            recurrence=recurrence,
+            timezone_name=timezone_name,
+            occurrence_date=local_due.date(),
+            due_at=local_due,
+            subject_code=subject_code,
+            type_code=type_code,
+            practice_source_code=practice_source_code,
+            grade_code=assignment["grade_code"],
+            material_asset_ids=material_asset_ids,
+        )
+    except ValueError as exc:
+        if asset_error := _task_asset_error(exc):
+            raise asset_error from exc
+        raise
 
 
 async def _require_student(student_user_id: str) -> None:
@@ -152,6 +173,8 @@ async def check_in_task(
             asset_ids=asset_ids,
         )
     except ValueError as exc:
+        if asset_error := _task_asset_error(exc):
+            raise asset_error from exc
         raise EducationTaskTransitionError(str(exc)) from exc
     if not submission:
         raise EducationTaskNotFoundError("Homework task not found")
@@ -189,6 +212,8 @@ async def append_revision_submission(
             asset_ids=asset_ids,
         )
     except ValueError as exc:
+        if asset_error := _task_asset_error(exc):
+            raise asset_error from exc
         raise EducationTaskTransitionError(str(exc)) from exc
     if not submission:
         raise EducationTaskNotFoundError("Homework task not found")

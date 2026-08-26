@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from src.server.app.education.router import router
+from src.server.services.education_tasks import EducationTaskAssetError
 from src.server.utils.api import get_current_user_id
 
 
@@ -69,6 +70,34 @@ async def test_parent_creates_a_materialized_task_instance(client):
     assert response.status_code == 201
     assert response.json()["status"] == "open"
     assert create.await_args.kwargs["parent_user_id"] == "parent-1"
+
+
+@pytest.mark.asyncio
+async def test_task_creation_returns_bad_request_for_assets_outside_the_household(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    with patch(
+        "src.server.app.education.router.create_task",
+        new=AsyncMock(
+            side_effect=EducationTaskAssetError(
+                "One or more material assets are outside the household"
+            )
+        ),
+    ):
+        response = await client.post(
+            "/api/v1/education/tasks",
+            json={
+                "assigned_student_id": "student-1",
+                "title": "Read chapter one",
+                "due_at": "2026-08-09T09:00:00Z",
+                "subject_code": "chinese",
+                "type_code": "read",
+                "material_asset_ids": ["c0b32d33-cccb-4a80-a706-59ef75c2fd85"],
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "One or more material assets are outside the household"
 
 
 @pytest.mark.asyncio
