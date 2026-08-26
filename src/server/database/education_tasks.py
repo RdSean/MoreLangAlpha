@@ -467,6 +467,112 @@ async def list_tasks_for_user(user_id: str) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+async def get_task_detail_for_user(*, task_id: str, user_id: str) -> dict[str, Any] | None:
+    """Return one task timeline only to a household parent or its assignee."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT tasks.task_id, tasks.task_rule_id, tasks.household_id,
+                       tasks.assigned_student_id, tasks.occurrence_date, tasks.due_at,
+                       tasks.title, tasks.description, tasks.subject_code, tasks.type_code,
+                       tasks.practice_source_code, tasks.grade_code, tasks.status,
+                       tasks.completed_at, tasks.created_at
+                FROM education_tasks AS tasks
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = tasks.household_id
+                WHERE tasks.task_id = %s
+                  AND memberships.user_id = %s
+                  AND (
+                      memberships.role = 'parent'
+                      OR (
+                          memberships.role = 'student'
+                          AND tasks.assigned_student_id = %s
+                      )
+                  )
+                LIMIT 1
+                """,
+                (task_id, user_id, user_id),
+            )
+            task = await cur.fetchone()
+            if not task:
+                return None
+
+            detail = dict(task)
+            await cur.execute(
+                """
+                SELECT assets.asset_id, assets.original_filename, assets.content_type,
+                       assets.size_bytes, assets.created_at
+                FROM education_task_material_assets AS materials
+                JOIN education_assets AS assets ON assets.asset_id = materials.asset_id
+                WHERE materials.task_id = %s
+                ORDER BY assets.created_at ASC, assets.asset_id ASC
+                """,
+                (task_id,),
+            )
+            detail["parent_materials"] = [dict(row) for row in await cur.fetchall()]
+
+            await cur.execute(
+                """
+                SELECT submission_id, task_id, submitted_by_user_id, sequence,
+                       submission_text, submission_kind, created_at
+                FROM education_task_submissions
+                WHERE task_id = %s
+                ORDER BY sequence ASC, created_at ASC, submission_id ASC
+                """,
+                (task_id,),
+            )
+            submissions = [dict(row) for row in await cur.fetchall()]
+            submission_by_id = {
+                str(submission["submission_id"]): submission for submission in submissions
+            }
+            for submission in submissions:
+                submission["assets"] = []
+                submission["reviews"] = []
+
+            await cur.execute(
+                """
+                SELECT submission_assets.submission_id, assets.asset_id,
+                       assets.original_filename, assets.content_type, assets.size_bytes,
+                       assets.created_at
+                FROM education_task_submission_assets AS submission_assets
+                JOIN education_task_submissions AS submissions
+                  ON submissions.submission_id = submission_assets.submission_id
+                JOIN education_assets AS assets ON assets.asset_id = submission_assets.asset_id
+                WHERE submissions.task_id = %s
+                ORDER BY submissions.sequence ASC, assets.created_at ASC, assets.asset_id ASC
+                """,
+                (task_id,),
+            )
+            for row in await cur.fetchall():
+                asset = dict(row)
+                submission = submission_by_id.get(str(asset.pop("submission_id")))
+                if submission is not None:
+                    submission["assets"].append(asset)
+
+            await cur.execute(
+                """
+                SELECT reviews.review_id, reviews.submission_id,
+                       reviews.reviewed_by_user_id, reviews.decision,
+                       reviews.feedback_text, reviews.created_at
+                FROM education_task_reviews AS reviews
+                JOIN education_task_submissions AS submissions
+                  ON submissions.submission_id = reviews.submission_id
+                WHERE submissions.task_id = %s
+                ORDER BY submissions.sequence ASC, reviews.created_at ASC, reviews.review_id ASC
+                """,
+                (task_id,),
+            )
+            for row in await cur.fetchall():
+                review = dict(row)
+                submission = submission_by_id.get(str(review["submission_id"]))
+                if submission is not None:
+                    submission["reviews"].append(review)
+
+            detail["submissions"] = submissions
+    return detail
+
+
 async def list_active_rule_timezones_for_user(user_id: str) -> list[dict[str, Any]]:
     """Return active rules visible to the caller so recurrence is materialized locally."""
     async with get_db_connection() as conn:

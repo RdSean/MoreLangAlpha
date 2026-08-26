@@ -11,6 +11,7 @@ from src.server.database.education_tasks import (
     check_in_task as check_in_task_record,
     create_task_rule_and_instance,
     get_household_context_for_parent,
+    get_task_detail_for_user,
     get_task_creation_context,
     list_active_rule_timezones_for_user,
     list_tasks_for_user as list_task_records,
@@ -258,6 +259,33 @@ async def stop_task_rule(*, parent_user_id: str, task_rule_id: str) -> None:
         raise EducationTaskPermissionError("Only a parent can stop homework rules")
     if not await stop_task_rule_record(task_rule_id=task_rule_id, parent_user_id=parent_user_id):
         raise EducationTaskNotFoundError("Homework rule not found or already stopped")
+
+
+def _asset_download_endpoint(asset_id: str) -> str:
+    """Reference the existing scoped download route without exposing object storage."""
+    return f"/api/v1/education/assets/{asset_id}/download"
+
+
+def _detail_asset(asset: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **asset,
+        "download_endpoint": _asset_download_endpoint(str(asset["asset_id"])),
+    }
+
+
+async def get_task_detail(*, user_id: str, task_id: str) -> dict[str, Any]:
+    """Read a task and append-only submission timeline within its role boundary."""
+    detail = await get_task_detail_for_user(task_id=task_id, user_id=user_id)
+    if not detail:
+        raise EducationTaskNotFoundError("Homework task not found")
+    detail["parent_materials"] = [
+        _detail_asset(asset) for asset in detail["parent_materials"]
+    ]
+    for submission in detail["submissions"]:
+        submission["assets"] = [
+            _detail_asset(asset) for asset in submission["assets"]
+        ]
+    return detail
 
 
 async def list_tasks(user_id: str) -> list[dict[str, Any]]:

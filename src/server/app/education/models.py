@@ -143,6 +143,27 @@ class EducationReviewResponse(BaseModel):
     created_at: datetime | None = None
 
 
+class EducationTaskAssetResponse(BaseModel):
+    """Client-safe attachment metadata for a task timeline."""
+
+    asset_id: UUID
+    original_filename: str
+    content_type: str
+    size_bytes: int
+    created_at: datetime | None = None
+    download_endpoint: str
+
+
+class EducationTaskSubmissionDetailResponse(EducationSubmissionResponse):
+    assets: list[EducationTaskAssetResponse]
+    reviews: list[EducationReviewResponse]
+
+
+class EducationTaskDetailResponse(EducationTaskResponse):
+    parent_materials: list[EducationTaskAssetResponse]
+    submissions: list[EducationTaskSubmissionDetailResponse]
+
+
 class CreateTextbookRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
 

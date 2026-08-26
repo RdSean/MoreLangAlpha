@@ -9,6 +9,7 @@ from src.server.app.education.models import (
     CreateEducationTaskRequest,
     EducationReviewResponse,
     EducationSubmissionResponse,
+    EducationTaskDetailResponse,
     EducationTaskResponse,
     EducationHomeworkDictionariesResponse,
     ReviewEducationTaskRequest,
@@ -28,6 +29,7 @@ from src.server.services.education_tasks import (
     cancel_task,
     check_in_task,
     create_task,
+    get_task_detail,
     list_tasks,
     review_task,
     stop_task_rule,
@@ -62,6 +64,18 @@ async def get_education_homework_dictionaries(user_id: CurrentUserId):
 @router.get("/tasks", response_model=list[EducationTaskResponse], response_model_exclude_none=True)
 async def list_education_tasks(user_id: CurrentUserId):
     return await list_tasks(user_id)
+
+
+@router.get(
+    "/tasks/{task_id}",
+    response_model=EducationTaskDetailResponse,
+    response_model_exclude_none=True,
+)
+async def get_education_task_detail(task_id: UUID, user_id: CurrentUserId):
+    try:
+        return await get_task_detail(user_id=user_id, task_id=str(task_id))
+    except EducationTaskError as exc:
+        raise _task_http_error(exc) from exc
 
 
 @router.post("/tasks", response_model=EducationTaskResponse, response_model_exclude_none=True, status_code=status.HTTP_201_CREATED)
