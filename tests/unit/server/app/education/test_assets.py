@@ -63,6 +63,34 @@ async def test_upload_returns_private_metadata_without_storage_key_or_signed_url
 
 
 @pytest.mark.asyncio
+async def test_upload_forwards_staging_identity_to_make_a_retry_safe(client):
+    with patch(
+        "src.server.app.education.assets.create_education_asset",
+        new=AsyncMock(return_value=ASSET),
+    ) as create:
+        response = await client.post(
+            "/api/v1/education/assets?staging_key=ec4075f0-6e7a-4f3d-bf56-c04121bbb395&staging_slot=0",
+            files={"file": ("worksheet.pdf", b"%PDF-1.7...", "application/pdf")},
+        )
+
+    assert response.status_code == 201
+    assert create.await_args.kwargs["staging_key"] == "ec4075f0-6e7a-4f3d-bf56-c04121bbb395"
+    assert create.await_args.kwargs["staging_slot"] == 0
+
+
+@pytest.mark.asyncio
+async def test_creator_can_delete_an_unreferenced_attachment(client):
+    with patch(
+        "src.server.app.education.assets.delete_education_asset",
+        new=AsyncMock(),
+    ) as remove:
+        response = await client.delete(f"/api/v1/education/assets/{ASSET['asset_id']}")
+
+    assert response.status_code == 204
+    remove.assert_awaited_once_with(user_id="student-1", asset_id=ASSET["asset_id"])
+
+
+@pytest.mark.asyncio
 async def test_cross_household_download_is_not_found(client):
     with patch(
         "src.server.app.education.assets.get_education_asset_download_url",

@@ -104,6 +104,47 @@ async def test_create_asset_uploads_private_bytes_and_records_metadata(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_create_asset_reuses_a_staged_upload_without_reuploading_bytes(monkeypatch):
+    monkeypatch.setattr(education_assets, "get_membership_for_user", AsyncMock(return_value=MEMBER))
+    staged = {**ASSET, "staging_key": "ec4075f0-6e7a-4f3d-bf56-c04121bbb395", "staging_slot": 0}
+    find_staged = AsyncMock(return_value=staged)
+    uploads = AsyncMock()
+    monkeypatch.setattr(education_assets, "get_staged_education_asset", find_staged)
+    monkeypatch.setattr(education_assets, "upload_bytes", uploads)
+
+    result = await education_assets.create_education_asset(
+        user_id="student-1",
+        filename="worksheet.pdf",
+        content_type="application/pdf",
+        content=b"%PDF-1.7...",
+        staging_key="ec4075f0-6e7a-4f3d-bf56-c04121bbb395",
+        staging_slot=0,
+    )
+
+    assert result == staged
+    find_staged.assert_awaited_once_with(
+        household_id=HOUSEHOLD_ID,
+        created_by_user_id="student-1",
+        staging_key="ec4075f0-6e7a-4f3d-bf56-c04121bbb395",
+        staging_slot=0,
+    )
+    uploads.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_creator_can_delete_only_an_unreferenced_staged_asset(monkeypatch):
+    remove_record = AsyncMock(return_value=ASSET)
+    removed_keys: list[str] = []
+    monkeypatch.setattr(education_assets, "delete_unreferenced_education_asset", remove_record)
+    monkeypatch.setattr(education_assets, "delete_object", lambda key: removed_keys.append(key) or True)
+
+    await education_assets.delete_education_asset(user_id="student-1", asset_id=ASSET_ID)
+
+    remove_record.assert_awaited_once_with(asset_id=ASSET_ID, created_by_user_id="student-1")
+    assert removed_keys == [ASSET["storage_key"]]
+
+
+@pytest.mark.asyncio
 async def test_create_asset_removes_just_uploaded_object_when_metadata_write_fails(monkeypatch):
     monkeypatch.setattr(education_assets, "get_membership_for_user", AsyncMock(return_value=MEMBER))
     monkeypatch.setattr(

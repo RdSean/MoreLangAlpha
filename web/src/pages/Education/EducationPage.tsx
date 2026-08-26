@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/contexts/AuthContext';
 import { createRequestKeyTracker } from '@/pages/ChatAgent/hooks/utils/requestKey';
-import { uploadEducationAsset } from './api';
+import { deleteEducationAsset, uploadEducationAsset } from './api';
 import { useEducationHomeworkDictionaries, useEducationMembers, useEducationTaskMutations, useEducationTasks, useLearningAssignments } from './queries';
 import type { CreateEducationTaskInput, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskStatus } from './types';
 
@@ -30,10 +30,39 @@ function assertAttachmentLimit(files: File[]) {
   }
 }
 
-async function uploadSelectedFiles(files: File[]): Promise<string[]> {
+type StagedAttachmentAttempt = {
+  fingerprint: string;
+  idempotencyKey: string;
+  assetIds: string[];
+};
+
+async function uploadSelectedFiles(
+  files: File[],
+  stagingKey: string,
+  assetIds: string[],
+): Promise<string[]> {
   assertAttachmentLimit(files);
-  const assets = await Promise.all(files.map((file) => uploadEducationAsset(file)));
-  return assets.map((asset) => asset.asset_id);
+  for (let index = assetIds.length; index < files.length; index += 1) {
+    const asset = await uploadEducationAsset(files[index], { stagingKey, stagingSlot: index });
+    assetIds.push(asset.asset_id);
+  }
+  return assetIds;
+}
+
+async function cleanupStagedAssets(attempt: StagedAttachmentAttempt) {
+  await Promise.all(attempt.assetIds.map(async (assetId) => {
+    try {
+      await deleteEducationAsset(assetId);
+    } catch {
+      // The original request error remains the useful error for the user.
+    }
+  }));
+}
+
+function isDefinitiveRequestError(error: unknown): boolean {
+  const response = asRecord(error)?.response;
+  const status = asRecord(response)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500 && status !== 409;
 }
 
 type ParentCreateInput = {
@@ -46,7 +75,8 @@ type ParentCreateInput = {
   practiceSourceCode: string | null;
   frequency: CreateEducationTaskInput['frequency'];
   weekdays: number[] | null;
-  files: File[];
+  idempotencyKey: string;
+  materialAssetIds: string[];
 };
 
 const weeklyDayOptions = [
@@ -62,12 +92,6 @@ function readableError(error: unknown) {
   const detail = asRecord(asRecord(response)?.data)?.detail;
   if (typeof detail === 'string' && detail.trim()) return detail;
   return error instanceof Error ? error.message : '操作失败，请重试。';
-}
-
-function localIsoWeekday(value: string): number | null {
-  const dueAt = new Date(value);
-  if (Number.isNaN(dueAt.getTime())) return null;
-  return dueAt.getDay() || 7;
 }
 
 function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
@@ -88,6 +112,8 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
   const [weekdays, setWeekdays] = useState<number[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const requestKeyTracker = useRef(createRequestKeyTracker());
+  const stagedAttempt = useRef<StagedAttachmentAttempt | null>(null);
   const subject = dictionaries?.subjects.find((item) => item.code === subjectCode);
   const selectedStudent = students.find((student) => student.user_id === assignedStudentId);
   const isDictionaryReady = Boolean(dictionaries);
@@ -109,12 +135,17 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitError(null);
-    const dueWeekday = localIsoWeekday(dueAt);
-    if (needsWeekdaySelection && (!dueWeekday || !weekdays.includes(dueWeekday))) {
-      setSubmitError('首次截止时间必须落在所选的每周日期。');
-      return;
-    }
+    let attempt: StagedAttachmentAttempt | null = null;
     try {
+      assertAttachmentLimit(files);
+      const fingerprint = [assignedStudentId, title, description, dueAt, subjectCode, typeCode, practiceSourceCode, frequency, ...weekdays.map(String), ...files.map((file) => `${file.name}:${file.size}:${file.lastModified}`)].join('\u0000');
+      const idempotencyKey = requestKeyTracker.current.take(fingerprint);
+      attempt = stagedAttempt.current;
+      if (!attempt || attempt.fingerprint !== fingerprint || attempt.idempotencyKey !== idempotencyKey) {
+        attempt = { fingerprint, idempotencyKey, assetIds: [] };
+        stagedAttempt.current = attempt;
+      }
+      const materialAssetIds = await uploadSelectedFiles(files, idempotencyKey, attempt.assetIds);
       await onSubmit({
         assignedStudentId,
         title,
@@ -125,10 +156,18 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
         practiceSourceCode: isPractice ? practiceSourceCode : null,
         frequency,
         weekdays: needsWeekdaySelection ? weekdays : null,
-        files,
+        idempotencyKey,
+        materialAssetIds,
       });
+      stagedAttempt.current = null;
+      requestKeyTracker.current.clear();
       setOpen(false);
     } catch (error) {
+      if (attempt && isDefinitiveRequestError(error)) {
+        await cleanupStagedAssets(attempt);
+        stagedAttempt.current = null;
+        requestKeyTracker.current.clear();
+      }
       setSubmitError(readableError(error));
     }
   };
@@ -166,8 +205,32 @@ function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'st
   const [dialogOpen, setDialogOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const requestKeyTracker = useRef(createRequestKeyTracker());
+  const stagedAttempt = useRef<StagedAttachmentAttempt | null>(null);
 
-  const makeRequestKey = () => requestKeyTracker.current.take([task.task_id, text, ...files.map((file) => `${file.name}:${file.size}:${file.lastModified}`)].join('\u0000'));
+  const submitWithAttachments = async (
+    kind: 'check-in' | 'revision',
+    submit: (idempotencyKey: string, assetIds: string[]) => Promise<void>,
+  ) => {
+    assertAttachmentLimit(files);
+    const fingerprint = [kind, task.task_id, text, ...files.map((file) => `${file.name}:${file.size}:${file.lastModified}`)].join('\u0000');
+    const idempotencyKey = requestKeyTracker.current.take(fingerprint);
+    let attempt = stagedAttempt.current;
+    if (!attempt || attempt.fingerprint !== fingerprint || attempt.idempotencyKey !== idempotencyKey) {
+      attempt = { fingerprint, idempotencyKey, assetIds: [] };
+      stagedAttempt.current = attempt;
+    }
+    try {
+      const assetIds = await uploadSelectedFiles(files, idempotencyKey, attempt.assetIds);
+      await submit(idempotencyKey, assetIds);
+    } catch (error) {
+      if (isDefinitiveRequestError(error)) {
+        await cleanupStagedAssets(attempt);
+        stagedAttempt.current = null;
+        requestKeyTracker.current.clear();
+      }
+      throw error;
+    }
+  };
   const runAction = async (action: () => Promise<void>) => {
     setActionError(null);
     try {
@@ -178,18 +241,21 @@ function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'st
   };
   const resetSubmission = () => {
     requestKeyTracker.current.clear();
+    stagedAttempt.current = null;
     setText('');
     setFiles([]);
   };
   const checkIn = () => runAction(async () => {
-    const assetIds = await uploadSelectedFiles(files);
-    await mutations.checkIn.mutateAsync({ taskId: task.task_id, submission_text: text, idempotency_key: makeRequestKey(), asset_ids: assetIds });
+    await submitWithAttachments('check-in', async (idempotencyKey, assetIds) => {
+      await mutations.checkIn.mutateAsync({ taskId: task.task_id, submission_text: text, idempotency_key: idempotencyKey, asset_ids: assetIds });
+    });
     resetSubmission();
     setCheckInOpen(false);
   });
   const appendRevision = () => runAction(async () => {
-    const assetIds = await uploadSelectedFiles(files);
-    await mutations.appendRevision.mutateAsync({ taskId: task.task_id, submission_text: text, idempotency_key: makeRequestKey(), asset_ids: assetIds });
+    await submitWithAttachments('revision', async (idempotencyKey, assetIds) => {
+      await mutations.appendRevision.mutateAsync({ taskId: task.task_id, submission_text: text, idempotency_key: idempotencyKey, asset_ids: assetIds });
+    });
     resetSubmission();
     setDialogOpen(false);
   });
@@ -249,9 +315,8 @@ export default function EducationPage() {
   const membersQuery = useEducationMembers(role === 'parent');
   const learningAssignments = useLearningAssignments(role === 'student');
   const students = useMemo(() => (membersQuery.data ?? []).filter((item) => item.role === 'student'), [membersQuery.data]);
-  const create = async ({ assignedStudentId, title, description, dueAt, subjectCode, typeCode, practiceSourceCode, frequency, weekdays, files }: ParentCreateInput) => {
-    const materialAssetIds = await uploadSelectedFiles(files);
-    const input: CreateEducationTaskInput = { assigned_student_id: assignedStudentId, title, description, due_at: new Date(dueAt).toISOString(), subject_code: subjectCode, type_code: typeCode, practice_source_code: practiceSourceCode, frequency, weekdays, material_asset_ids: materialAssetIds };
+  const create = async ({ assignedStudentId, title, description, dueAt, subjectCode, typeCode, practiceSourceCode, frequency, weekdays, idempotencyKey, materialAssetIds }: ParentCreateInput) => {
+    const input: CreateEducationTaskInput = { idempotency_key: idempotencyKey, assigned_student_id: assignedStudentId, title, description, due_at: new Date(dueAt).toISOString(), subject_code: subjectCode, type_code: typeCode, practice_source_code: practiceSourceCode, frequency, weekdays, material_asset_ids: materialAssetIds };
     await mutations.create.mutateAsync(input);
   };
 

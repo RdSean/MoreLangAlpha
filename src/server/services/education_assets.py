@@ -11,8 +11,10 @@ from src.config.env import (
 )
 from src.server.database.education_assets import (
     get_education_asset_for_user,
+    get_staged_education_asset,
     insert_education_asset,
     list_education_assets_for_parent,
+    delete_unreferenced_education_asset,
 )
 from src.server.database.education_members import get_membership_for_user
 from src.utils.storage import delete_object, get_signed_url, upload_bytes
@@ -109,8 +111,24 @@ def build_storage_key(*, household_id: str, asset_id: str, content_type: str) ->
     return f"education/{household}/{asset}{extension}"
 
 
+def _normalized_staging_identity(
+    *, staging_key: str | None, staging_slot: int | None,
+) -> tuple[str | None, int | None]:
+    if (staging_key is None) != (staging_slot is None):
+        raise EducationAssetValidationError("Attachment staging key and slot must be provided together")
+    if staging_key is None:
+        return None, None
+    if not 0 <= staging_slot <= 19:
+        raise EducationAssetValidationError("Attachment staging slot is invalid")
+    try:
+        return str(UUID(str(staging_key))), staging_slot
+    except (TypeError, ValueError) as exc:
+        raise EducationAssetValidationError("Attachment staging key is invalid") from exc
+
+
 async def create_education_asset(
-    *, user_id: str, filename: str | None, content_type: str | None, content: bytes
+    *, user_id: str, filename: str | None, content_type: str | None, content: bytes,
+    staging_key: str | None = None, staging_slot: int | None = None,
 ) -> dict:
     """Upload private content, then persist metadata with compensating cleanup on failure."""
     upload = validate_upload(filename=filename, content_type=content_type, content=content)
@@ -118,8 +136,21 @@ async def create_education_asset(
     if not membership:
         raise EducationAssetAccessDeniedError("Education household membership is required")
 
-    asset_id = str(uuid4())
+    normalized_staging_key, normalized_staging_slot = _normalized_staging_identity(
+        staging_key=staging_key, staging_slot=staging_slot,
+    )
     household_id = str(membership["household_id"])
+    if normalized_staging_key is not None:
+        existing_asset = await get_staged_education_asset(
+            household_id=household_id,
+            created_by_user_id=user_id,
+            staging_key=normalized_staging_key,
+            staging_slot=normalized_staging_slot,
+        )
+        if existing_asset:
+            return existing_asset
+
+    asset_id = str(uuid4())
     storage_key = build_storage_key(
         household_id=household_id,
         asset_id=asset_id,
@@ -140,15 +171,41 @@ async def create_education_asset(
             original_filename=upload.filename,
             content_type=upload.content_type,
             size_bytes=len(upload.content),
+            staging_key=normalized_staging_key,
+            staging_slot=normalized_staging_slot,
         )
     except Exception as exc:
         await asyncio.to_thread(delete_object, storage_key)
+        if normalized_staging_key is not None:
+            existing_asset = await get_staged_education_asset(
+                household_id=household_id,
+                created_by_user_id=user_id,
+                staging_key=normalized_staging_key,
+                staging_slot=normalized_staging_slot,
+            )
+            if existing_asset:
+                return existing_asset
         raise EducationAssetPersistenceError("Attachment metadata could not be saved") from exc
 
     if not asset:
         await asyncio.to_thread(delete_object, storage_key)
         raise EducationAssetAccessDeniedError("Education household membership is required")
     return asset
+
+
+async def delete_education_asset(*, user_id: str, asset_id: str) -> None:
+    """Remove an unreferenced creator-owned staged attachment and its private object."""
+    asset = await delete_unreferenced_education_asset(
+        asset_id=asset_id, created_by_user_id=user_id,
+    )
+    if not asset:
+        return
+    storage_key = asset["storage_key"]
+    if not storage_key.startswith("education/"):
+        raise EducationAssetPersistenceError("Education attachment key is invalid")
+    deleted = await asyncio.to_thread(delete_object, storage_key)
+    if not deleted:
+        raise EducationAssetStorageError("Attachment cleanup is unavailable")
 
 
 async def list_parent_education_assets(*, user_id: str) -> list[dict]:

@@ -48,6 +48,13 @@ def _workflow_open_submission_repair_source() -> str:
     ).read_text()
 
 
+def _task_request_staging_source() -> str:
+    return (
+        Path(__file__).parents[3]
+        / "migrations/versions/041_add_education_task_request_staging.py"
+    ).read_text()
+
+
 def test_homework_workflow_migration_follows_seeded_dictionaries():
     migration_path = (
         Path(__file__).parents[3]
@@ -203,3 +210,20 @@ def test_open_submission_repair_completes_legacy_open_tasks_from_first_submissio
     assert "WHERE tasks.status = 'open'" in migration
     assert "SET status = 'completed'" in migration
     assert "MIN(submissions.created_at)" in migration
+
+
+def test_task_request_staging_adds_creation_and_attachment_retry_fences():
+    migration = _task_request_staging_source()
+    migration_globals = runpy.run_path(
+        str(Path(__file__).parents[3] / "migrations/versions/041_add_education_task_request_staging.py")
+    )
+
+    assert migration_globals["revision"] == "041"
+    assert migration_globals["down_revision"] == "040"
+    assert "ADD COLUMN idempotency_key UUID" in migration
+    assert "uq_education_task_rules_creator_idempotency" in migration
+    assert "ADD COLUMN staging_key UUID" in migration
+    assert "ADD COLUMN staging_slot SMALLINT" in migration
+    assert "education_assets_staging_pair_check" in migration
+    assert "staging_slot BETWEEN 0 AND 19" in migration
+    assert "uq_education_assets_staging_slot" in migration

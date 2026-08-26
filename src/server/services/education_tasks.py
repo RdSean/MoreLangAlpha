@@ -13,6 +13,7 @@ from src.server.database.education_tasks import (
     get_calendar_context_for_user,
     get_calendar_progress_counts,
     get_household_context_for_parent,
+    get_task_by_creation_idempotency,
     get_task_detail_for_user,
     get_task_creation_context,
     is_student_in_household,
@@ -93,7 +94,7 @@ async def create_task(
     *, parent_user_id: str, assigned_student_id: str, title: str,
     description: str, due_at: datetime, subject_code: str, type_code: str,
     practice_source_code: str | None, frequency: str, weekdays: list[int] | None,
-    material_asset_ids: list[str],
+    material_asset_ids: list[str], idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     """Create a classified parent rule and materialize its first task instance."""
     if due_at.tzinfo is None or due_at.utcoffset() is None:
@@ -107,6 +108,14 @@ async def create_task(
     if not context:
         raise EducationTaskPermissionError("Only a parent can create homework tasks")
     household_id = str(context["household_id"])
+    if idempotency_key:
+        existing_task = await get_task_by_creation_idempotency(
+            household_id=household_id,
+            parent_user_id=parent_user_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing_task:
+            return existing_task
     assignment = await get_task_creation_context(
         household_id=household_id,
         assigned_student_id=assigned_student_id,
@@ -154,6 +163,7 @@ async def create_task(
             practice_source_code=practice_source_code,
             grade_code=assignment["grade_code"],
             material_asset_ids=material_asset_ids,
+            idempotency_key=idempotency_key,
         )
     except ValueError as exc:
         if asset_error := _task_asset_error(exc):

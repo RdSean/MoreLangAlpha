@@ -118,6 +118,7 @@ async def create_education_task(body: CreateEducationTaskRequest, user_id: Curre
             frequency=body.frequency,
             weekdays=body.weekdays,
             material_asset_ids=[str(asset_id) for asset_id in body.material_asset_ids],
+            idempotency_key=str(body.idempotency_key),
         )
     except EducationTaskError as exc:
         raise _task_http_error(exc) from exc

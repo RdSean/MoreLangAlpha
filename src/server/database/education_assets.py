@@ -16,6 +16,8 @@ async def insert_education_asset(
     original_filename: str,
     content_type: str,
     size_bytes: int,
+    staging_key: str | None = None,
+    staging_slot: int | None = None,
 ) -> dict[str, Any] | None:
     """Record an uploaded object only while its creator remains a household member."""
     async with get_db_connection() as conn:
@@ -24,13 +26,13 @@ async def insert_education_asset(
                 """
                 INSERT INTO education_assets (
                     asset_id, household_id, created_by_user_id, storage_key,
-                    original_filename, content_type, size_bytes, created_at
+                    original_filename, content_type, size_bytes, staging_key, staging_slot, created_at
                 )
-                SELECT %s, memberships.household_id, %s, %s, %s, %s, %s, NOW()
+                SELECT %s, memberships.household_id, %s, %s, %s, %s, %s, %s, %s, NOW()
                 FROM education_memberships AS memberships
                 WHERE memberships.household_id = %s AND memberships.user_id = %s
                 RETURNING asset_id, household_id, created_by_user_id, storage_key,
-                          original_filename, content_type, size_bytes, created_at
+                          original_filename, content_type, size_bytes, staging_key, staging_slot, created_at
                 """,
                 (
                     asset_id,
@@ -39,11 +41,67 @@ async def insert_education_asset(
                     original_filename,
                     content_type,
                     size_bytes,
+                    staging_key,
+                    staging_slot,
                     household_id,
                     created_by_user_id,
                 ),
             )
             row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_staged_education_asset(
+    *, household_id: str, created_by_user_id: str, staging_key: str, staging_slot: int,
+) -> dict[str, Any] | None:
+    """Return an existing attachment reserved by the same logical request."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT asset_id, household_id, created_by_user_id, storage_key,
+                       original_filename, content_type, size_bytes, staging_key,
+                       staging_slot, created_at
+                FROM education_assets
+                WHERE household_id = %s AND created_by_user_id = %s
+                  AND staging_key = %s AND staging_slot = %s
+                """,
+                (household_id, created_by_user_id, staging_key, staging_slot),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def delete_unreferenced_education_asset(
+    *, asset_id: str, created_by_user_id: str,
+) -> dict[str, Any] | None:
+    """Delete creator-owned metadata only when no education record references it."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    DELETE FROM education_assets AS assets
+                    WHERE assets.asset_id = %s
+                      AND assets.created_by_user_id = %s
+                      AND NOT EXISTS (
+                          SELECT 1 FROM education_task_material_assets AS materials
+                          WHERE materials.asset_id = assets.asset_id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM education_task_submission_assets AS submissions
+                          WHERE submissions.asset_id = assets.asset_id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM education_textbook_sources AS sources
+                          WHERE sources.asset_id = assets.asset_id
+                      )
+                    RETURNING asset_id, household_id, created_by_user_id, storage_key,
+                              original_filename, content_type, size_bytes, created_at
+                    """,
+                    (asset_id, created_by_user_id),
+                )
+                row = await cur.fetchone()
     return dict(row) if row else None
 
 

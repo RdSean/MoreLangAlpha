@@ -51,6 +51,7 @@ class EducationHomeworkDictionariesResponse(BaseModel):
 
 
 class CreateEducationTaskRequest(BaseModel):
+    idempotency_key: UUID
     assigned_student_id: str = Field(min_length=1, max_length=255)
     title: str = Field(min_length=1, max_length=255)
     description: str = Field(default="", max_length=10_000)

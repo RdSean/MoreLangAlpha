@@ -64,12 +64,33 @@ async def test_parent_creates_a_materialized_task_instance(client):
                 "subject_code": "chinese",
                 "type_code": "read",
                 "frequency": "once",
+                "idempotency_key": "ec4075f0-6e7a-4f3d-bf56-c04121bbb395",
             },
         )
 
     assert response.status_code == 201
     assert response.json()["status"] == "open"
     assert create.await_args.kwargs["parent_user_id"] == "parent-1"
+    assert create.await_args.kwargs["idempotency_key"] == "ec4075f0-6e7a-4f3d-bf56-c04121bbb395"
+
+
+@pytest.mark.asyncio
+async def test_task_creation_requires_a_request_key(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+
+    response = await client.post(
+        "/api/v1/education/tasks",
+        json={
+            "assigned_student_id": "student-1",
+            "title": "Read chapter one",
+            "due_at": "2026-08-09T09:00:00Z",
+            "subject_code": "chinese",
+            "type_code": "read",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -93,6 +114,7 @@ async def test_task_creation_returns_bad_request_for_assets_outside_the_househol
                 "subject_code": "chinese",
                 "type_code": "read",
                 "material_asset_ids": ["c0b32d33-cccb-4a80-a706-59ef75c2fd85"],
+                "idempotency_key": "ec4075f0-6e7a-4f3d-bf56-c04121bbb395",
             },
         )
 
@@ -119,6 +141,7 @@ async def test_task_creation_serializes_database_uuid_values(client):
                 "due_at": "2026-08-09T09:00:00Z",
                 "subject_code": "chinese",
                 "type_code": "read",
+                "idempotency_key": "ec4075f0-6e7a-4f3d-bf56-c04121bbb395",
             },
         )
 

@@ -186,6 +186,64 @@ async def test_task_creation_persists_student_grade_and_weekly_recurrence(monkey
 
 
 @pytest.mark.asyncio
+async def test_task_creation_reuses_the_original_task_for_a_retried_request_key(monkeypatch):
+    _stub_create_context(monkeypatch)
+    existing = {"task_id": "task-1", "title": "Already created"}
+    find_existing = AsyncMock(return_value=existing)
+    write = AsyncMock()
+    monkeypatch.setattr(education_tasks, "get_task_by_creation_idempotency", find_existing)
+    monkeypatch.setattr(education_tasks, "create_task_rule_and_instance", write)
+
+    result = await education_tasks.create_task(
+        parent_user_id="parent-1",
+        assigned_student_id="student-1",
+        title="Read",
+        description="",
+        due_at=datetime.now(timezone.utc),
+        subject_code="chinese",
+        type_code="read",
+        practice_source_code=None,
+        frequency="once",
+        weekdays=None,
+        material_asset_ids=[],
+        idempotency_key="ec4075f0-6e7a-4f3d-bf56-c04121bbb395",
+    )
+
+    assert result == existing
+    find_existing.assert_awaited_once_with(
+        household_id="h-1",
+        parent_user_id="parent-1",
+        idempotency_key="ec4075f0-6e7a-4f3d-bf56-c04121bbb395",
+    )
+    write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_task_creation_persists_its_request_key(monkeypatch):
+    _stub_create_context(monkeypatch)
+    monkeypatch.setattr(education_tasks, "get_task_by_creation_idempotency", AsyncMock(return_value=None))
+    write = AsyncMock(return_value={"task_id": "task-1"})
+    monkeypatch.setattr(education_tasks, "create_task_rule_and_instance", write)
+
+    await education_tasks.create_task(
+        parent_user_id="parent-1",
+        assigned_student_id="student-1",
+        title="Read",
+        description="",
+        due_at=datetime.now(timezone.utc),
+        subject_code="chinese",
+        type_code="read",
+        practice_source_code=None,
+        frequency="once",
+        weekdays=None,
+        material_asset_ids=[],
+        idempotency_key="ec4075f0-6e7a-4f3d-bf56-c04121bbb395",
+    )
+
+    assert write.await_args.kwargs["idempotency_key"] == "ec4075f0-6e7a-4f3d-bf56-c04121bbb395"
+
+
+@pytest.mark.asyncio
 async def test_task_creation_reports_material_assets_outside_the_household(monkeypatch):
     _stub_create_context(monkeypatch)
     monkeypatch.setattr(

@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
   review: vi.fn(),
   cancel: vi.fn(),
   upload: vi.fn(),
+  deleteAsset: vi.fn(),
   membersEnabled: vi.fn(),
   dictionaries: {
     subjects: [
@@ -36,6 +37,7 @@ vi.mock('@/contexts/AuthContext', () => ({
 
 vi.mock('../api', () => ({
   uploadEducationAsset: state.upload,
+  deleteEducationAsset: state.deleteAsset,
 }));
 
 vi.mock('../queries', () => ({
@@ -77,6 +79,7 @@ beforeEach(() => {
   state.review.mockReset().mockResolvedValue(undefined);
   state.cancel.mockReset().mockResolvedValue(undefined);
   state.upload.mockReset().mockResolvedValue({ asset_id: 'asset-1' });
+  state.deleteAsset.mockReset().mockResolvedValue(undefined);
   state.membersEnabled.mockReset();
   state.dictionaries = {
     subjects: [
@@ -122,6 +125,7 @@ describe('EducationPage', () => {
       practice_source_code: 'schoolwork',
       frequency: 'once',
       material_asset_ids: [],
+      idempotency_key: 'submission-idempotency-key',
     })));
   });
 
@@ -156,14 +160,16 @@ describe('EducationPage', () => {
       frequency: 'weekly',
       weekdays: [1, 3],
       material_asset_ids: ['asset-1', 'asset-2'],
+      idempotency_key: 'submission-idempotency-key',
     })));
-    expect(state.upload).toHaveBeenCalledWith(first);
-    expect(state.upload).toHaveBeenCalledWith(second);
+    expect(state.upload).toHaveBeenCalledWith(first, { stagingKey: 'submission-idempotency-key', stagingSlot: 0 });
+    expect(state.upload).toHaveBeenCalledWith(second, { stagingKey: 'submission-idempotency-key', stagingSlot: 1 });
   });
 
-  it('rejects a weekly task when its first due date is outside the selected weekdays', async () => {
+  it('defers weekly date validation to the household timezone and shows its server error', async () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
+    state.create.mockRejectedValue({ response: { data: { detail: 'The initial due date must be one of the selected weekly weekdays' } } });
 
     render(<MemoryRouter><EducationPage /></MemoryRouter>);
 
@@ -177,8 +183,32 @@ describe('EducationPage', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '周一' }));
     fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('首次截止时间必须落在所选的每周日期。');
-    expect(state.create).not.toHaveBeenCalled();
+    await waitFor(() => expect(state.create).toHaveBeenCalled());
+    expect(await screen.findByRole('alert')).toHaveTextContent('The initial due date must be one of the selected weekly weekdays');
+  });
+
+  it('reuses staged parent materials and its creation key when a create response is lost', async () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
+    state.create.mockRejectedValueOnce(new Error('network unavailable')).mockResolvedValueOnce(undefined);
+    const attachment = new File(['first'], 'first.pdf', { type: 'application/pdf' });
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
+    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
+    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '可重试作业' } });
+    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
+    fireEvent.change(screen.getByLabelText('材料附件'), { target: { files: [attachment] } });
+    fireEvent.click(screen.getAllByRole('button', { name: '创建作业' }).at(-1)!);
+    expect(await screen.findByRole('alert')).toHaveTextContent('network unavailable');
+    fireEvent.click(screen.getAllByRole('button', { name: '创建作业' }).at(-1)!);
+
+    await waitFor(() => expect(state.create).toHaveBeenCalledTimes(2));
+    expect(state.upload).toHaveBeenCalledTimes(1);
+    expect(state.create.mock.calls[1][0]).toEqual(state.create.mock.calls[0][0]);
   });
 
   it('rejects more than twenty parent materials before starting uploads', async () => {
@@ -290,6 +320,40 @@ describe('EducationPage', () => {
       idempotency_key: 'submission-idempotency-key',
       asset_ids: ['asset-1', 'asset-2'],
     }));
+  });
+
+  it('reuses staged student attachments when a check-in response is lost', async () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    state.tasks = [task('open')];
+    state.checkIn.mockRejectedValueOnce(new Error('network unavailable')).mockResolvedValueOnce(undefined);
+    const attachment = new File(['first'], 'first.pdf', { type: 'application/pdf' });
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '完成打卡' }));
+    fireEvent.change(screen.getByLabelText('附件'), { target: { files: [attachment] } });
+    fireEvent.click(screen.getByRole('button', { name: '确认打卡' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('network unavailable');
+    fireEvent.click(screen.getByRole('button', { name: '确认打卡' }));
+
+    await waitFor(() => expect(state.checkIn).toHaveBeenCalledTimes(2));
+    expect(state.upload).toHaveBeenCalledTimes(1);
+    expect(state.checkIn.mock.calls[1][0]).toEqual(state.checkIn.mock.calls[0][0]);
+  });
+
+  it('cleans up staged student attachments after a definite check-in rejection', async () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    state.tasks = [task('open')];
+    state.checkIn.mockRejectedValue({ response: { status: 400, data: { detail: '该作业已取消。' } } });
+    const attachment = new File(['first'], 'first.pdf', { type: 'application/pdf' });
+
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: '完成打卡' }));
+    fireEvent.change(screen.getByLabelText('附件'), { target: { files: [attachment] } });
+    fireEvent.click(screen.getByRole('button', { name: '确认打卡' }));
+
+    await waitFor(() => expect(state.deleteAsset).toHaveBeenCalledWith('asset-1'));
   });
 
   it('rejects more than twenty first check-in attachments before starting uploads', async () => {

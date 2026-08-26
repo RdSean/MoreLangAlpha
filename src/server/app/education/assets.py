@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 
 from src.config.env import EDUCATION_ASSET_MAX_BYTES
@@ -14,6 +14,7 @@ from src.server.services.education_assets import (
     EducationAssetStorageError,
     EducationAssetValidationError,
     create_education_asset,
+    delete_education_asset,
     get_education_asset_download_url,
     list_parent_education_assets,
 )
@@ -56,6 +57,8 @@ async def list_education_assets(user_id: CurrentUserId):
 async def upload_education_asset(
     user_id: CurrentUserId,
     file: UploadFile = File(...),
+    staging_key: UUID | None = None,
+    staging_slot: int | None = Query(default=None, ge=0, le=19),
 ):
     """Proxy an attachment upload and return metadata without a durable URL."""
     content = await file.read(EDUCATION_ASSET_MAX_BYTES + 1)
@@ -65,6 +68,8 @@ async def upload_education_asset(
             filename=file.filename,
             content_type=file.content_type,
             content=content,
+            staging_key=str(staging_key) if staging_key else None,
+            staging_slot=staging_slot,
         )
     except EducationAssetValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -74,6 +79,15 @@ async def upload_education_asset(
         raise HTTPException(status_code=503, detail="Attachment storage is unavailable") from exc
     except EducationAssetPersistenceError as exc:
         raise HTTPException(status_code=500, detail="Attachment metadata could not be saved") from exc
+
+
+@router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_education_attachment(asset_id: UUID, user_id: CurrentUserId):
+    """Best-effort cleanup used only after an operation was definitively rejected."""
+    try:
+        await delete_education_asset(user_id=user_id, asset_id=str(asset_id))
+    except EducationAssetStorageError as exc:
+        raise HTTPException(status_code=503, detail="Attachment cleanup is unavailable") from exc
 
 
 @router.get("/{asset_id}/download", response_model=EducationAssetDownloadResponse)

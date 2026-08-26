@@ -95,11 +95,39 @@ async def get_task_creation_context(
     return dict(row) if row else None
 
 
+async def get_task_by_creation_idempotency(
+    *, household_id: str, parent_user_id: str, idempotency_key: str,
+) -> dict[str, Any] | None:
+    """Find the first materialized task for a parent's retried create request."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT tasks.task_id, tasks.task_rule_id, tasks.household_id,
+                       tasks.assigned_student_id, tasks.occurrence_date, tasks.due_at,
+                       tasks.title, tasks.description, tasks.subject_code, tasks.type_code,
+                       tasks.practice_source_code, tasks.grade_code, tasks.status,
+                       tasks.completed_at, tasks.created_at
+                FROM education_task_rules AS rules
+                JOIN education_tasks AS tasks ON tasks.task_rule_id = rules.task_rule_id
+                WHERE rules.household_id = %s
+                  AND rules.created_by_user_id = %s
+                  AND rules.idempotency_key = %s
+                ORDER BY tasks.occurrence_date, tasks.created_at
+                LIMIT 1
+                """,
+                (household_id, parent_user_id, idempotency_key),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def create_task_rule_and_instance(
     *, parent_user_id: str, household_id: str, assigned_student_id: str,
     title: str, description: str, recurrence: dict[str, Any], timezone_name: str,
     occurrence_date: date, due_at: datetime, subject_code: str, type_code: str,
     practice_source_code: str | None, grade_code: str, material_asset_ids: list[str],
+    idempotency_key: str | None,
 ) -> dict[str, Any]:
     """Create a rule and first instance atomically; all asset IDs must be household-owned."""
     rule_id = str(uuid4())
@@ -112,15 +140,41 @@ async def create_task_rule_and_instance(
                     INSERT INTO education_task_rules (
                         task_rule_id, household_id, created_by_user_id, assigned_student_id,
                         title, description, recurrence, timezone, subject_code, type_code,
-                        practice_source_code, grade_code, status, created_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', NOW())
+                        practice_source_code, grade_code, idempotency_key, status, created_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', NOW())
+                    ON CONFLICT (household_id, created_by_user_id, idempotency_key)
+                    WHERE idempotency_key IS NOT NULL DO NOTHING
+                    RETURNING task_rule_id
                     """,
                     (
                         rule_id, household_id, parent_user_id, assigned_student_id, title,
                         description, Json(recurrence), timezone_name, subject_code, type_code,
-                        practice_source_code, grade_code,
+                        practice_source_code, grade_code, idempotency_key,
                     ),
                 )
+                inserted_rule = await cur.fetchone()
+                if not inserted_rule:
+                    await cur.execute(
+                        """
+                        SELECT tasks.task_id, tasks.task_rule_id, tasks.household_id,
+                               tasks.assigned_student_id, tasks.occurrence_date, tasks.due_at,
+                               tasks.title, tasks.description, tasks.subject_code, tasks.type_code,
+                               tasks.practice_source_code, tasks.grade_code, tasks.status,
+                               tasks.completed_at, tasks.created_at
+                        FROM education_task_rules AS rules
+                        JOIN education_tasks AS tasks ON tasks.task_rule_id = rules.task_rule_id
+                        WHERE rules.household_id = %s
+                          AND rules.created_by_user_id = %s
+                          AND rules.idempotency_key = %s
+                        ORDER BY tasks.occurrence_date, tasks.created_at
+                        LIMIT 1
+                        """,
+                        (household_id, parent_user_id, idempotency_key),
+                    )
+                    existing_task = await cur.fetchone()
+                    if not existing_task:
+                        raise RuntimeError("Idempotent task creation did not materialize a task")
+                    return dict(existing_task)
                 await cur.execute(
                     """
                     INSERT INTO education_tasks (

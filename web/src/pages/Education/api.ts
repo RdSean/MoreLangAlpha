@@ -59,13 +59,19 @@ export async function cancelEducationTask(taskId: string): Promise<EducationTask
   return data;
 }
 
-export async function uploadEducationAsset(file: File): Promise<EducationAsset> {
+export async function uploadEducationAsset(file: File, options?: { stagingKey?: string; stagingSlot?: number }): Promise<EducationAsset> {
   const body = new FormData();
   body.append('file', file);
+  const params = options?.stagingKey && options.stagingSlot !== undefined ? { staging_key: options.stagingKey, staging_slot: options.stagingSlot } : undefined;
   const { data } = await api.post<EducationAsset>('/api/v1/education/assets', body, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    params,
   });
   return data;
+}
+
+export async function deleteEducationAsset(assetId: string): Promise<void> {
+  await api.delete(`/api/v1/education/assets/${assetId}`);
 }
 
 export async function listEducationAssets(): Promise<EducationAsset[]> {

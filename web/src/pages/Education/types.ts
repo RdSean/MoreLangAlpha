@@ -28,6 +28,7 @@ export interface EducationMember {
 }
 
 export interface CreateEducationTaskInput {
+  idempotency_key: string;
   assigned_student_id: string;
   title: string;
   description: string;
