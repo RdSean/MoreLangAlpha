@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ClipboardPlus, RotateCcw, Send, XCircle } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -136,7 +136,7 @@ function ChoiceGroup({
 }) {
   return <fieldset className="grid gap-2">
     <legend className="text-sm font-medium">{label}</legend>
-    <div className="flex flex-wrap gap-2" role="group" aria-label={label}>
+    <div className="flex flex-wrap gap-0" role="group" aria-label={label}>
       {options.map((option) => {
         const selected = option.value === value;
         const color = colorForOption?.(option.value);
@@ -145,20 +145,39 @@ function ChoiceGroup({
           type="button"
           size="sm"
           variant={selected ? 'secondary' : 'outline'}
+          className="rounded-none border-r-0 first:rounded-l-md last:border-r last:rounded-r-md"
           aria-pressed={selected}
           onClick={() => onChange(option.value)}
-          style={selected && color ? { borderColor: color, color } : undefined}
+          style={{
+            borderColor: selected ? (color ?? 'var(--color-text-primary)') : 'var(--color-border-default)',
+            ...(selected ? { backgroundColor: color ?? 'var(--color-text-primary)', color: '#fff' } : {}),
+          }}
         >{color && <span className="mr-2 size-2.5 rounded-full" aria-hidden="true" style={{ backgroundColor: color }} />}{option.label}</Button>;
       })}
     </div>
   </fieldset>;
 }
 
-function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
+export function CreateHomeworkPage() {
+  const { member } = useAuth();
+  const dictionariesQuery = useEducationHomeworkDictionaries();
+  const membersQuery = useEducationMembers(member?.role === 'parent');
+  const mutations = useEducationTaskMutations();
+  const students = useMemo(() => (membersQuery.data ?? []).filter((item) => item.role === 'student'), [membersQuery.data]);
+
+  if (member?.role !== 'parent') return <Navigate to="/education" replace />;
+  const create = async ({ assignedStudentId, title, description, dueAt, subjectCode, typeCode, practiceSourceCode, frequency, weekdays, idempotencyKey, materialAssetIds }: ParentCreateInput) => {
+    await mutations.create.mutateAsync({ idempotency_key: idempotencyKey, assigned_student_id: assignedStudentId, title, description, due_at: householdWallClockToIso(dueAt, dictionariesQuery.data?.timezone ?? 'UTC'), subject_code: subjectCode, type_code: typeCode, practice_source_code: practiceSourceCode, frequency, weekdays, material_asset_ids: materialAssetIds });
+  };
+  return <ParentCreateDialog page students={students} dictionaries={dictionariesQuery.data} onSubmit={create} isPending={mutations.create.isPending} />;
+}
+
+export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending, page = false }: {
   students: EducationMember[];
   dictionaries: EducationHomeworkDictionaries | undefined;
   onSubmit: (input: ParentCreateInput) => Promise<void>;
   isPending: boolean;
+  page?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -270,11 +289,7 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
     }
   };
 
-  return <Dialog open={open} onOpenChange={handleOpenChange}>
-    <DialogTrigger asChild><Button><ClipboardPlus className="mr-2 size-4" aria-hidden="true" />创建作业</Button></DialogTrigger>
-    <DialogContent variant="centered" className="max-w-lg" onEscapeKeyDown={(event) => { if (isSubmitting || isPending) event.preventDefault(); }} onPointerDownOutside={(event) => { if (isSubmitting || isPending) event.preventDefault(); }}>
-      <DialogHeader><DialogTitle>创建作业</DialogTitle><DialogDescription>分配给家庭中的学生，并设定完成时间。</DialogDescription></DialogHeader>
-      <form className="grid gap-4" onSubmit={(event) => void submit(event)}>
+  const form = <form className="grid gap-5" onSubmit={(event) => void submit(event)}>
         <ChoiceGroup label="学生" value={assignedStudentId} options={students.map((student) => ({ value: student.user_id, label: student.name }))} onChange={setAssignedStudentId} />
         {selectedStudent && !isDictionaryReady && <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>正在加载作业字典…</p>}
         {selectedStudent && isDictionaryReady && <p className="text-sm" style={{ color: hasStudentGrade ? 'var(--color-text-secondary)' : 'var(--color-loss)' }}>当前年级：{gradeName}</p>}
@@ -289,7 +304,15 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
         <label className="grid gap-1.5 text-sm font-medium">材料附件<Input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />{files.length > 0 && <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>已选择 {files.length} 份附件</span>}</label>
         {submitError && <p role="alert" className="text-sm" style={{ color: 'var(--color-loss)' }}>{submitError}</p>}
         <DialogFooter><Button type="submit" disabled={isSubmitting || isPending || !isDictionaryReady || !assignedStudentId || !hasStudentGrade || !subjectCode || !typeCode || (isPractice && !practiceSourceCode) || (needsWeekdaySelection && weekdays.length === 0)}>{isSubmitting || isPending ? '正在创建' : '创建作业'}</Button></DialogFooter>
-      </form>
+  </form>;
+
+  if (page) return <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="create-homework-page"><div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10"><nav aria-label="面包屑" className="mb-8 flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}><Link to="/education" className="hover:underline">家庭作业</Link><span aria-hidden="true">/</span><span style={{ color: 'var(--color-text-primary)' }}>创建作业</span></nav><header className="mb-8 border-b pb-5" style={{ borderColor: 'var(--color-border-default)' }}><h1 className="title-font text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>创建作业</h1><p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>分配给家庭中的学生，并设定完成时间。</p></header><section className="border bg-background p-5 sm:p-7" style={{ borderColor: 'var(--color-border-default)' }}>{form}</section></div></main>;
+
+  return <Dialog open={open} onOpenChange={handleOpenChange}>
+    <DialogTrigger asChild><Button><ClipboardPlus className="mr-2 size-4" aria-hidden="true" />创建作业</Button></DialogTrigger>
+    <DialogContent variant="centered" className="max-w-lg" onEscapeKeyDown={(event) => { if (isSubmitting || isPending) event.preventDefault(); }} onPointerDownOutside={(event) => { if (isSubmitting || isPending) event.preventDefault(); }}>
+      <DialogHeader><DialogTitle>创建作业</DialogTitle><DialogDescription>分配给家庭中的学生，并设定完成时间。</DialogDescription></DialogHeader>
+      {form}
     </DialogContent>
   </Dialog>;
 }
@@ -433,18 +456,11 @@ export default function EducationPage() {
   const { member } = useAuth();
   const tasksQuery = useEducationTasks();
   const dictionariesQuery = useEducationHomeworkDictionaries();
-  const mutations = useEducationTaskMutations();
   const tasks = useMemo(() => tasksQuery.data ?? [], [tasksQuery.data]);
   const role = member?.role ?? 'student';
-  const membersQuery = useEducationMembers(role === 'parent');
   const learningAssignments = useLearningAssignments(role === 'student');
-  const students = useMemo(() => (membersQuery.data ?? []).filter((item) => item.role === 'student'), [membersQuery.data]);
-  const create = async ({ assignedStudentId, title, description, dueAt, subjectCode, typeCode, practiceSourceCode, frequency, weekdays, idempotencyKey, materialAssetIds }: ParentCreateInput) => {
-    const input: CreateEducationTaskInput = { idempotency_key: idempotencyKey, assigned_student_id: assignedStudentId, title, description, due_at: householdWallClockToIso(dueAt, dictionariesQuery.data?.timezone ?? 'UTC'), subject_code: subjectCode, type_code: typeCode, practice_source_code: practiceSourceCode, frequency, weekdays, material_asset_ids: materialAssetIds };
-    await mutations.create.mutateAsync(input);
-  };
 
-  if (role === 'parent') return <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="education-page"><div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8"><header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-end sm:justify-between" style={{ borderColor: 'var(--color-border-muted)' }}><div><p className="font-mono text-xs" style={{ color: 'var(--color-text-tertiary)' }}>FAMILY EDUCATION</p><h1 className="title-font mt-2 text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>家庭作业</h1><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>创建任务、查看学生打卡并给出文字反馈。</p></div><div className="flex flex-wrap gap-2"><Link to="/education/textbooks"><Button variant="outline">家庭教材库</Button></Link><ParentCreateDialog students={students} dictionaries={dictionariesQuery.data} onSubmit={create} isPending={mutations.create.isPending} /></div></header><section aria-label="作业列表" className="border-t" style={{ borderColor: 'var(--color-border-muted)' }}>{tasksQuery.isLoading ? <p className="py-8 text-sm text-muted-foreground">正在加载作业…</p> : <TaskRows tasks={tasks} role={role} timezone={dictionariesQuery.data?.timezone ?? 'UTC'} />}</section></div></main>;
+  if (role === 'parent') return <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="education-page"><div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8"><header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-end sm:justify-between" style={{ borderColor: 'var(--color-border-muted)' }}><div><p className="font-mono text-xs" style={{ color: 'var(--color-text-tertiary)' }}>FAMILY EDUCATION</p><h1 className="title-font mt-2 text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>家庭作业</h1><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>创建任务、查看学生打卡并给出文字反馈。</p></div><div className="flex flex-wrap gap-2"><Link to="/education/textbooks"><Button variant="outline">家庭教材库</Button></Link><Link to="/education/tasks/new"><Button><ClipboardPlus className="mr-2 size-4" aria-hidden="true" />创建作业</Button></Link></div></header><section aria-label="作业列表" className="border-t" style={{ borderColor: 'var(--color-border-muted)' }}>{tasksQuery.isLoading ? <p className="py-8 text-sm text-muted-foreground">正在加载作业…</p> : <TaskRows tasks={tasks} role={role} timezone={dictionariesQuery.data?.timezone ?? 'UTC'} />}</section></div></main>;
 
   return <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="education-page"><div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8 lg:py-8"><header className="border-b pb-5" style={{ borderColor: 'var(--color-border-muted)' }}><p className="font-mono text-xs" style={{ color: 'var(--color-text-tertiary)' }}>MY LEARNING</p><h1 className="title-font mt-2 text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>我的学习</h1><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>继续阅读已分配教材，并完成章节知识检查。</p></header><section aria-label="已分配教材" className="border-t" style={{ borderColor: 'var(--color-border-muted)' }}>{learningAssignments.isLoading ? <p className="py-8 text-sm text-muted-foreground">正在加载学习材料…</p> : (learningAssignments.data ?? []).length === 0 ? <p className="py-8 text-sm text-muted-foreground">暂未分配教材。</p> : (learningAssignments.data ?? []).map((assignment) => <article key={assignment.assignment_id} className="grid gap-3 border-b py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center" style={{ borderColor: 'var(--color-border-muted)' }}><div><h2 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{assignment.textbook_title}</h2><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>v{assignment.version_sequence} · {assignment.completed_chapter_count}/{assignment.chapter_count} 章已学习</p></div><Link to={`/education/learn/${assignment.assignment_id}/`}><Button size="sm">继续学习</Button></Link></article>)}</section><section aria-label="作业列表" className="border-t" style={{ borderColor: 'var(--color-border-muted)' }}><h2 className="py-4 text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>我的作业</h2>{tasksQuery.isLoading ? <p className="pb-6 text-sm text-muted-foreground">正在加载作业…</p> : <TaskRows tasks={tasks} role={role} timezone={dictionariesQuery.data?.timezone ?? 'UTC'} />}</section></div></main>;
 }

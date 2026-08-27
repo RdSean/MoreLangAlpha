@@ -15,6 +15,7 @@ const routeChunks = {
   chat: () => import('../../pages/ChatAgent/ChatAgent'),
   automations: () => import('../../pages/Automations/Automations'),
   education: () => import('../../pages/Education/EducationPage'),
+  createHomework: () => import('../../pages/Education/EducationPage'),
   textbookLibrary: () => import('../../pages/Education/TextbooksPage'),
   textbookDetail: () => import('../../pages/Education/TextbookDetailPage'),
   studentLearning: () => import('../../pages/Education/StudentLearningPage'),
@@ -25,6 +26,7 @@ const Dashboard = React.lazy(routeChunks.dashboard);
 const ChatAgent = React.lazy(routeChunks.chat);
 const Automations = React.lazy(routeChunks.automations);
 const Education = React.lazy(routeChunks.education);
+const CreateHomework = React.lazy(async () => ({ default: (await routeChunks.createHomework()).CreateHomeworkPage }));
 const TextbookLibrary = React.lazy(routeChunks.textbookLibrary);
 const TextbookDetail = React.lazy(routeChunks.textbookDetail);
 const StudentLearning = React.lazy(routeChunks.studentLearning);
@@ -57,6 +59,7 @@ function Main() {
         <Route path="/chat/:workspaceId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
         <Route path="/automations" element={<Automations />} />
         <Route path="/education" element={<Education />} />
+        <Route path="/education/tasks/new" element={<CreateHomework />} />
         <Route path="/education/textbooks" element={<TextbookLibrary />} />
         <Route path="/education/textbooks/:textbookId" element={<TextbookDetail />} />
         <Route path="/education/learn/:assignmentId/:chapterId?" element={<StudentLearning />} />
