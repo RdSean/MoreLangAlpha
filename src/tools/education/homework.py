@@ -254,8 +254,4 @@ async def education_create_homework(
         )
     except (EducationTaskError, ValueError) as exc:
         message = str(exc)
-        return json.dumps({"success": False, "error": message}, ensure_ascii=False), {
-            "type": "education_homework",
-            "success": False,
-            "error": message,
-        }
+        return json.dumps({"success": False, "error": message}, ensure_ascii=False), {}
