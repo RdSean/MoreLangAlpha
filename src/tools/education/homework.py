@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
@@ -203,9 +204,17 @@ async def _create_homework_impl(
     except EducationTaskError as exc:
         raise ValueError(f"Unable to create homework: {exc}") from exc
 
-    result = _json_safe(dict(task))
+    raw_result = dict(task)
+    result = _json_safe(raw_result)
     task_id = str(result.get("task_id", ""))
-    local_due = result.get("due_at") or parsed_due_at.isoformat()
+    due_value = raw_result.get("due_at")
+    if isinstance(due_value, datetime):
+        timezone_name = str(membership.get("timezone") or "UTC")
+        local_due = due_value.astimezone(ZoneInfo(timezone_name)).isoformat()
+    else:
+        local_due = parsed_due_at.astimezone(
+            ZoneInfo(str(membership.get("timezone") or "UTC"))
+        ).isoformat()
     response = {
         "success": True,
         "task_id": task_id,
