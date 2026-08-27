@@ -12,6 +12,7 @@ from typing import Any, Callable, Literal
 from src.config.features import is_feature_enabled_system
 from src.config.settings import get_workflow_orchestration_config
 from src.tools.automation import AUTOMATION_TOOLS
+from src.tools.education import education_create_homework
 
 # Type alias for agent modes that can use skills
 SkillMode = Literal["ptc", "flash"]
@@ -112,6 +113,13 @@ def _matches_mode(skill: SkillDefinition, mode: SkillMode | None) -> bool:
 # Registry of all available skills
 # Skills are pre-registered at agent creation but tools are hidden until loaded
 SKILL_REGISTRY: dict[str, SkillDefinition] = {
+    "family-homework": SkillDefinition(
+        name="family-homework",
+        description="Create text-only homework for a child in the caller's household",
+        tools=[education_create_homework],
+        skill_md_path="skills/family-homework/SKILL.md",
+        exposure="both",
+    ),
     "secretary": SkillDefinition(
         name="secretary",
         description="Manage workspaces, dispatch research, monitor running analyses",
