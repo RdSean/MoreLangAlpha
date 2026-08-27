@@ -47,6 +47,17 @@ function householdWallClockToIso(value: string, timeZone: string): string {
   return new Date(instant).toISOString();
 }
 
+function moveWallClockToNextWeekday(value: string, weekdays: number[]): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})$/.exec(value);
+  if (!match || weekdays.length === 0) return value;
+  const [year, month, day] = match.slice(1, 4).map(Number);
+  const currentWeekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay() || 7;
+  const offset = Math.min(...weekdays.map((weekday) => (weekday - currentWeekday + 7) % 7));
+  const nextDate = new Date(Date.UTC(year, month - 1, day + offset));
+  const nextDateValue = nextDate.toISOString().slice(0, 10);
+  return `${nextDateValue}T${match[4]}`;
+}
+
 const maxEducationAttachments = 20;
 
 function assertAttachmentLimit(files: File[]) {
@@ -241,9 +252,15 @@ export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending
     if (nextFrequency !== 'weekly') setWeekdays([]);
   };
   const toggleWeekday = (weekday: number) => {
-    setWeekdays((current) => current.includes(weekday)
-      ? current.filter((item) => item !== weekday)
-      : [...current, weekday].sort((left, right) => left - right));
+    setWeekdays((current) => {
+      const next = current.includes(weekday)
+        ? current.filter((item) => item !== weekday)
+        : [...current, weekday].sort((left, right) => left - right);
+      if (next.length > 0 && !next.includes(new Date(`${dueAt}:00Z`).getUTCDay() || 7)) {
+        setDueAt((currentDueAt) => moveWallClockToNextWeekday(currentDueAt, next));
+      }
+      return next;
+    });
   };
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -306,7 +323,7 @@ export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending
         <DialogFooter><Button type="submit" disabled={isSubmitting || isPending || !isDictionaryReady || !assignedStudentId || !hasStudentGrade || !subjectCode || !typeCode || (isPractice && !practiceSourceCode) || (needsWeekdaySelection && weekdays.length === 0)}>{isSubmitting || isPending ? '正在创建' : '创建作业'}</Button></DialogFooter>
   </form>;
 
-  if (page) return <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="create-homework-page"><div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10"><nav aria-label="面包屑" className="mb-8 flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}><Link to="/education" className="hover:underline">家庭作业</Link><span aria-hidden="true">/</span><span style={{ color: 'var(--color-text-primary)' }}>创建作业</span></nav><header className="mb-8 border-b pb-5" style={{ borderColor: 'var(--color-border-default)' }}><h1 className="title-font text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>创建作业</h1><p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>分配给家庭中的学生，并设定完成时间。</p></header><section className="border bg-background p-5 sm:p-7" style={{ borderColor: 'var(--color-border-default)' }}>{form}</section></div></main>;
+  if (page) return <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="create-homework-page"><div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10"><nav aria-label="面包屑" className="mb-8 flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}><Link to="/education" className="hover:underline">家庭作业</Link><span aria-hidden="true">/</span><span style={{ color: 'var(--color-text-primary)' }}>创建作业</span></nav><header className="mb-8 border-b pb-5" style={{ borderColor: 'var(--color-border-default)' }}><h1 className="title-font flex items-center gap-2 text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}><ClipboardPlus className="size-5" aria-hidden="true" />创建作业</h1><p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>分配给家庭中的学生，并设定完成时间。</p></header><section className="border bg-background p-5 sm:p-7" style={{ borderColor: 'var(--color-border-default)' }}>{form}</section></div></main>;
 
   return <Dialog open={open} onOpenChange={handleOpenChange}>
     <DialogTrigger asChild><Button><ClipboardPlus className="mr-2 size-4" aria-hidden="true" />创建作业</Button></DialogTrigger>
