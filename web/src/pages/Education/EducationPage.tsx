@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ClipboardPlus, RotateCcw, Send, XCircle } from 'lucide-react';
-import { Link, Navigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -163,7 +163,7 @@ function ChoiceGroup({
             borderColor: selected ? (color ?? 'var(--color-text-primary)') : 'var(--color-border-default)',
             ...(selected ? { backgroundColor: color ?? 'var(--color-text-primary)', color: '#fff' } : {}),
           }}
-        >{color && <span className="mr-2 size-2.5 rounded-full" aria-hidden="true" style={{ backgroundColor: color }} />}{option.label}</Button>;
+        >{color && <span className="mr-2 size-2.5 rounded-full border" aria-hidden="true" style={{ backgroundColor: selected ? '#fff' : color, borderColor: selected ? 'rgba(255,255,255,0.85)' : color }} />}{option.label}</Button>;
       })}
     </div>
   </fieldset>;
@@ -190,6 +190,7 @@ export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending
   isPending: boolean;
   page?: boolean;
 }) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [assignedStudentId, setAssignedStudentId] = useState('');
@@ -295,7 +296,8 @@ export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending
       });
       stagedAttempt.current = null;
       requestKeyTracker.current.clear();
-      setOpen(false);
+      if (page) navigate('/education');
+      else setOpen(false);
     } catch (error) {
       if (attempt && isDefinitiveRequestError(error)) {
         await discardStagedAttempt();
