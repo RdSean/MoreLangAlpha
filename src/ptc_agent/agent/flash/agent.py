@@ -40,6 +40,7 @@ from ptc_agent.agent.middleware.model_resilience import (
 # External tools only (no sandbox, no MCP)
 from src.tools.web.search import get_web_search_tool
 from src.tools.web.fetch import web_fetch_tool
+from src.tools.education import education_create_homework
 
 logger = structlog.get_logger(__name__)
 
@@ -126,6 +127,7 @@ class FlashAgent:
         from src.tools.secretary import SECRETARY_TOOLS
 
         tools.extend(SECRETARY_TOOLS)
+        tools.append(education_create_homework)
 
         return tools
 

@@ -106,6 +106,7 @@ from ptc_agent.agent.tools import (
 from src.tools.web.search import get_web_search_tool
 from src.tools.web.fetch import web_fetch_tool
 from src.tools.web.crawl import create_crawl_tools
+from src.tools.education import education_create_homework
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.mcp_registry import MCPRegistry
 from ptc_agent.core.sandbox import PTCSandbox
@@ -567,6 +568,7 @@ class PTCAgent:
                 preview_url_tool,
                 show_widget_tool,
                 TodoWrite,
+                education_create_homework,
             ]
         else:
             from ptc_agent.agent.managed_execution import validate_managed_bash_command
