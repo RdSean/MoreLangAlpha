@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ClipboardPlus, RotateCcw, Send, XCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -121,6 +121,39 @@ function readableError(error: unknown) {
   return error instanceof Error ? error.message : '操作失败，请重试。';
 }
 
+function ChoiceGroup({
+  label,
+  value,
+  options,
+  onChange,
+  colorForOption,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+  colorForOption?: (value: string) => string | undefined;
+}) {
+  return <fieldset className="grid gap-2">
+    <legend className="text-sm font-medium">{label}</legend>
+    <div className="flex flex-wrap gap-2" role="group" aria-label={label}>
+      {options.map((option) => {
+        const selected = option.value === value;
+        const color = colorForOption?.(option.value);
+        return <Button
+          key={option.value}
+          type="button"
+          size="sm"
+          variant={selected ? 'secondary' : 'outline'}
+          aria-pressed={selected}
+          onClick={() => onChange(option.value)}
+          style={selected && color ? { borderColor: color, color } : undefined}
+        >{color && <span className="mr-2 size-2.5 rounded-full" aria-hidden="true" style={{ backgroundColor: color }} />}{option.label}</Button>;
+      })}
+    </div>
+  </fieldset>;
+}
+
 function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
   students: EducationMember[];
   dictionaries: EducationHomeworkDictionaries | undefined;
@@ -130,7 +163,6 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
   const [open, setOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [assignedStudentId, setAssignedStudentId] = useState('');
-  const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dueAt, setDueAt] = useState('');
   const [subjectCode, setSubjectCode] = useState('');
@@ -150,6 +182,24 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
   const isPractice = typeCode === 'practice';
   const needsWeekdaySelection = frequency === 'weekly';
   const householdTimezone = dictionaries?.timezone ?? 'UTC';
+
+  useEffect(() => {
+    if (!dictionaries || students.length === 0) return;
+    setAssignedStudentId((current) => current || students[0].user_id);
+    setSubjectCode((current) => current || dictionaries.subjects.find((item) => item.code === 'math')?.code || dictionaries.subjects[0]?.code || '');
+  }, [dictionaries, students]);
+
+  useEffect(() => {
+    if (!subject) return;
+    setTypeCode((current) => current && subject.homework_types.some((item) => item.code === current)
+      ? current
+      : subject.homework_types.find((item) => item.code === 'practice')?.code || subject.homework_types[0]?.code || '');
+  }, [subject]);
+
+  useEffect(() => {
+    if (!isPractice || !dictionaries) return;
+    setPracticeSourceCode((current) => current || dictionaries.practice_sources.find((item) => item.code === 'homework')?.code || dictionaries.practice_sources[0]?.code || '');
+  }, [dictionaries, isPractice]);
 
   const discardStagedAttempt = async () => {
     const attempt = stagedAttempt.current;
@@ -184,7 +234,8 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
     let attempt: StagedAttachmentAttempt | null = null;
     try {
       assertAttachmentLimit(files);
-      const fingerprint = [assignedStudentId, title, description, dueAt, subjectCode, typeCode, practiceSourceCode, frequency, ...weekdays.map(String), ...files.map((file) => `${file.name}:${file.size}:${file.lastModified}`)].join('\u0000');
+      const generatedTitle = [subject?.name, typeCode && subject?.homework_types.find((item) => item.code === typeCode)?.name].filter(Boolean).join('') || '家庭作业';
+      const fingerprint = [assignedStudentId, generatedTitle, description, dueAt, subjectCode, typeCode, practiceSourceCode, frequency, ...weekdays.map(String), ...files.map((file) => `${file.name}:${file.size}:${file.lastModified}`)].join('\u0000');
       const idempotencyKey = requestKeyTracker.current.take(fingerprint);
       attempt = stagedAttempt.current;
       if (!attempt || attempt.fingerprint !== fingerprint || attempt.idempotencyKey !== idempotencyKey) {
@@ -195,7 +246,7 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
       const materialAssetIds = await uploadSelectedFiles(files, idempotencyKey, attempt.assetIds);
       await onSubmit({
         assignedStudentId,
-        title,
+        title: generatedTitle,
         description,
         dueAt,
         subjectCode,
@@ -224,17 +275,16 @@ function ParentCreateDialog({ students, dictionaries, onSubmit, isPending }: {
     <DialogContent variant="centered" className="max-w-lg" onEscapeKeyDown={(event) => { if (isSubmitting || isPending) event.preventDefault(); }} onPointerDownOutside={(event) => { if (isSubmitting || isPending) event.preventDefault(); }}>
       <DialogHeader><DialogTitle>创建作业</DialogTitle><DialogDescription>分配给家庭中的学生，并设定完成时间。</DialogDescription></DialogHeader>
       <form className="grid gap-4" onSubmit={(event) => void submit(event)}>
-        <label className="grid gap-1.5 text-sm font-medium">学生<select value={assignedStudentId} onChange={(event) => setAssignedStudentId(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm" required><option value="" disabled>选择学生</option>{students.map((student) => <option value={student.user_id} key={student.user_id}>{student.name}</option>)}</select></label>
+        <ChoiceGroup label="学生" value={assignedStudentId} options={students.map((student) => ({ value: student.user_id, label: student.name }))} onChange={setAssignedStudentId} />
         {selectedStudent && !isDictionaryReady && <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>正在加载作业字典…</p>}
         {selectedStudent && isDictionaryReady && <p className="text-sm" style={{ color: hasStudentGrade ? 'var(--color-text-secondary)' : 'var(--color-loss)' }}>当前年级：{gradeName}</p>}
         {selectedStudent && isDictionaryReady && !hasStudentGrade && <p className="text-sm" style={{ color: 'var(--color-loss)' }}>请先在‘设置 &gt; 家庭账户’中为该学生设置当前年级。</p>}
-        <label className="grid gap-1.5 text-sm font-medium">科目<select value={subjectCode} onChange={(event) => { setSubjectCode(event.target.value); setTypeCode(''); setPracticeSourceCode(''); }} className="h-10 rounded-md border border-input bg-background px-3 text-sm" required><option value="" disabled>选择科目</option>{(dictionaries?.subjects ?? []).map((item) => <option value={item.code} key={item.code}>{item.name}</option>)}</select></label>
-        <label className="grid gap-1.5 text-sm font-medium">作业类型<select value={typeCode} onChange={(event) => { setTypeCode(event.target.value); setPracticeSourceCode(''); }} className="h-10 rounded-md border border-input bg-background px-3 text-sm" required disabled={!subject}><option value="" disabled>选择作业类型</option>{subject?.homework_types.map((item) => <option value={item.code} key={item.code}>{item.name}</option>)}</select></label>
-        {isPractice && <label className="grid gap-1.5 text-sm font-medium">练习来源<select value={practiceSourceCode} onChange={(event) => setPracticeSourceCode(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm" required><option value="" disabled>选择练习来源</option>{(dictionaries?.practice_sources ?? []).map((item) => <option value={item.code} key={item.code}>{item.name}</option>)}</select></label>}
-        <label className="grid gap-1.5 text-sm font-medium">标题<Input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
+        <ChoiceGroup label="科目" value={subjectCode} options={(dictionaries?.subjects ?? []).map((item) => ({ value: item.code, label: item.name }))} onChange={(value) => { setSubjectCode(value); setTypeCode(''); setPracticeSourceCode(''); }} colorForOption={(value) => dictionaries?.subjects.find((item) => item.code === value)?.color} />
+        <ChoiceGroup label="作业类型" value={typeCode} options={(subject?.homework_types ?? []).map((item) => ({ value: item.code, label: item.name }))} onChange={(value) => { setTypeCode(value); setPracticeSourceCode(''); }} />
+        {isPractice && <ChoiceGroup label="练习来源" value={practiceSourceCode} options={(dictionaries?.practice_sources ?? []).map((item) => ({ value: item.code, label: item.name }))} onChange={setPracticeSourceCode} />}
         <label className="grid gap-1.5 text-sm font-medium">说明<Textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label>
         <label className="grid gap-1.5 text-sm font-medium"><span>截止时间</span><span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>家庭时区：{householdTimezone}</span><Input aria-label="截止时间" type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} required /></label>
-        <label className="grid gap-1.5 text-sm font-medium">重复方式<select value={frequency} onChange={(event) => updateFrequency(event.target.value as CreateEducationTaskInput['frequency'])} className="h-10 rounded-md border border-input bg-background px-3 text-sm"><option value="once">一次</option><option value="daily">每天</option><option value="weekdays">工作日</option><option value="weekly">每周指定日期</option></select></label>
+        <ChoiceGroup label="重复方式" value={frequency} options={[{ value: 'once', label: '一次' }, { value: 'daily', label: '每天' }, { value: 'weekdays', label: '工作日' }, { value: 'weekly', label: '每周指定日期' }]} onChange={(value) => updateFrequency(value as CreateEducationTaskInput['frequency'])} />
         {needsWeekdaySelection && <fieldset className="grid gap-2"><legend className="text-sm font-medium">每周日期</legend><div className="flex flex-wrap gap-x-4 gap-y-2">{weeklyDayOptions.map(([weekday, label]) => <label className="flex items-center gap-2 text-sm" key={weekday}><input type="checkbox" checked={weekdays.includes(weekday)} onChange={() => toggleWeekday(weekday)} />{label}</label>)}</div></fieldset>}
         <label className="grid gap-1.5 text-sm font-medium">材料附件<Input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />{files.length > 0 && <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>已选择 {files.length} 份附件</span>}</label>
         {submitError && <p role="alert" className="text-sm" style={{ color: 'var(--color-loss)' }}>{submitError}</p>}
