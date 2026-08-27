@@ -25,7 +25,7 @@ def _fake_db(*, rows=()):
 
 
 @pytest.mark.asyncio
-async def test_list_student_membership_context_returns_only_students_with_grade():
+async def test_list_student_membership_context_returns_students_with_optional_grade():
     rows = [
         {"user_id": "student-1", "display_name": "Henry", "grade_code": "g6"},
         {"user_id": "student-2", "display_name": "Mia", "grade_code": None},
@@ -43,6 +43,7 @@ async def test_list_student_membership_context_returns_only_students_with_grade(
     assert "memberships.role = 'student'" in query
     assert "ORDER BY memberships.created_at ASC" in query
     assert params == ("household-1",)
+    cursor.fetchall.assert_awaited_once()
 
 
 def _homework_tool():
