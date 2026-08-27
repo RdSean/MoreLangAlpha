@@ -41,3 +41,5 @@ def test_family_homework_skill_requires_tool_and_text_only_boundary():
     assert "text instructions only" in text
     assert "images, PDFs" in text
     assert "multiple children" in text
+    assert "语文 `chinese`" in text
+    assert "校内作业 `schoolwork`" in text
