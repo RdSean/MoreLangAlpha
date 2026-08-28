@@ -341,6 +341,31 @@ class WorkflowOrchestrationConfig(BaseModel):
         return self
 
 
+class ChannelGatewayConfig(BaseModel):
+    """Bounded runtime controls for durable external messaging channels."""
+
+    default_idle_timeout_seconds: int = Field(
+        default=21_600,
+        ge=60,
+        le=604_800,
+        description="Idle period after which a channel starts a new agent session",
+    )
+    worker_poll_interval_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        le=60,
+        description="Delay between gateway worker ticks when no work is available",
+    )
+    binding_lease_seconds: int = Field(default=30, ge=5, le=300)
+    inbound_lease_seconds: int = Field(default=120, ge=10, le=3600)
+    outbox_lease_seconds: int = Field(default=60, ge=10, le=3600)
+    worker_concurrency: int = Field(default=4, ge=1, le=64)
+    max_image_bytes: int = Field(default=8 * 1024 * 1024, ge=1, le=32 * 1024 * 1024)
+    max_image_pixels: int = Field(default=24_000_000, ge=1, le=100_000_000)
+    max_ilink_text_length: int = Field(default=2000, ge=1, le=10_000)
+    max_delivery_attempts: int = Field(default=8, ge=1, le=32)
+
+
 class InfrastructureConfig(BaseModel):
     """Root model for infrastructure configuration (config.yaml)."""
 
@@ -404,6 +429,9 @@ class InfrastructureConfig(BaseModel):
 
     # Redis Cache
     redis: RedisConfig = Field(default_factory=RedisConfig)
+
+    # External channel gateway controls
+    channels: ChannelGatewayConfig = Field(default_factory=ChannelGatewayConfig)
 
     # RunWorkflow orchestration caps
     workflow: WorkflowOrchestrationConfig = Field(
