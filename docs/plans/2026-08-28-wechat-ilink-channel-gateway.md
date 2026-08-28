@@ -195,7 +195,8 @@ git commit -m "feat: configure channel gateway runtime"
 **Step 1: Write the failing test**
 
 测试 migration 链接在 `041` 之后，并断言 source 包含每张表、关键唯一索引、
-外键、pgcrypto 使用位置及可逆 downgrade：
+外键、加密 `BYTEA` 秘密列契约及可逆 downgrade。`pgp_sym_encrypt`/`pgp_sym_decrypt`
+属于 repository SQL，而不是 migration DDL：
 
 ```python
 def test_channel_gateway_migration_follows_task_request_staging():
@@ -207,7 +208,7 @@ def test_channel_gateway_schema_has_durable_dedup_and_fences():
     source = (MIGRATIONS / "042_add_channel_gateway.py").read_text()
     assert "CREATE TABLE channel_bindings" in source
     assert "UNIQUE (binding_id, provider_message_id)" in source
-    assert "pgp_sym_encrypt" in source
+    assert "credentials_ciphertext BYTEA" in source
 ```
 
 **Step 2: Run test to verify it fails**
