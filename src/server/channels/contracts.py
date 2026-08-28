@@ -83,6 +83,7 @@ class LinkPollResult:
     """The result of one link-challenge poll."""
 
     status: LinkStatus
+    next_poll_state: LinkPollState | None = None
     binding: BindingView | None = None
     routing: BindingRoute | None = None
     credentials: BindingCredentials | None = None

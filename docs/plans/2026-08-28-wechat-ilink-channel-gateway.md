@@ -327,9 +327,9 @@ git commit -m "feat: persist channel gateway state"
 
 ```python
 @pytest.mark.asyncio
-async def test_confirmed_qr_status_returns_credentials_without_writing_disk(tmp_path):
+async def test_linked_qr_status_returns_credentials_without_writing_disk(tmp_path):
     result = await adapter.poll_link(challenge)
-    assert result.status is LinkStatus.CONFIRMED
+    assert result.status is LinkStatus.LINKED
     assert result.credentials.user_id == "bound-peer"
     assert not list(tmp_path.iterdir())
 
@@ -341,7 +341,7 @@ async def test_verify_code_is_forwarded_once_and_not_retained():
 ```
 
 增加 `wait`、`scaned`、`need_verifycode`、`scaned_but_redirect`、`expired`、
-`verify_code_blocked`、`binded_redirect` 和 malformed confirmed 响应的用例。
+`verify_code_blocked`、`binded_redirect` 和 malformed linked 响应的用例。
 
 **Step 2: Run test to verify it fails**
 
@@ -356,7 +356,7 @@ Expected: FAIL because the WeChat adapter does not exist.
 - `begin_link()` 调用 `get_qr_code(FIXED_QR_BASE_URL, [])`，仅返回 `qrcode_img_content`
   和加密所需的 qrcode 值；二维码显示 URL 不是凭证，但不能在日志中打印。
 - `poll_link()` 处理 SDK 已知状态，IDC redirect 只更新本次 challenge 的 poll base URL；
-  `confirmed` 必须得到 `bot_token`、`ilink_bot_id`、`ilink_user_id` 和 base URL 才能
+  `linked` 必须得到 `bot_token`、`ilink_bot_id`、`ilink_user_id` 和 base URL 才能
   生成 `BindingCredentials`。
 - 绝不调用 `wechatbot.auth.save_credentials/load_credentials`，不构造
   `WeChatBot.run()`，也不让 Adapter 写文件或访问数据库。

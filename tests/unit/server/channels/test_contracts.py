@@ -302,6 +302,35 @@ def test_link_challenge_keeps_provider_poll_state_outside_display_fields():
     )
 
 
+def test_redirect_poll_state_round_trips_into_the_next_link_challenge():
+    result = LinkPollResult(
+        status=LinkStatus.SCANNED,
+        next_poll_state=LinkPollState(
+            values=(
+                ("qrcode", "provider-private-qrcode"),
+                ("poll_base_url", "https://redirected-provider.invalid/poll"),
+            )
+        ),
+    )
+
+    assert result.next_poll_state is not None
+    next_challenge = LinkChallenge(
+        channel_type="fake",
+        challenge_ref="challenge-1",
+        qr_code_url="https://example.invalid/qr",
+        expires_at=NOW,
+        provider_poll_state=result.next_poll_state,
+    )
+
+    assert next_challenge.provider_poll_state == result.next_poll_state
+    assert next_challenge.provider_poll_state.values[1] == (
+        "poll_base_url",
+        "https://redirected-provider.invalid/poll",
+    )
+    with pytest.raises(FrozenInstanceError):
+        result.next_poll_state = None  # type: ignore[misc]
+
+
 def test_link_results_use_explicit_states_without_persisting_verification_codes():
     assert tuple(LinkStatus) == (
         LinkStatus.WAITING,
