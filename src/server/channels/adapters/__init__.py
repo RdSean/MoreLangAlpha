@@ -3,4 +3,3 @@
 from src.server.channels.adapters.base import ChannelAdapter
 
 __all__ = ["ChannelAdapter"]
-
