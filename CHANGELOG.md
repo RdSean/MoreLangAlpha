@@ -2,6 +2,10 @@
 
 ## 2026-08-28
 
+### 出站 HTTPS 证书兼容性
+
+- 移除后端对 `SSL_CERT_FILE` 和 `REQUESTS_CA_BUNDLE` 的全局 certifi 覆盖，恢复系统默认 CA 验证，避免本机代理环境下 Tavily 等出站请求在 TLS 握手阶段失败。
+
 ### 离线环境下的聊天 token 统计
 
 - `tiktoken` 首次下载 `cl100k_base` 编码文件失败时，compaction 自动切换到本地近似估算，不再因网络 TLS 或代理问题导致 LM Studio 等 Endpoint 的聊天请求返回 500。
