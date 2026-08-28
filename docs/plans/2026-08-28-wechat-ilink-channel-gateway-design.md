@@ -43,7 +43,7 @@
 
 | 资料 | 采用的结论 | 不采用的部分 |
 | --- | --- | --- |
-| 本地协议整理：`/Users/seanlee/DevelopCode/MoreAlpha/protocol-spec.md` | 二维码状态机、`getupdates` 长轮询、`context_token` 的逐消息回复语义、`-14` 登录失效、CDN AES-128-ECB 媒体流程与文本分片约束。 | 语音、文件、视频的媒体处理留到后续范围。 |
+| 本地协议整理：`/Users/seanlee/DevelopCode/MoreAlpha/protocol-spec.md` | 二维码状态机（包括手机端可能要求的短配对码）、`getupdates` 长轮询、`context_token` 的逐消息回复语义、`-14` 登录失效、CDN AES-128-ECB 媒体流程与文本分片约束。 | 语音、文件、视频的媒体处理留到后续范围。 |
 | [corespeed-io/wechatbot](https://github.com/corespeed-io/wechatbot) | 采用 `wechatbot-sdk` 的低层 `ILinkApi`、协议类型和 CDN 加解密实现；本地副本位于 `/Users/seanlee/DevelopCode/MoreAlpha/wechatbot`。 | 不使用高层 `WeChatBot.run()`、SDK 文件凭证存储或进程内 context-token 缓存。LangAlpha 必须自行持久化状态。 |
 | [SDK 架构说明](https://github.com/corespeed-io/wechatbot/blob/main/docs/architecture.md) | 借鉴扫码、长轮询、媒体上传下载和文本分片的职责划分。 | Node SDK 的 `silk-wasm` 语音转码不进入本期；不会在 Python gateway 中隐藏引入 Node 运行时。 |
 | [SDK 协议说明](https://github.com/corespeed-io/wechatbot/blob/main/docs/protocol.md) | 使用文本、图片、语音、文件、视频的 iLink 类型映射作为通道契约的前瞻参考。 | 不把“协议支持某媒体”误写成“当前 Flash 已能消费或产生该媒体”。 |
@@ -182,8 +182,13 @@ class AgentAdapter(Protocol):
 
 - 关联用户和通道类型；
 - 加密二维码轮询 token，展示用二维码 URL、状态和失效时间；
-- `wait`、`scaned`、`confirmed`、`expired`、`cancelled` 和失败状态；
+- `wait`、`scaned`、`need_verifycode`、`confirmed`、`expired`、`cancelled` 和失败状态；
 - 并发轮询时使用事务锁，确保一次 `confirmed` 只物化一个 binding。
+
+当 iLink 返回 `need_verifycode` 时，设置页展示短配对码输入框。该码只随本次
+`get_qrcode_status` 请求传给 Adapter，不写入 link attempt、日志、浏览器存储或
+普通 API 响应；多次失败导致 `verify_code_blocked` 时将该尝试标记失败并要求重新
+获取二维码。
 
 ### `channel_sessions`
 
@@ -222,11 +227,13 @@ LangAlpha 的 `external_thread_id` 必须由 `binding_id + peer + session_uuid` 
 2. API 经 WeChatChannelAdapter 调用 `get_bot_qrcode`，持久化 link attempt 后返回
    展示用二维码 URL 和 attempt ID。
 3. 前端轮询 attempt 状态；API 通过 Adapter 调用 `get_qrcode_status`。
-4. `wait` 和 `scaned` 只更新状态；`expired` 允许用户重新创建二维码。
+4. `wait` 和 `scaned` 只更新状态；若返回 `need_verifycode`，前端将一次性输入的
+   手机端配对码传回同一 attempt 的状态查询；`expired` 允许用户重新创建二维码。
 5. `confirmed` 在一个事务中写入加密凭证、绑定微信 ID和默认 6 小时超时，随后
    GatewayRunner 可取得 binding 租约并开始轮询。
 
-二维码和凭证均不返回给前端日志、浏览器存储或普通 API 状态对象。
+二维码和凭证均不返回给前端日志、浏览器存储或普通 API 状态对象。二维码图片 URL
+仅在该 attempt 存活期间返回；配对码不持久化也不回显。
 
 ### 入站与 Flash 调用
 
@@ -300,6 +307,7 @@ delivery outbox 不是给 FlashAdapter 的队列。它是 Flash 已经返回最�
 ```text
 未连接 -> 配置微信 -> 展示二维码 / 等待扫码
                          -> 已扫码，等待手机确认
+                         -> （如微信要求）输入手机端短配对码
                          -> 已连接
                          -> 二维码过期或绑定失效，可重新开始
 ```
