@@ -197,7 +197,7 @@ class ResolvedImage:
 class AgentTurn:
     """One normalized inbound turn supplied to an agent adapter."""
 
-    turn_ref: str
+    request_key: str
     text: str | None
     received_at: datetime
     images: tuple[ResolvedImage, ...] = ()
@@ -205,6 +205,10 @@ class AgentTurn:
 
 @dataclass(frozen=True)
 class AgentTurnResult:
-    """A completed provider-neutral response from an agent adapter."""
+    """Provider-neutral response content from an agent adapter.
 
-    message: OutboundMessage
+    The gateway owns splitting this content and assigning durable delivery IDs
+    while it writes the outbound rows.
+    """
+
+    parts: tuple[TextPart | MediaPart, ...]

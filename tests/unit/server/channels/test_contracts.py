@@ -156,12 +156,7 @@ class FakeAgent:
                 height=16,
             ),
         )
-        return AgentTurnResult(
-            message=OutboundMessage(
-                client_id="outbound-1",
-                parts=(TextPart(text="Hi"),),
-            )
-        )
+        return AgentTurnResult(parts=(TextPart(text="Hi"),))
 
 
 @pytest.mark.asyncio
@@ -199,7 +194,7 @@ async def test_fake_adapters_satisfy_generic_runtime_contracts():
     result = await agent.run_turn(
         session,
         AgentTurn(
-            turn_ref="turn-1",
+            request_key="request-key-1",
             text=inbound.text,
             images=(
                 ResolvedImage(
@@ -216,12 +211,11 @@ async def test_fake_adapters_satisfy_generic_runtime_contracts():
     receipt = await channel.deliver(
         linked.credentials,
         inbound.reply_context,
-        result.message,
+        OutboundMessage(client_id="outbound-1", parts=result.parts),
     )
 
     assert session.ref == "opaque-agent-session"
-    assert result.message.client_id == "outbound-1"
-    assert result.message.parts == (TextPart(text="Hi"),)
+    assert result.parts == (TextPart(text="Hi"),)
     assert receipt.accepted is True
 
 
@@ -245,7 +239,7 @@ def test_contract_values_preserve_message_states_and_future_media_parts():
         parts=(
             TextPart(text="A caption"),
             MediaPart(media_ref="asset-1", mime_type="image/png", caption="An image"),
-        )
+        ),
     )
 
     assert ignored.text is None
@@ -256,6 +250,19 @@ def test_contract_values_preserve_message_states_and_future_media_parts():
 
     with pytest.raises(FrozenInstanceError):
         outbound.parts = ()  # type: ignore[misc]
+
+
+def test_agent_turn_uses_request_key_and_returns_content_without_delivery_id():
+    turn = AgentTurn(
+        request_key="inbound-request-key-1",
+        text="Hello",
+        received_at=NOW,
+    )
+    result = AgentTurnResult(parts=(TextPart(text="Hi"),))
+
+    assert turn.request_key == "inbound-request-key-1"
+    assert result.parts == (TextPart(text="Hi"),)
+    assert "client_id" not in {field.name for field in fields(AgentTurnResult)}
 
 
 def test_binding_view_excludes_private_peer_routing_data():
