@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-08-28
+
+### 微信 iLink Bot 通道网关设计
+
+- 记录微信 iLink Bot 的通用 `ChannelAdapter -> GatewayRunner -> AgentAdapter`
+  设计、可靠收件箱/发件箱模型、6 小时通道会话轮换、二维码绑定流程和安全边界。
+- 汇总 iLink 协议、wechatbot SDK、Hermes 平台抽象及 LangAlpha 现有 Flash、SSE、
+  多模态和加密存储实现的参考地址与采用结论。
+- 明确第一期对所有用户开放：支持文本和图片入站、文本回复；视频、语音和文件
+  附件跳过，Flash 原生图片输出暂不在本期解决。
+
 ## 2026-08-27
 
 ### 作业创建完成反馈
