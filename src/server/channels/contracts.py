@@ -10,7 +10,9 @@ from enum import Enum
 class LinkStatus(str, Enum):
     """The current state of a channel account linking challenge."""
 
-    PENDING = "pending"
+    WAITING = "waiting"
+    SCANNED = "scanned"
+    VERIFICATION_REQUIRED = "verification_required"
     LINKED = "linked"
     EXPIRED = "expired"
     FAILED = "failed"
@@ -25,6 +27,17 @@ class InboundKind(str, Enum):
 
 
 @dataclass(frozen=True)
+class LinkPollState:
+    """Opaque provider state needed to poll a pairing challenge.
+
+    Services persist these values encrypted and never expose them in a display
+    response.
+    """
+
+    values: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
 class LinkChallenge:
     """A short-lived platform-specific pairing challenge represented generically."""
 
@@ -32,6 +45,7 @@ class LinkChallenge:
     challenge_ref: str
     qr_code_url: str
     expires_at: datetime
+    provider_poll_state: LinkPollState
 
 
 @dataclass(frozen=True)
@@ -49,12 +63,19 @@ class BindingCredentials:
 
 @dataclass(frozen=True)
 class BindingView:
-    """Non-secret binding information suitable for routing and display."""
+    """Non-secret binding information suitable for a settings display."""
 
     binding_ref: str
     channel_type: str
-    external_account_ref: str
     display_name: str | None = None
+
+
+@dataclass(frozen=True)
+class BindingRoute:
+    """Private routing data for a binding, stored with the binding's secrets."""
+
+    binding_ref: str
+    peer_ref: str
 
 
 @dataclass(frozen=True)
@@ -63,8 +84,8 @@ class LinkPollResult:
 
     status: LinkStatus
     binding: BindingView | None = None
+    routing: BindingRoute | None = None
     credentials: BindingCredentials | None = None
-    detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +105,17 @@ class ReplyContext:
 
 
 @dataclass(frozen=True)
+class InboundMedia:
+    """A provider media reference and metadata collected during normalization."""
+
+    ref: str
+    mime_type: str
+    byte_size: int | None = None
+    width: int | None = None
+    height: int | None = None
+
+
+@dataclass(frozen=True)
 class InboundMessage:
     """A normalized message or an explicitly non-processable provider update."""
 
@@ -92,7 +124,7 @@ class InboundMessage:
     received_at: datetime
     kind: InboundKind
     text: str | None = None
-    media_refs: tuple[str, ...] = ()
+    media: tuple[InboundMedia, ...] = ()
     reply_context: ReplyContext | None = None
     reason: str | None = None
 
@@ -117,6 +149,7 @@ class MediaPart:
 class OutboundMessage:
     """A provider-neutral reply composed from text and media components."""
 
+    client_id: str
     parts: tuple[TextPart | MediaPart, ...]
 
 
@@ -149,13 +182,24 @@ class AgentSession:
 
 
 @dataclass(frozen=True)
+class ResolvedImage:
+    """A validated internal image reference that can be supplied to an agent."""
+
+    content_ref: str
+    mime_type: str
+    byte_size: int | None = None
+    width: int | None = None
+    height: int | None = None
+
+
+@dataclass(frozen=True)
 class AgentTurn:
     """One normalized inbound turn supplied to an agent adapter."""
 
     turn_ref: str
     text: str | None
-    media_refs: tuple[str, ...]
     received_at: datetime
+    images: tuple[ResolvedImage, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -163,4 +207,3 @@ class AgentTurnResult:
     """A completed provider-neutral response from an agent adapter."""
 
     message: OutboundMessage
-

@@ -6,7 +6,7 @@ from typing import Protocol, runtime_checkable
 
 from src.server.channels.contracts import (
     BindingCredentials,
-    BindingView,
+    BindingRoute,
     DeliveryReceipt,
     InboundMessage,
     LinkChallenge,
@@ -40,7 +40,7 @@ class ChannelAdapter(Protocol):
     def normalize(
         self,
         raw_update: object,
-        binding: BindingView,
+        binding: BindingRoute,
     ) -> InboundMessage: ...
 
     async def deliver(
@@ -49,4 +49,3 @@ class ChannelAdapter(Protocol):
         reply_context: ReplyContext,
         message: OutboundMessage,
     ) -> DeliveryReceipt: ...
-
