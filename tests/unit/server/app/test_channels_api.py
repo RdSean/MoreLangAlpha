@@ -41,12 +41,17 @@ async def test_create_link_attempt_returns_qr_without_credentials(client):
             "src.server.services.channels.linking.channel_db.create_link_attempt",
             new=AsyncMock(return_value=uuid4()),
         ),
+        patch(
+            "src.server.services.channels.linking.channel_db.get_active_binding_credentials",
+            new=AsyncMock(return_value=None),
+        ) as get_active_credentials,
     ):
         response = await client.post("/api/v1/channels/wechat/link-attempts")
     assert response.status_code == 201
     body = response.json()
     assert body["qr_code_url"] == challenge.qr_code_url
     assert "secret-qr-token" not in str(body)
+    get_active_credentials.assert_awaited_once_with("test-user-123", "wechat")
 
 
 @pytest.mark.asyncio
