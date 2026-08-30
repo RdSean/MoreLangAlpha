@@ -101,3 +101,13 @@ def test_reused_qr_binding_finalization_preserves_the_active_binding_epoch() -> 
     assert "result.reuse_existing_binding" in finalize_source
     assert "status = 'active'" in finalize_source
     assert "status = 'failed', poll_state_ciphertext = NULL" in finalize_source
+
+
+def test_qr_poll_state_null_check_has_an_explicit_postgres_type() -> None:
+    source = (Path(__file__).parents[4] / "src/server/database/channels.py").read_text(
+        encoding="utf-8"
+    )
+
+    finalize_start = source.index("async def finalize_link_attempt")
+    finalize_source = source[finalize_start : source.index("async def _retire_binding_rows", finalize_start)]
+    assert "WHEN %s::text IS NULL" in finalize_source

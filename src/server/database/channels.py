@@ -1038,7 +1038,7 @@ async def finalize_link_attempt(
                         UPDATE channel_link_attempts
                         SET status = %s,
                             poll_state_ciphertext = CASE
-                                WHEN %s IS NULL THEN poll_state_ciphertext
+                                WHEN %s::text IS NULL THEN poll_state_ciphertext
                                 ELSE pgp_sym_encrypt(%s, %s)
                             END,
                             lease_owner = NULL, lease_expires_at = NULL,
