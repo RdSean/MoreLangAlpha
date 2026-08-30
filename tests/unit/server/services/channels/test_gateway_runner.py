@@ -81,4 +81,3 @@ async def test_ingest_persists_cursor_and_messages_without_calling_agent():
     runner = GatewayRunner(channel_adapters={"fake": FakeChannel()}, agent_adapter=SimpleNamespace(), repository=repo)
     await runner.ingest_binding(repo.lease)
     assert repo.persisted[0].provider_message_id == "m1"
-

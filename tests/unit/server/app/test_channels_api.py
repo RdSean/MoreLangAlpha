@@ -51,4 +51,3 @@ async def test_get_wechat_status_is_scoped_to_current_user(client):
     assert response.status_code == 200
     assert response.json()["status"] == "unlinked"
     get_binding.assert_awaited_once_with("test-user-123", "wechat")
-

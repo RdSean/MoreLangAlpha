@@ -22,4 +22,3 @@ describe('channel settings API', () => {
     expect(queryKeys.settings.channels.wechat()).toEqual(['settings', 'channels', 'wechat']);
   });
 });
-
