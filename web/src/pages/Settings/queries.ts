@@ -92,3 +92,22 @@ export function useCreateChildAccount() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.settings.family.children() }),
   });
 }
+
+export function useWechatStatus(enabled = true) {
+  return useQuery({ queryKey: queryKeys.settings.channels.wechat(), queryFn: familyAccountsApi.getWechatStatus, enabled, staleTime: 10_000 });
+}
+
+export function useStartWechatLinkAttempt() {
+  const queryClient = useQueryClient();
+  return useMutation({ mutationFn: familyAccountsApi.startWechatLinkAttempt, onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.settings.channels.wechat() }) });
+}
+
+export function useUpdateWechatStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({ mutationFn: familyAccountsApi.updateWechatStatus, onSuccess: (data) => queryClient.setQueryData(queryKeys.settings.channels.wechat(), data) });
+}
+
+export function useDisconnectWechat() {
+  const queryClient = useQueryClient();
+  return useMutation({ mutationFn: familyAccountsApi.disconnectWechat, onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.settings.channels.wechat() }) });
+}
