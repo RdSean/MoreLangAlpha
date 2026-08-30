@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-08-30
+
+### 微信 iLink Bot 通道网关
+
+- 新增基于通用 `ChannelAdapter -> GatewayRunner -> AgentAdapter` 的独立通道 worker；
+  worker 通过 PostgreSQL 租约轮询、持久化收件、调用系统内部 Flash API，并从可靠发件箱投递回复。
+- 新增 `LangAlphaFlashAdapter`：固定使用 Flash、携带所属用户的内部服务认证与稳定 request key，
+  支持 SSE 文本汇总和重复请求后的既有 run 重连，不直接导入或运行 Flash graph。
+- iLink 图片引用的 AES 元数据仅随加密入站 payload 保存；语音、文件和视频保持跳过。入站和
+  出站均支持租约恢复、确定性 client id、按会话顺序处理，并始终使用所引用入站消息的 context token。
+- 新增设置 API 回归、Flash adapter、GatewayRunner 和独立 worker 的聚焦测试；验证 47 项通过，
+  后端通道 Ruff 通过，默认/开发/中间件/NAS 组合 Compose 配置均可解析。
+
 ## 2026-08-28
 
 ### 微信 iLink Bot 通道网关设计

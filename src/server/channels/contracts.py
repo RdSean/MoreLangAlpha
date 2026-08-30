@@ -114,6 +114,10 @@ class InboundMedia:
     byte_size: int | None = None
     width: int | None = None
     height: int | None = None
+    # Provider encryption metadata is retained only in the encrypted inbound
+    # payload so a worker can resolve the media after a restart.
+    aes_key: str | None = None
+    encrypt_type: int | None = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +184,7 @@ class AgentSession:
 
     ref: str
     opened_at: datetime
+    actor_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -212,3 +217,6 @@ class AgentTurnResult:
     """
 
     parts: tuple[TextPart | MediaPart, ...]
+    # Set when a new opaque agent session was created while running the turn.
+    # The gateway persists it with the channel session after the turn commits.
+    session_ref: str | None = None

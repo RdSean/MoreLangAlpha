@@ -197,6 +197,8 @@ class WeChatILinkAdapter(ChannelAdapter):
                         InboundMedia(
                             ref=str(ref),
                             mime_type="image/*",
+                            aes_key=str(cdn.get("aes_key") or image.get("aeskey") or "") or None,
+                            encrypt_type=_int_or_none(cdn.get("encrypt_type")),
                             width=_int_or_none(image.get("thumb_width")),
                             height=_int_or_none(image.get("thumb_height")),
                         )
@@ -264,7 +266,7 @@ class WeChatILinkAdapter(ChannelAdapter):
             delivered_at=datetime.now(UTC),
         )
 
-    async def download_image(self, media: InboundMedia, *, aes_key: str) -> bytes:
+    async def download_image(self, media: InboundMedia, *, aes_key: str | None = None) -> bytes:
         url = (
             f"{CDN_BASE_URL}/download?encrypted_query_param={quote(media.ref, safe='')}"
         )
@@ -272,7 +274,10 @@ class WeChatILinkAdapter(ChannelAdapter):
             async with session.get(url) as response:
                 response.raise_for_status()
                 ciphertext = await response.read()
-        return decrypt_aes_ecb(ciphertext, decode_aes_key(aes_key))
+        key = aes_key or media.aes_key
+        if not key:
+            raise ValueError("image media is missing aes key")
+        return decrypt_aes_ecb(ciphertext, decode_aes_key(key))
 
     @staticmethod
     def validate_image(

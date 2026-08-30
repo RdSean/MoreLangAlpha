@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Sequence
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from psycopg.rows import dict_row
 
@@ -39,6 +39,7 @@ class BindingLease:
     route: BindingRoute
     cursor: str
     generation: int
+    idle_timeout_seconds: int = 21_600
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,10 @@ class ClaimedInbound:
     lease_generation: int
     user_id: str
     agent_session_ref: str | None
+    peer_lookup_hash: str
+    peer_ref: str | None
+    attempts: int
+    channel_type: str = "wechat"
 
 
 @dataclass(frozen=True)
@@ -81,6 +86,9 @@ class ClaimedDelivery:
     reply_context: ReplyContext
     lease_generation: int
     user_id: str
+    credentials: BindingCredentials
+    attempts: int
+    channel_type: str = "wechat"
 
 
 def _json(value: Any) -> str:
@@ -96,6 +104,8 @@ def _media_json(media: Sequence[InboundMedia]) -> str:
                 "byte_size": item.byte_size,
                 "width": item.width,
                 "height": item.height,
+                "aes_key": item.aes_key,
+                "encrypt_type": item.encrypt_type,
             }
             for item in media
         ]
@@ -142,7 +152,7 @@ async def claim_binding_lease(
                               pgp_sym_decrypt(credentials_ciphertext, %s) AS credentials,
                               pgp_sym_decrypt(bound_peer_ciphertext, %s) AS bound_peer,
                               COALESCE(pgp_sym_decrypt(cursor_ciphertext, %s), '') AS cursor,
-                              lease_generation
+                              lease_generation, idle_timeout_seconds
                     """,
                     (worker_id, float(seconds), binding_id, worker_id, key, key, key),
                 )
@@ -170,6 +180,7 @@ async def claim_binding_lease(
                     ),
                     cursor=str(row["cursor"] or ""),
                     generation=int(row["lease_generation"]),
+                    idle_timeout_seconds=int(row.get("idle_timeout_seconds") or 21_600),
                 )
 
 
@@ -227,8 +238,12 @@ async def persist_update_batch(
                             else "pending",
                             message.peer_lookup_hash,
                             message.text,
-                            _media_json(message.media) if message.media else None,
-                            _media_json(message.media) if message.media else None,
+                            _media_json(message.media)
+                            if message.media and message.kind is not InboundKind.IGNORED
+                            else None,
+                            _media_json(message.media)
+                            if message.media and message.kind is not InboundKind.IGNORED
+                            else None,
                             key,
                             _reply_json(message.reply_context),
                             _reply_json(message.reply_context),
@@ -259,12 +274,15 @@ async def claim_pending_inbound(limit: int, lease_seconds: int) -> list[ClaimedI
                     WITH heads AS (
                         SELECT i.inbound_message_id
                         FROM channel_inbound_messages i
-                        WHERE i.status = 'pending'
+                        WHERE (i.status = 'pending'
+                               OR (i.status = 'claimed' AND i.lease_expires_at <= NOW()))
+                          AND i.session_id IS NOT NULL
                           AND (i.next_retry_at IS NULL OR i.next_retry_at <= NOW())
                           AND NOT EXISTS (
                               SELECT 1 FROM channel_inbound_messages prior
                               WHERE prior.session_id = i.session_id
-                                AND prior.status IN ('pending', 'claimed')
+                                AND (prior.status = 'pending'
+                                     OR (prior.status = 'claimed' AND prior.lease_expires_at > NOW()))
                                 AND (prior.received_at, prior.inbound_message_id)
                                     < (i.received_at, i.inbound_message_id)
                           )
@@ -274,7 +292,7 @@ async def claim_pending_inbound(limit: int, lease_seconds: int) -> list[ClaimedI
                     )
                     claimed AS (
                         UPDATE channel_inbound_messages i
-                        SET status = 'claimed', attempts = i.attempts + 1,
+                    SET status = 'claimed', attempts = i.attempts + 1,
                             lease_expires_at = clock_timestamp() + make_interval(secs => %s),
                             lease_generation = i.lease_generation + 1
                         FROM heads h
@@ -284,14 +302,15 @@ async def claim_pending_inbound(limit: int, lease_seconds: int) -> list[ClaimedI
                     SELECT c.*,
                            pgp_sym_decrypt(c.media_ciphertext, %s) AS media_json,
                            pgp_sym_decrypt(c.reply_context_ciphertext, %s) AS reply_json,
-                           b.user_id,
+                           b.user_id, b.channel_type,
                            pgp_sym_decrypt(s.agent_session_ref_ciphertext, %s)
-                               AS agent_session_ref
+                               AS agent_session_ref,
+                           pgp_sym_decrypt(s.peer_ciphertext, %s) AS peer_ref
                     FROM claimed c
                     JOIN channel_bindings b ON b.binding_id = c.binding_id
                     LEFT JOIN channel_sessions s ON s.session_id = c.session_id
                     """,
-                    (limit, float(lease_seconds), key, key, key),
+                    (limit, float(lease_seconds), key, key, key, key),
                 )
                 rows = await cur.fetchall()
                 result: list[ClaimedInbound] = []
@@ -327,13 +346,18 @@ async def claim_pending_inbound(limit: int, lease_seconds: int) -> list[ClaimedI
                             lease_generation=int(row["lease_generation"]),
                             user_id=row["user_id"],
                             agent_session_ref=row["agent_session_ref"],
+                            peer_lookup_hash=str(row["peer_lookup_hash"] or ""),
+                            peer_ref=(str(row["peer_ref"]) if row["peer_ref"] else None),
+                            attempts=int(row["attempts"]),
+                            channel_type=str(row["channel_type"]),
                         )
                     )
                 return result
 
 
 async def ack_inbound_and_enqueue_deliveries(
-    claim: ClaimedInbound, result: AgentTurnResult
+    claim: ClaimedInbound,
+    result: AgentTurnResult,
 ) -> bool:
     """Atomically ack an inbound and create stable, ordered outbox parts."""
     key = get_encryption_key()
@@ -355,8 +379,20 @@ async def ack_inbound_and_enqueue_deliveries(
                 )
                 if cur.rowcount != 1:
                     return False
+                if result.session_ref and claim.session_id:
+                    await cur.execute(
+                        """
+                        UPDATE channel_sessions
+                        SET agent_session_ref_ciphertext = pgp_sym_encrypt(%s, %s)
+                        WHERE session_id = %s AND status = 'active'
+                        """,
+                        (result.session_ref, key, claim.session_id),
+                    )
                 for sequence_no, payload in enumerate(parts):
-                    client_id = uuid4()
+                    client_id = uuid5(
+                        NAMESPACE_URL,
+                        f"https://langalpha.local/channel-delivery/{claim.inbound_message_id}/{sequence_no}",
+                    )
                     await cur.execute(
                         """
                         INSERT INTO channel_delivery_outbox (
@@ -420,12 +456,14 @@ async def claim_due_deliveries(limit: int, lease_seconds: int) -> list[ClaimedDe
                     WITH due AS (
                         SELECT o.delivery_id
                         FROM channel_delivery_outbox o
-                        WHERE o.status = 'pending'
+                        WHERE (o.status = 'pending'
+                               OR (o.status = 'claimed' AND o.lease_expires_at <= NOW()))
                           AND (o.next_retry_at IS NULL OR o.next_retry_at <= NOW())
                           AND NOT EXISTS (
                               SELECT 1 FROM channel_delivery_outbox prior
                               WHERE prior.session_id = o.session_id
-                                AND prior.status IN ('pending', 'claimed')
+                                AND (prior.status = 'pending'
+                                     OR (prior.status = 'claimed' AND prior.lease_expires_at > NOW()))
                                 AND prior.sequence_no < o.sequence_no
                           )
                         ORDER BY o.created_at, o.delivery_id
@@ -443,19 +481,21 @@ async def claim_due_deliveries(limit: int, lease_seconds: int) -> list[ClaimedDe
                     SELECT c.*,
                            pgp_sym_decrypt(c.payload_ciphertext, %s) AS payload,
                            pgp_sym_decrypt(i.reply_context_ciphertext, %s) AS reply_context,
-                           b.user_id
+                           b.user_id, b.channel_type,
+                           pgp_sym_decrypt(b.credentials_ciphertext, %s) AS credentials
                     FROM claimed c
                     JOIN channel_inbound_messages i
                       ON i.inbound_message_id = c.inbound_message_id
                     JOIN channel_bindings b ON b.binding_id = c.binding_id
                     """,
-                    (limit, float(lease_seconds), key, key),
+                    (limit, float(lease_seconds), key, key, key),
                 )
                 rows = await cur.fetchall()
                 deliveries: list[ClaimedDelivery] = []
                 for row in rows:
                     reply_data = json.loads(row["reply_context"] or "{}")
                     payload = json.loads(row["payload"] or "{}")
+                    credentials_data = json.loads(row["credentials"] or "{}")
                     deliveries.append(
                         ClaimedDelivery(
                             delivery_id=row["delivery_id"],
@@ -473,6 +513,13 @@ async def claim_due_deliveries(limit: int, lease_seconds: int) -> list[ClaimedDe
                             ),
                             lease_generation=int(row["lease_generation"]),
                             user_id=row["user_id"],
+                            credentials=BindingCredentials(
+                                binding_ref=str(row["binding_id"]),
+                                channel_type=str(row["channel_type"]),
+                                values=tuple((str(k), str(v)) for k, v in credentials_data.items()),
+                            ),
+                            attempts=int(row["attempts"]),
+                            channel_type=str(row["channel_type"]),
                         )
                     )
                 return deliveries
@@ -552,6 +599,131 @@ async def get_user_binding(user_id: str, channel_type: str) -> dict[str, Any] | 
             )
             row = await cur.fetchone()
             return dict(row) if row else None
+
+
+async def list_active_binding_ids(limit: int = 100) -> list[UUID]:
+    """Return active binding IDs for a worker lease pass."""
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT binding_id FROM channel_bindings
+                WHERE status = 'active'
+                  AND (lease_expires_at IS NULL OR lease_expires_at <= NOW())
+                ORDER BY updated_at, binding_id LIMIT %s
+                """,
+                (limit,),
+            )
+            return [row[0] for row in await cur.fetchall()]
+
+
+@dataclass(frozen=True)
+class ChannelSessionRecord:
+    session_id: UUID
+    peer_ref: str
+    agent_session_ref: str | None
+    last_inbound_at: datetime
+
+
+async def get_or_rotate_session(
+    *,
+    binding_id: UUID | str,
+    peer_ref: str,
+    peer_lookup_hash: str,
+    received_at: datetime,
+    idle_timeout_seconds: int,
+    external_thread_id: str,
+) -> ChannelSessionRecord:
+    """Select or create the active peer session under a binding row lock."""
+    key = get_encryption_key()
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "SELECT binding_id FROM channel_bindings WHERE binding_id = %s FOR UPDATE",
+                    (binding_id,),
+                )
+                if not await cur.fetchone():
+                    raise LookupError("channel binding not found")
+                await cur.execute(
+                    """
+                    SELECT session_id, peer_ciphertext, agent_session_ref_ciphertext,
+                           last_inbound_at
+                    FROM channel_sessions
+                    WHERE binding_id = %s AND peer_lookup_hash = %s AND status = 'active'
+                    FOR UPDATE
+                    """,
+                    (binding_id, peer_lookup_hash),
+                )
+                row = await cur.fetchone()
+                if row:
+                    last = row["last_inbound_at"]
+                    elapsed = (received_at - last).total_seconds()
+                    if elapsed <= idle_timeout_seconds:
+                        await cur.execute(
+                            "UPDATE channel_sessions SET last_inbound_at = %s WHERE session_id = %s",
+                            (received_at, row["session_id"]),
+                        )
+                        peer = str(row["peer_ciphertext"] or "")
+                        # Decrypt using SQL to avoid exposing ciphertext to callers.
+                        await cur.execute(
+                            "SELECT pgp_sym_decrypt(peer_ciphertext, %s) AS peer, pgp_sym_decrypt(agent_session_ref_ciphertext, %s) AS agent_ref FROM channel_sessions WHERE session_id = %s",
+                            (key, key, row["session_id"]),
+                        )
+                        decrypted = await cur.fetchone()
+                        return ChannelSessionRecord(
+                            session_id=row["session_id"],
+                            peer_ref=str(decrypted["peer"] or peer),
+                            agent_session_ref=(str(decrypted["agent_ref"]) if decrypted and decrypted["agent_ref"] else None),
+                            last_inbound_at=received_at,
+                        )
+                    await cur.execute(
+                        "UPDATE channel_sessions SET status = 'closed', closed_at = NOW() WHERE session_id = %s",
+                        (row["session_id"],),
+                    )
+                await cur.execute(
+                    """
+                    INSERT INTO channel_sessions
+                      (binding_id, peer_lookup_hash, peer_ciphertext, status, last_inbound_at)
+                    VALUES (%s, %s, pgp_sym_encrypt(%s, %s), 'active', %s)
+                    RETURNING session_id, last_inbound_at
+                    """,
+                    (binding_id, peer_lookup_hash, peer_ref, key, received_at),
+                )
+                created = await cur.fetchone()
+                return ChannelSessionRecord(
+                    session_id=created["session_id"],
+                    peer_ref=peer_ref,
+                    agent_session_ref=None,
+                    last_inbound_at=created["last_inbound_at"],
+                )
+
+
+async def set_agent_session_ref(session_id: UUID | str, ref: str) -> bool:
+    key = get_encryption_key()
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE channel_sessions SET agent_session_ref_ciphertext = pgp_sym_encrypt(%s, %s) WHERE session_id = %s AND status = 'active'",
+                (ref, key, session_id),
+            )
+            return cur.rowcount == 1
+
+
+async def mark_binding_reauth(binding_id: UUID | str, error_code: str = "session_expired") -> bool:
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE channel_bindings
+                SET status = 'reauth_required', credentials_ciphertext = NULL,
+                    cursor_ciphertext = NULL, last_error_code = %s,
+                    lease_owner = NULL, lease_expires_at = NULL, updated_at = NOW()
+                WHERE binding_id = %s AND status <> 'disabled'
+                """,
+                (error_code[:64], binding_id),
+            )
+            return cur.rowcount == 1
 
 
 async def create_link_attempt(*, user_id: str, channel_type: str, challenge: LinkChallenge) -> UUID:
