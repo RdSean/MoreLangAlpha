@@ -23,3 +23,12 @@ def test_delivery_claim_joins_the_referenced_inbound_context() -> None:
 
     assert "JOIN channel_inbound_messages" in source
     assert "reply_context_ciphertext" in source
+
+
+def test_claim_ctes_separate_read_and_update_expressions() -> None:
+    source = (Path(__file__).parents[4] / "src/server/database/channels.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "FOR UPDATE SKIP LOCKED\n                    ),\n                    claimed AS" in source
+    assert "LIMIT %s FOR UPDATE SKIP LOCKED\n                    ),\n                    claimed AS" in source

@@ -289,7 +289,7 @@ async def claim_pending_inbound(limit: int, lease_seconds: int) -> list[ClaimedI
                         ORDER BY i.received_at, i.inbound_message_id
                         LIMIT %s
                         FOR UPDATE SKIP LOCKED
-                    )
+                    ),
                     claimed AS (
                         UPDATE channel_inbound_messages i
                     SET status = 'claimed', attempts = i.attempts + 1,
@@ -468,7 +468,7 @@ async def claim_due_deliveries(limit: int, lease_seconds: int) -> list[ClaimedDe
                           )
                         ORDER BY o.created_at, o.delivery_id
                         LIMIT %s FOR UPDATE SKIP LOCKED
-                    )
+                    ),
                     claimed AS (
                         UPDATE channel_delivery_outbox o
                         SET status = 'claimed', attempts = o.attempts + 1,
