@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-31
+
+### 微信 iLink Bot 收发链路修复
+
+- 修复入站纯文本消息写入 PostgreSQL 时可空媒体和回复上下文参数未标注类型、导致 worker 重试失败的问题。
+- 修复 OSS 模式未配置 `INTERNAL_SERVICE_TOKEN` 时，独立 channel worker 无浏览器 session cookie 被消息接口拒绝的问题；保留配置服务 token 时的严格认证。
+
 ## 2026-08-30
 
 ### 微信 iLink Bot 通道网关

@@ -278,9 +278,9 @@ async def persist_update_batch(
                             reply_context_ciphertext, received_at, binding_epoch
                         ) VALUES (
                             %s, %s, %s, %s, %s, %s, %s,
-                            CASE WHEN %s IS NULL THEN NULL
+                            CASE WHEN %s::text IS NULL THEN NULL
                                  ELSE pgp_sym_encrypt(%s, %s) END,
-                            CASE WHEN %s IS NULL THEN NULL
+                            CASE WHEN %s::text IS NULL THEN NULL
                                  ELSE pgp_sym_encrypt(%s, %s) END,
                             %s, %s
                         )

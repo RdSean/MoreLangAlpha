@@ -111,3 +111,13 @@ def test_qr_poll_state_null_check_has_an_explicit_postgres_type() -> None:
     finalize_start = source.index("async def finalize_link_attempt")
     finalize_source = source[finalize_start : source.index("async def _retire_binding_rows", finalize_start)]
     assert "WHEN %s::text IS NULL" in finalize_source
+
+
+def test_inbound_optional_encrypted_values_have_explicit_postgres_types() -> None:
+    source = (Path(__file__).parents[4] / "src/server/database/channels.py").read_text(
+        encoding="utf-8"
+    )
+
+    persist_start = source.index("async def persist_update_batch")
+    persist_source = source[persist_start : source.index("async def _get_or_rotate_session_locked", persist_start)]
+    assert persist_source.count("CASE WHEN %s::text IS NULL THEN NULL") == 2
