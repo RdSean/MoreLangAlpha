@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
@@ -9,6 +10,23 @@ import pytest
 
 from src.server.channels.adapters.wechat_ilink import WeChatILinkAdapter
 from src.server.channels.contracts import BindingCredentials, LinkStatus
+
+
+@pytest.mark.asyncio
+async def test_begin_link_renders_provider_qr_url_as_a_png_data_url() -> None:
+    api = AsyncMock()
+    api.get_qr_code.return_value = {
+        "qrcode": "opaque-qrcode",
+        "qrcode_img_content": "https://weixin.qq.com/x/opaque-content",
+        "expires_in": 300,
+    }
+    adapter = WeChatILinkAdapter(api=api)
+
+    challenge = await adapter.begin_link()
+
+    assert challenge.qr_code_url.startswith("data:image/png;base64,")
+    encoded = challenge.qr_code_url.partition(",")[2]
+    assert base64.b64decode(encoded).startswith(b"\x89PNG\r\n\x1a\n")
 
 
 @pytest.mark.asyncio

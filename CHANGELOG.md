@@ -4,6 +4,8 @@
 
 ### 微信 iLink Bot 通道网关
 
+- 修复二维码无法显示的问题：iLink 的 `qrcode_img_content` 是待编码的 URL 内容，
+  现在由 `qrcode` 生成 PNG Data URL 后交给前端；不要求 HTTPS，并兼容 provider 已返回的图片 Data URL。
 - 修复二维码轮询在没有新的 provider poll state 时触发 PostgreSQL 未定类型 `NULL` 参数、
   导致接口返回 500 的问题；显式标注 SQL 参数类型并补充回归测试。
 - 将原始 iLink 网关设计同步至已实现的通用 Adapter 契约、已绑定账号重配置、二维码

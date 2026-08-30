@@ -77,7 +77,7 @@ class WeChatILinkAdapter(ChannelAdapter):
         return LinkChallenge(
             channel_type=self.channel_type,
             challenge_ref=qrcode,
-            qr_code_url=image,
+            qr_code_url=_render_qr_image(image),
             expires_at=expires_at,
             provider_poll_state=LinkPollState(
                 values=(("qrcode", qrcode), ("poll_base_url", self.base_url))
@@ -370,6 +370,24 @@ class WeChatILinkAdapter(ChannelAdapter):
         if not mime or not mime.startswith("image/") or width * height > max_pixels:
             raise ValueError("image failed validation")
         return mime, width, height
+
+
+def _render_qr_image(content: str) -> str:
+    """Render iLink's QR payload as a browser-displayable PNG data URL."""
+    if content.startswith("data:image/"):
+        return content
+    try:
+        import qrcode
+    except ImportError as exc:  # pragma: no cover - dependency is declared directly
+        raise RuntimeError("qrcode package is required to render WeChat QR codes") from exc
+
+    qr = qrcode.QRCode(box_size=8, border=2)
+    qr.add_data(content)
+    qr.make(fit=True)
+    output = BytesIO()
+    qr.make_image().save(output, format="PNG")
+    encoded = base64.b64encode(output.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
 def _int_or_none(value: Any) -> int | None:

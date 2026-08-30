@@ -6,7 +6,7 @@
 
 **Architecture:** `WeChatChannelAdapter` 将 iLink 扫码、轮询、媒体和发送收敛为通用 `ChannelAdapter` 契约；`GatewayRunner` 以 PostgreSQL 的绑定租约、收件箱、会话和发件箱编排可靠处理；唯一的 `LangAlphaFlashAdapter` 通过现有内部 Chat API 与 SSE 调用 Flash。设置 API 只管理绑定和状态，通道 worker 是独立进程，不运行在 FastAPI 生命周期内。
 
-**Tech Stack:** Python 3.13、FastAPI、Pydantic、async psycopg、PostgreSQL/pgcrypto、httpx、`wechatbot-sdk>=0.3.0`、Pillow、React 19、TypeScript、React Query、Vitest、Tailwind/shadcn。
+**Tech Stack:** Python 3.13、FastAPI、Pydantic、async psycopg、PostgreSQL/pgcrypto、httpx、`wechatbot-sdk>=0.3.0`、Pillow、`qrcode>=7.0`、React 19、TypeScript、React Query、Vitest、Tailwind/shadcn。
 
 ---
 
@@ -224,7 +224,7 @@ Expected: FAIL because revision `042` does not exist.
 - `channel_bindings`：`user_id`、`channel_type`、`status`、加密 credentials/cursor/
   bound peer、`idle_timeout_seconds`、binding lease owner/expiry/generation、无敏感错误
   摘要；唯一 `(user_id, channel_type)`。
-- `channel_link_attempts`：用户、类型、状态、二维码展示 URL、加密 `qrcode` 轮询值、
+- `channel_link_attempts`：用户、类型、状态、PNG Data URL、加密 `qrcode` 轮询值、
   过期时间；没有 verify code 字段。
 - `channel_sessions`：binding、不可逆 peer hash、加密 peer、session UUID、不透明
   `agent_session_ref`、`last_inbound_at`、状态；partial unique index 保证每个
@@ -353,8 +353,9 @@ Expected: FAIL because the WeChat adapter does not exist.
 
 用 `wechatbot.protocol.ILinkApi` 直接实现 `begin_link` 与 `poll_link`：
 
-- `begin_link()` 调用 `get_qr_code(FIXED_QR_BASE_URL, [])`，仅返回 `qrcode_img_content`
-  和加密所需的 qrcode 值；二维码显示 URL 不是凭证，但不能在日志中打印。
+- `begin_link()` 调用 `get_qr_code(FIXED_QR_BASE_URL, [])`，将 provider 返回的
+  `qrcode_img_content` URL 编码为 PNG Data URL 后返回，并保存加密所需的 qrcode 值；
+  该 URL 不是凭证，但不能在日志中打印。若 provider 已返回图片 Data URL，则直接保留。
 - `poll_link()` 处理 SDK 已知状态，IDC redirect 只更新本次 challenge 的 poll base URL；
   `linked` 必须得到 `bot_token`、`ilink_bot_id`、`ilink_user_id` 和 base URL 才能
   生成 `BindingCredentials`。

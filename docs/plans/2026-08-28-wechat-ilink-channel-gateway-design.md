@@ -43,9 +43,9 @@
 
 | 资料 | 采用的结论 | 不采用的部分 |
 | --- | --- | --- |
-| 本地协议整理：`/Users/seanlee/DevelopCode/MoreAlpha/protocol-spec.md` | 二维码状态机（包括手机端可能要求的短配对码）、`getupdates` 长轮询、`context_token` 的逐消息回复语义、`-14` 登录失效、CDN AES-128-ECB 媒体流程与文本分片约束。 | 语音、文件、视频的媒体处理留到后续范围。 |
+| 本地协议整理：`/Users/seanlee/DevelopCode/MoreAlpha/protocol-spec.md` | 二维码状态机（包括手机端可能要求的短配对码）、`getupdates` 长轮询、`context_token` 的逐消息回复语义、`-14` 登录失效、CDN AES-128-ECB 媒体流程与文本分片约束。`qrcode_img_content` 是应编码进二维码的 URL 内容，不是浏览器可直接作为图片加载的 PNG。 | 语音、文件、视频的媒体处理留到后续范围。 |
 | [corespeed-io/wechatbot](https://github.com/corespeed-io/wechatbot) | 采用 `wechatbot-sdk` 的低层 `ILinkApi`、协议类型和 CDN 加解密实现；本地副本位于 `/Users/seanlee/DevelopCode/MoreAlpha/wechatbot`。 | 不使用高层 `WeChatBot.run()`、SDK 文件凭证存储或进程内 context-token 缓存。LangAlpha 必须自行持久化状态。 |
-| [SDK 架构说明](https://github.com/corespeed-io/wechatbot/blob/main/docs/architecture.md) | 借鉴扫码、长轮询、媒体上传下载和文本分片的职责划分。 | Node SDK 的 `silk-wasm` 语音转码不进入本期；不会在 Python gateway 中隐藏引入 Node 运行时。 |
+| [SDK 架构说明](https://github.com/corespeed-io/wechatbot/blob/main/docs/architecture.md) | 借鉴扫码、长轮询、媒体上传下载和文本分片的职责划分。SDK 将 QR URL 交给调用方渲染；本项目沿用本地 `agentica` 参考代码，用 `qrcode` 生成 PNG Data URL。 | Node SDK 的 `silk-wasm` 语音转码不进入本期；不会在 Python gateway 中隐藏引入 Node 运行时。 |
 | [SDK 协议说明](https://github.com/corespeed-io/wechatbot/blob/main/docs/protocol.md) | 使用文本、图片、语音、文件、视频的 iLink 类型映射作为通道契约的前瞻参考。 | 不把“协议支持某媒体”误写成“当前 Flash 已能消费或产生该媒体”。 |
 
 关键协议事实：iLink 的 `context_token` 是当前对话的回复能力令牌，不等同于
@@ -247,8 +247,11 @@ LangAlpha 的 `external_thread_id` 必须由 `binding_id + peer + session_uuid` 
 1. 设置页调用通用的“创建微信绑定挑战”接口。若已有 active binding，服务仅在这
    一次服务端请求中解密其凭证交给 Adapter；微信 Adapter 从中取 iLink token 并按
    SDK 约定传为 `local_token_list`。旧 token 不写入二维码 attempt，也不返回浏览器。
-2. API 经 WeChatChannelAdapter 调用 `get_bot_qrcode`，持久化 link attempt 后返回
-   展示用二维码 URL 和 attempt ID。
+2. API 经 WeChatChannelAdapter 调用 `get_bot_qrcode`。iLink 的
+   `qrcode_img_content` 是二维码内容 URL，Adapter 使用 `qrcode.QRCode.add_data()`
+   生成 PNG Data URL，再持久化 link attempt 并返回给前端。浏览器展示的是本地
+   `data:image/png;base64,...`，不依赖 HTTPS，也不会因为外部图片 URL 或混合内容策略
+   而加载失败；如果 provider 已返回 `data:image/...`，则直接兼容保留。
 3. 前端轮询 attempt 状态；API 通过 Adapter 调用 `get_qrcode_status`。
 4. `wait` 和 `scaned` 只更新状态；本地 10 秒查询超时也按 `waiting` 完成该次轮询、
    释放短租约并返回当前 attempt，前端随后可继续轮询而不会收到 API 500。若返回
