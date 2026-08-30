@@ -5,9 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-MIGRATION = (
-    Path(__file__).parents[3] / "migrations/versions/042_add_channel_gateway.py"
-)
+MIGRATION = Path(__file__).parents[3] / "migrations/versions/042_add_channel_gateway.py"
 
 
 def test_channel_gateway_schema_has_durable_dedup_and_fences() -> None:

@@ -17,7 +17,9 @@ async def client():
     from src.server.app.channels import router
 
     app = create_test_app(router)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as value:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as value:
         yield value
 
 
@@ -31,8 +33,14 @@ async def test_create_link_attempt_returns_qr_without_credentials(client):
         provider_poll_state=LinkPollState((("qrcode", "secret-qr-token"),)),
     )
     with (
-        patch("src.server.services.channels.linking.WeChatILinkAdapter.begin_link", new=AsyncMock(return_value=challenge)),
-        patch("src.server.services.channels.linking.channel_db.create_link_attempt", new=AsyncMock(return_value=uuid4())),
+        patch(
+            "src.server.services.channels.linking.WeChatILinkAdapter.begin_link",
+            new=AsyncMock(return_value=challenge),
+        ),
+        patch(
+            "src.server.services.channels.linking.channel_db.create_link_attempt",
+            new=AsyncMock(return_value=uuid4()),
+        ),
     ):
         response = await client.post("/api/v1/channels/wechat/link-attempts")
     assert response.status_code == 201

@@ -37,6 +37,7 @@ export function ChannelsTab() {
         setAttempt(next);
         if (next.status === 'linked') {
           setOpen(false);
+          setAttempt(null);
           void status.refetch();
         }
       } catch { /* the next tick remains the retry boundary */ }
@@ -64,6 +65,11 @@ export function ChannelsTab() {
     const next = await pollWechatLinkAttempt(attempt.attempt_id, verificationCode);
     setVerificationCode('');
     setAttempt(next);
+    if (next.status === 'linked') {
+      setOpen(false);
+      setAttempt(null);
+      await status.refetch();
+    }
   };
 
   const saveIdle = async () => {

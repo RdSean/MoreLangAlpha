@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 
 import pytest
 
@@ -9,7 +8,6 @@ from src.server.channels.agent_adapters.langalpha_flash import LangAlphaFlashAda
 from src.server.channels.contracts import (
     AgentSession,
     AgentTurn,
-    OpenSessionRequest,
     ResolvedImage,
 )
 
@@ -55,29 +53,40 @@ class FakeClient:
 
 
 def session(ref="external-thread-1"):
-    return AgentSession(ref=f"external:{ref}", opened_at=__import__("datetime").datetime.now(), actor_ref="user-1")
+    return AgentSession(
+        ref=f"external:{ref}",
+        opened_at=__import__("datetime").datetime.now(),
+        actor_ref="user-1",
+    )
 
 
 @pytest.mark.asyncio
 async def test_flash_adapter_sends_image_context_and_collects_final_text(monkeypatch):
     fake = FakeClient(
         [
-            FakeResponse(200, json_data={"status": "dispatched", "thread_id": "thread-1", "run_id": "run-1"}),
+            FakeResponse(
+                200,
+                json_data={
+                    "status": "dispatched",
+                    "thread_id": "thread-1",
+                    "run_id": "run-1",
+                },
+            ),
             FakeResponse(
                 200,
                 lines=[
-                    'event: metadata',
+                    "event: metadata",
                     'data: {"thread_id":"thread-1"}',
-                    '',
-                    'event: message_chunk',
+                    "",
+                    "event: message_chunk",
                     'data: {"content_type":"text","content":"完整"}',
-                    '',
-                    'event: message_chunk',
+                    "",
+                    "event: message_chunk",
                     'data: {"content_type":"text","content":"回复"}',
-                    '',
-                    'event: run_end',
+                    "",
+                    "event: run_end",
                     'data: {"status":"completed"}',
-                    '',
+                    "",
                 ],
             ),
         ]
@@ -111,16 +120,25 @@ async def test_flash_adapter_sends_image_context_and_collects_final_text(monkeyp
 async def test_duplicate_request_reconnects_to_existing_run(monkeypatch):
     fake = FakeClient(
         [
-            FakeResponse(409, json_data={"detail": {"code": "duplicate_request", "thread_id": "thread-1", "run_id": "run-1"}}),
+            FakeResponse(
+                409,
+                json_data={
+                    "detail": {
+                        "code": "duplicate_request",
+                        "thread_id": "thread-1",
+                        "run_id": "run-1",
+                    }
+                },
+            ),
             FakeResponse(
                 200,
                 lines=[
-                    'event: message_chunk',
+                    "event: message_chunk",
                     'data: {"content_type":"text","content":"恢复"}',
-                    '',
-                    'event: run_end',
+                    "",
+                    "event: run_end",
                     'data: {"status":"completed"}',
-                    '',
+                    "",
                 ],
             ),
         ]
@@ -135,4 +153,6 @@ async def test_duplicate_request_reconnects_to_existing_run(monkeypatch):
         AgentTurn("same-key", "再次发送", __import__("datetime").datetime.now()),
     )
     assert "恢复" == "".join(part.text for part in result.parts)
-    assert fake.gets[0][1].endswith("/api/v1/threads/thread-1/messages/stream?run_id=run-1")
+    assert fake.gets[0][1].endswith(
+        "/api/v1/threads/thread-1/messages/stream?run_id=run-1"
+    )

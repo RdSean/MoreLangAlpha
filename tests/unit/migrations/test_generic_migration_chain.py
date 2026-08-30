@@ -133,3 +133,13 @@ def test_channel_gateway_schema_follows_task_request_staging():
 
     assert migration["revision"] == "042"
     assert migration["down_revision"] == "041"
+
+
+def test_channel_gateway_hardening_follows_the_initial_gateway_schema():
+    migration_dir = Path(__file__).parents[3] / "migrations/versions"
+    migration = runpy.run_path(
+        str(migration_dir / "043_harden_channel_gateway_fences.py")
+    )
+
+    assert migration["revision"] == "043"
+    assert migration["down_revision"] == "042"

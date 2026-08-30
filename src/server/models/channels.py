@@ -21,7 +21,13 @@ class LinkAttemptResponse(BaseModel):
     attempt_id: UUID
     channel_type: str
     status: Literal[
-        "waiting", "scanned", "verification_required", "linked", "expired", "failed", "cancelled"
+        "waiting",
+        "scanned",
+        "verification_required",
+        "linked",
+        "expired",
+        "failed",
+        "cancelled",
     ]
     qr_code_url: str | None = None
     expires_at: datetime
@@ -29,7 +35,9 @@ class LinkAttemptResponse(BaseModel):
 
 
 class LinkPollRequest(BaseModel):
-    verification_code: str | None = Field(default=None, min_length=4, max_length=16, pattern=r"^[0-9]+$")
+    verification_code: str | None = Field(
+        default=None, min_length=4, max_length=16, pattern=r"^[0-9]+$"
+    )
 
 
 class UpdateChannelRequest(BaseModel):

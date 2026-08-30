@@ -47,7 +47,10 @@ async def run_worker(*, runner: GatewayRunner | None = None) -> None:
             except Exception:
                 logger.warning("channel gateway tick failed", exc_info=True)
             try:
-                await asyncio.wait_for(stop_event.wait(), timeout=get_channel_gateway_config().worker_poll_interval_seconds)
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=get_channel_gateway_config().worker_poll_interval_seconds,
+                )
             except asyncio.TimeoutError:
                 pass
 

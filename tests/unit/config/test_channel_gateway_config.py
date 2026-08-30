@@ -18,6 +18,10 @@ def test_channel_gateway_defaults_are_bounded() -> None:
     assert config.max_image_pixels > 0
     assert config.max_ilink_text_length > 0
     assert config.max_delivery_attempts > 0
+    # iLink permits a 45-second long poll, so the database lease needs a
+    # network-scheduling margin before another worker can take over.
+    assert config.binding_lease_seconds >= 60
+    assert config.link_attempt_lease_seconds >= config.link_poll_timeout_seconds + 5
 
 
 @pytest.mark.parametrize(
@@ -28,7 +32,15 @@ def test_channel_gateway_defaults_are_bounded() -> None:
         ({"max_image_pixels": 0}, "max_image_pixels"),
         ({"default_idle_timeout_seconds": 0}, "default_idle_timeout_seconds"),
         ({"max_ilink_text_length": 0}, "max_ilink_text_length"),
+        ({"max_ilink_text_length": 2_001}, "max_ilink_text_length"),
         ({"max_delivery_attempts": 0}, "max_delivery_attempts"),
+        (
+            {
+                "link_attempt_lease_seconds": 10,
+                "link_poll_timeout_seconds": 10,
+            },
+            "link_attempt_lease_seconds",
+        ),
     ],
 )
 def test_channel_gateway_rejects_unbounded_or_invalid_values(

@@ -274,13 +274,46 @@ delivery outbox 不是给 FlashAdapter 的队列。它是 Flash 已经返回最�
 
 ### 闲置会话轮换
 
-当一个 pending 入站消息被领取时，Runner 比较其到达时间和该 peer 的
+当一个首次去重成功的入站消息写入数据库时，Repository 在同一事务中比较其到达时间和该 peer 的
 `last_inbound_at`：
 
 - 差值不超过 `idle_timeout_seconds`：复用活跃 channel session 和 Flash thread；
 - 差值超过阈值：原 session 结束，创建新 session UUID 和新 Flash thread；
 - 更新 `last_inbound_at` 仅在入站消息成功被接纳时进行，模型回复、出站重试和
   thread 标题更新都不影响这个时钟。
+
+## 2026-08-30 可靠性加固
+
+- iLink SDK 的 `getupdates` 可持续 45 秒，binding 租约默认设为 75 秒，避免另一个 worker
+  在长轮询尚未返回时取得同一个 token。所有入站的唯一性检查、session 轮换和 cursor 前进都在
+  锁住 active binding 的同一事务中完成；重复的 provider message 不会错误延长 session。
+- `channel_bindings.binding_epoch` 是重绑围栏。解绑或 `-14` 会递增 epoch、使 pending/claimed
+  收件与发件终态化，并清除绑定、session、入站媒体、reply context 与未投递 payload 的密文。
+  所有 worker claim 和 ack 都要求当前 active binding 的 epoch 相同，旧 worker 即使稍后恢复也无法
+  将旧消息写进新绑定或以新凭证发送旧答案。下载图片、调用 Flash 或微信前会在 binding 行上持有
+  PostgreSQL `FOR SHARE` 锁；解绑和重绑使用冲突的更新锁，因此两者必有明确先后，避免“已检查 epoch、
+  随后才发送”的 TOCTOU 窗口。
+- 发件箱新增每个 session 的 `session_delivery_order`。它跨 inbound 的局部 `sequence_no` 单调递增，
+  领取查询只允许该 session 中最早的 pending/claimed 发件，从而保证 Flash 答复及其文本分片在微信端
+  保持顺序。稳定的 `client_id` 仍用于进程在平台确认前中断时的幂等重试。
+- 二维码尝试使用数据库短租约。创建新二维码会取消同用户同平台所有未终态尝试；轮询只可领取一次，
+  取消、过期或另一轮询完成后，旧响应无法激活或覆盖 binding。绑定激活与尝试置为 `linked` 在同一
+  事务中完成。状态请求由 `asyncio.wait_for` 限制为 10 秒，低于默认 30 秒尝试租约至少 5 秒，
+  不让 SDK 的默认 5 分钟 HTTP 超时导致一次性配对码轮询失去租约。
+- 图片 CDN 下载先根据 `Content-Length` 和流式密文累计字节限制响应，再解密、检查 MIME 和像素；
+  没有该消息自己的 `context_token` 时直接记为 rejected，绝不以 peer ID 伪造回复令牌。
+  若图片项同时给出 `image_item.aeskey` 与 CDN `media.aes_key`，适配器优先前者，后者仅作为
+  兼容回退。Flash 文本在写入 outbox 前按 `max_ilink_text_length` 分片，该配置的上限固定为
+  iLink 兼容的 2000 字符。设置页的手工配对码成功路径与轮询成功路径一致，都会关闭二维码弹窗并
+  刷新连接状态。
+- SDK 在收件长轮询或发件时返回 iLink 会话失效错误（errcode -14），均转换成同一
+  `BindingExpiredError`，由 GatewayRunner 标记为 `reauth_required`，避免失效 token 被普通重试
+  长期占用。
+- 同一批恢复的消息即使跨越 6 小时，较早消息所属的 session 被后续消息关闭后，仍可完成原本已
+  排队的 Flash turn 和 outbox 确认；关闭只阻止新的路由，不能让历史收件无限重试。`rejected` 与
+  `ignored` 分别保存，安全拒绝不会伪装成普通媒体跳过。
+- `043` 可回滚到 `042`：回滚会丢弃其秘密已按设计销毁的终态二维码尝试和终态发件箱记录，再恢复
+  旧版本的 `NOT NULL` 密文列，避免用无法解密的空占位字节满足约束。
 
 ## 异常、安全与恢复
 

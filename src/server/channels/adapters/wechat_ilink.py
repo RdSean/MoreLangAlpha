@@ -141,9 +141,14 @@ class WeChatILinkAdapter(ChannelAdapter):
         self, credentials: BindingCredentials, cursor: str | None
     ) -> UpdateBatch:
         values = dict(credentials.values)
-        response = await self.api.get_updates(
-            values["base_url"], values["token"], cursor or ""
-        )
+        try:
+            response = await self.api.get_updates(
+                values["base_url"], values["token"], cursor or ""
+            )
+        except ApiError as exc:
+            if exc.is_session_expired:
+                raise BindingExpiredError from exc
+            raise
         return UpdateBatch(
             updates=tuple(response.get("msgs") or ()),
             next_cursor=response.get("get_updates_buf") or cursor,
@@ -197,7 +202,8 @@ class WeChatILinkAdapter(ChannelAdapter):
                         InboundMedia(
                             ref=str(ref),
                             mime_type="image/*",
-                            aes_key=str(cdn.get("aes_key") or image.get("aeskey") or "") or None,
+                            aes_key=str(image.get("aeskey") or cdn.get("aes_key") or "")
+                            or None,
                             encrypt_type=_int_or_none(cdn.get("encrypt_type")),
                             width=_int_or_none(image.get("thumb_width")),
                             height=_int_or_none(image.get("thumb_height")),
@@ -217,6 +223,15 @@ class WeChatILinkAdapter(ChannelAdapter):
                 kind=InboundKind.IGNORED,
                 reason="unsupported_media",
             )
+        context_token = raw.get("context_token")
+        if not isinstance(context_token, str) or not context_token:
+            return InboundMessage(
+                provider_message_id=provider_id or "invalid",
+                peer_ref=str(peer),
+                received_at=received_at,
+                kind=InboundKind.REJECTED,
+                reason="missing_reply_context",
+            )
         text = "\n".join(texts) or None
         if text and len(text) > self.max_text_length:
             text = text[: self.max_text_length]
@@ -229,7 +244,7 @@ class WeChatILinkAdapter(ChannelAdapter):
             media=tuple(media),
             reply_context=ReplyContext(
                 route_ref=str(peer),
-                values=(("context_token", str(raw.get("context_token") or "")),),
+                values=(("context_token", context_token),),
             ),
         )
 
@@ -241,7 +256,14 @@ class WeChatILinkAdapter(ChannelAdapter):
     ) -> DeliveryReceipt:
         values = dict(credentials.values)
         context = dict(reply_context.values)
-        context_token = context.get("context_token") or reply_context.route_ref
+        context_token = context.get("context_token")
+        if not isinstance(context_token, str) or not context_token:
+            return DeliveryReceipt(
+                accepted=False,
+                provider_message_id=None,
+                delivered_at=datetime.now(UTC),
+                detail="missing_context_token",
+            )
         text = "\n".join(
             part.text for part in message.parts if isinstance(part, TextPart)
         )
@@ -266,18 +288,35 @@ class WeChatILinkAdapter(ChannelAdapter):
             delivered_at=datetime.now(UTC),
         )
 
-    async def download_image(self, media: InboundMedia, *, aes_key: str | None = None) -> bytes:
+    async def download_image(
+        self,
+        media: InboundMedia,
+        *,
+        max_bytes: int,
+        aes_key: str | None = None,
+    ) -> bytes:
         url = (
             f"{CDN_BASE_URL}/download?encrypted_query_param={quote(media.ref, safe='')}"
         )
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 response.raise_for_status()
-                ciphertext = await response.read()
+                # AES-ECB adds at most one 16-byte block of PKCS#7 padding.
+                max_ciphertext_bytes = max_bytes + 16
+                if (
+                    response.content_length
+                    and response.content_length > max_ciphertext_bytes
+                ):
+                    raise ValueError("image ciphertext exceeds byte limit")
+                ciphertext = bytearray()
+                async for chunk in response.content.iter_chunked(64 * 1024):
+                    ciphertext.extend(chunk)
+                    if len(ciphertext) > max_ciphertext_bytes:
+                        raise ValueError("image ciphertext exceeds byte limit")
         key = aes_key or media.aes_key
         if not key:
             raise ValueError("image media is missing aes key")
-        return decrypt_aes_ecb(ciphertext, decode_aes_key(key))
+        return decrypt_aes_ecb(bytes(ciphertext), decode_aes_key(key))
 
     @staticmethod
     def validate_image(

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from uuid import UUID
+import asyncio
+from uuid import UUID, uuid4
 
+from src.config.settings import get_channel_gateway_config
 from src.server.channels.adapters.wechat_ilink import WeChatILinkAdapter
 from src.server.channels.contracts import LinkStatus
 from src.server.database import channels as channel_db
@@ -17,7 +19,11 @@ from src.server.models.channels import (
 async def get_status(user_id: str, adapter: WeChatILinkAdapter) -> ChannelStatus:
     row = await channel_db.get_user_binding(user_id, adapter.channel_type)
     if not row:
-        return ChannelStatus(channel_type=adapter.channel_type, status="unlinked", idle_timeout_seconds=21600)
+        return ChannelStatus(
+            channel_type=adapter.channel_type,
+            status="unlinked",
+            idle_timeout_seconds=21600,
+        )
     return ChannelStatus(
         channel_type=adapter.channel_type,
         status=row["status"],
@@ -49,30 +55,45 @@ async def poll_link(
     adapter: WeChatILinkAdapter,
     verification_code: str | None = None,
 ) -> LinkAttemptResponse:
-    attempt = await channel_db.get_link_attempt_for_user(user_id, attempt_id)
+    worker_id = f"channel-link-{uuid4()}"
+    config = get_channel_gateway_config()
+    attempt = await channel_db.claim_link_attempt(
+        user_id,
+        attempt_id,
+        worker_id,
+        lease_seconds=config.link_attempt_lease_seconds,
+    )
     if not attempt:
-        raise LookupError("link attempt not found")
+        current = await channel_db.get_link_attempt_for_user(user_id, attempt_id)
+        if not current:
+            raise LookupError("link attempt not found")
+        return _link_attempt_response(current)
     challenge = channel_db.challenge_from_row(attempt)
-    result = await adapter.poll_link(challenge, verification_code)
-    if result.next_poll_state:
-        await channel_db.update_link_poll_state(attempt_id, result.next_poll_state)
-    await channel_db.update_link_attempt_status(attempt_id, result.status.value)
-    if result.status is LinkStatus.LINKED:
-        if not result.credentials or not result.binding or not result.routing:
-            raise RuntimeError("linked response missing credentials")
-        await channel_db.activate_binding(
-            user_id=user_id,
-            channel_type=adapter.channel_type,
-            binding=result.binding,
-            route=result.routing,
-            credentials=result.credentials,
-        )
-    return LinkAttemptResponse(
+    result = await asyncio.wait_for(
+        adapter.poll_link(challenge, verification_code),
+        timeout=config.link_poll_timeout_seconds,
+    )
+    await channel_db.finalize_link_attempt(
+        user_id=user_id,
         attempt_id=attempt_id,
-        channel_type=adapter.channel_type,
-        status=result.status.value,
+        worker_id=worker_id,
+        lease_generation=int(attempt["lease_generation"]),
+        result=result,
+    )
+    current = await channel_db.get_link_attempt_for_user(user_id, attempt_id)
+    if not current:
+        raise LookupError("link attempt not found")
+    return _link_attempt_response(current)
+
+
+def _link_attempt_response(attempt: dict) -> LinkAttemptResponse:
+    return LinkAttemptResponse(
+        attempt_id=attempt["attempt_id"],
+        channel_type=attempt["channel_type"],
+        status=attempt["status"],
         expires_at=attempt["expires_at"],
-        verification_required=result.status is LinkStatus.VERIFICATION_REQUIRED,
+        verification_required=attempt["status"]
+        == LinkStatus.VERIFICATION_REQUIRED.value,
     )
 
 
@@ -81,7 +102,9 @@ async def cancel_link(user_id: str, attempt_id: UUID) -> bool:
 
 
 async def update_status(user_id: str, body: UpdateChannelRequest) -> ChannelStatus:
-    row = await channel_db.update_binding_timeout(user_id, "wechat", body.idle_timeout_seconds)
+    row = await channel_db.update_binding_timeout(
+        user_id, "wechat", body.idle_timeout_seconds
+    )
     if not row:
         raise LookupError("wechat binding not found")
     return await get_status(user_id, WeChatILinkAdapter())
@@ -89,4 +112,6 @@ async def update_status(user_id: str, body: UpdateChannelRequest) -> ChannelStat
 
 async def disconnect(user_id: str) -> bool:
     binding = await channel_db.get_user_binding(user_id, "wechat")
-    return bool(binding and await channel_db.disconnect_binding(binding["binding_id"], user_id))
+    return bool(
+        binding and await channel_db.disconnect_binding(binding["binding_id"], user_id)
+    )

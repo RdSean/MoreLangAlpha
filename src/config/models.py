@@ -356,14 +356,27 @@ class ChannelGatewayConfig(BaseModel):
         le=60,
         description="Delay between gateway worker ticks when no work is available",
     )
-    binding_lease_seconds: int = Field(default=30, ge=5, le=300)
+    # iLink permits a 45-second long poll. Keep a scheduling margin so a
+    # second worker cannot acquire this binding while that request is in flight.
+    binding_lease_seconds: int = Field(default=75, ge=60, le=300)
+    link_poll_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    link_attempt_lease_seconds: int = Field(default=30, ge=10, le=300)
     inbound_lease_seconds: int = Field(default=120, ge=10, le=3600)
     outbox_lease_seconds: int = Field(default=60, ge=10, le=3600)
     worker_concurrency: int = Field(default=4, ge=1, le=64)
     max_image_bytes: int = Field(default=8 * 1024 * 1024, ge=1, le=32 * 1024 * 1024)
     max_image_pixels: int = Field(default=24_000_000, ge=1, le=100_000_000)
-    max_ilink_text_length: int = Field(default=2000, ge=1, le=10_000)
+    max_ilink_text_length: int = Field(default=2000, ge=1, le=2_000)
     max_delivery_attempts: int = Field(default=8, ge=1, le=32)
+
+    @model_validator(mode="after")
+    def _link_attempt_lease_outlasts_provider_request(self) -> "ChannelGatewayConfig":
+        if self.link_attempt_lease_seconds < self.link_poll_timeout_seconds + 5:
+            raise ValueError(
+                "channels.link_attempt_lease_seconds must exceed "
+                "link_poll_timeout_seconds by at least five seconds"
+            )
+        return self
 
 
 class InfrastructureConfig(BaseModel):

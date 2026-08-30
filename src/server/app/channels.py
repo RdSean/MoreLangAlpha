@@ -7,7 +7,11 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Response, status
 
 from src.server.channels.adapters.wechat_ilink import WeChatILinkAdapter
-from src.server.models.channels import LinkAttemptResponse, LinkPollRequest, UpdateChannelRequest
+from src.server.models.channels import (
+    LinkAttemptResponse,
+    LinkPollRequest,
+    UpdateChannelRequest,
+)
 from src.server.services.channels import linking
 from src.server.utils.api import CurrentUserId
 
@@ -23,22 +27,32 @@ async def get_wechat_status(user_id: CurrentUserId):
     return await linking.get_status(user_id, _adapter())
 
 
-@router.post("/wechat/link-attempts", response_model=LinkAttemptResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/wechat/link-attempts",
+    response_model=LinkAttemptResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_wechat_link_attempt(user_id: CurrentUserId):
     return await linking.start_link(user_id, _adapter())
 
 
-@router.post("/wechat/link-attempts/{attempt_id}/poll", response_model=LinkAttemptResponse)
+@router.post(
+    "/wechat/link-attempts/{attempt_id}/poll", response_model=LinkAttemptResponse
+)
 async def poll_wechat_link_attempt(
     attempt_id: UUID, body: LinkPollRequest, user_id: CurrentUserId
 ):
     try:
-        return await linking.poll_link(user_id, attempt_id, _adapter(), body.verification_code)
+        return await linking.poll_link(
+            user_id, attempt_id, _adapter(), body.verification_code
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="link attempt not found") from exc
 
 
-@router.delete("/wechat/link-attempts/{attempt_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/wechat/link-attempts/{attempt_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 async def cancel_wechat_link_attempt(attempt_id: UUID, user_id: CurrentUserId):
     if not await linking.cancel_link(user_id, attempt_id):
         raise HTTPException(status_code=404, detail="link attempt not found")

@@ -159,7 +159,9 @@ redis:
 channels:
   default_idle_timeout_seconds: 21600
   worker_poll_interval_seconds: 1.0
-  binding_lease_seconds: 30
+  binding_lease_seconds: 75
+  link_poll_timeout_seconds: 10
+  link_attempt_lease_seconds: 30
   inbound_lease_seconds: 120
   outbox_lease_seconds: 60
   worker_concurrency: 4
