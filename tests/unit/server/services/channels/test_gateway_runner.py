@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from src.server.channels import contracts
 from src.server.channels.contracts import (
     AgentSession,
     AgentTurnResult,
@@ -17,6 +18,7 @@ from src.server.channels.contracts import (
     InboundKind,
     InboundMessage,
     ReplyContext,
+    ResolvedImage,
     TextPart,
     UpdateBatch,
 )
@@ -42,6 +44,7 @@ class FakeRepo:
         self.persisted = []
         self.acked = []
         self.sessions = {}
+        self.reauth = []
 
     async def list_active_binding_ids(self, limit):
         return [self.lease.binding_id]
@@ -67,9 +70,13 @@ class FakeRepo:
     async def claim_due_deliveries(self, *args):
         return []
 
+    async def mark_binding_reauth(self, binding_id, error_code):
+        self.reauth.append((binding_id, error_code))
+
 
 class FakeChannel:
     channel_type = "fake"
+    max_outbound_text_length = 3
 
     async def fetch_updates(self, credentials, cursor):
         return UpdateBatch(
@@ -86,6 +93,9 @@ class FakeChannel:
             text="hello",
             reply_context=ReplyContext("peer", (("context_token", "ctx"),)),
         )
+
+    async def resolve_images(self, media, *, max_bytes, max_pixels):
+        return ()
 
 
 @pytest.mark.asyncio
@@ -108,6 +118,34 @@ def test_outbound_text_is_split_to_the_provider_limit_in_order() -> None:
     )
 
     assert parts == (TextPart("abc"), TextPart("def"))
+
+
+def test_outbound_text_prefers_a_natural_boundary_before_hard_cut() -> None:
+    parts = gateway_runner.split_outbound_parts(
+        (TextPart("aaaaa\nbbbbb"),), max_text_length=8
+    )
+
+    assert parts == (TextPart("aaaaa\n"), TextPart("bbbbb"))
+
+
+@pytest.mark.asyncio
+async def test_generic_expired_binding_reauthenticates_without_wechat_exception() -> None:
+    repo = FakeRepo()
+    repo.lease = _lease()
+    assert hasattr(contracts, "ChannelBindingExpiredError")
+
+    class ExpiredChannel(FakeChannel):
+        async def fetch_updates(self, credentials, cursor):
+            raise contracts.ChannelBindingExpiredError
+
+    runner = GatewayRunner(
+        channel_adapters={"fake": ExpiredChannel()},
+        agent_adapter=SimpleNamespace(),
+        repository=repo,
+    )
+
+    assert await runner.poll_bindings_once() == 0
+    assert repo.reauth == [(repo.lease.binding_id, "session_expired")]
 
 
 @pytest.mark.asyncio
@@ -277,6 +315,7 @@ async def test_inbound_calls_flash_while_epoch_fence_is_held() -> None:
 
     async def run_turn(_session, _turn):
         assert fence_held
+        assert _turn.channel_type == "fake"
         return AgentTurnResult(parts=(TextPart("answer"),), session_ref="thread-1")
 
     agent = SimpleNamespace(
@@ -292,7 +331,7 @@ async def test_inbound_calls_flash_while_epoch_fence_is_held() -> None:
         nack_inbound=AsyncMock(return_value=True),
     )
     runner = GatewayRunner(
-        channel_adapters={"fake": SimpleNamespace()},
+        channel_adapters={"fake": SimpleNamespace(max_outbound_text_length=None)},
         agent_adapter=agent,
         repository=repository,
     )
@@ -331,15 +370,13 @@ async def test_inbound_downloads_images_while_epoch_fence_is_held() -> None:
         finally:
             fence_held = False
 
-    async def download_image(_media, *, max_bytes):
+    async def resolve_images(_media, *, max_bytes, max_pixels):
         assert max_bytes > 0
+        assert max_pixels > 0
         image_fence_states.append(fence_held)
-        return b"image"
+        return (ResolvedImage("data:image/png;base64,aW1hZ2U=", "image/png", 5, 1, 1),)
 
-    adapter = SimpleNamespace(
-        download_image=download_image,
-        validate_image=lambda *_args, **_kwargs: ("image/png", 1, 1),
-    )
+    adapter = SimpleNamespace(max_outbound_text_length=3, resolve_images=resolve_images)
     repository = SimpleNamespace(
         claim_pending_inbound=AsyncMock(return_value=[claim]),
         hold_active_binding_epoch=active_epoch_fence,

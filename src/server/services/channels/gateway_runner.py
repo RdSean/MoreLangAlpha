@@ -13,14 +13,13 @@ from src.config.settings import get_channel_gateway_config
 from src.server.channels.contracts import (
     AgentSession,
     AgentTurn,
+    ChannelBindingExpiredError,
     InboundKind,
     MediaPart,
     OpenSessionRequest,
     OutboundMessage,
-    ResolvedImage,
     TextPart,
 )
-from src.server.channels.adapters.wechat_ilink import BindingExpiredError
 from src.server.database import channels as channel_db
 
 logger = logging.getLogger(__name__)
@@ -41,19 +40,41 @@ def _external_thread_id(
 
 
 def split_outbound_parts(
-    parts: tuple[TextPart | MediaPart, ...], *, max_text_length: int
+    parts: tuple[TextPart | MediaPart, ...], *, max_text_length: int | None
 ) -> tuple[TextPart | MediaPart, ...]:
     """Split provider-limited text without changing delivery order."""
+    if max_text_length is None:
+        return parts
     split: list[TextPart | MediaPart] = []
     for part in parts:
         if not isinstance(part, TextPart):
             split.append(part)
             continue
-        split.extend(
-            TextPart(part.text[index : index + max_text_length])
-            for index in range(0, len(part.text), max_text_length)
-        )
+        split.extend(TextPart(text) for text in _split_text(part.text, max_text_length))
     return tuple(split)
+
+
+def _split_text(text: str, limit: int) -> list[str]:
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= limit:
+            chunks.append(remaining)
+            break
+        window = remaining[:limit]
+        split_at = -1
+        for separator in ("\n\n", "\n", " "):
+            position = window.rfind(separator)
+            if position > limit * 3 // 10:
+                split_at = position + len(separator)
+                break
+        if split_at == -1:
+            split_at = limit
+        chunks.append(remaining[:split_at])
+        remaining = remaining[split_at:]
+    return chunks
 
 
 class GatewayRunner:
@@ -90,7 +111,7 @@ class GatewayRunner:
             try:
                 await self.ingest_binding(lease)
                 count += 1
-            except BindingExpiredError:
+            except ChannelBindingExpiredError:
                 await self.repository.mark_binding_reauth(
                     lease.binding_id, "session_expired"
                 )
@@ -185,50 +206,38 @@ class GatewayRunner:
                             opened_at=datetime.now(UTC),
                             actor_ref=claim.user_id,
                         )
-                    images: list[ResolvedImage] = []
                     adapter = self.channel_adapters.get(claim.channel_type)
-                    if adapter and claim.media and hasattr(adapter, "download_image"):
-                        for media in claim.media:
-                            data = await adapter.download_image(
-                                media, max_bytes=self.config.max_image_bytes
-                            )
-                            mime, width, height = adapter.validate_image(
-                                data,
-                                max_bytes=self.config.max_image_bytes,
-                                max_pixels=self.config.max_image_pixels,
-                            )
-                            import base64 as _b64
-
-                            encoded = _b64.b64encode(data).decode("ascii")
-                            images.append(
-                                ResolvedImage(
-                                    f"data:{mime};base64,{encoded}",
-                                    mime,
-                                    len(data),
-                                    width,
-                                    height,
-                                )
-                            )
+                    if adapter is None:
+                        raise RuntimeError(f"no adapter for channel type {claim.channel_type}")
+                    images = (
+                        await adapter.resolve_images(
+                            claim.media,
+                            max_bytes=self.config.max_image_bytes,
+                            max_pixels=self.config.max_image_pixels,
+                        )
+                        if claim.media
+                        else ()
+                    )
                     result = await self.agent_adapter.run_turn(
                         opened,
                         AgentTurn(
                             request_key=claim.request_key,
                             text=claim.text,
                             received_at=datetime.now(UTC),
-                            images=tuple(images),
+                            channel_type=claim.channel_type,
+                            images=images,
                         ),
                     )
-                if claim.channel_type == "wechat":
-                    result = result.__class__(
-                        parts=split_outbound_parts(
-                            result.parts,
-                            max_text_length=self.config.max_ilink_text_length,
-                        ),
-                        session_ref=result.session_ref,
-                    )
+                result = result.__class__(
+                    parts=split_outbound_parts(
+                        result.parts,
+                        max_text_length=adapter.max_outbound_text_length,
+                    ),
+                    session_ref=result.session_ref,
+                )
                 await self.repository.ack_inbound_and_enqueue_deliveries(claim, result)
                 processed += 1
-            except BindingExpiredError:
+            except ChannelBindingExpiredError:
                 await self.repository.mark_binding_reauth(
                     claim.binding_id, "session_expired"
                 )
@@ -295,7 +304,7 @@ class GatewayRunner:
                     delivery.delivery_id, delivery.lease_generation
                 )
                 delivered += 1
-            except BindingExpiredError:
+            except ChannelBindingExpiredError:
                 await self.repository.mark_binding_reauth(
                     delivery.binding_id, "session_expired"
                 )

@@ -159,7 +159,7 @@ class LangAlphaFlashAdapter:
             thread_id = None
         body: dict[str, Any] = {
             "agent_mode": "flash",
-            "platform": "wechat",
+            "platform": turn.channel_type,
             "request_key": turn.request_key,
             "messages": [{"role": "user", "content": turn.text or ""}],
         }

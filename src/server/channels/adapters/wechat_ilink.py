@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
@@ -18,6 +19,7 @@ from wechatbot.types import MessageItemType, MessageType
 from src.server.channels.adapters.base import ChannelAdapter
 from src.server.channels.contracts import (
     BindingCredentials,
+    ChannelBindingExpiredError,
     BindingRoute,
     BindingView,
     DeliveryReceipt,
@@ -30,13 +32,13 @@ from src.server.channels.contracts import (
     LinkStatus,
     OutboundMessage,
     ReplyContext,
+    ResolvedImage,
     UpdateBatch,
     TextPart,
 )
 
-
-class BindingExpiredError(RuntimeError):
-    """The iLink token is no longer valid and must be rebound."""
+# Kept for adapter consumers that imported the former concrete error.
+BindingExpiredError = ChannelBindingExpiredError
 
 
 class WeChatILinkAdapter(ChannelAdapter):
@@ -52,8 +54,11 @@ class WeChatILinkAdapter(ChannelAdapter):
         self.api = api or ILinkApi()
         self.base_url = base_url.rstrip("/")
         self.max_text_length = max_text_length
+        self.max_outbound_text_length = max_text_length
 
-    async def begin_link(self) -> LinkChallenge:
+    async def begin_link(
+        self, previous_credentials: BindingCredentials | None = None
+    ) -> LinkChallenge:
         response = await self.api.get_qr_code(self.base_url, [])
         qrcode = response.get("qrcode")
         image = response.get("qrcode_img_content")
@@ -147,7 +152,7 @@ class WeChatILinkAdapter(ChannelAdapter):
             )
         except ApiError as exc:
             if exc.is_session_expired:
-                raise BindingExpiredError from exc
+                raise ChannelBindingExpiredError from exc
             raise
         return UpdateBatch(
             updates=tuple(response.get("msgs") or ()),
@@ -280,7 +285,7 @@ class WeChatILinkAdapter(ChannelAdapter):
             await self.api.send_message(values["base_url"], values["token"], payload)
         except ApiError as exc:
             if exc.is_session_expired:
-                raise BindingExpiredError from exc
+                raise ChannelBindingExpiredError from exc
             raise
         return DeliveryReceipt(
             accepted=True,
@@ -317,6 +322,30 @@ class WeChatILinkAdapter(ChannelAdapter):
         if not key:
             raise ValueError("image media is missing aes key")
         return decrypt_aes_ecb(bytes(ciphertext), decode_aes_key(key))
+
+    async def resolve_images(
+        self,
+        media: tuple[InboundMedia, ...],
+        *,
+        max_bytes: int,
+        max_pixels: int,
+    ) -> tuple[ResolvedImage, ...]:
+        resolved: list[ResolvedImage] = []
+        for item in media:
+            data = await self.download_image(item, max_bytes=max_bytes)
+            mime, width, height = self.validate_image(
+                data, max_bytes=max_bytes, max_pixels=max_pixels
+            )
+            resolved.append(
+                ResolvedImage(
+                    content_ref=f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}",
+                    mime_type=mime,
+                    byte_size=len(data),
+                    width=width,
+                    height=height,
+                )
+            )
+        return tuple(resolved)
 
     @staticmethod
     def validate_image(

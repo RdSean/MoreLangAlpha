@@ -40,8 +40,12 @@ NOW = datetime(2026, 8, 28, 12, 0, tzinfo=UTC)
 
 class FakeChannel:
     channel_type = "fake"
+    max_outbound_text_length = 2_000
 
-    async def begin_link(self) -> LinkChallenge:
+    async def begin_link(
+        self, previous_credentials: BindingCredentials | None = None
+    ) -> LinkChallenge:
+        assert previous_credentials is None
         return LinkChallenge(
             channel_type=self.channel_type,
             challenge_ref="challenge-1",
@@ -118,6 +122,26 @@ class FakeChannel:
             ),
         )
 
+    async def resolve_images(
+        self,
+        media: tuple[InboundMedia, ...],
+        *,
+        max_bytes: int,
+        max_pixels: int,
+    ) -> tuple[ResolvedImage, ...]:
+        assert media[0].ref == "media-1"
+        assert max_bytes > 0
+        assert max_pixels > 0
+        return (
+            ResolvedImage(
+                content_ref="workspace-image-1",
+                mime_type="image/png",
+                byte_size=256,
+                width=16,
+                height=16,
+            ),
+        )
+
     async def deliver(
         self,
         credentials: BindingCredentials,
@@ -182,6 +206,17 @@ async def test_fake_adapters_satisfy_generic_runtime_contracts():
     assert inbound.text == "Hello"
     assert inbound.media[0].mime_type == "image/png"
     assert inbound.reply_context is not None
+    assert await channel.resolve_images(
+        inbound.media, max_bytes=1_024, max_pixels=1_024
+    ) == (
+        ResolvedImage(
+            content_ref="workspace-image-1",
+            mime_type="image/png",
+            byte_size=256,
+            width=16,
+            height=16,
+        ),
+    )
 
     session = await agent.open_session(
         OpenSessionRequest(

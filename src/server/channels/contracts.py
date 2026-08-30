@@ -26,6 +26,10 @@ class InboundKind(str, Enum):
     REJECTED = "rejected"
 
 
+class ChannelBindingExpiredError(RuntimeError):
+    """A provider revoked the credentials for an otherwise active binding."""
+
+
 @dataclass(frozen=True)
 class LinkPollState:
     """Opaque provider state needed to poll a pairing challenge.
@@ -205,6 +209,7 @@ class AgentTurn:
     request_key: str
     text: str | None
     received_at: datetime
+    channel_type: str = "unknown"
     images: tuple[ResolvedImage, ...] = ()
 
 

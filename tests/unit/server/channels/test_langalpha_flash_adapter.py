@@ -102,12 +102,13 @@ async def test_flash_adapter_sends_image_context_and_collects_final_text(monkeyp
             request_key="key-1",
             text="解释",
             received_at=__import__("datetime").datetime.now(),
+            channel_type="telegram",
             images=(ResolvedImage("data:image/png;base64,", "image/png", 3, 1, 1),),
         ),
     )
     body = fake.posts[0][1]["json"]
     assert body["agent_mode"] == "flash"
-    assert body["platform"] == "wechat"
+    assert body["platform"] == "telegram"
     assert body["external_thread_id"] == "external-thread-1"
     assert fake.posts[0][1]["headers"]["X-User-Id"] == "user-1"
     assert body["additional_context"][0]["type"] == "image"

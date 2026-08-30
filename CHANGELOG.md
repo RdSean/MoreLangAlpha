@@ -4,6 +4,9 @@
 
 ### 微信 iLink Bot 通道网关
 
+- Gateway 的认证失效、图片解析、文本长度与来源平台信息改由通用 ChannelAdapter 契约提供；
+  不再导入微信异常、探测微信私有方法或按通道名称分支。Flash 内部请求会保留实际 channel 类型，
+  长文本按段落、换行和空格优先切分后才硬切，保持微信端回复可读性。
 - 新增基于通用 `ChannelAdapter -> GatewayRunner -> AgentAdapter` 的独立通道 worker；
   worker 通过 PostgreSQL 租约轮询、持久化收件、调用系统内部 Flash API，并从可靠发件箱投递回复。
 - 新增 `LangAlphaFlashAdapter`：固定使用 Flash、携带所属用户的内部服务认证与稳定 request key，

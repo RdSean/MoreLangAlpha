@@ -8,11 +8,13 @@ from src.server.channels.contracts import (
     BindingCredentials,
     BindingRoute,
     DeliveryReceipt,
+    InboundMedia,
     InboundMessage,
     LinkChallenge,
     LinkPollResult,
     OutboundMessage,
     ReplyContext,
+    ResolvedImage,
     UpdateBatch,
 )
 
@@ -22,8 +24,11 @@ class ChannelAdapter(Protocol):
     """Translate one external messaging platform into generic channel values."""
 
     channel_type: str
+    max_outbound_text_length: int | None
 
-    async def begin_link(self) -> LinkChallenge: ...
+    async def begin_link(
+        self, previous_credentials: BindingCredentials | None = None
+    ) -> LinkChallenge: ...
 
     async def poll_link(
         self,
@@ -42,6 +47,14 @@ class ChannelAdapter(Protocol):
         raw_update: object,
         binding: BindingRoute,
     ) -> InboundMessage: ...
+
+    async def resolve_images(
+        self,
+        media: tuple[InboundMedia, ...],
+        *,
+        max_bytes: int,
+        max_pixels: int,
+    ) -> tuple[ResolvedImage, ...]: ...
 
     async def deliver(
         self,
