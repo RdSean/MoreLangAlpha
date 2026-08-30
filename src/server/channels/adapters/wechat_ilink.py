@@ -59,7 +59,12 @@ class WeChatILinkAdapter(ChannelAdapter):
     async def begin_link(
         self, previous_credentials: BindingCredentials | None = None
     ) -> LinkChallenge:
-        response = await self.api.get_qr_code(self.base_url, [])
+        known_tokens: list[str] = []
+        if previous_credentials and previous_credentials.channel_type == self.channel_type:
+            token = dict(previous_credentials.values).get("token")
+            if isinstance(token, str) and token:
+                known_tokens.append(token)
+        response = await self.api.get_qr_code(self.base_url, known_tokens)
         qrcode = response.get("qrcode")
         image = response.get("qrcode_img_content")
         if not isinstance(qrcode, str) or not qrcode:
@@ -94,6 +99,11 @@ class WeChatILinkAdapter(ChannelAdapter):
         except ApiError:
             raise
         status = str(response.get("status") or "").lower()
+        if status == "binded_redirect":
+            return LinkPollResult(
+                status=LinkStatus.LINKED,
+                reuse_existing_binding=True,
+            )
         next_state = None
         redirect_host = response.get("redirect_host")
         if status == "scaned_but_redirect" and redirect_host:
@@ -112,7 +122,6 @@ class WeChatILinkAdapter(ChannelAdapter):
             "confirmed": LinkStatus.LINKED,
             "expired": LinkStatus.EXPIRED,
             "verify_code_blocked": LinkStatus.FAILED,
-            "binded_redirect": LinkStatus.FAILED,
         }.get(status, LinkStatus.WAITING)
         if mapped is not LinkStatus.LINKED:
             return LinkPollResult(status=mapped, next_poll_state=next_state)

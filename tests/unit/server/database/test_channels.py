@@ -89,3 +89,15 @@ def test_inbound_persistence_checks_binding_epoch_before_advancing_cursor() -> N
     assert (
         "WHERE binding_id = %s AND status = 'active' AND binding_epoch = %s" in source
     )
+
+
+def test_reused_qr_binding_finalization_preserves_the_active_binding_epoch() -> None:
+    source = (Path(__file__).parents[4] / "src/server/database/channels.py").read_text(
+        encoding="utf-8"
+    )
+
+    finalize_start = source.index("async def finalize_link_attempt")
+    finalize_source = source[finalize_start : source.index("async def _retire_binding_rows", finalize_start)]
+    assert "result.reuse_existing_binding" in finalize_source
+    assert "status = 'active'" in finalize_source
+    assert "status = 'failed', poll_state_ciphertext = NULL" in finalize_source

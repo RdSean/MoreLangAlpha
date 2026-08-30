@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   disconnect: vi.fn(),
   update: vi.fn(),
   refetch: vi.fn(),
+  status: 'unlinked',
 }));
 
 vi.mock('../api', () => ({
@@ -20,7 +21,7 @@ vi.mock('../api', () => ({
 
 vi.mock('../queries', () => ({
   useWechatStatus: () => ({
-    data: { channel_type: 'wechat', status: 'unlinked', idle_timeout_seconds: 21600 },
+    data: { channel_type: 'wechat', status: state.status, idle_timeout_seconds: 21600 },
     refetch: state.refetch,
   }),
 }));
@@ -40,6 +41,7 @@ beforeEach(() => {
   state.disconnect.mockReset().mockResolvedValue(undefined);
   state.update.mockReset().mockResolvedValue({});
   state.refetch.mockReset().mockResolvedValue({});
+  state.status = 'unlinked';
 });
 
 describe('ChannelsTab', () => {
@@ -53,5 +55,15 @@ describe('ChannelsTab', () => {
 
     await waitFor(() => expect(state.refetch).toHaveBeenCalledOnce());
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('allows an active binding to start a reconfiguration QR flow', async () => {
+    state.status = 'active';
+    render(<ChannelsTab />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure WeChat' }));
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(state.start).toHaveBeenCalledOnce();
   });
 });

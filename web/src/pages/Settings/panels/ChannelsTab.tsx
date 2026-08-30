@@ -94,6 +94,7 @@ export function ChannelsTab() {
         {currentStatus === 'active' && <div className="space-y-4">
           <label className="block text-sm" htmlFor="wechat-idle-timeout">{t('settings.wechatIdleTimeout')}</label>
           <div className="flex max-w-sm items-center gap-2"><input id="wechat-idle-timeout" className="h-9 w-28 rounded border bg-transparent px-2 text-sm" type="number" min={1} max={10080} value={idleMinutes} onChange={(e) => setIdleMinutes(Number(e.target.value))} /><Button variant="outline" onClick={saveIdle}>{t('settings.wechatSave')}</Button></div>
+          <Button variant="outline" onClick={configure}><QrCode className="mr-2 size-4" aria-hidden="true" />{t('settings.configureWechat')}</Button>
           <Button variant="outline" onClick={() => setDisconnectOpen(true)}><Unlink className="mr-2 size-4" aria-hidden="true" />{t('settings.wechatDisconnect')}</Button>
         </div>}
       </div>

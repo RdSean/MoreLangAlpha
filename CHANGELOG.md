@@ -7,6 +7,9 @@
 - Gateway 的认证失效、图片解析、文本长度与来源平台信息改由通用 ChannelAdapter 契约提供；
   不再导入微信异常、探测微信私有方法或按通道名称分支。Flash 内部请求会保留实际 channel 类型，
   长文本按段落、换行和空格优先切分后才硬切，保持微信端回复可读性。
+- 已连接的微信卡片现可重新配置。二维码请求会将现有加密 iLink token 临时传给 SDK；
+  平台返回 `binded_redirect` 时原子复用当前 binding，不重置 cursor、会话或 epoch。二维码轮询本地
+  超时会释放 attempt 并继续等待，重配期间 binding 已断开则安全终态为失败而非返回服务端错误。
 - 新增基于通用 `ChannelAdapter -> GatewayRunner -> AgentAdapter` 的独立通道 worker；
   worker 通过 PostgreSQL 租约轮询、持久化收件、调用系统内部 Flash API，并从可靠发件箱投递回复。
 - 新增 `LangAlphaFlashAdapter`：固定使用 Flash、携带所属用户的内部服务认证与稳定 request key，

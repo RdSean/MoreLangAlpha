@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from src.config.settings import get_channel_gateway_config
 from src.server.channels.adapters.wechat_ilink import WeChatILinkAdapter
-from src.server.channels.contracts import LinkStatus
+from src.server.channels.contracts import LinkPollResult, LinkStatus
 from src.server.database import channels as channel_db
 from src.server.models.channels import (
     ChannelStatus,
@@ -34,7 +34,10 @@ async def get_status(user_id: str, adapter: WeChatILinkAdapter) -> ChannelStatus
 
 
 async def start_link(user_id: str, adapter: WeChatILinkAdapter) -> LinkAttemptResponse:
-    challenge = await adapter.begin_link()
+    previous_credentials = await channel_db.get_active_binding_credentials(
+        user_id, adapter.channel_type
+    )
+    challenge = await adapter.begin_link(previous_credentials)
     attempt_id = await channel_db.create_link_attempt(
         user_id=user_id,
         channel_type=adapter.channel_type,
@@ -69,10 +72,13 @@ async def poll_link(
             raise LookupError("link attempt not found")
         return _link_attempt_response(current)
     challenge = channel_db.challenge_from_row(attempt)
-    result = await asyncio.wait_for(
-        adapter.poll_link(challenge, verification_code),
-        timeout=config.link_poll_timeout_seconds,
-    )
+    try:
+        result = await asyncio.wait_for(
+            adapter.poll_link(challenge, verification_code),
+            timeout=config.link_poll_timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        result = LinkPollResult(status=LinkStatus.WAITING)
     await channel_db.finalize_link_attempt(
         user_id=user_id,
         attempt_id=attempt_id,

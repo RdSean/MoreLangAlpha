@@ -25,8 +25,13 @@ async def run_worker(*, runner: GatewayRunner | None = None) -> None:
     await pool.open()
     owns_runner = runner is None
     if runner is None:
+        config = get_channel_gateway_config()
         runner = GatewayRunner(
-            channel_adapters={"wechat": WeChatILinkAdapter()},
+            channel_adapters={
+                "wechat": WeChatILinkAdapter(
+                    max_text_length=config.max_ilink_text_length
+                )
+            },
             agent_adapter=LangAlphaFlashAdapter(),
             worker_id=f"channel-worker-{uuid.uuid4()}",
         )

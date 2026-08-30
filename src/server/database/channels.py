@@ -846,6 +846,36 @@ async def get_user_binding(user_id: str, channel_type: str) -> dict[str, Any] | 
             return dict(row) if row else None
 
 
+async def get_active_binding_credentials(
+    user_id: str, channel_type: str
+) -> BindingCredentials | None:
+    """Read an active binding only for a provider's one-time reconfiguration QR."""
+    key = get_encryption_key()
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT binding_id, channel_type,
+                       pgp_sym_decrypt(credentials_ciphertext, %s) AS credentials
+                FROM channel_bindings
+                WHERE user_id = %s AND channel_type = %s AND status = 'active'
+                """,
+                (key, user_id, channel_type),
+            )
+            row = await cur.fetchone()
+            if not row:
+                return None
+            try:
+                values = json.loads(row["credentials"] or "{}")
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError("channel binding ciphertext is malformed") from exc
+            return BindingCredentials(
+                binding_ref=str(row["binding_id"]),
+                channel_type=str(row["channel_type"]),
+                values=tuple((str(name), str(value)) for name, value in values.items()),
+            )
+
+
 async def list_active_binding_ids(limit: int = 100) -> list[UUID]:
     """Return active binding IDs for a worker lease pass."""
     async with get_db_connection() as conn:
@@ -1024,11 +1054,9 @@ async def finalize_link_attempt(
                         ),
                     )
                     return True
-                if not result.credentials or not result.routing or not result.binding:
-                    raise RuntimeError("linked response missing credentials")
                 await cur.execute(
                     """
-                    SELECT binding_id
+                    SELECT binding_id, status
                     FROM channel_bindings
                     WHERE user_id = %s AND channel_type = %s
                     FOR UPDATE
@@ -1036,6 +1064,31 @@ async def finalize_link_attempt(
                     (user_id, attempt["channel_type"]),
                 )
                 existing = await cur.fetchone()
+                if result.reuse_existing_binding:
+                    if not existing or existing["status"] != "active":
+                        await cur.execute(
+                            """
+                            UPDATE channel_link_attempts
+                            SET status = 'failed', poll_state_ciphertext = NULL,
+                                lease_owner = NULL, lease_expires_at = NULL,
+                                last_error_code = 'binding_not_active', updated_at = NOW()
+                            WHERE attempt_id = %s
+                            """,
+                            (attempt_id,),
+                        )
+                        return True
+                    await cur.execute(
+                        """
+                        UPDATE channel_link_attempts
+                        SET status = 'linked', poll_state_ciphertext = NULL,
+                            lease_owner = NULL, lease_expires_at = NULL, updated_at = NOW()
+                        WHERE attempt_id = %s
+                        """,
+                        (attempt_id,),
+                    )
+                    return True
+                if not result.credentials or not result.routing or not result.binding:
+                    raise RuntimeError("linked response missing credentials")
                 values = _json(dict(result.credentials.values))
                 if existing:
                     binding_id = existing["binding_id"]

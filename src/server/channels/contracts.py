@@ -91,6 +91,7 @@ class LinkPollResult:
     binding: BindingView | None = None
     routing: BindingRoute | None = None
     credentials: BindingCredentials | None = None
+    reuse_existing_binding: bool = False
 
 
 @dataclass(frozen=True)
