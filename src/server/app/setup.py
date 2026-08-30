@@ -899,6 +899,7 @@ from src.server.app.workflows import include_workflow_router
 from src.server.app.mcp_catalog import router as mcp_catalog_router
 from src.server.app.mcp_servers import router as mcp_servers_router
 from src.server.app.speech import router as speech_router
+from src.server.app.channels import router as channels_router
 
 # Include all routers
 app.include_router(threads_router)  # /api/v1/threads/* - Thread CRUD, messages, control
@@ -949,6 +950,7 @@ app.include_router(
     mcp_servers_router
 )  # /api/v1/workspaces/{id}/mcp/servers - Per-workspace MCP server config
 app.include_router(speech_router)  # /ws/v1/speech/transcribe - Backend ASR relay
+app.include_router(channels_router)  # /api/v1/channels/* - Generic channel bindings
 app.include_router(health_router)  # /health - Health check
 app.include_router(
     preview_redirect_router

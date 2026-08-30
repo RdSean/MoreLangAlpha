@@ -21,6 +21,9 @@ from src.server.channels.contracts import (
     BindingRoute,
     InboundKind,
     InboundMedia,
+    LinkChallenge,
+    LinkPollState,
+    BindingView,
     ReplyContext,
 )
 from src.server.database.encryption import get_encryption_key
@@ -533,5 +536,126 @@ async def disconnect_binding(binding_id: UUID | str, user_id: str) -> bool:
                 WHERE binding_id = %s AND user_id = %s
                 """,
                 (binding_id, user_id),
+            )
+            return cur.rowcount == 1
+
+
+async def get_user_binding(user_id: str, channel_type: str) -> dict[str, Any] | None:
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT binding_id, status, idle_timeout_seconds, last_error_code
+                FROM channel_bindings WHERE user_id = %s AND channel_type = %s
+                """,
+                (user_id, channel_type),
+            )
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def create_link_attempt(*, user_id: str, channel_type: str, challenge: LinkChallenge) -> UUID:
+    key = get_encryption_key()
+    state = _json(dict(challenge.provider_poll_state.values))
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO channel_link_attempts
+                    (user_id, channel_type, qr_code_url, poll_state_ciphertext, expires_at)
+                VALUES (%s, %s, %s, pgp_sym_encrypt(%s, %s), %s)
+                RETURNING attempt_id
+                """,
+                (user_id, channel_type, challenge.qr_code_url, state, key, challenge.expires_at),
+            )
+            row = await cur.fetchone()
+            return row[0]
+
+
+async def get_link_attempt_for_user(user_id: str, attempt_id: UUID) -> dict[str, Any] | None:
+    key = get_encryption_key()
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT attempt_id, channel_type, status, qr_code_url, expires_at,
+                       pgp_sym_decrypt(poll_state_ciphertext, %s) AS poll_state
+                FROM channel_link_attempts WHERE attempt_id = %s AND user_id = %s
+                """,
+                (key, attempt_id, user_id),
+            )
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+def challenge_from_row(row: dict[str, Any]) -> LinkChallenge:
+    state = json.loads(row["poll_state"] or "{}")
+    return LinkChallenge(
+        channel_type=row["channel_type"],
+        challenge_ref=str(row["attempt_id"]),
+        qr_code_url=row["qr_code_url"],
+        expires_at=row["expires_at"],
+        provider_poll_state=LinkPollState(values=tuple((str(k), str(v)) for k, v in state.items())),
+    )
+
+
+async def update_link_poll_state(attempt_id: UUID, state: LinkPollState) -> bool:
+    key = get_encryption_key()
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE channel_link_attempts SET poll_state_ciphertext = pgp_sym_encrypt(%s, %s), updated_at = NOW() WHERE attempt_id = %s",
+                (_json(dict(state.values)), key, attempt_id),
+            )
+            return cur.rowcount == 1
+
+
+async def update_link_attempt_status(attempt_id: UUID, status: str) -> bool:
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE channel_link_attempts SET status = %s, updated_at = NOW() WHERE attempt_id = %s",
+                (status, attempt_id),
+            )
+            return cur.rowcount == 1
+
+
+async def cancel_link_attempt(user_id: str, attempt_id: UUID) -> bool:
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE channel_link_attempts SET status = 'cancelled', updated_at = NOW() WHERE attempt_id = %s AND user_id = %s AND status NOT IN ('linked', 'expired', 'failed', 'cancelled')",
+                (attempt_id, user_id),
+            )
+            return cur.rowcount == 1
+
+
+async def activate_binding(*, user_id: str, channel_type: str, binding: BindingView, route: BindingRoute, credentials: BindingCredentials) -> None:
+    key = get_encryption_key()
+    values = dict(credentials.values)
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO channel_bindings
+                    (user_id, channel_type, status, credentials_ciphertext,
+                     bound_peer_ciphertext, cursor_ciphertext)
+                VALUES (%s, %s, 'active', pgp_sym_encrypt(%s, %s), pgp_sym_encrypt(%s, %s), pgp_sym_encrypt(%s, %s))
+                ON CONFLICT (user_id, channel_type) DO UPDATE SET status = 'active',
+                    credentials_ciphertext = EXCLUDED.credentials_ciphertext,
+                    bound_peer_ciphertext = EXCLUDED.bound_peer_ciphertext,
+                    cursor_ciphertext = EXCLUDED.cursor_ciphertext, last_error_code = NULL,
+                    updated_at = NOW()
+                """,
+                (user_id, channel_type, _json(values), key, route.peer_ref, key, "", key),
+            )
+
+
+async def update_binding_timeout(user_id: str, channel_type: str, seconds: int) -> bool:
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE channel_bindings SET idle_timeout_seconds = %s, updated_at = NOW() WHERE user_id = %s AND channel_type = %s AND status = 'active'",
+                (seconds, user_id, channel_type),
             )
             return cur.rowcount == 1
