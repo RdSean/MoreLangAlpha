@@ -99,19 +99,34 @@ Agent。其责任是：
 - 使用给定凭证和游标拉取 webhook/长轮询更新；
 - 将平台更新规范化为 `InboundMessage`；
 - 将 `OutboundMessage` 发送至平台；
-- 声明平台能力和限制，例如最大文本长度、是否支持 typing、支持哪些媒体。
+- 声明平台能力和限制，例如最大文本长度、是否支持 typing、支持哪些媒体；
+- 解析本平台图片引用为已校验的内部图片内容。微信的 CDN 下载、AES 解密与
+  MIME/尺寸校验属于这一层，不由 Gateway 探测适配器私有方法。
+
+平台凭证被撤销时，Adapter 抛出通用的 `ChannelBindingExpiredError`。Gateway 只处理
+这个中立契约并将 binding 标为 `reauth_required`，不导入微信异常或按通道名称分支。
+`WeChatILinkAdapter` 保留旧 `BindingExpiredError` 名称作为兼容别名，但新实现均使用
+通用异常。
 
 建议的抽象输入/输出：
 
 ```python
 class ChannelAdapter(Protocol):
     channel_type: str
+    max_outbound_text_length: int | None
 
-    async def begin_link(self) -> LinkChallenge: ...
-    async def poll_link(self, challenge: LinkChallenge) -> LinkStatus: ...
-    async def fetch_updates(self, binding: BindingCredentials, cursor: str) -> UpdateBatch: ...
-    def normalize(self, update: object, binding: BindingView) -> InboundMessage: ...
-    async def deliver(self, binding: BindingCredentials, message: OutboundMessage) -> DeliveryReceipt: ...
+    async def begin_link(
+        self, previous_credentials: BindingCredentials | None = None
+    ) -> LinkChallenge: ...
+    async def poll_link(self, challenge: LinkChallenge,
+                        verification_code: str | None = None) -> LinkPollResult: ...
+    async def fetch_updates(self, credentials: BindingCredentials,
+                            cursor: str | None) -> UpdateBatch: ...
+    def normalize(self, raw_update: object, binding: BindingRoute) -> InboundMessage: ...
+    async def resolve_images(self, media: tuple[InboundMedia, ...], *, max_bytes: int,
+                             max_pixels: int) -> tuple[ResolvedImage, ...]: ...
+    async def deliver(self, credentials: BindingCredentials, reply_context: ReplyContext,
+                      message: OutboundMessage) -> DeliveryReceipt: ...
 ```
 
 这些方法不持有数据库连接，也不启动永久 `run()` 循环。游标、链接状态、租约和
@@ -125,11 +140,16 @@ class ChannelAdapter(Protocol):
 
 GatewayRunner 是通用的可靠性层，负责：
 
-- PostgreSQL 绑定租约，保证同一微信 token 同一时刻最多一个 worker 长轮询；
+- PostgreSQL 绑定租约，保证同一平台 binding 同一时刻最多一个 worker 长轮询；
 - 入站消息持久化、平台消息 ID 去重、会话顺序和闲置超时轮换；
 - 以稳定的请求键调用 AgentAdapter，恢复进程崩溃中断的请求；
 - delivery outbox 的写入、领取、重试和终态记录；
 - 指数退避、`-14` 失效与可观测的无敏感状态。
+
+文本回复在写入可靠发件箱之前由 Gateway 按 Adapter 声明的
+`max_outbound_text_length` 通用分片。分片顺序是段落空行、换行、空格，最后才在长度
+上限硬切；这样所有有文本限制的通道都能复用顺序与持久化语义，微信仅提供其
+2,000 字符限制。
 
 GatewayRunner 作为独立 worker 进程运行，不嵌入 FastAPI 的 request 生命周期。
 API 服务负责设置页和绑定接口；worker 负责轮询与消息处理。两个进程共享
@@ -150,7 +170,8 @@ class AgentAdapter(Protocol):
 调用既有内部 Chat API：
 
 - 新通道 session：`POST /api/v1/threads/messages`，请求设置
-  `agent_mode="flash"`、`platform="wechat"`、唯一的 `external_thread_id`；
+  `agent_mode="flash"`、来自 `AgentTurn.channel_type` 的 `platform`、唯一的
+  `external_thread_id`；
 - 已有通道 session：`POST /api/v1/threads/{thread_id}/messages`；
 - 每次请求携带 `X-Service-Token`、`X-User-Id` 与由 inbound message 推导的稳定
   `request_key`；
@@ -223,14 +244,22 @@ LangAlpha 的 `external_thread_id` 必须由 `binding_id + peer + session_uuid` 
 
 ### 二维码绑定
 
-1. 设置页调用通用的“创建微信绑定挑战”接口。
+1. 设置页调用通用的“创建微信绑定挑战”接口。若已有 active binding，服务仅在这
+   一次服务端请求中解密其凭证交给 Adapter；微信 Adapter 从中取 iLink token 并按
+   SDK 约定传为 `local_token_list`。旧 token 不写入二维码 attempt，也不返回浏览器。
 2. API 经 WeChatChannelAdapter 调用 `get_bot_qrcode`，持久化 link attempt 后返回
    展示用二维码 URL 和 attempt ID。
 3. 前端轮询 attempt 状态；API 通过 Adapter 调用 `get_qrcode_status`。
-4. `wait` 和 `scaned` 只更新状态；若返回 `need_verifycode`，前端将一次性输入的
+4. `wait` 和 `scaned` 只更新状态；本地 10 秒查询超时也按 `waiting` 完成该次轮询、
+   释放短租约并返回当前 attempt，前端随后可继续轮询而不会收到 API 500。若返回
+   `need_verifycode`，前端将一次性输入的
    手机端配对码传回同一 attempt 的状态查询；`expired` 允许用户重新创建二维码。
 5. `confirmed` 在一个事务中写入加密凭证、绑定微信 ID和默认 6 小时超时，随后
-   GatewayRunner 可取得 binding 租约并开始轮询。
+   GatewayRunner 可取得 binding 租约并开始轮询。SDK 返回 `binded_redirect` 时，
+   Adapter 返回不带凭证的 `linked + reuse_existing_binding` 结果；同一事务确认原
+   binding 仍 active 后只关闭 attempt，不重置旧 binding 的 cursor、session 或 epoch。
+   若用户在扫码期间已经断开该 binding，则 attempt 终态为 `binding_not_active`，不会
+   以服务端错误结束。
 
 二维码和凭证均不返回给前端日志、浏览器存储或普通 API 状态对象。二维码图片 URL
 仅在该 attempt 存活期间返回；配对码不持久化也不回显。
@@ -299,15 +328,17 @@ delivery outbox 不是给 FlashAdapter 的队列。它是 Flash 已经返回最�
 - 二维码尝试使用数据库短租约。创建新二维码会取消同用户同平台所有未终态尝试；轮询只可领取一次，
   取消、过期或另一轮询完成后，旧响应无法激活或覆盖 binding。绑定激活与尝试置为 `linked` 在同一
   事务中完成。状态请求由 `asyncio.wait_for` 限制为 10 秒，低于默认 30 秒尝试租约至少 5 秒，
-  不让 SDK 的默认 5 分钟 HTTP 超时导致一次性配对码轮询失去租约。
+  不让 SDK 的默认 5 分钟 HTTP 超时导致一次性配对码轮询失去租约。若本地等待仍到达
+  10 秒上限，服务会将本次结果持久化为 `waiting` 并释放租约，而非将超时传播为 500。
 - 图片 CDN 下载先根据 `Content-Length` 和流式密文累计字节限制响应，再解密、检查 MIME 和像素；
   没有该消息自己的 `context_token` 时直接记为 rejected，绝不以 peer ID 伪造回复令牌。
   若图片项同时给出 `image_item.aeskey` 与 CDN `media.aes_key`，适配器优先前者，后者仅作为
   兼容回退。Flash 文本在写入 outbox 前按 `max_ilink_text_length` 分片，该配置的上限固定为
-  iLink 兼容的 2000 字符。设置页的手工配对码成功路径与轮询成功路径一致，都会关闭二维码弹窗并
+  iLink 兼容的 2000 字符。Gateway 会优先以段落、换行、空格自然分界后才硬切分文本，避免在
+  微信端将一段答复机械截断。设置页的手工配对码成功路径与轮询成功路径一致，都会关闭二维码弹窗并
   刷新连接状态。
 - SDK 在收件长轮询或发件时返回 iLink 会话失效错误（errcode -14），均转换成同一
-  `BindingExpiredError`，由 GatewayRunner 标记为 `reauth_required`，避免失效 token 被普通重试
+  `ChannelBindingExpiredError`，由 GatewayRunner 标记为 `reauth_required`，避免失效 token 被普通重试
   长期占用。
 - 同一批恢复的消息即使跨越 6 小时，较早消息所属的 session 被后续消息关闭后，仍可完成原本已
   排队的 Flash turn 和 outbox 确认；关闭只阻止新的路由，不能让历史收件无限重试。`rejected` 与
@@ -345,8 +376,10 @@ delivery outbox 不是给 FlashAdapter 的队列。它是 Flash 已经返回最�
                          -> 二维码过期或绑定失效，可重新开始
 ```
 
-已连接卡片显示连接状态、可编辑的会话闲置超时（默认 6 小时）和断开连接动作。前端
-只拿到安全状态、二维码展示 URL 和超时设置；不取得 iLink 凭证、微信 ID或回复 token。
+已连接卡片显示连接状态、可编辑的会话闲置超时（默认 6 小时）、重新配置和断开连接
+动作。重新配置仍走新的短期二维码 attempt；若扫码账号仍是当前 iLink 账号，平台的
+`binded_redirect` 会保留既有连接而不是人为重绑。前端只拿到安全状态、二维码展示 URL
+和超时设置；不取得 iLink 凭证、微信 ID或回复 token。
 
 API 使用 `/api/v1/channels/...` 通用前缀，而不是 `/wechat_gateway/...`。第一期
 需要的操作为：读取通道状态、创建/取消/查询绑定挑战、更新闲置超时和解绑。具体
@@ -367,9 +400,13 @@ API 使用 `/api/v1/channels/...` 通用前缀，而不是 `/wechat_gateway/...`
 ### 单元测试
 
 - 微信二维码状态映射、凭证解析和 `-14`；
+- active binding 的 `local_token_list` 重配置、`binded_redirect` 原子复用，以及二维码
+  轮询本地超时后的 `waiting` 与 lease 释放；
 - iLink 文本/图片规范化、绑定发件人校验、图片 MIME/大小校验；
 - `context_token` 必须从被引用 inbound message 读取；
 - 文本分片、确定性 client ID、delivery 重试；
+- 通用 `ChannelBindingExpiredError`、图片解析能力、平台文本限制与 Flash 的 channel
+  provenance；
 - session 6 小时轮换与 `last_inbound_at` 而非 thread `updated_at`；
 - Flash SSE 的 chunk/finish/error 汇总和稳定 request key；
 - 被跳过的语音、文件、视频绝不触发下载或 Flash。
