@@ -131,4 +131,5 @@ def test_claimed_inbound_includes_encrypted_binding_credentials() -> None:
     claim_start = source.index("async def claim_pending_inbound")
     claim_source = source[claim_start : source.index("async def ack_inbound_and_enqueue_deliveries", claim_start)]
     assert "pgp_sym_decrypt(b.credentials_ciphertext" in claim_source
-    assert "credentials = BindingCredentials" in claim_source
+    assert "credentials = (" in claim_source
+    assert "BindingCredentials(" in claim_source

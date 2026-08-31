@@ -463,14 +463,22 @@ async def claim_pending_inbound(limit: int, lease_seconds: int) -> list[ClaimedI
                         raise RuntimeError(
                             "channel binding credentials ciphertext is malformed"
                         ) from exc
-                    credentials = BindingCredentials(
-                        binding_ref=str(row["binding_id"]),
-                        channel_type=str(row["channel_type"]),
-                        values=tuple(
-                            (str(key_name), str(value))
-                            for key_name, value in credential_values.items()
-                        ),
-                    ) if credential_values else None
+                    if credential_values and not isinstance(credential_values, dict):
+                        raise RuntimeError(
+                            "channel binding credentials ciphertext is malformed"
+                        )
+                    credentials = (
+                        BindingCredentials(
+                            binding_ref=str(row["binding_id"]),
+                            channel_type=str(row["channel_type"]),
+                            values=tuple(
+                                (str(key_name), str(value))
+                                for key_name, value in credential_values.items()
+                            ),
+                        )
+                        if credential_values
+                        else None
+                    )
                     result.append(
                         ClaimedInbound(
                             inbound_message_id=row["inbound_message_id"],

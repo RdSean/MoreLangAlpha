@@ -2,6 +2,15 @@
 
 ## 2026-08-31
 
+### 微信 iLink 最终消息分块与 Typing
+
+- 在通用 `ChannelAdapter` 增加 binding 生命周期、typing 刷新和最终消息预处理钩子；`GatewayRunner`
+  负责在 Agent turn 期间启动/取消 typing，并保证异常不会触发错误重试或泄漏 typing 状态。
+- 微信适配器直接复用本地 `wechatbot-sdk` 的 `ILinkApi`，支持 `getconfig`/`sendtyping`、连接上线/下线通知，
+  同时继续使用 PostgreSQL 加密 `context_token` 作为回复上下文。
+- 微信最终回复移植 Hermes 的 Markdown 标题、表格、代码块和语义分片策略，按 iLink 长度限制写入有序
+  delivery outbox；明确不实现逐 token 推送、`GENERATING` 更新或消息编辑。
+
 ### 微信最终内容分块与 Typing 设计
 
 - 对照 Hermes `BasePlatformAdapter`、`stream_dispatch.py`、Weixin adapter 及本地
