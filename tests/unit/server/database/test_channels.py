@@ -121,3 +121,14 @@ def test_inbound_optional_encrypted_values_have_explicit_postgres_types() -> Non
     persist_start = source.index("async def persist_update_batch")
     persist_source = source[persist_start : source.index("async def _get_or_rotate_session_locked", persist_start)]
     assert persist_source.count("CASE WHEN %s::text IS NULL THEN NULL") == 2
+
+
+def test_claimed_inbound_includes_encrypted_binding_credentials() -> None:
+    source = (Path(__file__).parents[4] / "src/server/database/channels.py").read_text(
+        encoding="utf-8"
+    )
+
+    claim_start = source.index("async def claim_pending_inbound")
+    claim_source = source[claim_start : source.index("async def ack_inbound_and_enqueue_deliveries", claim_start)]
+    assert "pgp_sym_decrypt(b.credentials_ciphertext" in claim_source
+    assert "credentials = BindingCredentials" in claim_source

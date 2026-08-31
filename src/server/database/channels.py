@@ -77,6 +77,7 @@ class ClaimedInbound:
     attempts: int
     channel_type: str = "wechat"
     binding_epoch: int = 1
+    credentials: BindingCredentials | None = None
 
 
 @dataclass(frozen=True)
@@ -422,6 +423,8 @@ async def claim_pending_inbound(limit: int, lease_seconds: int) -> list[ClaimedI
                            pgp_sym_decrypt(c.media_ciphertext, %s) AS media_json,
                            pgp_sym_decrypt(c.reply_context_ciphertext, %s) AS reply_json,
                            b.user_id, b.channel_type, b.binding_epoch,
+                           pgp_sym_decrypt(b.credentials_ciphertext, %s)
+                               AS credentials_json,
                            pgp_sym_decrypt(s.agent_session_ref_ciphertext, %s)
                                AS agent_session_ref,
                            pgp_sym_decrypt(s.peer_ciphertext, %s) AS peer_ref
@@ -432,7 +435,7 @@ async def claim_pending_inbound(limit: int, lease_seconds: int) -> list[ClaimedI
                     LEFT JOIN channel_sessions s
                       ON s.session_id = c.session_id AND s.binding_epoch = c.binding_epoch
                     """,
-                    (limit, float(lease_seconds), key, key, key, key),
+                    (limit, float(lease_seconds), key, key, key, key, key),
                 )
                 rows = await cur.fetchall()
                 result: list[ClaimedInbound] = []
@@ -454,6 +457,20 @@ async def claim_pending_inbound(limit: int, lease_seconds: int) -> list[ClaimedI
                         if reply_data
                         else None
                     )
+                    try:
+                        credential_values = json.loads(row["credentials_json"] or "{}")
+                    except (TypeError, ValueError) as exc:
+                        raise RuntimeError(
+                            "channel binding credentials ciphertext is malformed"
+                        ) from exc
+                    credentials = BindingCredentials(
+                        binding_ref=str(row["binding_id"]),
+                        channel_type=str(row["channel_type"]),
+                        values=tuple(
+                            (str(key_name), str(value))
+                            for key_name, value in credential_values.items()
+                        ),
+                    ) if credential_values else None
                     result.append(
                         ClaimedInbound(
                             inbound_message_id=row["inbound_message_id"],
@@ -464,6 +481,7 @@ async def claim_pending_inbound(limit: int, lease_seconds: int) -> list[ClaimedI
                             text=row["text_content"],
                             media=media,
                             reply_context=reply,
+                            credentials=credentials,
                             request_key=str(row["inbound_message_id"]),
                             lease_generation=int(row["lease_generation"]),
                             user_id=row["user_id"],
