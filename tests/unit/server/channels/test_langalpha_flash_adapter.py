@@ -242,10 +242,10 @@ async def test_flash_adapter_emits_structured_events_without_channel_filtering(m
                     'data: {"agent":"main","content":"先检查"}',
                     "",
                     "event: tool_call_chunks",
-                    'data: {"tool_call_chunks":[{"name":"search","args":{"q":"x"},"preview":"x"}]}',
+                    'data: {"tool_call_chunks":[{"name":"search","index":2,"args":{"q":"x"},"preview":"x"}]}',
                     "",
                     "event: tool_call_result",
-                    'data: {"name":"search","duration":0.2,"ok":true}',
+                    'data: {"tool_call_id":"call-1","duration":0.2,"ok":true}',
                     "",
                     "event: message_chunk",
                     'data: {"agent":"task:one","role":"assistant","content_type":"text","content":"子任务"}',
@@ -278,6 +278,8 @@ async def test_flash_adapter_emits_structured_events_without_channel_filtering(m
     assert any(isinstance(event, Commentary) for event in events)
     assert any(isinstance(event, ToolCallChunk) for event in events)
     assert any(isinstance(event, ToolCallFinished) for event in events)
+    assert next(event for event in events if isinstance(event, ToolCallChunk)).index == 2
+    assert next(event for event in events if isinstance(event, ToolCallFinished)).tool_call_id == "call-1"
     assert isinstance(events[-1], MessageStop)
     assert "答案" == "".join(part.text for part in result.parts)
 

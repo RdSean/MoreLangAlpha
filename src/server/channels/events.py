@@ -49,6 +49,7 @@ class ToolCallFinished:
     duration: float = 0.0
     ok: bool = True
     index: int = 0
+    tool_call_id: str | None = None
 
 
 @dataclass(frozen=True)

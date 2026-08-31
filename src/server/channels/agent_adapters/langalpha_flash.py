@@ -191,18 +191,24 @@ class LangAlphaFlashAdapter:
                     if not isinstance(args, dict):
                         args = None
                     preview = raw_chunk.get("preview")
+                    raw_index = raw_chunk.get("index", index)
+                    try:
+                        event_index = int(raw_index)
+                    except (TypeError, ValueError):
+                        event_index = index
                     emit(
                         ToolCallChunk(
                             tool_name=str(name),
                             preview=str(preview) if preview is not None else None,
                             args=args,
-                            index=index,
+                            index=event_index,
                         )
                     )
                 continue
             if event in {"tool_call_result", "tool_finished", "tool_result"}:
                 name = payload.get("tool_name") or payload.get("name")
-                if name:
+                tool_call_id = payload.get("tool_call_id") or payload.get("id")
+                if name or tool_call_id:
                     duration = (
                         payload.get("duration")
                         or payload.get("duration_seconds")
@@ -214,11 +220,14 @@ class LangAlphaFlashAdapter:
                         duration_value = 0.0
                     emit(
                         ToolCallFinished(
-                            tool_name=str(name),
+                            tool_name=str(name or ""),
                             duration=duration_value,
                             ok=payload.get("ok", payload.get("success", True))
                             is not False,
                             index=int(payload.get("index") or 0),
+                            tool_call_id=(
+                                str(tool_call_id) if tool_call_id is not None else None
+                            ),
                         )
                     )
                 continue

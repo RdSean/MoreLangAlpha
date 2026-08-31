@@ -45,3 +45,13 @@ def test_stream_event_vocabulary_carries_lifecycle_and_tool_facts() -> None:
     assert events[3].index == 2  # type: ignore[union-attr]
     assert events[4].ok is False  # type: ignore[union-attr]
     assert events[6].kind == "online"  # type: ignore[union-attr]
+
+
+def test_tool_finish_can_identify_results_without_a_tool_name() -> None:
+    event = ToolCallFinished(
+        tool_name="",
+        tool_call_id="call-1",
+        duration=0.2,
+    )
+
+    assert event.tool_call_id == "call-1"
