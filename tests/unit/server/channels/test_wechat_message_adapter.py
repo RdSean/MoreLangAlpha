@@ -68,6 +68,70 @@ def test_only_bound_sender_text_and_image_become_processable() -> None:
     assert inbound.reply_context is not None
 
 
+@pytest.mark.asyncio
+async def test_typing_uses_cached_ticket_and_stops_with_status_two() -> None:
+    api = AsyncMock()
+    api.get_config.return_value = {"typing_ticket": "ticket-1"}
+    adapter = WeChatILinkAdapter(api=api)
+    context = ReplyContext("peer-1", (("context_token", "ctx"),))
+
+    await adapter.send_typing(_credentials(), context)
+    await adapter.send_typing(_credentials(), context)
+    await adapter.stop_typing(_credentials(), context)
+
+    api.get_config.assert_awaited_once_with(
+        "https://base.invalid", "secret", "peer-1", "ctx"
+    )
+    assert api.send_typing.await_count == 3
+    assert api.send_typing.await_args_list[0].args == (
+        "https://base.invalid",
+        "secret",
+        "peer-1",
+        "ticket-1",
+        1,
+    )
+    assert api.send_typing.await_args_list[-1].args[-1] == 2
+
+
+@pytest.mark.asyncio
+async def test_binding_lifecycle_notifies_ilink_without_propagating_errors() -> None:
+    api = AsyncMock()
+    api.notify_start.side_effect = RuntimeError("offline")
+    api.notify_stop.side_effect = RuntimeError("offline")
+    adapter = WeChatILinkAdapter(api=api)
+
+    await adapter.on_binding_start(_credentials())
+    await adapter.on_binding_stop(_credentials())
+
+    api.notify_start.assert_awaited_once_with("https://base.invalid", "secret")
+    api.notify_stop.assert_awaited_once_with("https://base.invalid", "secret")
+
+
+def test_wechat_final_parts_normalize_markdown_and_preserve_code_blocks() -> None:
+    adapter = WeChatILinkAdapter(max_text_length=2000)
+    parts = adapter.prepare_outbound_parts(
+        (
+            TextPart(
+                "# Title\n\n| Name | Value |\n| --- | --- |\n| mode | fast |\n\n```python\nprint('ok')\n```"
+            ),
+        )
+    )
+
+    assert parts == (
+        TextPart("【Title】"),
+        TextPart("- Name: mode\n  Value: fast"),
+        TextPart("```python\nprint('ok')\n```"),
+    )
+
+
+def test_wechat_final_parts_split_oversized_units_naturally() -> None:
+    adapter = WeChatILinkAdapter(max_text_length=8)
+
+    parts = adapter.prepare_outbound_parts((TextPart("aaaaa\nbbbbb"),))
+
+    assert parts == (TextPart("aaaaa"), TextPart("bbbbb"))
+
+
 def test_image_item_aeskey_takes_precedence_over_cdn_aes_key() -> None:
     adapter = WeChatILinkAdapter(api=AsyncMock())
 

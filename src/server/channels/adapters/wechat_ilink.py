@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import re
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
@@ -41,9 +43,193 @@ from src.server.channels.events import MessageChunk, MessageStop
 # Kept for adapter consumers that imported the former concrete error.
 BindingExpiredError = ChannelBindingExpiredError
 
+_HEADER_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+_TABLE_RULE_RE = re.compile(r"^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$")
+_FENCE_RE = re.compile(r"^```([^\n`]*)\s*$")
+
+
+def _split_table_row(line: str) -> list[str]:
+    row = line.strip()
+    if row.startswith("|"):
+        row = row[1:]
+    if row.endswith("|"):
+        row = row[:-1]
+    return [cell.strip() for cell in row.split("|")]
+
+
+def _rewrite_header(line: str) -> str:
+    match = _HEADER_RE.match(line)
+    if not match:
+        return line.rstrip()
+    title = match.group(2).strip()
+    return f"【{title}】" if len(match.group(1)) == 1 else f"**{title}**"
+
+
+def _rewrite_table(lines: list[str]) -> str:
+    if len(lines) < 3:
+        return "\n".join(lines)
+    headers = _split_table_row(lines[0])
+    rows = [_split_table_row(line) for line in lines[2:] if line.strip()]
+    if not headers or not rows:
+        return "\n".join(lines)
+    rendered: list[str] = []
+    for row in rows:
+        pairs = []
+        for index, value in enumerate(row):
+            if index >= len(headers):
+                break
+            value = value.strip()
+            if value:
+                pairs.append((headers[index] or f"Column {index + 1}", value))
+        if not pairs:
+            continue
+        rendered.append(f"- {pairs[0][0]}: {pairs[0][1]}")
+        rendered.extend(f"  {label}: {value}" for label, value in pairs[1:])
+    return "\n".join(rendered) if rendered else "\n".join(lines)
+
+
+def _normalize_markdown(content: str) -> str:
+    lines = content.splitlines()
+    result: list[str] = []
+    in_code = False
+    index = 0
+    while index < len(lines):
+        line = lines[index].rstrip()
+        if _FENCE_RE.match(line.strip()):
+            in_code = not in_code
+            result.append(line)
+            index += 1
+            continue
+        if in_code:
+            result.append(line)
+            index += 1
+            continue
+        if (
+            index + 1 < len(lines)
+            and "|" in lines[index]
+            and _TABLE_RULE_RE.match(lines[index + 1].rstrip())
+        ):
+            table = [lines[index].rstrip(), lines[index + 1].rstrip()]
+            index += 2
+            while index < len(lines) and "|" in lines[index]:
+                table.append(lines[index].rstrip())
+                index += 1
+            result.append(_rewrite_table(table))
+            continue
+        result.append(_rewrite_header(line))
+        index += 1
+    normalized = "\n".join(item.rstrip() for item in result)
+    return re.sub(r"\n{3,}", "\n\n", normalized).strip()
+
+
+def _split_markdown_blocks(content: str) -> list[str]:
+    if not content:
+        return []
+    blocks: list[str] = []
+    current: list[str] = []
+    in_code = False
+    for raw_line in content.splitlines():
+        line = raw_line.rstrip()
+        if _FENCE_RE.match(line.strip()):
+            if not in_code and current:
+                blocks.append("\n".join(current).strip())
+                current = []
+            current.append(line)
+            in_code = not in_code
+            if not in_code:
+                blocks.append("\n".join(current).strip())
+                current = []
+            continue
+        if in_code:
+            current.append(line)
+        elif not line.strip():
+            if current:
+                blocks.append("\n".join(current).strip())
+                current = []
+        else:
+            current.append(line)
+    if current:
+        blocks.append("\n".join(current).strip())
+    return [block for block in blocks if block]
+
+
+def _split_delivery_units(content: str) -> list[str]:
+    units: list[str] = []
+    for block in _split_markdown_blocks(content):
+        if _FENCE_RE.match(block.splitlines()[0].strip()):
+            units.append(block)
+            continue
+        current: list[str] = []
+        for raw_line in block.splitlines():
+            line = raw_line.rstrip()
+            if not line.strip():
+                if current:
+                    units.append("\n".join(current).strip())
+                    current = []
+                continue
+            if current and raw_line.startswith((" ", "\t")):
+                current.append(line)
+            else:
+                if current:
+                    units.append("\n".join(current).strip())
+                current = [line]
+        if current:
+            units.append("\n".join(current).strip())
+    return [unit for unit in units if unit]
+
+
+def _hard_split(text: str, limit: int) -> list[str]:
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > limit:
+        window = remaining[:limit]
+        split_at = max(window.rfind("\n"), window.rfind(" "))
+        if split_at < limit * 3 // 10:
+            split_at = limit
+        chunks.append(remaining[:split_at].rstrip())
+        remaining = remaining[split_at:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks or [text]
+
+
+def _pack_units(units: list[str], limit: int) -> list[str]:
+    packed: list[str] = []
+    current = ""
+    for unit in units:
+        if len(unit) > limit:
+            if current:
+                packed.append(current)
+                current = ""
+            packed.extend(_hard_split(unit, limit))
+            continue
+        candidate = unit if not current else f"{current}\n\n{unit}"
+        if len(candidate) <= limit:
+            current = candidate
+        else:
+            packed.append(current)
+            current = unit
+    if current:
+        packed.append(current)
+    return packed
+
+
+def _split_final_text(content: str, limit: int) -> list[str]:
+    if len(content) <= limit and "\n" not in content:
+        return [content]
+    units = _split_delivery_units(content)
+    chunks: list[str] = []
+    for unit in units:
+        if len(unit) <= limit:
+            chunks.append(unit)
+        else:
+            chunks.extend(_pack_units([unit], limit))
+    return chunks or [content]
+
 
 class WeChatILinkAdapter(ChannelAdapter):
     channel_type = "wechat"
+    supports_typing = True
 
     def __init__(
         self,
@@ -56,6 +242,136 @@ class WeChatILinkAdapter(ChannelAdapter):
         self.base_url = base_url.rstrip("/")
         self.max_text_length = max_text_length
         self.max_outbound_text_length = max_text_length
+        self._typing_tickets: dict[tuple[str, str], tuple[str, float]] = {}
+        self._started_binding_tokens: set[str] = set()
+
+    @staticmethod
+    def _context_token(reply_context: ReplyContext) -> str | None:
+        value = dict(reply_context.values).get("context_token")
+        return value if isinstance(value, str) and value else None
+
+    def _typing_key(
+        self, credentials: BindingCredentials, reply_context: ReplyContext
+    ) -> tuple[str, str]:
+        return (credentials.binding_ref, reply_context.route_ref)
+
+    def _cached_typing_ticket(
+        self, credentials: BindingCredentials, reply_context: ReplyContext
+    ) -> str | None:
+        key = self._typing_key(credentials, reply_context)
+        entry = self._typing_tickets.get(key)
+        if not entry:
+            return None
+        if time.monotonic() - entry[1] >= 600:
+            self._typing_tickets.pop(key, None)
+            return None
+        return entry[0]
+
+    async def _typing_ticket(
+        self, credentials: BindingCredentials, reply_context: ReplyContext
+    ) -> str | None:
+        cached = self._cached_typing_ticket(credentials, reply_context)
+        if cached:
+            return cached
+        context_token = self._context_token(reply_context)
+        if not context_token:
+            return None
+        values = dict(credentials.values)
+        try:
+            response = await self.api.get_config(
+                values["base_url"],
+                values["token"],
+                reply_context.route_ref,
+                context_token,
+            )
+        except Exception:
+            return None
+        ticket = response.get("typing_ticket") if isinstance(response, dict) else None
+        if not isinstance(ticket, str) or not ticket:
+            return None
+        self._typing_tickets[self._typing_key(credentials, reply_context)] = (
+            ticket,
+            time.monotonic(),
+        )
+        return ticket
+
+    async def on_binding_start(self, credentials: BindingCredentials) -> None:
+        values = dict(credentials.values)
+        token = values.get("token")
+        base_url = values.get("base_url")
+        if not token or not base_url or credentials.binding_ref in self._started_binding_tokens:
+            return
+        try:
+            await self.api.notify_start(base_url, token)
+        except Exception:
+            return
+        self._started_binding_tokens.add(credentials.binding_ref)
+
+    async def on_binding_stop(self, credentials: BindingCredentials) -> None:
+        values = dict(credentials.values)
+        token = values.get("token")
+        base_url = values.get("base_url")
+        if not token or not base_url:
+            return
+        try:
+            await self.api.notify_stop(base_url, token)
+        except Exception:
+            pass
+        self._started_binding_tokens.discard(credentials.binding_ref)
+
+    async def send_typing(
+        self, credentials: BindingCredentials, reply_context: ReplyContext
+    ) -> None:
+        ticket = await self._typing_ticket(credentials, reply_context)
+        if not ticket:
+            return
+        values = dict(credentials.values)
+        try:
+            await self.api.send_typing(
+                values["base_url"],
+                values["token"],
+                reply_context.route_ref,
+                ticket,
+                1,
+            )
+        except Exception:
+            pass
+
+    async def stop_typing(
+        self, credentials: BindingCredentials, reply_context: ReplyContext
+    ) -> None:
+        ticket = self._cached_typing_ticket(credentials, reply_context)
+        if not ticket:
+            return
+        values = dict(credentials.values)
+        try:
+            await self.api.send_typing(
+                values["base_url"],
+                values["token"],
+                reply_context.route_ref,
+                ticket,
+                2,
+            )
+        except Exception:
+            pass
+
+    def prepare_outbound_parts(
+        self, parts: tuple[Any, ...]
+    ) -> tuple[Any, ...]:
+        prepared: list[Any] = []
+        for part in parts:
+            if not isinstance(part, TextPart):
+                prepared.append(part)
+                continue
+            formatted = _normalize_markdown(part.text)
+            if not formatted:
+                continue
+            prepared.extend(
+                TextPart(chunk)
+                for chunk in _split_final_text(formatted, self.max_text_length)
+                if chunk
+            )
+        return tuple(prepared)
 
     def render_message_event(self, event: Any, sink: Any) -> None:
         """Expose only main-agent ordinary text on the user-facing channel."""
