@@ -2,6 +2,16 @@
 
 ## 2026-08-31
 
+### 微信最终内容分块与 Typing 设计
+
+- 对照 Hermes `BasePlatformAdapter`、`stream_dispatch.py`、Weixin adapter 及本地
+  `wechatbot` SDK，明确微信采用“生成期间 typing，完成后按 Markdown 语义块和长度
+  顺序发送最终内容”的策略；不实现逐 token 推送、消息编辑或 `GENERATING` 更新。
+- 新增微信 iLink 分块交付设计文档，记录通用 ChannelAdapter、PostgreSQL
+  delivery outbox、context token、typing ticket、连接状态通知、错误恢复和测试边界。
+- 将 Hermes 与 wechatbot 的有界参考源文件保存在 `docs/references/wechat-ilink/`，
+  便于后续实现和评审时复用经过验证的协议逻辑。
+
 ### 助理设置界面
 
 - 将设置页“通道”改名为“助理设置”，微信接入改为可纵向扩展的助理 group；配置按钮缩小并将扫码二维码内嵌到 group 展开区域，不再使用弹窗。
