@@ -4,7 +4,10 @@ from contextlib import asynccontextmanager
 
 import pytest
 
-from src.server.channels.agent_adapters.langalpha_flash import LangAlphaFlashAdapter
+from src.server.channels.agent_adapters.langalpha_flash import (
+    FlashAgentError,
+    LangAlphaFlashAdapter,
+)
 from src.server.channels.contracts import (
     AgentSession,
     AgentTurn,
@@ -157,3 +160,91 @@ async def test_duplicate_request_reconnects_to_existing_run(monkeypatch):
     assert fake.gets[0][1].endswith(
         "/api/v1/threads/thread-1/messages/stream?run_id=run-1"
     )
+
+
+@pytest.mark.asyncio
+async def test_flash_adapter_only_collects_main_text_from_sse(monkeypatch):
+    fake = FakeClient(
+        [
+            FakeResponse(
+                200,
+                json_data={
+                    "status": "dispatched",
+                    "thread_id": "thread-1",
+                    "run_id": "run-1",
+                },
+            ),
+            FakeResponse(
+                200,
+                lines=[
+                    "event: message_chunk",
+                    'data: {"agent":"main","content_type":"reasoning","content":"内部思考"}',
+                    "",
+                    "event: message_chunk",
+                    'data: {"agent":"task:skill-1","content_type":"text","content":"技能调用过程"}',
+                    "",
+                    "event: commentary",
+                    'data: {"content":"工具执行中"}',
+                    "",
+                    "event: tool_call_result",
+                    'data: {"content":"工具返回值"}',
+                    "",
+                    "event: message_chunk",
+                    'data: {"agent":"main","content_type":"text","content":"最终结果"}',
+                    "",
+                    "event: run_end",
+                    'data: {"status":"completed"}',
+                    "",
+                ],
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        "src.server.channels.agent_adapters.langalpha_flash.httpx.AsyncClient",
+        lambda **kwargs: fake,
+    )
+    adapter = LangAlphaFlashAdapter(base_url="http://backend", service_token="svc")
+
+    result = await adapter.run_turn(
+        session(),
+        AgentTurn("key-1", "你好", __import__("datetime").datetime.now()),
+    )
+
+    assert "最终结果" == "".join(part.text for part in result.parts)
+
+
+@pytest.mark.asyncio
+async def test_flash_adapter_preserves_failed_run_status(monkeypatch):
+    fake = FakeClient(
+        [
+            FakeResponse(
+                200,
+                json_data={
+                    "status": "dispatched",
+                    "thread_id": "thread-1",
+                    "run_id": "run-1",
+                },
+            ),
+            FakeResponse(
+                200,
+                lines=[
+                    "event: run_end",
+                    'data: {"status":"failed"}',
+                    "",
+                ],
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        "src.server.channels.agent_adapters.langalpha_flash.httpx.AsyncClient",
+        lambda **kwargs: fake,
+    )
+    adapter = LangAlphaFlashAdapter(base_url="http://backend", service_token="svc")
+
+    with pytest.raises(FlashAgentError) as error:
+        await adapter.run_turn(
+            session(),
+            AgentTurn("key-1", "你好", __import__("datetime").datetime.now()),
+        )
+
+    assert getattr(error.value, "code", None) == "failed"

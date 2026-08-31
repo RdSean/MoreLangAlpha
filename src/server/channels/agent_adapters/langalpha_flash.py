@@ -131,17 +131,29 @@ class LangAlphaFlashAdapter:
                 raise FlashAgentError(
                     str(detail), code=str(payload.get("code") or "flash_run_error")
                 )
-            if event == "message_chunk" or payload.get("content_type") == "text":
-                role = payload.get("role")
-                if role and role not in {"assistant", "agent", "main"}:
-                    continue
-                content = payload.get("content")
-                if isinstance(content, str) and content:
-                    chunks.append(content)
             if event in {"run_end", "done", "finish", "complete"}:
                 status = str(payload.get("status") or "").lower()
                 if status in {"failed", "error", "cancelled"}:
                     raise FlashAgentError("Flash run did not complete", code=status)
+                continue
+            # SSE contains presentation-only reasoning, tool, commentary, and
+            # subagent events alongside the assistant response. A channel
+            # delivery must receive only the main agent's user-facing text;
+            # these filters do not alter the persisted run transcript.
+            if event != "message_chunk":
+                continue
+            content_type = payload.get("content_type")
+            if content_type not in (None, "text"):
+                continue
+            role = payload.get("role")
+            if role and role not in {"assistant", "agent", "main"}:
+                continue
+            agent = payload.get("agent")
+            if agent is not None and str(agent) != "main":
+                continue
+            content = payload.get("content")
+            if isinstance(content, str) and content:
+                chunks.append(content)
         if not chunks:
             raise FlashAgentError("Flash run produced no text", code="empty_response")
         return AgentTurnResult(
