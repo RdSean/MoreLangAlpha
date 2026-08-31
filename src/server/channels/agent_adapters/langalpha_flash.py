@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -16,6 +17,14 @@ from src.server.channels.contracts import (
     AgentTurnResult,
     OpenSessionRequest,
     TextPart,
+)
+from src.server.channels.events import (
+    Commentary,
+    MessageChunk,
+    MessageStop,
+    StreamEvent,
+    ToolCallChunk,
+    ToolCallFinished,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,6 +107,7 @@ class LangAlphaFlashAdapter:
         response: Any,
         *,
         fallback_thread_id: str | None,
+        on_event: Callable[[StreamEvent], None] | None = None,
     ) -> AgentTurnResult:
         chunks: list[str] = []
         thread_id = fallback_thread_id
@@ -118,6 +128,15 @@ class LangAlphaFlashAdapter:
             if not isinstance(payload, dict):
                 continue
             event = str(payload.get("event") or event_name or "")
+
+            def emit(stream_event: StreamEvent) -> None:
+                if on_event is None:
+                    return
+                try:
+                    on_event(stream_event)
+                except Exception:
+                    logger.debug("Flash stream event callback failed", exc_info=True)
+
             if event == "metadata" or payload.get("thread_id"):
                 candidate = payload.get("thread_id") or (
                     payload.get("metadata") or {}
@@ -135,23 +154,94 @@ class LangAlphaFlashAdapter:
                 status = str(payload.get("status") or "").lower()
                 if status in {"failed", "error", "cancelled"}:
                     raise FlashAgentError("Flash run did not complete", code=status)
+                emit(MessageStop(final=True))
                 continue
-            # SSE contains presentation-only reasoning, tool, commentary, and
-            # subagent events alongside the assistant response. A channel
-            # delivery must receive only the main agent's user-facing text;
-            # these filters do not alter the persisted run transcript.
+            if event in {"commentary", "assistant_commentary"}:
+                content = payload.get("content")
+                if isinstance(content, str) and content:
+                    emit(
+                        Commentary(
+                            text=content,
+                            agent=str(payload.get("agent"))
+                            if payload.get("agent") is not None
+                            else None,
+                        )
+                    )
+                continue
+            if event in {"tool_call_chunks", "tool_call_chunk", "tool_call"}:
+                raw_chunks = payload.get("tool_call_chunks")
+                if not isinstance(raw_chunks, list):
+                    raw_chunks = [payload]
+                for index, raw_chunk in enumerate(raw_chunks):
+                    if not isinstance(raw_chunk, dict):
+                        continue
+                    name = raw_chunk.get("name") or raw_chunk.get("tool_name")
+                    if not name:
+                        continue
+                    args = raw_chunk.get("args")
+                    if not isinstance(args, dict):
+                        args = None
+                    preview = raw_chunk.get("preview")
+                    emit(
+                        ToolCallChunk(
+                            tool_name=str(name),
+                            preview=str(preview) if preview is not None else None,
+                            args=args,
+                            index=index,
+                        )
+                    )
+                continue
+            if event in {"tool_call_result", "tool_finished", "tool_result"}:
+                name = payload.get("tool_name") or payload.get("name")
+                if name:
+                    duration = (
+                        payload.get("duration")
+                        or payload.get("duration_seconds")
+                        or 0.0
+                    )
+                    try:
+                        duration_value = float(duration)
+                    except (TypeError, ValueError):
+                        duration_value = 0.0
+                    emit(
+                        ToolCallFinished(
+                            tool_name=str(name),
+                            duration=duration_value,
+                            ok=payload.get("ok", payload.get("success", True))
+                            is not False,
+                            index=int(payload.get("index") or 0),
+                        )
+                    )
+                continue
+            if event in {"message_stop", "assistant_message_stop"}:
+                emit(MessageStop(final=bool(payload.get("final"))))
+                continue
             if event != "message_chunk":
                 continue
+            content = payload.get("content")
             content_type = payload.get("content_type")
+            role = payload.get("role")
+            agent = payload.get("agent")
+            if isinstance(content, str) and content:
+                emit(
+                    MessageChunk(
+                        text=content,
+                        agent=str(agent) if agent is not None else None,
+                        content_type=str(content_type)
+                        if content_type is not None
+                        else None,
+                        role=str(role) if role is not None else None,
+                    )
+                )
+            # The returned result is an agent contract value, independent of
+            # channel presentation. Keep only the ordinary main answer for
+            # callers that do not consume structured events.
             if content_type not in (None, "text"):
                 continue
-            role = payload.get("role")
             if role and role not in {"assistant", "agent", "main"}:
                 continue
-            agent = payload.get("agent")
             if agent is not None and str(agent) != "main":
                 continue
-            content = payload.get("content")
             if isinstance(content, str) and content:
                 chunks.append(content)
         if not chunks:
@@ -161,7 +251,12 @@ class LangAlphaFlashAdapter:
             session_ref=thread_id,
         )
 
-    async def run_turn(self, session: AgentSession, turn: AgentTurn) -> AgentTurnResult:
+    async def run_turn(
+        self,
+        session: AgentSession,
+        turn: AgentTurn,
+        on_event: Callable[[StreamEvent], None] | None = None,
+    ) -> AgentTurnResult:
         thread_id = (
             session.ref
             if session.ref and not session.ref.startswith("wechat:")
@@ -219,7 +314,9 @@ class LangAlphaFlashAdapter:
                                     code="reconnect_failed",
                                 )
                             return await self._consume_sse(
-                                stream, fallback_thread_id=thread_id
+                                stream,
+                                fallback_thread_id=thread_id,
+                                on_event=on_event,
                             )
                 raise FlashAgentError("Flash API rejected the request", code="conflict")
             if response.status_code >= 400:
@@ -231,7 +328,11 @@ class LangAlphaFlashAdapter:
 
             content_type = response.headers.get("content-type", "")
             if "text/event-stream" in content_type:
-                return await self._consume_sse(response, fallback_thread_id=thread_id)
+                return await self._consume_sse(
+                    response,
+                    fallback_thread_id=thread_id,
+                    on_event=on_event,
+                )
 
             data = self._json_response(response)
             if data.get("status") == "dispatched":
@@ -251,7 +352,11 @@ class LangAlphaFlashAdapter:
                         raise FlashAgentError(
                             "Unable to read Flash stream", code="stream_failed"
                         )
-                    return await self._consume_sse(stream, fallback_thread_id=thread_id)
+                    return await self._consume_sse(
+                        stream,
+                        fallback_thread_id=thread_id,
+                        on_event=on_event,
+                    )
             raise FlashAgentError(
                 "Flash API returned an unexpected response", code="invalid_response"
             )

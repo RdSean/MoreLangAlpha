@@ -13,6 +13,13 @@ from src.server.channels.contracts import (
     AgentTurn,
     ResolvedImage,
 )
+from src.server.channels.events import (
+    Commentary,
+    MessageChunk,
+    MessageStop,
+    ToolCallChunk,
+    ToolCallFinished,
+)
 
 
 class FakeResponse:
@@ -211,6 +218,68 @@ async def test_flash_adapter_only_collects_main_text_from_sse(monkeypatch):
     )
 
     assert "最终结果" == "".join(part.text for part in result.parts)
+
+
+@pytest.mark.asyncio
+async def test_flash_adapter_emits_structured_events_without_channel_filtering(monkeypatch):
+    fake = FakeClient(
+        [
+            FakeResponse(
+                200,
+                json_data={
+                    "status": "dispatched",
+                    "thread_id": "thread-1",
+                    "run_id": "run-1",
+                },
+            ),
+            FakeResponse(
+                200,
+                lines=[
+                    "event: message_chunk",
+                    'data: {"agent":"main","role":"assistant","content_type":"reasoning","content":"思考"}',
+                    "",
+                    "event: commentary",
+                    'data: {"agent":"main","content":"先检查"}',
+                    "",
+                    "event: tool_call_chunks",
+                    'data: {"tool_call_chunks":[{"name":"search","args":{"q":"x"},"preview":"x"}]}',
+                    "",
+                    "event: tool_call_result",
+                    'data: {"name":"search","duration":0.2,"ok":true}',
+                    "",
+                    "event: message_chunk",
+                    'data: {"agent":"task:one","role":"assistant","content_type":"text","content":"子任务"}',
+                    "",
+                    "event: message_chunk",
+                    'data: {"agent":"main","role":"assistant","content_type":"text","content":"答案"}',
+                    "",
+                    "event: run_end",
+                    'data: {"status":"completed"}',
+                    "",
+                ],
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        "src.server.channels.agent_adapters.langalpha_flash.httpx.AsyncClient",
+        lambda **kwargs: fake,
+    )
+    events = []
+    adapter = LangAlphaFlashAdapter(base_url="http://backend", service_token="svc")
+
+    result = await adapter.run_turn(
+        session(),
+        AgentTurn("key-1", "你好", __import__("datetime").datetime.now()),
+        on_event=events.append,
+    )
+
+    assert isinstance(events[0], MessageChunk)
+    assert events[0].content_type == "reasoning"
+    assert any(isinstance(event, Commentary) for event in events)
+    assert any(isinstance(event, ToolCallChunk) for event in events)
+    assert any(isinstance(event, ToolCallFinished) for event in events)
+    assert isinstance(events[-1], MessageStop)
+    assert "答案" == "".join(part.text for part in result.parts)
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 from src.server.channels.contracts import (
@@ -10,6 +11,7 @@ from src.server.channels.contracts import (
     AgentTurnResult,
     OpenSessionRequest,
 )
+from src.server.channels.events import StreamEvent
 
 
 @runtime_checkable
@@ -22,4 +24,5 @@ class AgentAdapter(Protocol):
         self,
         session: AgentSession,
         turn: AgentTurn,
+        on_event: Callable[[StreamEvent], None] | None = None,
     ) -> AgentTurnResult: ...
