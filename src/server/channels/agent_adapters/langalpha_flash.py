@@ -60,6 +60,22 @@ class LangAlphaFlashAdapter:
         self.user_id = user_id
         self.timeout = timeout
 
+    @staticmethod
+    def _canonical_agent_name(agent: Any) -> str | None:
+        """Map Flash's graph namespace to the channel agent contract.
+
+        The main Flash graph is emitted with a ``model:<uuid>`` namespace,
+        while background work uses ``task:<id>``.  Channels should not need to
+        know the provider's per-run model UUID, so expose the stable ``main``
+        identity to presentation and result filtering.
+        """
+        if agent is None:
+            return None
+        value = str(agent)
+        if value in {"main", "agent"} or value.startswith("model:"):
+            return "main"
+        return value
+
     async def open_session(self, request: OpenSessionRequest) -> AgentSession:
         # Prefix prevents an opaque external thread key from being mistaken
         # for a real LangAlpha thread id on the first turn.
@@ -162,9 +178,7 @@ class LangAlphaFlashAdapter:
                     emit(
                         Commentary(
                             text=content,
-                            agent=str(payload.get("agent"))
-                            if payload.get("agent") is not None
-                            else None,
+                            agent=self._canonical_agent_name(payload.get("agent")),
                         )
                     )
                 continue
@@ -239,12 +253,12 @@ class LangAlphaFlashAdapter:
             content = payload.get("content")
             content_type = payload.get("content_type")
             role = payload.get("role")
-            agent = payload.get("agent")
+            agent = self._canonical_agent_name(payload.get("agent"))
             if isinstance(content, str) and content:
                 emit(
                     MessageChunk(
                         text=content,
-                        agent=str(agent) if agent is not None else None,
+                        agent=agent,
                         content_type=str(content_type)
                         if content_type is not None
                         else None,
@@ -258,7 +272,7 @@ class LangAlphaFlashAdapter:
                 continue
             if role and role not in {"assistant", "agent", "main"}:
                 continue
-            if agent is not None and str(agent) != "main":
+            if agent is not None and agent != "main":
                 continue
             if isinstance(content, str) and content:
                 chunks.append(content)

@@ -11,6 +11,8 @@
 
 - 微信只接收主 Agent 的最终普通文本；过滤 reasoning、技能/工具调用、工具结果、commentary
   及子 Agent 中间事件，内部运行历史和 Web 端 SSE 展示保持不变。
+- 修复 Flash 主 Agent 在 SSE 中使用 `model:<uuid>` 命名空间时被误判为非主 Agent 的问题；
+  现在在通道边界规范化为稳定的 `main` 身份，避免已完成的回复被 worker 重试 8 次后丢弃。
 
 ### 通道结构化事件与呈现抽象
 

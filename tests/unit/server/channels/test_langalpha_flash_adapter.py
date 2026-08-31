@@ -221,6 +221,49 @@ async def test_flash_adapter_only_collects_main_text_from_sse(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_flash_adapter_collects_model_namespace_as_main_text(monkeypatch):
+    """The main Flash lane uses a ``model:<id>`` namespace on the wire."""
+    fake = FakeClient(
+        [
+            FakeResponse(
+                200,
+                json_data={
+                    "status": "dispatched",
+                    "thread_id": "thread-1",
+                    "run_id": "run-1",
+                },
+            ),
+            FakeResponse(
+                200,
+                lines=[
+                    "event: message_chunk",
+                    'data: {"agent":"model:1569fd6c-4502-4823-d4b7-418bebd4a88b","role":"assistant","content_type":"text","content":"你好"}',
+                    "",
+                    "event: message_chunk",
+                    'data: {"agent":"model:1569fd6c-4502-4823-d4b7-418bebd4a88b","role":"assistant","content_type":"text","content":"，世界"}',
+                    "",
+                    "event: run_end",
+                    'data: {"status":"completed"}',
+                    "",
+                ],
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        "src.server.channels.agent_adapters.langalpha_flash.httpx.AsyncClient",
+        lambda **kwargs: fake,
+    )
+    adapter = LangAlphaFlashAdapter(base_url="http://backend", service_token="svc")
+
+    result = await adapter.run_turn(
+        session(),
+        AgentTurn("key-1", "你好", __import__("datetime").datetime.now()),
+    )
+
+    assert "你好，世界" == "".join(part.text for part in result.parts)
+
+
+@pytest.mark.asyncio
 async def test_flash_adapter_emits_structured_events_without_channel_filtering(monkeypatch):
     fake = FakeClient(
         [
