@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -110,6 +111,89 @@ async def test_ingest_persists_cursor_and_messages_without_calling_agent():
     await runner.ingest_binding(repo.lease)
     assert repo.persisted[0].provider_message_id == "m1"
     assert repo.persisted[0].peer_ref == "peer"
+
+
+@pytest.mark.asyncio
+async def test_runner_starts_and_stops_each_binding_once() -> None:
+    repo = FakeRepo()
+    repo.lease = _lease()
+    channel = FakeChannel()
+    channel.on_binding_start = AsyncMock()
+    channel.on_binding_stop = AsyncMock()
+    runner = GatewayRunner(
+        channel_adapters={"fake": channel},
+        agent_adapter=SimpleNamespace(),
+        repository=repo,
+    )
+
+    await runner.poll_bindings_once()
+    await runner.poll_bindings_once()
+    await runner.stop()
+
+    channel.on_binding_start.assert_awaited_once_with(repo.lease.credentials)
+    channel.on_binding_stop.assert_awaited_once_with(repo.lease.credentials)
+
+
+@pytest.mark.asyncio
+async def test_runner_keeps_typing_during_agent_turn_and_stops_on_error() -> None:
+    claim = SimpleNamespace(
+        binding_id=uuid4(),
+        binding_epoch=1,
+        kind=InboundKind.MESSAGE,
+        session_id=uuid4(),
+        agent_session_ref="thread-1",
+        peer_ref="peer",
+        peer_lookup_hash="peer-hash",
+        user_id="user-1",
+        channel_type="fake",
+        media=(),
+        request_key="request-1",
+        text="hello",
+        inbound_message_id=uuid4(),
+        lease_generation=1,
+        attempts=1,
+        credentials=BindingCredentials("binding", "fake", (("token", "secret"),)),
+        reply_context=ReplyContext("peer", (("context_token", "ctx"),)),
+    )
+
+    @asynccontextmanager
+    async def active_epoch_fence(_binding_id, _binding_epoch):
+        yield True
+
+    typing_started = asyncio.Event()
+    typing_stopped = asyncio.Event()
+
+    async def keep_typing(_credentials, _reply_context, *, stop_event):
+        typing_started.set()
+        await stop_event.wait()
+        typing_stopped.set()
+
+    adapter = SimpleNamespace(
+        supports_typing=True,
+        keep_typing=keep_typing,
+        max_outbound_text_length=None,
+        resolve_images=AsyncMock(return_value=()),
+    )
+
+    async def run_turn(_session, _turn, on_event=None):
+        await typing_started.wait()
+        raise RuntimeError("agent failed")
+
+    repository = SimpleNamespace(
+        claim_pending_inbound=AsyncMock(return_value=[claim]),
+        hold_active_binding_epoch=active_epoch_fence,
+        ack_inbound_and_enqueue_deliveries=AsyncMock(),
+        nack_inbound=AsyncMock(return_value=True),
+    )
+    runner = GatewayRunner(
+        channel_adapters={"fake": adapter},
+        agent_adapter=SimpleNamespace(run_turn=run_turn),
+        repository=repository,
+    )
+
+    assert await runner.process_inbound_once() == 0
+    assert typing_stopped.is_set()
+    repository.nack_inbound.assert_awaited_once()
 
 
 def test_outbound_text_is_split_to_the_provider_limit_in_order() -> None:

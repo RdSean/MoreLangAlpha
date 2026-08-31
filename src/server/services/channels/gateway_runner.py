@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import hashlib
 import inspect
 import logging
@@ -99,9 +100,34 @@ class GatewayRunner:
         self.worker_id = worker_id or f"gateway-{uuid.uuid4()}"
         self.config = get_channel_gateway_config()
         self._stopped = False
+        self._started_bindings: dict[str, tuple[Any, Any]] = {}
+
+    async def _start_binding(self, binding_id: Any, adapter: Any, credentials: Any) -> None:
+        key = str(binding_id)
+        if key in self._started_bindings:
+            return
+        hook = getattr(adapter, "on_binding_start", None)
+        if callable(hook):
+            try:
+                await hook(credentials)
+            except Exception:
+                logger.debug("channel binding start hook failed", exc_info=True)
+        self._started_bindings[key] = (adapter, credentials)
+
+    async def _stop_binding(self, key: str, adapter: Any, credentials: Any) -> None:
+        hook = getattr(adapter, "on_binding_stop", None)
+        if callable(hook):
+            try:
+                await hook(credentials)
+            except Exception:
+                logger.debug("channel binding stop hook failed", exc_info=True)
+        self._started_bindings.pop(key, None)
 
     async def stop(self) -> None:
         self._stopped = True
+        started = list(self._started_bindings.items())
+        for key, (adapter, credentials) in started:
+            await self._stop_binding(key, adapter, credentials)
 
     async def _run_agent_turn(
         self,
@@ -135,10 +161,17 @@ class GatewayRunner:
             )
             if lease is None:
                 continue
+            adapter = self.channel_adapters.get(lease.channel_type)
             try:
+                if adapter is None:
+                    raise RuntimeError(f"no adapter for channel type {lease.channel_type}")
+                await self._start_binding(lease.binding_id, adapter, lease.credentials)
                 await self.ingest_binding(lease)
                 count += 1
             except ChannelBindingExpiredError:
+                await self._stop_binding(
+                    str(lease.binding_id), adapter, lease.credentials
+                )
                 await self.repository.mark_binding_reauth(
                     lease.binding_id, "session_expired"
                 )
@@ -247,17 +280,50 @@ class GatewayRunner:
                     )
                     sink = PresentationSink()
                     dispatcher = ChannelEventDispatcher(adapter, sink)
-                    result = await self._run_agent_turn(
-                        opened,
-                        AgentTurn(
-                            request_key=claim.request_key,
-                            text=claim.text,
-                            received_at=datetime.now(UTC),
-                            channel_type=claim.channel_type,
-                            images=images,
-                        ),
-                        dispatcher.dispatch,
-                    )
+                    typing_task: asyncio.Task[Any] | None = None
+                    typing_stop = asyncio.Event()
+                    credentials = getattr(claim, "credentials", None)
+                    reply_context = getattr(claim, "reply_context", None)
+                    if (
+                        getattr(adapter, "supports_typing", False)
+                        and credentials is not None
+                        and reply_context is not None
+                        and callable(getattr(adapter, "keep_typing", None))
+                    ):
+                        typing_task = asyncio.create_task(
+                            adapter.keep_typing(
+                                credentials,
+                                reply_context,
+                                stop_event=typing_stop,
+                            ),
+                            name=f"channel-typing-{claim.inbound_message_id}",
+                        )
+                    try:
+                        result = await self._run_agent_turn(
+                            opened,
+                            AgentTurn(
+                                request_key=claim.request_key,
+                                text=claim.text,
+                                received_at=datetime.now(UTC),
+                                channel_type=claim.channel_type,
+                                images=images,
+                            ),
+                            dispatcher.dispatch,
+                        )
+                    finally:
+                        if typing_task is not None:
+                            typing_stop.set()
+                            try:
+                                await asyncio.wait_for(typing_task, timeout=2.0)
+                            except asyncio.TimeoutError:
+                                typing_task.cancel()
+                                await asyncio.gather(
+                                    typing_task, return_exceptions=True
+                                )
+                            except Exception:
+                                logger.debug(
+                                    "channel typing task failed", exc_info=True
+                                )
                     rendered_parts = sink.parts
                     if rendered_parts:
                         media_parts = tuple(
@@ -267,9 +333,13 @@ class GatewayRunner:
                             parts=rendered_parts + media_parts,
                             session_ref=result.session_ref,
                         )
+                prepared_parts = tuple(result.parts)
+                prepare = getattr(adapter, "prepare_outbound_parts", None)
+                if callable(prepare):
+                    prepared_parts = tuple(prepare(prepared_parts))
                 result = result.__class__(
                     parts=split_outbound_parts(
-                        result.parts,
+                        prepared_parts,
                         max_text_length=adapter.max_outbound_text_length,
                     ),
                     session_ref=result.session_ref,
