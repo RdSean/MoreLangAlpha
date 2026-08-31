@@ -33,9 +33,12 @@ export function ChannelsTab() {
     const timer = window.setInterval(async () => {
       try {
         const next = await pollWechatLinkAttempt(attempt.attempt_id);
-        setAttempt(next);
+        setAttempt((previous) => ({
+          ...next,
+          qr_code_url: next.qr_code_url ?? previous?.qr_code_url,
+        }));
         if (next.status === 'linked') {
-          setOpen(false);
+          setExpanded(false);
           setAttempt(null);
           void status.refetch();
         }
@@ -62,7 +65,10 @@ export function ChannelsTab() {
     if (!attempt || !verificationCode) return;
     const next = await pollWechatLinkAttempt(attempt.attempt_id, verificationCode);
     setVerificationCode('');
-    setAttempt(next);
+    setAttempt((previous) => ({
+      ...next,
+      qr_code_url: next.qr_code_url ?? previous?.qr_code_url,
+    }));
     if (next.status === 'linked') {
       setExpanded(false);
       setAttempt(null);
@@ -110,7 +116,7 @@ export function ChannelsTab() {
           </div>}
 
           {expanded && <div id="wechat-config-panel" className="mt-5 border-t pt-5" style={{ borderColor: 'var(--color-border-muted)' }}>
-            {attempt?.qr_code_url && <img className="mx-auto aspect-square w-full max-w-[280px] object-contain" src={attempt.qr_code_url} alt={t('settings.wechatQrAlt')} />}
+            {attempt?.qr_code_url && attempt.status !== 'expired' && <img className="mx-auto aspect-square w-full max-w-[280px] object-contain" src={attempt.qr_code_url} alt={t('settings.wechatQrAlt')} />}
             <p className="mt-3 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>{attempt?.status === 'scanned' ? t('settings.wechatScanned') : attempt?.status === 'verification_required' ? t('settings.wechatVerification') : attempt?.status === 'expired' ? t('settings.wechatReauth') : t('settings.wechatWaiting')}</p>
             {attempt?.status === 'verification_required' && <div className="mt-4 flex gap-2"><input autoFocus inputMode="numeric" value={verificationCode} onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))} className="h-9 min-w-0 flex-1 rounded border bg-transparent px-2 text-sm" aria-label={t('settings.wechatVerification')} /><Button onClick={submitVerification}><RefreshCw className="mr-2 size-4" aria-hidden="true" />{t('settings.wechatSave')}</Button></div>}
           </div>}

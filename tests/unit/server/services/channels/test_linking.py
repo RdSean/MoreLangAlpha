@@ -40,6 +40,7 @@ async def test_poll_returns_current_status_when_another_request_holds_attempt_le
     response = await linking.poll_link("user-1", attempt_id, Adapter())
 
     assert response.status == "waiting"
+    assert response.qr_code_url == "https://example.invalid/qr"
     claim.assert_awaited_once()
 
 

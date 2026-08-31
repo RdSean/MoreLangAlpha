@@ -97,6 +97,7 @@ def _link_attempt_response(attempt: dict) -> LinkAttemptResponse:
         attempt_id=attempt["attempt_id"],
         channel_type=attempt["channel_type"],
         status=attempt["status"],
+        qr_code_url=attempt.get("qr_code_url"),
         expires_at=attempt["expires_at"],
         verification_required=attempt["status"]
         == LinkStatus.VERIFICATION_REQUIRED.value,

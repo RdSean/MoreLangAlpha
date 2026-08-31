@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
@@ -30,7 +30,7 @@ import { ChannelsTab } from '../panels/ChannelsTab';
 
 beforeEach(() => {
   state.start.mockReset().mockResolvedValue({
-    attempt_id: 'attempt-1', channel_type: 'wechat', status: 'verification_required',
+    attempt_id: 'attempt-1', channel_type: 'wechat', status: 'waiting',
     qr_code_url: 'https://example.invalid/qr', expires_at: '2026-08-30T00:00:00Z',
   });
   state.poll.mockReset().mockResolvedValue({
@@ -45,25 +45,26 @@ beforeEach(() => {
 });
 
 describe('ChannelsTab', () => {
-  it('closes and refreshes after a manually submitted verification code links', async () => {
+  it('keeps the QR code visible when a waiting poll omits its image URL', async () => {
     render(<ChannelsTab />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Configure WeChat' }));
-    const code = await screen.findByLabelText('Enter the code shown in WeChat');
-    fireEvent.change(code, { target: { value: '123456' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
 
-    await waitFor(() => expect(state.refetch).toHaveBeenCalledOnce());
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
+    expect(await screen.findByRole('img', { name: 'WeChat QR code' })).toHaveAttribute('src', 'https://example.invalid/qr');
+    state.poll.mockResolvedValueOnce({ attempt_id: 'attempt-1', channel_type: 'wechat', status: 'waiting', expires_at: '2026-08-30T00:00:00Z' });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2_200));
+    });
+    expect(screen.getByRole('img', { name: 'WeChat QR code' })).toHaveAttribute('src', 'https://example.invalid/qr');
+  }, 7_000);
 
   it('allows an active binding to start a reconfiguration QR flow', async () => {
     state.status = 'active';
     render(<ChannelsTab />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Configure WeChat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
 
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: 'WeChat QR code' })).toBeInTheDocument();
     expect(state.start).toHaveBeenCalledOnce();
   });
 });
