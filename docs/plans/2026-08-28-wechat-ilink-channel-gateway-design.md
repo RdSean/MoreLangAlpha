@@ -181,6 +181,44 @@ class AgentAdapter(Protocol):
 `agent_session_ref` 对 Gateway 保持不透明。第一期它是 Flash thread ID，未来即使
 增加其他 AgentAdapter，也不要求 ChannelAdapter 或 GatewayRunner 变更。
 
+#### 结构化流式事件与呈现边界
+
+为了避免把“模型发生了什么”和“某个平台要显示什么”混在一起，当前实现增加了
+`src/server/channels/events.py` 中的 provider-neutral 事件词汇：
+
+- `MessageChunk` 携带增量文本以及 `agent`、`role`、`content_type` 来源元数据；
+- `MessageStop` 标记文本段结束；`Commentary` 表示独立的中间说明；
+- `ToolCallChunk` 与 `ToolCallFinished` 只携带工具名称、参数预览、耗时和成功状态；
+- `LongToolHint`、`GatewayNotice` 用于网关生命周期提示；`StreamEvent` 是显式联合类型。
+
+这些 frozen dataclass 是展示层事件，不写入会话历史，也不替代 Agent 的持久化消息。
+Flash 只负责把内部 SSE 事实转换为这些事件；其 `AgentTurnResult` 仍是兼容旧调用方的
+最终普通文本值，并不代表微信或其他平台的呈现策略。
+
+`ChannelAdapter` 现为可继承的通用基类，保留收发、规范化和媒体解析等传输方法，并
+提供 Hermes `BasePlatformAdapter` 风格的能力默认值：`supports_code_blocks`、
+`supports_draft_streaming()`、`prefers_fresh_final_streaming()`，以及
+`render_message_event()`、`format_tool_event()`、`format_tool_preview()`。默认实现
+把文本增量、分段和 commentary 交给 sink，并将工具调用格式化为短进度文本；适配器
+返回 `None` 即表示该平台主动吞掉工具 chrome。
+
+`ChannelEventDispatcher` 位于 `src/server/services/channels/event_dispatcher.py`，是
+通用分发环节：它把消息事件路由到 `PresentationSink`，把工具事件交给当前
+`ChannelAdapter` 格式化，再通过临时进度回调发送；它不导入微信、Flash、LangGraph，
+并隔离呈现异常，不能让 Agent turn 失败。`GatewayRunner` 为每条入站消息建立一个
+channel-specific dispatcher，优先把 sink 中已呈现的文本写入原有 PostgreSQL
+delivery outbox；没有事件回调的旧 AgentAdapter 继续使用其 `AgentTurnResult`。
+
+微信适配器覆盖 `render_message_event()`：仅接受 `agent == "main"`、普通 `text`
+content type 的 assistant 增量，忽略 reasoning、commentary、工具事件和子 Agent。
+因此微信最终只收到主 Agent 的答案，而其他适配器可以按自身能力显示中间进度或原生
+流式草稿。该选择只影响平台展示，不改变 Flash 的历史记录和 LangAlpha Web SSE。
+
+实现与参考的对应关系：Hermes 的 `BasePlatformAdapter` 提供能力和默认呈现钩子，
+`stream_dispatch.py` 提供事件到适配器/sink 的路由思路，`delivery.py` 继续只负责
+最终消息及媒体投递；本项目把相同职责压缩到本地通道边界，避免照搬 Hermes 的命令、
+TTS、HITL 和多 Agent 运行时。
+
 ## 持久化模型
 
 表名使用通用 `channel_*` 前缀，避免 `wechat_gateway` 将第一种平台写进运行时

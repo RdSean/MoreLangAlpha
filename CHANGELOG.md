@@ -12,6 +12,16 @@
 - 微信只接收主 Agent 的最终普通文本；过滤 reasoning、技能/工具调用、工具结果、commentary
   及子 Agent 中间事件，内部运行历史和 Web 端 SSE 展示保持不变。
 
+### 通道结构化事件与呈现抽象
+
+- 新增 provider-neutral 的 `MessageChunk`、`MessageStop`、`Commentary`、工具调用和网关通知事件类；
+  事件仅用于展示，不写入 Agent 历史。
+- `ChannelAdapter` 现提供 Hermes 风格的平台能力默认值和消息/工具呈现钩子；
+  `ChannelEventDispatcher` 负责把结构化事件路由到 channel-specific sink，适配器可返回 `None`
+  吞掉不适合平台显示的工具 chrome。
+- Flash 只把内部 SSE 转换为结构化事件；GatewayRunner 按适配器呈现结果写入原有 PostgreSQL
+  delivery outbox，并兼容没有事件回调的旧 AgentAdapter。微信覆盖呈现策略，仅发送主 Agent 普通文本。
+
 ### 微信 iLink Bot 收发链路修复
 
 - 修复入站纯文本消息写入 PostgreSQL 时可空媒体和回复上下文参数未标注类型、导致 worker 重试失败的问题。
