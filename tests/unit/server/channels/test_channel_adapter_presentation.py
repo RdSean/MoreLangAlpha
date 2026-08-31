@@ -1,5 +1,11 @@
+import asyncio
+from unittest.mock import AsyncMock
+
+import pytest
+
 from src.server.channels.adapters.base import ChannelAdapter
 from src.server.channels.adapters.wechat_ilink import WeChatILinkAdapter
+from src.server.channels.contracts import BindingCredentials, ReplyContext, TextPart
 from src.server.channels.events import MessageChunk, MessageStop, ToolCallChunk
 
 
@@ -25,6 +31,45 @@ def test_channel_adapter_exposes_hermes_style_capability_defaults() -> None:
     assert adapter.supports_code_blocks is False
     assert adapter.supports_draft_streaming() is False
     assert adapter.prefers_fresh_final_streaming("answer") is False
+    assert adapter.supports_typing is True
+    assert ChannelAdapter().supports_typing is False
+
+
+@pytest.mark.asyncio
+async def test_base_typing_loop_is_cancellable_and_provider_errors_are_non_fatal() -> None:
+    adapter = ChannelAdapter()
+    adapter.send_typing = AsyncMock(side_effect=RuntimeError("provider down"))
+    adapter.stop_typing = AsyncMock()
+    stop_event = asyncio.Event()
+
+    task = asyncio.create_task(
+        adapter.keep_typing(
+            BindingCredentials("b", "fake", ()),
+            ReplyContext("peer", (("context_token", "ctx"),)),
+            stop_event=stop_event,
+            interval=0.01,
+        )
+    )
+    await asyncio.sleep(0.02)
+    stop_event.set()
+    await asyncio.wait_for(task, timeout=1)
+
+    adapter.send_typing.assert_awaited()
+    adapter.stop_typing.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_base_adapter_exposes_lifecycle_and_outbound_defaults() -> None:
+    adapter = ChannelAdapter()
+    credentials = BindingCredentials("b", "fake", ())
+
+    await adapter.on_binding_start(credentials)
+    await adapter.on_binding_stop(credentials)
+    await adapter.send_typing(credentials, ReplyContext("peer"))
+    await adapter.stop_typing(credentials, ReplyContext("peer"))
+
+    parts = (TextPart("answer"),)
+    assert adapter.prepare_outbound_parts(parts) == parts
 
 
 def test_channel_adapter_default_message_rendering_targets_sink() -> None:

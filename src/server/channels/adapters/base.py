@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from abc import ABCMeta
 from typing import Any
@@ -61,6 +62,7 @@ class ChannelAdapter(metaclass=_ChannelAdapterMeta):
     max_outbound_text_length: int | None = None
     supports_code_blocks: bool = False
     supports_status_text: bool = False
+    supports_typing: bool = False
 
     async def begin_link(
         self, previous_credentials: BindingCredentials | None = None
@@ -104,6 +106,67 @@ class ChannelAdapter(metaclass=_ChannelAdapterMeta):
         message: OutboundMessage,
     ) -> DeliveryReceipt:
         raise NotImplementedError
+
+    async def on_binding_start(self, credentials: BindingCredentials) -> None:
+        """Notify an adapter that a binding entered the worker lifecycle."""
+
+    async def on_binding_stop(self, credentials: BindingCredentials) -> None:
+        """Notify an adapter that a binding left the worker lifecycle."""
+
+    async def send_typing(
+        self,
+        credentials: BindingCredentials,
+        reply_context: ReplyContext,
+    ) -> None:
+        """Send or refresh a provider-native typing indicator."""
+
+    async def stop_typing(
+        self,
+        credentials: BindingCredentials,
+        reply_context: ReplyContext,
+    ) -> None:
+        """Stop a provider-native typing indicator."""
+
+    async def keep_typing(
+        self,
+        credentials: BindingCredentials,
+        reply_context: ReplyContext,
+        *,
+        stop_event: asyncio.Event,
+        interval: float = 5.0,
+    ) -> None:
+        """Refresh typing until a turn finishes without failing the turn."""
+
+        send_timeout = max(0.25, min(1.5, interval - 0.25))
+        try:
+            while not stop_event.is_set():
+                try:
+                    await asyncio.wait_for(
+                        self.send_typing(credentials, reply_context),
+                        timeout=send_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=interval)
+                except asyncio.TimeoutError:
+                    continue
+        except asyncio.CancelledError:
+            pass
+        finally:
+            try:
+                await self.stop_typing(credentials, reply_context)
+            except Exception:
+                pass
+
+    def prepare_outbound_parts(self, parts: tuple[Any, ...]) -> tuple[Any, ...]:
+        """Prepare final parts before durable provider delivery."""
+
+        return tuple(parts)
 
     def supports_draft_streaming(
         self,
