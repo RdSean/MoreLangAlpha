@@ -36,6 +36,7 @@ from src.server.channels.contracts import (
     UpdateBatch,
     TextPart,
 )
+from src.server.channels.events import MessageChunk, MessageStop
 
 # Kept for adapter consumers that imported the former concrete error.
 BindingExpiredError = ChannelBindingExpiredError
@@ -55,6 +56,33 @@ class WeChatILinkAdapter(ChannelAdapter):
         self.base_url = base_url.rstrip("/")
         self.max_text_length = max_text_length
         self.max_outbound_text_length = max_text_length
+
+    def render_message_event(self, event: Any, sink: Any) -> None:
+        """Expose only main-agent ordinary text on the user-facing channel."""
+
+        if isinstance(event, MessageChunk):
+            if event.content_type not in (None, "text"):
+                return
+            if event.role and event.role not in {"assistant", "agent", "main"}:
+                return
+            if event.agent is not None and event.agent != "main":
+                return
+            if event.text:
+                sink.on_delta(event.text)
+            return
+        if isinstance(event, MessageStop):
+            # A final stop closes the durable answer; intermediate boundaries
+            # are intentionally invisible on WeChat.
+            return
+
+    def format_tool_event(
+        self,
+        event: Any,
+        *,
+        mode: str = "all",
+        preview_max_len: int = 40,
+    ) -> str | None:
+        return None
 
     async def begin_link(
         self, previous_credentials: BindingCredentials | None = None
