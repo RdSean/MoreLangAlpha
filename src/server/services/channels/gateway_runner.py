@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import inspect
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -19,6 +20,10 @@ from src.server.channels.contracts import (
     OpenSessionRequest,
     OutboundMessage,
     TextPart,
+)
+from src.server.services.channels.event_dispatcher import (
+    ChannelEventDispatcher,
+    PresentationSink,
 )
 from src.server.database import channels as channel_db
 
@@ -97,6 +102,28 @@ class GatewayRunner:
 
     async def stop(self) -> None:
         self._stopped = True
+
+    async def _run_agent_turn(
+        self,
+        session: AgentSession,
+        turn: AgentTurn,
+        on_event: Any,
+    ):
+        """Call event-aware agents while preserving legacy adapter signatures."""
+
+        run_turn = self.agent_adapter.run_turn
+        try:
+            parameters = inspect.signature(run_turn).parameters.values()
+            accepts_events = any(
+                parameter.name == "on_event"
+                or parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters
+            )
+        except (TypeError, ValueError):
+            accepts_events = True
+        if accepts_events:
+            return await run_turn(session, turn, on_event=on_event)
+        return await run_turn(session, turn)
 
     async def poll_bindings_once(self) -> int:
         count = 0
@@ -218,7 +245,9 @@ class GatewayRunner:
                         if claim.media
                         else ()
                     )
-                    result = await self.agent_adapter.run_turn(
+                    sink = PresentationSink()
+                    dispatcher = ChannelEventDispatcher(adapter, sink)
+                    result = await self._run_agent_turn(
                         opened,
                         AgentTurn(
                             request_key=claim.request_key,
@@ -227,7 +256,17 @@ class GatewayRunner:
                             channel_type=claim.channel_type,
                             images=images,
                         ),
+                        dispatcher.dispatch,
                     )
+                    rendered_parts = sink.parts
+                    if rendered_parts:
+                        media_parts = tuple(
+                            part for part in result.parts if isinstance(part, MediaPart)
+                        )
+                        result = result.__class__(
+                            parts=rendered_parts + media_parts,
+                            session_ref=result.session_ref,
+                        )
                 result = result.__class__(
                     parts=split_outbound_parts(
                         result.parts,

@@ -168,8 +168,15 @@ class LangAlphaFlashAdapter:
                         )
                     )
                 continue
-            if event in {"tool_call_chunks", "tool_call_chunk", "tool_call"}:
-                raw_chunks = payload.get("tool_call_chunks")
+            if event in {
+                "tool_call_chunks",
+                "tool_call_chunk",
+                "tool_call",
+                "tool_calls",
+            }:
+                raw_chunks = payload.get("tool_call_chunks") or payload.get(
+                    "tool_calls"
+                )
                 if not isinstance(raw_chunks, list):
                     raw_chunks = [payload]
                 for index, raw_chunk in enumerate(raw_chunks):
@@ -179,6 +186,8 @@ class LangAlphaFlashAdapter:
                     if not name:
                         continue
                     args = raw_chunk.get("args")
+                    if args is None:
+                        args = raw_chunk.get("arguments")
                     if not isinstance(args, dict):
                         args = None
                     preview = raw_chunk.get("preview")
