@@ -26,6 +26,10 @@ from ptc_agent.agent.middleware.compaction.types import (
     CompactionEvent,
     TRUNCATABLE_TOOLS,
 )
+from ptc_agent.tokenizer_resource import (
+    CL100K_BASE_ENCODING,
+    prepare_tokenizer_resource,
+)
 
 if TYPE_CHECKING:
     from ptc_agent.config.agent import AgentConfig
@@ -71,17 +75,20 @@ class _ApproximateTokenEncoder:
 
 
 def _get_tiktoken_encoder() -> Any:
-    """Get the encoder, falling back when the optional BPE download is offline."""
+    """Get an exact encoder when ready, otherwise use a recoverable fallback."""
     global _tiktoken_encoder
     if _tiktoken_encoder is None:
+        status = prepare_tokenizer_resource(allow_download=False)
+        if not status.exact:
+            return _ApproximateTokenEncoder()
         try:
-            _tiktoken_encoder = tiktoken.get_encoding("cl100k_base")
+            _tiktoken_encoder = tiktoken.get_encoding(CL100K_BASE_ENCODING)
         except Exception as exc:
             logger.warning(
                 "Unable to load cl100k_base locally; using approximate token counts: %s",
                 type(exc).__name__,
             )
-            _tiktoken_encoder = _ApproximateTokenEncoder()
+            return _ApproximateTokenEncoder()
     return _tiktoken_encoder
 
 
