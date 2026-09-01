@@ -5,7 +5,8 @@
 # exhaustion — while a connection sat free. See pyproject requires-python.
 FROM python:3.13-slim
 
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 \
+    TIKTOKEN_CACHE_DIR=/app/var/cache/tiktoken
 
 # Install minimal system dependencies (patchright will install its own browser + deps).
 # tini is required so `init: true` in compose reaps orphaned browser subprocesses;
@@ -43,6 +44,12 @@ RUN uv run patchright install --with-deps chromium \
 
 # Copy application source
 COPY src/ src/
+RUN echo "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7  src/ptc_agent/resources/tiktoken/cl100k_base.tiktoken" | sha256sum -c - \
+    && install -d -m 0755 "$TIKTOKEN_CACHE_DIR" \
+    && cp src/ptc_agent/resources/tiktoken/cl100k_base.tiktoken \
+        "$TIKTOKEN_CACHE_DIR/9b5ad71b2ce5302211f9c61530b329a4922fc6a4" \
+    && echo "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7  $TIKTOKEN_CACHE_DIR/9b5ad71b2ce5302211f9c61530b329a4922fc6a4" | sha256sum -c - \
+    && chown -R root:root "$TIKTOKEN_CACHE_DIR"
 COPY server.py .
 COPY scripts/ scripts/
 RUN chmod +x scripts/docker_entrypoint.sh
