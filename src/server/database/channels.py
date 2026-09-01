@@ -21,12 +21,15 @@ from src.server.channels.contracts import (
     AgentTurnResult,
     BindingCredentials,
     BindingRoute,
+    ChannelContinuation,
     InboundKind,
     InboundMedia,
     LinkChallenge,
     LinkPollResult,
     LinkPollState,
+    MediaPart,
     ReplyContext,
+    TextPart,
 )
 from src.server.database.encryption import get_encryption_key
 from src.server.database.pool import get_db_connection
@@ -77,6 +80,7 @@ class ClaimedInbound:
     attempts: int
     channel_type: str = "wechat"
     binding_epoch: int = 1
+    idle_timeout_seconds: int = 21_600
     credentials: BindingCredentials | None = None
 
 
@@ -125,6 +129,49 @@ def _reply_json(reply_context: ReplyContext | None) -> str | None:
     return _json(
         {"route_ref": reply_context.route_ref, "values": list(reply_context.values)}
     )
+
+
+def _parts_json(parts: Sequence[TextPart | MediaPart]) -> str:
+    payload = []
+    for part in parts:
+        if isinstance(part, TextPart):
+            payload.append({"type": "text", "text": part.text})
+        elif isinstance(part, MediaPart):
+            payload.append(
+                {
+                    "type": "media",
+                    "media_ref": part.media_ref,
+                    "mime_type": part.mime_type,
+                    "caption": part.caption,
+                }
+            )
+    return _json(payload)
+
+
+def _parts_from_json(value: str | None) -> tuple[TextPart | MediaPart, ...]:
+    try:
+        payload = json.loads(value or "[]")
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("channel continuation payload is malformed") from exc
+    if not isinstance(payload, list):
+        raise RuntimeError("channel continuation payload is malformed")
+    parts: list[TextPart | MediaPart] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise RuntimeError("channel continuation payload is malformed")
+        if item.get("type") == "text" and isinstance(item.get("text"), str):
+            parts.append(TextPart(item["text"]))
+        elif item.get("type") == "media" and isinstance(item.get("media_ref"), str):
+            parts.append(
+                MediaPart(
+                    item["media_ref"],
+                    str(item.get("mime_type") or "application/octet-stream"),
+                    item.get("caption") if isinstance(item.get("caption"), str) else None,
+                )
+            )
+        else:
+            raise RuntimeError("channel continuation payload is malformed")
+    return tuple(parts)
 
 
 def _credentials_from_row(row: dict[str, Any]) -> BindingCredentials:
@@ -423,6 +470,7 @@ async def claim_pending_inbound(limit: int, lease_seconds: int) -> list[ClaimedI
                            pgp_sym_decrypt(c.media_ciphertext, %s) AS media_json,
                            pgp_sym_decrypt(c.reply_context_ciphertext, %s) AS reply_json,
                            b.user_id, b.channel_type, b.binding_epoch,
+                           b.idle_timeout_seconds,
                            pgp_sym_decrypt(b.credentials_ciphertext, %s)
                                AS credentials_json,
                            pgp_sym_decrypt(s.agent_session_ref_ciphertext, %s)
@@ -501,24 +549,105 @@ async def claim_pending_inbound(limit: int, lease_seconds: int) -> list[ClaimedI
                             attempts=int(row["attempts"]),
                             channel_type=str(row["channel_type"]),
                             binding_epoch=int(row["binding_epoch"]),
+                            idle_timeout_seconds=int(
+                                row.get("idle_timeout_seconds") or 21_600
+                            ),
                         )
                     )
                 return result
 
 
+async def get_pending_continuation(
+    binding_id: UUID | str,
+    session_id: UUID | str,
+    binding_epoch: int,
+) -> ChannelContinuation | None:
+    """Read the oldest unexpired answer tail for a session."""
+    key = get_encryption_key()
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE channel_continuations
+                    SET status = 'expired', completed_at = NOW(), updated_at = NOW()
+                    WHERE binding_id = %s AND session_id = %s
+                      AND binding_epoch = %s AND status = 'pending'
+                      AND expires_at <= NOW()
+                    """,
+                    (binding_id, session_id, binding_epoch),
+                )
+                await cur.execute(
+                    """
+                    SELECT continuation_id, binding_id, session_id, binding_epoch,
+                           expires_at,
+                           pgp_sym_decrypt(parts_ciphertext, %s) AS parts
+                    FROM channel_continuations
+                    WHERE binding_id = %s AND session_id = %s
+                      AND binding_epoch = %s AND status = 'pending'
+                      AND expires_at > NOW()
+                    ORDER BY created_at, continuation_id
+                    LIMIT 1
+                    """,
+                    (key, binding_id, session_id, binding_epoch),
+                )
+                row = await cur.fetchone()
+                if not row:
+                    return None
+                return ChannelContinuation(
+                    continuation_id=str(row["continuation_id"]),
+                    binding_id=str(row["binding_id"]),
+                    session_id=str(row["session_id"]),
+                    binding_epoch=int(row["binding_epoch"]),
+                    parts=_parts_from_json(row["parts"]),
+                    expires_at=row["expires_at"],
+                )
+
+
 async def ack_inbound_and_enqueue_deliveries(
     claim: ClaimedInbound,
     result: AgentTurnResult,
+    *,
+    continuation_parts: Sequence[TextPart | MediaPart] = (),
+    continuation_expires_at: datetime | None = None,
+    continuation_id: UUID | str | None = None,
 ) -> bool:
     """Atomically ack an inbound and create stable, ordered outbox parts."""
     key = get_encryption_key()
-    parts = [
-        {"text": part.text} if hasattr(part, "text") else {"media_ref": part.media_ref}
-        for part in result.parts
-    ]
+    parts = []
+    for part in result.parts:
+        if isinstance(part, TextPart):
+            parts.append({"text": part.text})
+        elif isinstance(part, MediaPart):
+            parts.append(
+                {
+                    "media_ref": part.media_ref,
+                    "mime_type": part.mime_type,
+                    "caption": part.caption,
+                }
+            )
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor() as cur:
+                if continuation_id is not None:
+                    await cur.execute(
+                        """
+                        SELECT continuation_id
+                        FROM channel_continuations
+                        WHERE continuation_id = %s AND binding_id = %s
+                          AND session_id = %s AND binding_epoch = %s
+                          AND status = 'pending' AND expires_at > NOW()
+                        FOR UPDATE
+                        """,
+                        (
+                            continuation_id,
+                            claim.binding_id,
+                            claim.session_id,
+                            claim.binding_epoch,
+                        ),
+                    )
+                    if not await cur.fetchone():
+                        return False
                 if claim.session_id:
                     await cur.execute(
                         """
@@ -601,6 +730,51 @@ async def ack_inbound_and_enqueue_deliveries(
                             key,
                             claim.binding_epoch,
                             next_delivery_order + sequence_no,
+                        ),
+                    )
+                if continuation_id is not None:
+                    if continuation_parts:
+                        await cur.execute(
+                            """
+                            UPDATE channel_continuations
+                            SET parts_ciphertext = pgp_sym_encrypt(%s, %s),
+                                expires_at = COALESCE(%s, expires_at),
+                                updated_at = NOW()
+                            WHERE continuation_id = %s AND status = 'pending'
+                            """,
+                            (
+                                _parts_json(continuation_parts),
+                                key,
+                                continuation_expires_at,
+                                continuation_id,
+                            ),
+                        )
+                    else:
+                        await cur.execute(
+                            """
+                            UPDATE channel_continuations
+                            SET status = 'done', completed_at = NOW(), updated_at = NOW()
+                            WHERE continuation_id = %s AND status = 'pending'
+                            """,
+                            (continuation_id,),
+                        )
+                elif continuation_parts:
+                    await cur.execute(
+                        """
+                        INSERT INTO channel_continuations (
+                            binding_id, session_id, source_inbound_message_id,
+                            binding_epoch, parts_ciphertext, expires_at
+                        ) VALUES (%s, %s, %s, %s, pgp_sym_encrypt(%s, %s),
+                                  COALESCE(%s, NOW() + INTERVAL '6 hours'))
+                        """,
+                        (
+                            claim.binding_id,
+                            claim.session_id,
+                            claim.inbound_message_id,
+                            claim.binding_epoch,
+                            _parts_json(continuation_parts),
+                            key,
+                            continuation_expires_at,
                         ),
                     )
                 return True
@@ -774,6 +948,108 @@ async def nack_delivery(
             return cur.rowcount == 1
 
 
+async def park_delivery_context_budget(
+    delivery_id: UUID | str,
+    lease_generation: int,
+    error_code: str = "context_message_budget",
+    *,
+    expires_at: datetime | None = None,
+) -> bool:
+    """Move a failed delivery and its unsent session tail to continuation state."""
+    key = get_encryption_key()
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT o.delivery_id, o.inbound_message_id, o.session_id, o.binding_id,
+                           o.binding_epoch, o.session_delivery_order,
+                           pgp_sym_decrypt(o.payload_ciphertext, %s) AS payload
+                    FROM channel_delivery_outbox o
+                    JOIN channel_bindings b
+                      ON b.binding_id = o.binding_id
+                     AND b.status = 'active'
+                     AND b.binding_epoch = o.binding_epoch
+                    WHERE o.delivery_id = %s AND o.status = 'claimed'
+                      AND o.lease_generation = %s
+                    FOR UPDATE
+                    """,
+                    (key, delivery_id, lease_generation),
+                )
+                current = await cur.fetchone()
+                if not current:
+                    return False
+                await cur.execute(
+                    """
+                    SELECT delivery_id, inbound_message_id, session_id, binding_id,
+                           binding_epoch, session_delivery_order,
+                           pgp_sym_decrypt(payload_ciphertext, %s) AS payload
+                    FROM channel_delivery_outbox
+                    WHERE session_id = %s AND binding_epoch = %s
+                      AND session_delivery_order >= %s
+                      AND status IN ('pending', 'claimed')
+                    ORDER BY session_delivery_order, delivery_id
+                    FOR UPDATE
+                    """,
+                    (
+                        key,
+                        current["session_id"],
+                        current["binding_epoch"],
+                        current["session_delivery_order"],
+                    ),
+                )
+                rows = await cur.fetchall()
+                payloads = [
+                    json.loads(row["payload"] or "{}")
+                    for row in rows
+                    if row["payload"]
+                ]
+                if not payloads:
+                    return False
+                await cur.execute(
+                    """
+                    INSERT INTO channel_continuations (
+                        binding_id, session_id, source_inbound_message_id,
+                        binding_epoch, parts_ciphertext, expires_at
+                    ) VALUES (%s, %s, %s, %s, pgp_sym_encrypt(%s, %s),
+                              COALESCE(%s, NOW() + INTERVAL '6 hours'))
+                    """,
+                    (
+                        current["binding_id"],
+                        current["session_id"],
+                        current["inbound_message_id"],
+                        current["binding_epoch"],
+                        _parts_json(
+                            tuple(
+                                TextPart(row["text"])
+                                if isinstance(row.get("text"), str)
+                                else MediaPart(
+                                    str(row.get("media_ref") or ""),
+                                    str(row.get("mime_type") or "application/octet-stream"),
+                                    row.get("caption")
+                                    if isinstance(row.get("caption"), str)
+                                    else None,
+                                )
+                                for row in payloads
+                            )
+                        ),
+                        key,
+                        expires_at,
+                    ),
+                )
+                for row in rows:
+                    await cur.execute(
+                        """
+                        UPDATE channel_delivery_outbox
+                        SET status = 'dead', next_retry_at = NULL,
+                            lease_expires_at = NULL, last_error_code = %s
+                        WHERE delivery_id = %s
+                        """,
+                        (error_code, row["delivery_id"]),
+                    )
+                return True
+
+
 async def disconnect_binding(binding_id: UUID | str, user_id: str) -> bool:
     """Retire a binding and fence every queued item from its old epoch."""
     return await _retire_binding(binding_id, status="disabled", user_id=user_id)
@@ -833,6 +1109,14 @@ async def _retire_binding(
                         payload_ciphertext = NULL, lease_expires_at = NULL,
                         last_error_code = 'binding_retired'
                     WHERE binding_id = %s
+                    """,
+                    (binding_id,),
+                )
+                await cur.execute(
+                    """
+                    UPDATE channel_continuations
+                    SET status = 'expired', completed_at = NOW(), updated_at = NOW()
+                    WHERE binding_id = %s AND status = 'pending'
                     """,
                     (binding_id,),
                 )

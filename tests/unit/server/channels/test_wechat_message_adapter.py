@@ -118,10 +118,18 @@ def test_wechat_final_parts_normalize_markdown_and_preserve_code_blocks() -> Non
     )
 
     assert parts == (
-        TextPart("【Title】"),
-        TextPart("- Name: mode\n  Value: fast"),
-        TextPart("```python\nprint('ok')\n```"),
+        TextPart("【Title】\n\n- Name: mode\n  Value: fast\n\n```python\nprint('ok')\n```"),
     )
+
+
+def test_wechat_final_parts_globally_pack_short_units() -> None:
+    adapter = WeChatILinkAdapter(max_text_length=10)
+
+    parts = adapter.prepare_outbound_parts(
+        (TextPart("第一段"), TextPart("第二段"), TextPart("第三段"))
+    )
+
+    assert parts == (TextPart("第一段\n\n第二段"), TextPart("第三段"))
 
 
 def test_wechat_final_parts_split_oversized_units_naturally() -> None:
@@ -130,6 +138,18 @@ def test_wechat_final_parts_split_oversized_units_naturally() -> None:
     parts = adapter.prepare_outbound_parts((TextPart("aaaaa\nbbbbb"),))
 
     assert parts == (TextPart("aaaaa"), TextPart("bbbbb"))
+
+
+def test_wechat_oversized_code_block_keeps_fences_in_each_part() -> None:
+    adapter = WeChatILinkAdapter(max_text_length=18)
+
+    parts = adapter.prepare_outbound_parts(
+        (TextPart("```python\n" + "abcdefghij " * 5 + "\n```"),)
+    )
+
+    assert len(parts) > 1
+    assert all(part.text.startswith("```python\n") for part in parts)
+    assert all(part.text.endswith("\n```") for part in parts)
 
 
 def test_image_item_aeskey_takes_precedence_over_cdn_aes_key() -> None:
@@ -255,6 +275,42 @@ async def test_delivery_rejects_missing_context_token_without_sending() -> None:
     assert not receipt.accepted
     assert receipt.detail == "missing_context_token"
     api.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delivery_classifies_ilink_context_budget_error() -> None:
+    from src.server.channels.contracts import ChannelMessageBudgetError
+
+    api = AsyncMock()
+    api.send_message.side_effect = __import__(
+        "wechatbot.errors", fromlist=["ApiError"]
+    ).ApiError("rate limited", errcode=-2, payload={"ret": -2})
+    adapter = WeChatILinkAdapter(api=api)
+
+    with pytest.raises(ChannelMessageBudgetError) as exc_info:
+        await adapter.deliver(
+            _credentials(),
+            ReplyContext("peer-1", (("context_token", "ctx"),)),
+            OutboundMessage("client-1", (TextPart("答复"),)),
+        )
+
+    assert exc_info.value.provider_code == -2
+
+
+@pytest.mark.asyncio
+async def test_delivery_checks_business_ret_when_sdk_returns_payload() -> None:
+    from src.server.channels.contracts import ChannelMessageBudgetError
+
+    api = AsyncMock()
+    api.send_message.return_value = {"ret": -2, "errmsg": "rate limited"}
+    adapter = WeChatILinkAdapter(api=api)
+
+    with pytest.raises(ChannelMessageBudgetError):
+        await adapter.deliver(
+            _credentials(),
+            ReplyContext("peer-1", (("context_token", "ctx"),)),
+            OutboundMessage("client-1", (TextPart("答复"),)),
+        )
 
 
 @pytest.mark.asyncio

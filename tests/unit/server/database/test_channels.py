@@ -133,3 +133,27 @@ def test_claimed_inbound_includes_encrypted_binding_credentials() -> None:
     assert "pgp_sym_decrypt(b.credentials_ciphertext" in claim_source
     assert "credentials = (" in claim_source
     assert "BindingCredentials(" in claim_source
+
+
+def test_continuation_state_is_encrypted_and_fenced() -> None:
+    source = (Path(__file__).parents[4] / "src/server/database/channels.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "async def get_pending_continuation" in source
+    assert "channel_continuations" in source
+    assert "pgp_sym_encrypt(_parts_json(continuation_parts), key)" not in source
+    assert "pgp_sym_encrypt(%s, %s)" in source
+    assert "binding_epoch = %s" in source
+
+
+def test_continuation_migration_has_encrypted_tail_and_expiry() -> None:
+    source = (
+        Path(__file__).parents[4]
+        / "migrations/versions/044_add_channel_continuations.py"
+    ).read_text(encoding="utf-8")
+
+    assert "channel_continuations" in source
+    assert "parts_ciphertext BYTEA NOT NULL" in source
+    assert "expires_at TIMESTAMPTZ NOT NULL" in source
+    assert "Revises: 043" in source

@@ -8,14 +8,16 @@ import hashlib
 import inspect
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.settings import get_channel_gateway_config
 from src.server.channels.contracts import (
     AgentSession,
     AgentTurn,
+    AgentTurnResult,
     ChannelBindingExpiredError,
+    ChannelMessageBudgetError,
     InboundKind,
     MediaPart,
     OpenSessionRequest,
@@ -58,6 +60,21 @@ def split_outbound_parts(
             continue
         split.extend(TextPart(text) for text in _split_text(part.text, max_text_length))
     return tuple(split)
+
+
+def apply_context_message_budget(
+    parts: tuple[TextPart | MediaPart, ...],
+    *,
+    max_messages: int | None,
+    notice: str,
+) -> tuple[tuple[TextPart | MediaPart, ...], tuple[TextPart | MediaPart, ...]]:
+    """Reserve one provider bubble to explain how the remaining tail is fetched."""
+    if max_messages is None or len(parts) <= max_messages:
+        return parts, ()
+    if max_messages < 2:
+        raise ValueError("context message budget must leave room for a notice")
+    visible_count = max_messages - 1
+    return parts[:visible_count] + (TextPart(notice),), parts[visible_count:]
 
 
 def _split_text(text: str, limit: int) -> list[str]:
@@ -240,103 +257,135 @@ class GatewayRunner:
                 if claim.kind is not InboundKind.MESSAGE or claim.session_id is None:
                     processed += 1
                     continue
+                adapter = self.channel_adapters.get(claim.channel_type)
+                if adapter is None:
+                    raise RuntimeError(f"no adapter for channel type {claim.channel_type}")
+                continuation = None
+                continuation_id = None
+                command = getattr(adapter, "continuation_command", None)
+                load_continuation = getattr(
+                    self.repository, "get_pending_continuation", None
+                )
                 async with self.repository.hold_active_binding_epoch(
                     claim.binding_id, claim.binding_epoch
                 ) as active:
                     if not active:
                         continue
-                    session_ref = claim.agent_session_ref
-                    peer_ref = claim.peer_ref or ""
-                    if not session_ref:
-                        external = _external_thread_id(
-                            claim.binding_id, claim.peer_lookup_hash, claim.session_id
-                        )
-                        opened = await self.agent_adapter.open_session(
-                            OpenSessionRequest(
-                                binding_ref=str(claim.binding_id),
-                                actor_ref=claim.user_id,
-                                peer_ref=peer_ref,
-                                session_key=external,
-                            )
-                        )
-                        session_ref = opened.ref
-                    else:
-                        opened = AgentSession(
-                            ref=session_ref,
-                            opened_at=datetime.now(UTC),
-                            actor_ref=claim.user_id,
-                        )
-                    adapter = self.channel_adapters.get(claim.channel_type)
-                    if adapter is None:
-                        raise RuntimeError(f"no adapter for channel type {claim.channel_type}")
-                    images = (
-                        await adapter.resolve_images(
-                            claim.media,
-                            max_bytes=self.config.max_image_bytes,
-                            max_pixels=self.config.max_image_pixels,
-                        )
-                        if claim.media
-                        else ()
-                    )
-                    sink = PresentationSink()
-                    dispatcher = ChannelEventDispatcher(adapter, sink)
-                    typing_task: asyncio.Task[Any] | None = None
-                    typing_stop = asyncio.Event()
-                    credentials = getattr(claim, "credentials", None)
-                    reply_context = getattr(claim, "reply_context", None)
                     if (
-                        getattr(adapter, "supports_typing", False)
-                        and credentials is not None
-                        and reply_context is not None
-                        and callable(getattr(adapter, "keep_typing", None))
+                        callable(load_continuation)
+                        and command
+                        and claim.text
+                        and claim.text.strip() == command
                     ):
-                        typing_task = asyncio.create_task(
-                            adapter.keep_typing(
-                                credentials,
-                                reply_context,
-                                stop_event=typing_stop,
-                            ),
-                            name=f"channel-typing-{claim.inbound_message_id}",
+                        continuation = await load_continuation(
+                            claim.binding_id,
+                            claim.session_id,
+                            claim.binding_epoch,
                         )
-                    try:
-                        result = await self._run_agent_turn(
-                            opened,
-                            AgentTurn(
-                                request_key=claim.request_key,
-                                text=claim.text,
-                                received_at=datetime.now(UTC),
-                                channel_type=claim.channel_type,
-                                images=images,
-                            ),
-                            dispatcher.dispatch,
-                        )
-                    finally:
-                        if typing_task is not None:
-                            typing_stop.set()
-                            try:
-                                await asyncio.wait_for(typing_task, timeout=2.0)
-                            except asyncio.TimeoutError:
-                                typing_task.cancel()
-                                await asyncio.gather(
-                                    typing_task, return_exceptions=True
+                    if continuation is not None:
+                        continuation_id = continuation.continuation_id
+                        result = AgentTurnResult(parts=continuation.parts)
+                    else:
+                        session_ref = claim.agent_session_ref
+                        peer_ref = claim.peer_ref or ""
+                        if not session_ref:
+                            external = _external_thread_id(
+                                claim.binding_id, claim.peer_lookup_hash, claim.session_id
+                            )
+                            opened = await self.agent_adapter.open_session(
+                                OpenSessionRequest(
+                                    binding_ref=str(claim.binding_id),
+                                    actor_ref=claim.user_id,
+                                    peer_ref=peer_ref,
+                                    session_key=external,
                                 )
-                            except Exception:
-                                logger.debug(
-                                    "channel typing task failed", exc_info=True
-                                )
-                    rendered_parts = sink.parts
-                    if rendered_parts:
-                        media_parts = tuple(
-                            part for part in result.parts if isinstance(part, MediaPart)
+                            )
+                            session_ref = opened.ref
+                        else:
+                            opened = AgentSession(
+                                ref=session_ref,
+                                opened_at=datetime.now(UTC),
+                                actor_ref=claim.user_id,
+                            )
+                        images = (
+                            await adapter.resolve_images(
+                                claim.media,
+                                max_bytes=self.config.max_image_bytes,
+                                max_pixels=self.config.max_image_pixels,
+                            )
+                            if claim.media
+                            else ()
                         )
-                        result = result.__class__(
-                            parts=rendered_parts + media_parts,
-                            session_ref=result.session_ref,
-                        )
+                        sink = PresentationSink()
+                        dispatcher = ChannelEventDispatcher(adapter, sink)
+                        typing_task: asyncio.Task[Any] | None = None
+                        typing_stop = asyncio.Event()
+                        credentials = getattr(claim, "credentials", None)
+                        reply_context = getattr(claim, "reply_context", None)
+                        if (
+                            getattr(adapter, "supports_typing", False)
+                            and credentials is not None
+                            and reply_context is not None
+                            and callable(getattr(adapter, "keep_typing", None))
+                        ):
+                            typing_task = asyncio.create_task(
+                                adapter.keep_typing(
+                                    credentials,
+                                    reply_context,
+                                    stop_event=typing_stop,
+                                ),
+                                name=f"channel-typing-{claim.inbound_message_id}",
+                            )
+                        try:
+                            result = await self._run_agent_turn(
+                                opened,
+                                AgentTurn(
+                                    request_key=claim.request_key,
+                                    text=claim.text,
+                                    received_at=datetime.now(UTC),
+                                    channel_type=claim.channel_type,
+                                    images=images,
+                                ),
+                                dispatcher.dispatch,
+                            )
+                        finally:
+                            if typing_task is not None:
+                                typing_stop.set()
+                                try:
+                                    await asyncio.wait_for(typing_task, timeout=2.0)
+                                except asyncio.TimeoutError:
+                                    typing_task.cancel()
+                                    await asyncio.gather(
+                                        typing_task, return_exceptions=True
+                                    )
+                                except Exception:
+                                    logger.debug(
+                                        "channel typing task failed", exc_info=True
+                                    )
+                        rendered_parts = sink.parts
+                        if rendered_parts:
+                            media_parts = tuple(
+                                part for part in result.parts if isinstance(part, MediaPart)
+                            )
+                            result = result.__class__(
+                                parts=rendered_parts + media_parts,
+                                session_ref=result.session_ref,
+                            )
                 prepared_parts = tuple(result.parts)
                 prepare = getattr(adapter, "prepare_outbound_parts", None)
                 if callable(prepare):
                     prepared_parts = tuple(prepare(prepared_parts))
+                max_messages = getattr(adapter, "max_messages_per_context", None)
+                notice = getattr(adapter, "continuation_notice", None)
+                remaining_parts: tuple[TextPart | MediaPart, ...] = ()
+                if max_messages is not None:
+                    if not notice:
+                        notice = "内容较长，回复“继续”获取后续内容。"
+                    prepared_parts, remaining_parts = apply_context_message_budget(
+                        prepared_parts,
+                        max_messages=max_messages,
+                        notice=notice,
+                    )
                 result = result.__class__(
                     parts=split_outbound_parts(
                         prepared_parts,
@@ -344,7 +393,17 @@ class GatewayRunner:
                     ),
                     session_ref=result.session_ref,
                 )
-                await self.repository.ack_inbound_and_enqueue_deliveries(claim, result)
+                ack_kwargs: dict[str, Any] = {}
+                if remaining_parts:
+                    ack_kwargs["continuation_parts"] = remaining_parts
+                    ack_kwargs["continuation_expires_at"] = datetime.now(UTC) + timedelta(
+                        seconds=int(getattr(claim, "idle_timeout_seconds", 21_600))
+                    )
+                if continuation_id is not None:
+                    ack_kwargs["continuation_id"] = continuation_id
+                await self.repository.ack_inbound_and_enqueue_deliveries(
+                    claim, result, **ack_kwargs
+                )
                 processed += 1
             except ChannelBindingExpiredError:
                 await self.repository.mark_binding_reauth(
@@ -413,6 +472,27 @@ class GatewayRunner:
                     delivery.delivery_id, delivery.lease_generation
                 )
                 delivered += 1
+            except ChannelMessageBudgetError as exc:
+                error_code = f"context_budget_{str(exc.provider_code)[:16]}"
+                park = getattr(
+                    self.repository, "park_delivery_context_budget", None
+                )
+                if callable(park):
+                    parked = await park(
+                        delivery.delivery_id,
+                        delivery.lease_generation,
+                        error_code,
+                        expires_at=datetime.now(UTC) + timedelta(hours=6),
+                    )
+                    if parked:
+                        continue
+                await self.repository.nack_delivery(
+                    delivery.delivery_id,
+                    delivery.lease_generation,
+                    error_code,
+                    0,
+                    1,
+                )
             except ChannelBindingExpiredError:
                 await self.repository.mark_binding_reauth(
                     delivery.binding_id, "session_expired"

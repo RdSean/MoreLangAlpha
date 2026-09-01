@@ -30,6 +30,14 @@ class ChannelBindingExpiredError(RuntimeError):
     """A provider revoked the credentials for an otherwise active binding."""
 
 
+class ChannelMessageBudgetError(RuntimeError):
+    """The provider refused a message because the current context is exhausted."""
+
+    def __init__(self, message: str, *, provider_code: int | str) -> None:
+        super().__init__(message)
+        self.provider_code = provider_code
+
+
 @dataclass(frozen=True)
 class LinkPollState:
     """Opaque provider state needed to poll a pairing challenge.
@@ -161,6 +169,18 @@ class OutboundMessage:
 
     client_id: str
     parts: tuple[TextPart | MediaPart, ...]
+
+
+@dataclass(frozen=True)
+class ChannelContinuation:
+    """Durable tail of an answer waiting for a fresh provider context."""
+
+    continuation_id: str
+    binding_id: str
+    session_id: str
+    binding_epoch: int
+    parts: tuple[TextPart | MediaPart, ...]
+    expires_at: datetime
 
 
 @dataclass(frozen=True)

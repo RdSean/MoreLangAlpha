@@ -212,6 +212,161 @@ def test_outbound_text_prefers_a_natural_boundary_before_hard_cut() -> None:
     assert parts == (TextPart("aaaaa\n"), TextPart("bbbbb"))
 
 
+def test_context_message_budget_reserves_notice_for_remaining_parts() -> None:
+    parts = tuple(TextPart(f"part-{index}") for index in range(12))
+
+    visible, remaining = gateway_runner.apply_context_message_budget(
+        parts,
+        max_messages=10,
+        notice="继续",
+    )
+
+    assert len(visible) == 10
+    assert visible[:9] == parts[:9]
+    assert visible[-1] == TextPart("继续")
+    assert remaining == parts[9:]
+
+
+@pytest.mark.asyncio
+async def test_runner_persists_tail_when_response_exceeds_context_budget() -> None:
+    claim = SimpleNamespace(
+        binding_id=uuid4(),
+        binding_epoch=1,
+        kind=InboundKind.MESSAGE,
+        session_id=uuid4(),
+        agent_session_ref="thread-1",
+        peer_ref="peer",
+        peer_lookup_hash="peer-hash",
+        user_id="user-1",
+        channel_type="fake",
+        media=(),
+        request_key="request-1",
+        text="hello",
+        inbound_message_id=uuid4(),
+        lease_generation=1,
+        attempts=1,
+    )
+
+    @asynccontextmanager
+    async def active_epoch_fence(_binding_id, _binding_epoch):
+        yield True
+
+    adapter = SimpleNamespace(
+        max_outbound_text_length=None,
+        max_messages_per_context=3,
+        continuation_notice="继续",
+        resolve_images=AsyncMock(return_value=()),
+    )
+    repository = SimpleNamespace(
+        claim_pending_inbound=AsyncMock(return_value=[claim]),
+        hold_active_binding_epoch=active_epoch_fence,
+        ack_inbound_and_enqueue_deliveries=AsyncMock(),
+        nack_inbound=AsyncMock(),
+    )
+    agent = SimpleNamespace(
+        run_turn=AsyncMock(
+            return_value=contracts.AgentTurnResult(
+                parts=tuple(TextPart(f"part-{i}") for i in range(5)),
+                session_ref="thread-1",
+            )
+        )
+    )
+
+    runner = GatewayRunner(
+        channel_adapters={"fake": adapter}, agent_adapter=agent, repository=repository
+    )
+
+    assert await runner.process_inbound_once() == 1
+    ack_args = repository.ack_inbound_and_enqueue_deliveries.await_args
+    assert ack_args.args[1].parts == (
+        TextPart("part-0"),
+        TextPart("part-1"),
+        TextPart("继续"),
+    )
+    assert ack_args.kwargs["continuation_parts"] == (
+        TextPart("part-2"),
+        TextPart("part-3"),
+        TextPart("part-4"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_pending_continuation_without_invoking_agent() -> None:
+    claim = SimpleNamespace(
+        binding_id=uuid4(), binding_epoch=1, kind=InboundKind.MESSAGE,
+        session_id=uuid4(), agent_session_ref="thread-1", peer_ref="peer",
+        peer_lookup_hash="peer-hash", user_id="user-1", channel_type="fake",
+        media=(), request_key="request-1", text="继续", inbound_message_id=uuid4(),
+        lease_generation=1, attempts=1,
+    )
+
+    @asynccontextmanager
+    async def active_epoch_fence(_binding_id, _binding_epoch):
+        yield True
+
+    continuation = contracts.ChannelContinuation(
+        continuation_id="c1", binding_id=str(claim.binding_id),
+        session_id=str(claim.session_id), binding_epoch=1,
+        parts=(TextPart("tail"),), expires_at=datetime.now(UTC),
+    )
+    repository = SimpleNamespace(
+        claim_pending_inbound=AsyncMock(return_value=[claim]),
+        get_pending_continuation=AsyncMock(return_value=continuation),
+        hold_active_binding_epoch=active_epoch_fence,
+        ack_inbound_and_enqueue_deliveries=AsyncMock(),
+        nack_inbound=AsyncMock(),
+    )
+    agent = SimpleNamespace(run_turn=AsyncMock())
+    adapter = SimpleNamespace(
+        continuation_command="继续", max_messages_per_context=10,
+        max_outbound_text_length=None, prepare_outbound_parts=lambda parts: parts,
+    )
+    runner = GatewayRunner(
+        channel_adapters={"fake": adapter}, agent_adapter=agent, repository=repository
+    )
+
+    assert await runner.process_inbound_once() == 1
+    agent.run_turn.assert_not_awaited()
+    ack_args = repository.ack_inbound_and_enqueue_deliveries.await_args
+    assert ack_args.args[1].parts == (TextPart("tail"),)
+    assert ack_args.kwargs["continuation_id"] == "c1"
+
+
+@pytest.mark.asyncio
+async def test_delivery_budget_error_is_parked_without_generic_retry() -> None:
+    delivery = SimpleNamespace(
+        delivery_id=uuid4(), binding_id=uuid4(), binding_epoch=1,
+        channel_type="fake", payload={"text": "answer"}, client_id=uuid4(),
+        session_id=uuid4(), inbound_message_id=uuid4(), sequence_no=0,
+        reply_context=ReplyContext("peer", (("context_token", "ctx"),)),
+        lease_generation=1, credentials=BindingCredentials("binding", "fake", (("token", "t"),)),
+        attempts=1,
+    )
+
+    @asynccontextmanager
+    async def active_epoch_fence(_binding_id, _binding_epoch):
+        yield True
+
+    async def deliver(*_args):
+        raise contracts.ChannelMessageBudgetError("budget", provider_code=-2)
+
+    repository = SimpleNamespace(
+        claim_due_deliveries=AsyncMock(return_value=[delivery]),
+        hold_active_binding_epoch=active_epoch_fence,
+        park_delivery_context_budget=AsyncMock(return_value=True),
+        nack_delivery=AsyncMock(),
+        ack_delivery=AsyncMock(),
+    )
+    runner = GatewayRunner(
+        channel_adapters={"fake": SimpleNamespace(deliver=deliver)},
+        agent_adapter=SimpleNamespace(), repository=repository,
+    )
+
+    assert await runner.deliver_once() == 0
+    repository.park_delivery_context_budget.assert_awaited_once()
+    repository.nack_delivery.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_generic_expired_binding_reauthenticates_without_wechat_exception() -> None:
     repo = FakeRepo()

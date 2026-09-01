@@ -22,6 +22,7 @@ from src.server.channels.adapters.base import ChannelAdapter
 from src.server.channels.contracts import (
     BindingCredentials,
     ChannelBindingExpiredError,
+    ChannelMessageBudgetError,
     BindingRoute,
     BindingView,
     DeliveryReceipt,
@@ -178,7 +179,8 @@ def _split_delivery_units(content: str) -> list[str]:
     return [unit for unit in units if unit]
 
 
-def _hard_split(text: str, limit: int) -> list[str]:
+def _hard_split_plain(text: str, limit: int) -> list[str]:
+    limit = max(1, limit)
     chunks: list[str] = []
     remaining = text
     while len(remaining) > limit:
@@ -191,6 +193,20 @@ def _hard_split(text: str, limit: int) -> list[str]:
     if remaining:
         chunks.append(remaining)
     return chunks or [text]
+
+
+def _hard_split(text: str, limit: int) -> list[str]:
+    """Split one oversized unit while keeping fenced code chunks valid."""
+    lines = text.splitlines()
+    if len(lines) >= 2 and _FENCE_RE.match(lines[0].strip()) and lines[-1].strip() == "```":
+        opening = lines[0]
+        closing = "```"
+        body = "\n".join(lines[1:-1])
+        body_limit = max(1, limit - len(opening) - len(closing) - 2)
+        return [
+            f"{opening}\n{chunk}\n{closing}" for chunk in _hard_split_plain(body, body_limit)
+        ]
+    return _hard_split_plain(text, limit)
 
 
 def _pack_units(units: list[str], limit: int) -> list[str]:
@@ -215,21 +231,16 @@ def _pack_units(units: list[str], limit: int) -> list[str]:
 
 
 def _split_final_text(content: str, limit: int) -> list[str]:
-    if len(content) <= limit and "\n" not in content:
-        return [content]
     units = _split_delivery_units(content)
-    chunks: list[str] = []
-    for unit in units:
-        if len(unit) <= limit:
-            chunks.append(unit)
-        else:
-            chunks.extend(_pack_units([unit], limit))
-    return chunks or [content]
+    return _pack_units(units, limit) or [content]
 
 
 class WeChatILinkAdapter(ChannelAdapter):
     channel_type = "wechat"
     supports_typing = True
+    max_messages_per_context = 10
+    continuation_command = "继续"
+    continuation_notice = "内容较长，已发送前半部分。回复“继续”获取后续内容。"
 
     def __init__(
         self,
@@ -359,18 +370,28 @@ class WeChatILinkAdapter(ChannelAdapter):
         self, parts: tuple[Any, ...]
     ) -> tuple[Any, ...]:
         prepared: list[Any] = []
+        text_units: list[str] = []
+
+        def flush_text() -> None:
+            if not text_units:
+                return
+            prepared.extend(
+                TextPart(chunk)
+                for chunk in _pack_units(text_units, self.max_text_length)
+                if chunk
+            )
+            text_units.clear()
+
         for part in parts:
             if not isinstance(part, TextPart):
+                flush_text()
                 prepared.append(part)
                 continue
             formatted = _normalize_markdown(part.text)
             if not formatted:
                 continue
-            prepared.extend(
-                TextPart(chunk)
-                for chunk in _split_final_text(formatted, self.max_text_length)
-                if chunk
-            )
+            text_units.extend(_split_delivery_units(formatted))
+        flush_text()
         return tuple(prepared)
 
     def render_message_event(self, event: Any, sink: Any) -> None:
@@ -635,11 +656,38 @@ class WeChatILinkAdapter(ChannelAdapter):
         payload = ILinkApi.build_text_message(values["user_id"], context_token, text)
         payload["client_id"] = message.client_id
         try:
-            await self.api.send_message(values["base_url"], values["token"], payload)
+            response = await self.api.send_message(
+                values["base_url"], values["token"], payload
+            )
         except ApiError as exc:
             if exc.is_session_expired:
                 raise ChannelBindingExpiredError from exc
+            if exc.errcode == -2:
+                raise ChannelMessageBudgetError(
+                    "iLink context message budget exhausted",
+                    provider_code=exc.errcode,
+                ) from exc
             raise
+        if isinstance(response, dict):
+            raw_code = response.get("ret")
+            if raw_code in (None, 0):
+                raw_code = response.get("errcode", 0)
+            try:
+                code = int(raw_code)
+            except (TypeError, ValueError):
+                code = 0
+            if code == -2:
+                raise ChannelMessageBudgetError(
+                    "iLink context message budget exhausted", provider_code=code
+                )
+            if code == -14:
+                raise ChannelBindingExpiredError
+            if code != 0:
+                raise ApiError(
+                    str(response.get("errmsg") or f"send_message failed ({code})"),
+                    errcode=code,
+                    payload={"ret": code},
+                )
         return DeliveryReceipt(
             accepted=True,
             provider_message_id=str(payload["client_id"]),

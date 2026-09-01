@@ -60,6 +60,9 @@ class ChannelAdapter(metaclass=_ChannelAdapterMeta):
 
     channel_type: str = "unknown"
     max_outbound_text_length: int | None = None
+    max_messages_per_context: int | None = None
+    continuation_command: str | None = None
+    continuation_notice: str | None = None
     supports_code_blocks: bool = False
     supports_status_text: bool = False
     supports_typing: bool = False
