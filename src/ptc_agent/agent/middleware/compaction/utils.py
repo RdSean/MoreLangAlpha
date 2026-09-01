@@ -26,6 +26,10 @@ from ptc_agent.agent.middleware.compaction.types import (
     CompactionEvent,
     TRUNCATABLE_TOOLS,
 )
+from ptc_agent.tokenizer_resource import (
+    CL100K_BASE_ENCODING,
+    prepare_tokenizer_resource,
+)
 
 if TYPE_CHECKING:
     from ptc_agent.config.agent import AgentConfig
@@ -53,41 +57,38 @@ def resolve_compaction_client(config: AgentConfig) -> Any | None:
 # Token counting
 # =============================================================================
 
-# Lazy-loaded tiktoken encoder. The fallback keeps chat usable on installations
-# where the first-time BPE download is blocked by a proxy or restricted network.
+# Lazy-loaded tiktoken encoder
 _tiktoken_encoder: Any | None = None
 _PROVIDER_USAGE_MULTIPLIER = 8
 _PROVIDER_USAGE_SLACK_TOKENS = 32_768
 
 
 class _ApproximateTokenEncoder:
-    """Small local token-counting fallback used when tiktoken is unavailable."""
+    """Small offline fallback used when the BPE file cannot be downloaded."""
 
     @staticmethod
-    def encode(text: str) -> list[int]:
-        if not text:
-            return []
-
-        # CJK characters are generally close to one token, while a run of
-        # ASCII text averages roughly four characters per token.
+    def encode(text: str) -> range:
         ascii_count = sum(ord(char) < 128 for char in text)
         non_ascii_count = len(text) - ascii_count
-        estimate = (ascii_count + 3) // 4 + non_ascii_count
-        return [0] * max(1, estimate)
+        estimate = max(1, (ascii_count + 3) // 4 + non_ascii_count)
+        return range(estimate)
 
 
 def _get_tiktoken_encoder() -> Any:
-    """Get or create tiktoken encoder (lazy initialization)."""
+    """Get an exact encoder when ready, otherwise use a recoverable fallback."""
     global _tiktoken_encoder
     if _tiktoken_encoder is None:
+        status = prepare_tokenizer_resource(allow_download=False)
+        if not status.exact:
+            return _ApproximateTokenEncoder()
         try:
-            _tiktoken_encoder = tiktoken.get_encoding("cl100k_base")
+            _tiktoken_encoder = tiktoken.get_encoding(CL100K_BASE_ENCODING)
         except Exception as exc:
             logger.warning(
-                "tiktoken encoder unavailable; using local token estimate: %s",
-                exc,
+                "Unable to load cl100k_base locally; using approximate token counts: %s",
+                type(exc).__name__,
             )
-            _tiktoken_encoder = _ApproximateTokenEncoder()
+            return _ApproximateTokenEncoder()
     return _tiktoken_encoder
 
 

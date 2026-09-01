@@ -79,6 +79,22 @@ async def get_current_user_id(
             raise HTTPException(status_code=401, detail="Missing X-User-Id")
         return user_id
 
+    # In OSS mode with no service token configured, the standalone channel
+    # worker is the trusted self-dispatcher. It has no browser session cookie,
+    # so carry the user identity through the same headers that the message
+    # handler already accepts for this mode.
+    from src.config.settings import HOST_MODE
+
+    if (
+        HOST_MODE == "oss"
+        and not _SERVICE_TOKEN
+        and request.headers.get("X-Dispatch") == "background"
+    ):
+        user_id = request.headers.get("X-User-Id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Missing X-User-Id")
+        return user_id
+
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
         raise HTTPException(status_code=401, detail="Missing authentication")

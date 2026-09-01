@@ -108,6 +108,31 @@ _REDIS_BACKGROUND_SINGLETONS: tuple[tuple[str, str], ...] = (
 )
 
 
+async def _prepare_tokenizer_resource_at_startup() -> None:
+    """Warm the exact tokenizer cache without making it a startup dependency."""
+    from ptc_agent.tokenizer_resource import prepare_tokenizer_resource
+
+    try:
+        status = await asyncio.to_thread(
+            prepare_tokenizer_resource,
+            allow_download=True,
+        )
+    except Exception:
+        logger.error(
+            "Tokenizer resource degraded: error_code=tokenizer_preparation_failed"
+        )
+        return
+
+    if status.exact:
+        logger.info("Tokenizer resource ready: encoding=%s", status.encoding)
+        return
+    logger.error(
+        "Tokenizer resource degraded: encoding=%s error_code=%s",
+        status.encoding,
+        status.error_code,
+    )
+
+
 def _background_singleton(name: str, module: str):
     """Resolve one singleton, importing its module on first use.
 
@@ -163,6 +188,8 @@ async def lifespan(app: FastAPI):
 
     # Configure logging based on environment settings (first thing on startup)
     configure_logging()
+
+    await _prepare_tokenizer_resource_at_startup()
 
     # Phase 2 of the OTel bootstrap (see module-top init_otel comment). Runs
     # per-worker so BatchSpanProcessor / PeriodicExportingMetricReader daemon
@@ -900,6 +927,8 @@ from src.server.app.workflows import include_workflow_router
 from src.server.app.mcp_catalog import router as mcp_catalog_router
 from src.server.app.mcp_servers import router as mcp_servers_router
 from src.server.app.speech import router as speech_router
+from src.server.app.channels import router as channels_router
+from src.server.app.runtime_resources import router as runtime_resources_router
 
 # Include all routers
 app.include_router(threads_router)  # /api/v1/threads/* - Thread CRUD, messages, control
@@ -950,6 +979,8 @@ app.include_router(
     mcp_servers_router
 )  # /api/v1/workspaces/{id}/mcp/servers - Per-workspace MCP server config
 app.include_router(speech_router)  # /ws/v1/speech/transcribe - Backend ASR relay
+app.include_router(channels_router)  # /api/v1/channels/* - Generic channel bindings
+app.include_router(runtime_resources_router)  # /api/v1/runtime-resources/*
 app.include_router(health_router)  # /health - Health check
 app.include_router(
     preview_redirect_router

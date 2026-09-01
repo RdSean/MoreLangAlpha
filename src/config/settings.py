@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from src.config import env
 from src.config.core import get_infrastructure_config
-from src.config.models import WorkflowOrchestrationConfig
+from src.config.models import ChannelGatewayConfig, WorkflowOrchestrationConfig
 
 # Re-export env-var constants for backward compatibility
 from src.config.env import (  # noqa: F401
@@ -101,6 +101,11 @@ def get_education_teaching_abandoned_timeout() -> int:
 def get_workflow_orchestration_config() -> WorkflowOrchestrationConfig:
     """Caps and timeouts for RunWorkflow programmatic subagent runs."""
     return get_infrastructure_config().workflow
+
+
+def get_channel_gateway_config() -> ChannelGatewayConfig:
+    """Return bounded configuration shared by all external channel workers."""
+    return get_infrastructure_config().channels
 
 
 def get_sse_keepalive_interval() -> float:

@@ -14,6 +14,7 @@ import { useDebouncedSave } from '@/hooks/useDebouncedSave';
 import { isPlatformMode } from '@/config/hostMode';
 import { useTranslation } from 'react-i18next';
 import { ConnectedAccounts } from './ConnectedAccounts';
+import { TokenizerStatusAlert } from '../components/TokenizerStatusAlert';
 import type { Preferences } from './types';
 
 /** Model tab: default/flash model selection, starred models, advanced model
@@ -200,6 +201,7 @@ export function ModelTab() {
 
   return (
       <div className="space-y-6">
+        <TokenizerStatusAlert />
         {/* Section 1: Model Preferences */}
         <div>
           {/* Default + Flash model selectors */}

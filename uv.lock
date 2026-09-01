@@ -1851,11 +1851,13 @@ dependencies = [
     { name = "opentelemetry-api" },
     { name = "pandas" },
     { name = "pdfplumber" },
+    { name = "pillow" },
     { name = "playwright" },
     { name = "plotly" },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pypdf" },
     { name = "python-dotenv" },
+    { name = "qrcode" },
     { name = "quickjs-rs" },
     { name = "redis" },
     { name = "requests" },
@@ -1873,6 +1875,7 @@ dependencies = [
     { name = "trafilatura" },
     { name = "uvicorn" },
     { name = "websockets" },
+    { name = "wechatbot-sdk" },
     { name = "youtube-transcript-api" },
 ]
 
@@ -1954,6 +1957,7 @@ requires-dist = [
     { name = "opentelemetry-sdk", marker = "extra == 'observability'", specifier = ">=1.41.1" },
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pdfplumber", specifier = ">=0.10.0" },
+    { name = "pillow", specifier = ">=10" },
     { name = "playwright" },
     { name = "playwright", marker = "extra == 'pdf'", specifier = ">=1.49" },
     { name = "plotly" },
@@ -1964,6 +1968,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=4.1.0" },
     { name = "pytest-socket", marker = "extra == 'test'", specifier = ">=0.7.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
+    { name = "qrcode", specifier = ">=7.0" },
     { name = "quickjs-rs", specifier = ">=0.2.4,<0.3.0" },
     { name = "redis", specifier = ">=5.0.0" },
     { name = "requests", specifier = ">=2.32.5" },
@@ -1982,6 +1987,7 @@ requires-dist = [
     { name = "trafilatura", specifier = ">=2.0.0" },
     { name = "uvicorn", specifier = ">=0.27.1" },
     { name = "websockets", specifier = ">=12.0" },
+    { name = "wechatbot-sdk", specifier = ">=0.3.0" },
     { name = "youtube-transcript-api", specifier = ">=1.0.0" },
 ]
 provides-extras = ["dev", "test", "observability", "pdf"]
@@ -3955,6 +3961,18 @@ wheels = [
 ]
 
 [[package]]
+name = "qrcode"
+version = "8.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8f/b2/7fc2931bfae0af02d5f53b174e9cf701adbb35f39d69c2af63d4a39f81a9/qrcode-8.2.tar.gz", hash = "sha256:35c3f2a4172b33136ab9f6b3ef1c00260dd2f66f858f24d88418a015f446506c", size = 43317, upload-time = "2025-05-01T15:44:24.726Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dd/b8/d2d6d731733f51684bbf76bf34dab3b70a9148e8f2cef2bb544fccec681a/qrcode-8.2-py3-none-any.whl", hash = "sha256:16e64e0716c14960108e85d853062c9e8bba5ca8252c0b4d0231b9df4060ff4f", size = 45986, upload-time = "2025-05-01T15:44:22.781Z" },
+]
+
+[[package]]
 name = "quickjs-rs"
 version = "0.2.4"
 source = { registry = "https://pypi.org/simple" }
@@ -4915,6 +4933,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/86/eb/20b6cdf273913d0ad05a6a14aed4b9a85591c18a987a3d47f20fa13dcc47/websockets-15.0.1-cp313-cp313-win32.whl", hash = "sha256:ba9e56e8ceeeedb2e080147ba85ffcd5cd0711b89576b83784d8605a7df455fa", size = 176393, upload-time = "2025-03-05T20:02:53.814Z" },
     { url = "https://files.pythonhosted.org/packages/1b/6c/c65773d6cab416a64d191d6ee8a8b1c68a09970ea6909d16965d26bfed1e/websockets-15.0.1-cp313-cp313-win_amd64.whl", hash = "sha256:e09473f095a819042ecb2ab9465aee615bd9c2028e4ef7d933600a8401c79561", size = 176837, upload-time = "2025-03-05T20:02:55.237Z" },
     { url = "https://files.pythonhosted.org/packages/fa/a8/5b41e0da817d64113292ab1f8247140aac61cbf6cfd085d6a0fa77f4984f/websockets-15.0.1-py3-none-any.whl", hash = "sha256:f7a866fbc1e97b5c617ee4116daaa09b722101d4a3c170c787450ba409f9736f", size = 169743, upload-time = "2025-03-05T20:03:39.41Z" },
+]
+
+[[package]]
+name = "wechatbot-sdk"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "cryptography" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b6/75/d8f1e16df0d9de9035a63441c6e673574b97e5ae2a2329b0b818f6069911/wechatbot_sdk-0.3.0.tar.gz", hash = "sha256:65ecec0ef835391e8f7ce0035a2fc924ebf645e0d82ec9bdfd7f19bd27cccf98", size = 16940, upload-time = "2026-07-01T23:12:13.934Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/19/2a/4d57cf79c0b3bbe82e08de8d2f5e9a75c57d62aaa175703ed57bcb17c849/wechatbot_sdk-0.3.0-py3-none-any.whl", hash = "sha256:717ce38c5a7b0c207f2bef1f6e203ca18064fefc589c638d8890ade49cb742fb", size = 18424, upload-time = "2026-07-01T23:12:12.719Z" },
 ]
 
 [[package]]

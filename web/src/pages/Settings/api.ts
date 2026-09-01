@@ -1,6 +1,51 @@
 import { api } from '@/api/client';
 import { streamFetch } from '@/pages/ChatAgent/utils/api/transport';
 
+export interface ChannelStatus {
+  channel_type: string;
+  status: 'unlinked' | 'active' | 'reauth_required' | 'disabled';
+  display_name?: string | null;
+  idle_timeout_seconds: number;
+  last_error_code?: string | null;
+}
+
+export interface WechatLinkAttempt {
+  attempt_id: string;
+  channel_type: string;
+  status: 'waiting' | 'scanned' | 'verification_required' | 'linked' | 'expired' | 'failed' | 'cancelled';
+  qr_code_url?: string | null;
+  expires_at: string;
+  verification_required?: boolean;
+}
+
+export async function getWechatStatus(): Promise<ChannelStatus> {
+  const { data } = await api.get<ChannelStatus>('/api/v1/channels/wechat');
+  return data;
+}
+
+export async function startWechatLinkAttempt(): Promise<WechatLinkAttempt> {
+  const { data } = await api.post<WechatLinkAttempt>('/api/v1/channels/wechat/link-attempts');
+  return data;
+}
+
+export async function pollWechatLinkAttempt(attemptId: string, verificationCode?: string): Promise<WechatLinkAttempt> {
+  const { data } = await api.post<WechatLinkAttempt>(`/api/v1/channels/wechat/link-attempts/${encodeURIComponent(attemptId)}/poll`, verificationCode ? { verification_code: verificationCode } : {});
+  return data;
+}
+
+export async function cancelWechatLinkAttempt(attemptId: string): Promise<void> {
+  await api.delete(`/api/v1/channels/wechat/link-attempts/${encodeURIComponent(attemptId)}`);
+}
+
+export async function updateWechatStatus(idleTimeoutSeconds: number): Promise<ChannelStatus> {
+  const { data } = await api.patch<ChannelStatus>('/api/v1/channels/wechat', { idle_timeout_seconds: idleTimeoutSeconds });
+  return data;
+}
+
+export async function disconnectWechat(): Promise<void> {
+  await api.delete('/api/v1/channels/wechat');
+}
+
 export interface FlashWorkspaceSummary {
   workspace_id: string;
   name: string;

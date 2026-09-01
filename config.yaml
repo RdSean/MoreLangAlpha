@@ -152,7 +152,23 @@ redis:
   swr:
     enabled: true  # Enable SWR for cache reads
     soft_ttl_ratio: 0.6
-    warm_after_invalidation: true  # Pre-populate cache after invalidation
+  warm_after_invalidation: true  # Pre-populate cache after invalidation
+
+# External messaging channel worker controls. Credentials remain in .env and
+# encrypted PostgreSQL columns; this section only governs bounded behavior.
+channels:
+  default_idle_timeout_seconds: 21600
+  worker_poll_interval_seconds: 1.0
+  binding_lease_seconds: 75
+  link_poll_timeout_seconds: 10
+  link_attempt_lease_seconds: 30
+  inbound_lease_seconds: 120
+  outbox_lease_seconds: 60
+  worker_concurrency: 4
+  max_image_bytes: 8388608
+  max_image_pixels: 24000000
+  max_ilink_text_length: 2000
+  max_delivery_attempts: 8
 
 # RunWorkflow programmatic subagent orchestration
 workflow:

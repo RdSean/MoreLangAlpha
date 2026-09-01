@@ -125,3 +125,21 @@ def test_task_request_staging_follows_open_submission_repair():
 
     assert migration["revision"] == "041"
     assert migration["down_revision"] == "040"
+
+
+def test_channel_gateway_schema_follows_task_request_staging():
+    migration_dir = Path(__file__).parents[3] / "migrations/versions"
+    migration = runpy.run_path(str(migration_dir / "042_add_channel_gateway.py"))
+
+    assert migration["revision"] == "042"
+    assert migration["down_revision"] == "041"
+
+
+def test_channel_gateway_hardening_follows_the_initial_gateway_schema():
+    migration_dir = Path(__file__).parents[3] / "migrations/versions"
+    migration = runpy.run_path(
+        str(migration_dir / "043_harden_channel_gateway_fences.py")
+    )
+
+    assert migration["revision"] == "043"
+    assert migration["down_revision"] == "042"

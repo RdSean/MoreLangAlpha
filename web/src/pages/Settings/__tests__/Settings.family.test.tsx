@@ -17,6 +17,9 @@ vi.mock('../panels/ModelTab', () => ({ ModelTab: () => <div>模型管理内容</
 vi.mock('../panels/ExperimentsTab', () => ({ ExperimentsTab: () => <div /> }));
 vi.mock('../queries', () => ({
   useFamilyChildren: () => ({ data: state.children, isLoading: false, isError: false, refetch: vi.fn() }),
+  useEducationHomeworkDictionaries: () => ({ data: { grade_options: [] }, isLoading: false, isError: false }),
+  useFamilyChildEducationProfile: () => ({ data: { grade_code: null }, isLoading: false, isError: false }),
+  useUpdateFamilyChildEducationProfile: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreateChildAccount: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useFamilyChildWorkspace: () => ({ data: { workspace_id: 'flash-1', name: 'Flash', status: 'flash' }, isLoading: false, isError: false, refetch: vi.fn() }),
   useFamilyChildThreads: () => ({ data: { threads: [], total: 0, limit: 20, offset: 0 }, isLoading: false, isError: false, refetch: vi.fn() }),

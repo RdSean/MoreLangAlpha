@@ -1,4 +1,4 @@
-.PHONY: help configup down clean dev dev-web install test test-sandbox test-web test-all lint setup-db migrate
+.PHONY: help configup down clean dev dev-web dev-gateway install test test-sandbox test-web test-all lint setup-db migrate
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -44,6 +44,9 @@ dev: ## Start backend with hot-reload (requires DB + Redis running)
 
 dev-web: ## Start frontend dev server
 	cd web && pnpm dev
+
+dev-gateway: ## Start the standalone external channel gateway worker
+	GINLIXFLOW_BASE_URL=http://127.0.0.1:8010 uv run python -m src.server.services.channels.worker
 
 # ---------------------------------------------------------------------------
 # Testing

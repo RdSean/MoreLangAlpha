@@ -1,0 +1,639 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+import asyncio
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+
+from src.server.channels import contracts
+from src.server.channels.contracts import (
+    AgentSession,
+    AgentTurnResult,
+    BindingCredentials,
+    BindingRoute,
+    DeliveryReceipt,
+    InboundKind,
+    InboundMessage,
+    ReplyContext,
+    ResolvedImage,
+    TextPart,
+    UpdateBatch,
+)
+from src.server.database.channels import BindingLease
+from src.server.services.channels.gateway_runner import GatewayRunner
+from src.server.services.channels import gateway_runner
+
+
+def _lease():
+    return BindingLease(
+        binding_id=uuid4(),
+        user_id="u1",
+        channel_type="fake",
+        credentials=BindingCredentials("b", "fake", (("token", "t"),)),
+        route=BindingRoute("b", "peer"),
+        cursor="old",
+        generation=1,
+    )
+
+
+class FakeRepo:
+    def __init__(self):
+        self.persisted = []
+        self.acked = []
+        self.sessions = {}
+        self.reauth = []
+
+    async def list_active_binding_ids(self, limit):
+        return [self.lease.binding_id]
+
+    async def claim_binding_lease(self, *args):
+        return self.lease
+
+    async def release_binding_lease(self, *args):
+        return True
+
+    async def persist_update_batch(self, binding_id, cursor, messages, **kwargs):
+        self.persisted.extend(messages)
+        return len(messages)
+
+    async def get_or_rotate_session(self, **kwargs):
+        raise AssertionError(
+            "session rotation belongs to the durable insert transaction"
+        )
+
+    async def claim_pending_inbound(self, *args):
+        return []
+
+    async def claim_due_deliveries(self, *args):
+        return []
+
+    async def mark_binding_reauth(self, binding_id, error_code):
+        self.reauth.append((binding_id, error_code))
+
+
+class FakeChannel:
+    channel_type = "fake"
+    max_outbound_text_length = 3
+
+    async def fetch_updates(self, credentials, cursor):
+        return UpdateBatch(
+            updates=({"message_id": "m1"},),
+            next_cursor="new",
+        )
+
+    def normalize(self, raw, binding):
+        return InboundMessage(
+            provider_message_id="m1",
+            peer_ref="peer",
+            received_at=datetime.now(UTC),
+            kind=InboundKind.MESSAGE,
+            text="hello",
+            reply_context=ReplyContext("peer", (("context_token", "ctx"),)),
+        )
+
+    async def resolve_images(self, media, *, max_bytes, max_pixels):
+        return ()
+
+
+@pytest.mark.asyncio
+async def test_ingest_persists_cursor_and_messages_without_calling_agent():
+    repo = FakeRepo()
+    repo.lease = _lease()
+    runner = GatewayRunner(
+        channel_adapters={"fake": FakeChannel()},
+        agent_adapter=SimpleNamespace(),
+        repository=repo,
+    )
+    await runner.ingest_binding(repo.lease)
+    assert repo.persisted[0].provider_message_id == "m1"
+    assert repo.persisted[0].peer_ref == "peer"
+
+
+@pytest.mark.asyncio
+async def test_runner_starts_and_stops_each_binding_once() -> None:
+    repo = FakeRepo()
+    repo.lease = _lease()
+    channel = FakeChannel()
+    channel.on_binding_start = AsyncMock()
+    channel.on_binding_stop = AsyncMock()
+    runner = GatewayRunner(
+        channel_adapters={"fake": channel},
+        agent_adapter=SimpleNamespace(),
+        repository=repo,
+    )
+
+    await runner.poll_bindings_once()
+    await runner.poll_bindings_once()
+    await runner.stop()
+
+    channel.on_binding_start.assert_awaited_once_with(repo.lease.credentials)
+    channel.on_binding_stop.assert_awaited_once_with(repo.lease.credentials)
+
+
+@pytest.mark.asyncio
+async def test_runner_keeps_typing_during_agent_turn_and_stops_on_error() -> None:
+    claim = SimpleNamespace(
+        binding_id=uuid4(),
+        binding_epoch=1,
+        kind=InboundKind.MESSAGE,
+        session_id=uuid4(),
+        agent_session_ref="thread-1",
+        peer_ref="peer",
+        peer_lookup_hash="peer-hash",
+        user_id="user-1",
+        channel_type="fake",
+        media=(),
+        request_key="request-1",
+        text="hello",
+        inbound_message_id=uuid4(),
+        lease_generation=1,
+        attempts=1,
+        credentials=BindingCredentials("binding", "fake", (("token", "secret"),)),
+        reply_context=ReplyContext("peer", (("context_token", "ctx"),)),
+    )
+
+    @asynccontextmanager
+    async def active_epoch_fence(_binding_id, _binding_epoch):
+        yield True
+
+    typing_started = asyncio.Event()
+    typing_stopped = asyncio.Event()
+
+    async def keep_typing(_credentials, _reply_context, *, stop_event):
+        typing_started.set()
+        await stop_event.wait()
+        typing_stopped.set()
+
+    adapter = SimpleNamespace(
+        supports_typing=True,
+        keep_typing=keep_typing,
+        max_outbound_text_length=None,
+        resolve_images=AsyncMock(return_value=()),
+    )
+
+    async def run_turn(_session, _turn, on_event=None):
+        await typing_started.wait()
+        raise RuntimeError("agent failed")
+
+    repository = SimpleNamespace(
+        claim_pending_inbound=AsyncMock(return_value=[claim]),
+        hold_active_binding_epoch=active_epoch_fence,
+        ack_inbound_and_enqueue_deliveries=AsyncMock(),
+        nack_inbound=AsyncMock(return_value=True),
+    )
+    runner = GatewayRunner(
+        channel_adapters={"fake": adapter},
+        agent_adapter=SimpleNamespace(run_turn=run_turn),
+        repository=repository,
+    )
+
+    assert await runner.process_inbound_once() == 0
+    assert typing_stopped.is_set()
+    repository.nack_inbound.assert_awaited_once()
+
+
+def test_outbound_text_is_split_to_the_provider_limit_in_order() -> None:
+    parts = gateway_runner.split_outbound_parts(
+        (TextPart("abcdef"),), max_text_length=3
+    )
+
+    assert parts == (TextPart("abc"), TextPart("def"))
+
+
+def test_outbound_text_prefers_a_natural_boundary_before_hard_cut() -> None:
+    parts = gateway_runner.split_outbound_parts(
+        (TextPart("aaaaa\nbbbbb"),), max_text_length=8
+    )
+
+    assert parts == (TextPart("aaaaa\n"), TextPart("bbbbb"))
+
+
+def test_context_message_budget_reserves_notice_for_remaining_parts() -> None:
+    parts = tuple(TextPart(f"part-{index}") for index in range(12))
+
+    visible, remaining = gateway_runner.apply_context_message_budget(
+        parts,
+        max_messages=10,
+        notice="继续",
+    )
+
+    assert len(visible) == 10
+    assert visible[:9] == parts[:9]
+    assert visible[-1] == TextPart("继续")
+    assert remaining == parts[9:]
+
+
+@pytest.mark.asyncio
+async def test_runner_persists_tail_when_response_exceeds_context_budget() -> None:
+    claim = SimpleNamespace(
+        binding_id=uuid4(),
+        binding_epoch=1,
+        kind=InboundKind.MESSAGE,
+        session_id=uuid4(),
+        agent_session_ref="thread-1",
+        peer_ref="peer",
+        peer_lookup_hash="peer-hash",
+        user_id="user-1",
+        channel_type="fake",
+        media=(),
+        request_key="request-1",
+        text="hello",
+        inbound_message_id=uuid4(),
+        lease_generation=1,
+        attempts=1,
+    )
+
+    @asynccontextmanager
+    async def active_epoch_fence(_binding_id, _binding_epoch):
+        yield True
+
+    adapter = SimpleNamespace(
+        max_outbound_text_length=None,
+        max_messages_per_context=3,
+        continuation_notice="继续",
+        resolve_images=AsyncMock(return_value=()),
+    )
+    repository = SimpleNamespace(
+        claim_pending_inbound=AsyncMock(return_value=[claim]),
+        hold_active_binding_epoch=active_epoch_fence,
+        ack_inbound_and_enqueue_deliveries=AsyncMock(),
+        nack_inbound=AsyncMock(),
+    )
+    agent = SimpleNamespace(
+        run_turn=AsyncMock(
+            return_value=contracts.AgentTurnResult(
+                parts=tuple(TextPart(f"part-{i}") for i in range(5)),
+                session_ref="thread-1",
+            )
+        )
+    )
+
+    runner = GatewayRunner(
+        channel_adapters={"fake": adapter}, agent_adapter=agent, repository=repository
+    )
+
+    assert await runner.process_inbound_once() == 1
+    ack_args = repository.ack_inbound_and_enqueue_deliveries.await_args
+    assert ack_args.args[1].parts == (
+        TextPart("part-0"),
+        TextPart("part-1"),
+        TextPart("继续"),
+    )
+    assert ack_args.kwargs["continuation_parts"] == (
+        TextPart("part-2"),
+        TextPart("part-3"),
+        TextPart("part-4"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_pending_continuation_without_invoking_agent() -> None:
+    claim = SimpleNamespace(
+        binding_id=uuid4(), binding_epoch=1, kind=InboundKind.MESSAGE,
+        session_id=uuid4(), agent_session_ref="thread-1", peer_ref="peer",
+        peer_lookup_hash="peer-hash", user_id="user-1", channel_type="fake",
+        media=(), request_key="request-1", text="继续", inbound_message_id=uuid4(),
+        lease_generation=1, attempts=1,
+    )
+
+    @asynccontextmanager
+    async def active_epoch_fence(_binding_id, _binding_epoch):
+        yield True
+
+    continuation = contracts.ChannelContinuation(
+        continuation_id="c1", binding_id=str(claim.binding_id),
+        session_id=str(claim.session_id), binding_epoch=1,
+        parts=(TextPart("tail"),), expires_at=datetime.now(UTC),
+    )
+    repository = SimpleNamespace(
+        claim_pending_inbound=AsyncMock(return_value=[claim]),
+        get_pending_continuation=AsyncMock(return_value=continuation),
+        hold_active_binding_epoch=active_epoch_fence,
+        ack_inbound_and_enqueue_deliveries=AsyncMock(),
+        nack_inbound=AsyncMock(),
+    )
+    agent = SimpleNamespace(run_turn=AsyncMock())
+    adapter = SimpleNamespace(
+        continuation_command="继续", max_messages_per_context=10,
+        max_outbound_text_length=None, prepare_outbound_parts=lambda parts: parts,
+    )
+    runner = GatewayRunner(
+        channel_adapters={"fake": adapter}, agent_adapter=agent, repository=repository
+    )
+
+    assert await runner.process_inbound_once() == 1
+    agent.run_turn.assert_not_awaited()
+    ack_args = repository.ack_inbound_and_enqueue_deliveries.await_args
+    assert ack_args.args[1].parts == (TextPart("tail"),)
+    assert ack_args.kwargs["continuation_id"] == "c1"
+
+
+@pytest.mark.asyncio
+async def test_delivery_budget_error_is_parked_without_generic_retry() -> None:
+    delivery = SimpleNamespace(
+        delivery_id=uuid4(), binding_id=uuid4(), binding_epoch=1,
+        channel_type="fake", payload={"text": "answer"}, client_id=uuid4(),
+        session_id=uuid4(), inbound_message_id=uuid4(), sequence_no=0,
+        reply_context=ReplyContext("peer", (("context_token", "ctx"),)),
+        lease_generation=1, credentials=BindingCredentials("binding", "fake", (("token", "t"),)),
+        attempts=1,
+    )
+
+    @asynccontextmanager
+    async def active_epoch_fence(_binding_id, _binding_epoch):
+        yield True
+
+    async def deliver(*_args):
+        raise contracts.ChannelMessageBudgetError("budget", provider_code=-2)
+
+    repository = SimpleNamespace(
+        claim_due_deliveries=AsyncMock(return_value=[delivery]),
+        hold_active_binding_epoch=active_epoch_fence,
+        park_delivery_context_budget=AsyncMock(return_value=True),
+        nack_delivery=AsyncMock(),
+        ack_delivery=AsyncMock(),
+    )
+    runner = GatewayRunner(
+        channel_adapters={"fake": SimpleNamespace(deliver=deliver)},
+        agent_adapter=SimpleNamespace(), repository=repository,
+    )
+
+    assert await runner.deliver_once() == 0
+    repository.park_delivery_context_budget.assert_awaited_once()
+    repository.nack_delivery.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generic_expired_binding_reauthenticates_without_wechat_exception() -> None:
+    repo = FakeRepo()
+    repo.lease = _lease()
+    assert hasattr(contracts, "ChannelBindingExpiredError")
+
+    class ExpiredChannel(FakeChannel):
+        async def fetch_updates(self, credentials, cursor):
+            raise contracts.ChannelBindingExpiredError
+
+    runner = GatewayRunner(
+        channel_adapters={"fake": ExpiredChannel()},
+        agent_adapter=SimpleNamespace(),
+        repository=repo,
+    )
+
+    assert await runner.poll_bindings_once() == 0
+    assert repo.reauth == [(repo.lease.binding_id, "session_expired")]
+
+
+@pytest.mark.asyncio
+async def test_delivery_rechecks_binding_epoch_before_calling_the_provider() -> None:
+    delivery = SimpleNamespace(
+        delivery_id=uuid4(),
+        binding_id=uuid4(),
+        binding_epoch=2,
+        channel_type="fake",
+        payload={"text": "answer"},
+        client_id=uuid4(),
+        session_id=uuid4(),
+        inbound_message_id=uuid4(),
+        sequence_no=0,
+        reply_context=ReplyContext("peer", (("context_token", "ctx"),)),
+        lease_generation=1,
+        credentials=BindingCredentials("binding", "fake", (("token", "t"),)),
+        attempts=1,
+    )
+    adapter = SimpleNamespace(deliver=AsyncMock())
+    held_epochs = []
+
+    @asynccontextmanager
+    async def inactive_epoch_fence(binding_id, binding_epoch):
+        held_epochs.append((binding_id, binding_epoch))
+        yield False
+
+    repository = SimpleNamespace(
+        claim_due_deliveries=AsyncMock(return_value=[delivery]),
+        hold_active_binding_epoch=inactive_epoch_fence,
+        ack_delivery=AsyncMock(return_value=True),
+        nack_delivery=AsyncMock(return_value=True),
+    )
+    runner = GatewayRunner(
+        channel_adapters={"fake": adapter},
+        agent_adapter=SimpleNamespace(),
+        repository=repository,
+    )
+
+    await runner.deliver_once()
+
+    assert held_epochs == [(delivery.binding_id, 2)]
+    adapter.deliver.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_inbound_rechecks_binding_epoch_before_calling_flash() -> None:
+    claim = SimpleNamespace(
+        binding_id=uuid4(),
+        binding_epoch=3,
+        kind=InboundKind.MESSAGE,
+        session_id=uuid4(),
+        agent_session_ref="thread-1",
+        peer_ref="peer",
+        peer_lookup_hash="peer-hash",
+        user_id="user-1",
+        channel_type="fake",
+        media=(),
+        request_key="request-1",
+        text="hello",
+        inbound_message_id=uuid4(),
+        lease_generation=1,
+        attempts=1,
+    )
+    agent = SimpleNamespace(run_turn=AsyncMock())
+    held_epochs = []
+
+    @asynccontextmanager
+    async def inactive_epoch_fence(binding_id, binding_epoch):
+        held_epochs.append((binding_id, binding_epoch))
+        yield False
+
+    repository = SimpleNamespace(
+        claim_pending_inbound=AsyncMock(return_value=[claim]),
+        hold_active_binding_epoch=inactive_epoch_fence,
+        ack_inbound_and_enqueue_deliveries=AsyncMock(return_value=True),
+        nack_inbound=AsyncMock(return_value=True),
+    )
+    runner = GatewayRunner(
+        channel_adapters={"fake": SimpleNamespace()},
+        agent_adapter=agent,
+        repository=repository,
+    )
+
+    await runner.process_inbound_once()
+
+    assert held_epochs == [(claim.binding_id, 3)]
+    agent.run_turn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delivery_calls_provider_while_epoch_fence_is_held() -> None:
+    delivery = SimpleNamespace(
+        delivery_id=uuid4(),
+        binding_id=uuid4(),
+        binding_epoch=2,
+        channel_type="fake",
+        payload={"text": "answer"},
+        client_id=uuid4(),
+        session_id=uuid4(),
+        inbound_message_id=uuid4(),
+        sequence_no=0,
+        reply_context=ReplyContext("peer", (("context_token", "ctx"),)),
+        lease_generation=1,
+        credentials=BindingCredentials("binding", "fake", (("token", "t"),)),
+        attempts=1,
+    )
+    fence_held = False
+
+    @asynccontextmanager
+    async def active_epoch_fence(_binding_id, _binding_epoch):
+        nonlocal fence_held
+        fence_held = True
+        try:
+            yield True
+        finally:
+            fence_held = False
+
+    async def deliver(*_args):
+        assert fence_held
+        return DeliveryReceipt(True, "provider-message", datetime.now(UTC))
+
+    repository = SimpleNamespace(
+        claim_due_deliveries=AsyncMock(return_value=[delivery]),
+        hold_active_binding_epoch=active_epoch_fence,
+        ack_delivery=AsyncMock(return_value=True),
+        nack_delivery=AsyncMock(return_value=True),
+    )
+    runner = GatewayRunner(
+        channel_adapters={"fake": SimpleNamespace(deliver=deliver)},
+        agent_adapter=SimpleNamespace(),
+        repository=repository,
+    )
+
+    assert await runner.deliver_once() == 1
+
+
+@pytest.mark.asyncio
+async def test_inbound_calls_flash_while_epoch_fence_is_held() -> None:
+    claim = SimpleNamespace(
+        binding_id=uuid4(),
+        binding_epoch=3,
+        kind=InboundKind.MESSAGE,
+        session_id=uuid4(),
+        agent_session_ref="thread-1",
+        peer_ref="peer",
+        peer_lookup_hash="peer-hash",
+        user_id="user-1",
+        channel_type="fake",
+        media=(),
+        request_key="request-1",
+        text="hello",
+        inbound_message_id=uuid4(),
+        lease_generation=1,
+        attempts=1,
+    )
+    fence_held = False
+
+    @asynccontextmanager
+    async def active_epoch_fence(_binding_id, _binding_epoch):
+        nonlocal fence_held
+        fence_held = True
+        try:
+            yield True
+        finally:
+            fence_held = False
+
+    async def run_turn(_session, _turn):
+        assert fence_held
+        assert _turn.channel_type == "fake"
+        return AgentTurnResult(parts=(TextPart("answer"),), session_ref="thread-1")
+
+    agent = SimpleNamespace(
+        open_session=AsyncMock(
+            return_value=AgentSession("thread-1", datetime.now(UTC), "user-1")
+        ),
+        run_turn=run_turn,
+    )
+    repository = SimpleNamespace(
+        claim_pending_inbound=AsyncMock(return_value=[claim]),
+        hold_active_binding_epoch=active_epoch_fence,
+        ack_inbound_and_enqueue_deliveries=AsyncMock(return_value=True),
+        nack_inbound=AsyncMock(return_value=True),
+    )
+    runner = GatewayRunner(
+        channel_adapters={"fake": SimpleNamespace(max_outbound_text_length=None)},
+        agent_adapter=agent,
+        repository=repository,
+    )
+
+    assert await runner.process_inbound_once() == 1
+
+
+@pytest.mark.asyncio
+async def test_inbound_downloads_images_while_epoch_fence_is_held() -> None:
+    claim = SimpleNamespace(
+        binding_id=uuid4(),
+        binding_epoch=3,
+        kind=InboundKind.MESSAGE,
+        session_id=uuid4(),
+        agent_session_ref="thread-1",
+        peer_ref="peer",
+        peer_lookup_hash="peer-hash",
+        user_id="user-1",
+        channel_type="fake",
+        media=(SimpleNamespace(),),
+        request_key="request-1",
+        text="hello",
+        inbound_message_id=uuid4(),
+        lease_generation=1,
+        attempts=1,
+    )
+    fence_held = False
+    image_fence_states = []
+
+    @asynccontextmanager
+    async def active_epoch_fence(_binding_id, _binding_epoch):
+        nonlocal fence_held
+        fence_held = True
+        try:
+            yield True
+        finally:
+            fence_held = False
+
+    async def resolve_images(_media, *, max_bytes, max_pixels):
+        assert max_bytes > 0
+        assert max_pixels > 0
+        image_fence_states.append(fence_held)
+        return (ResolvedImage("data:image/png;base64,aW1hZ2U=", "image/png", 5, 1, 1),)
+
+    adapter = SimpleNamespace(max_outbound_text_length=3, resolve_images=resolve_images)
+    repository = SimpleNamespace(
+        claim_pending_inbound=AsyncMock(return_value=[claim]),
+        hold_active_binding_epoch=active_epoch_fence,
+        ack_inbound_and_enqueue_deliveries=AsyncMock(return_value=True),
+        nack_inbound=AsyncMock(return_value=True),
+    )
+    agent = SimpleNamespace(
+        run_turn=AsyncMock(
+            return_value=AgentTurnResult(
+                parts=(TextPart("answer"),), session_ref="thread-1"
+            )
+        )
+    )
+    runner = GatewayRunner(
+        channel_adapters={"fake": adapter},
+        agent_adapter=agent,
+        repository=repository,
+    )
+
+    assert await runner.process_inbound_once() == 1
+    assert image_fence_states == [True]

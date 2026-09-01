@@ -119,6 +119,28 @@ services:
       retries: 10
       start_period: 30s
 
+  channel-gateway:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.dev
+    init: true
+    restart: unless-stopped
+    command: python -m src.server.services.channels.worker
+    env_file: .env
+    environment:
+      GINLIXFLOW_BASE_URL: http://backend:8000
+      BYOK_ENCRYPTION_KEY: ${BYOK_ENCRYPTION_KEY:-langalpha-local-dev-encryption-key}
+      DB_HOST: ${DB_HOST:-postgres}
+      REDIS_URL: "${REDIS_URL:-redis://:${REDIS_PASSWORD:-redis}@redis:6379/0}"
+    volumes:
+      - ./src:/app/src
+      - ./config.yaml:/app/config.yaml
+      - ./alembic.ini:/app/alembic.ini
+      - ./migrations:/app/migrations
+    depends_on:
+      backend:
+        condition: service_healthy
+
   frontend:
     image: node:22-alpine
     working_dir: /app

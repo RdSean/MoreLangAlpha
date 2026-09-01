@@ -7,7 +7,7 @@ from langchain_core.messages import HumanMessage
 from ptc_agent.agent.middleware.compaction import utils
 
 
-def test_count_tokens_falls_back_when_tiktoken_initialization_fails(monkeypatch):
+def test_count_tokens_retries_when_tiktoken_initialization_fails(monkeypatch):
     calls = 0
 
     def fail_to_load(_name):
@@ -21,13 +21,13 @@ def test_count_tokens_falls_back_when_tiktoken_initialization_fails(monkeypatch)
     count = utils.count_tokens_tiktoken([HumanMessage(content="你好 hello")])
 
     assert count > 0
-    # The failed remote initialization is not retried for every message.
+    # The fallback is not cached, so a repaired tokenizer can recover in-process.
     utils.count_tokens_tiktoken([HumanMessage(content="再试一次")])
-    assert calls == 1
+    assert calls == 2
 
 
 def test_approximate_encoder_handles_empty_text():
     encoder = utils._ApproximateTokenEncoder()
 
-    assert encoder.encode("") == []
+    assert len(encoder.encode("")) == 1
     assert len(encoder.encode("中文")) == 2

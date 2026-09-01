@@ -11,6 +11,7 @@ import { ModelTab } from './panels/ModelTab';
 import { ExperimentsTab } from './panels/ExperimentsTab';
 import { FamilyAccountsTab } from './panels/FamilyAccountsTab';
 import { FamilyChildConversations } from './panels/FamilyChildConversations';
+import { ChannelsTab } from './panels/ChannelsTab';
 import { useFamilyChildren } from './queries';
 import './Settings.css';
 
@@ -77,6 +78,17 @@ function Settings() {
           </button>
           <button
             type="button"
+            onClick={() => handleTabChange('channels')}
+            className="px-4 py-2 text-sm font-medium whitespace-nowrap flex-shrink-0"
+            style={{
+              color: activeTab === 'channels' ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
+              borderBottom: activeTab === 'channels' ? '2px solid var(--color-accent-primary)' : '2px solid transparent',
+            }}
+          >
+            {t('settings.channels')}
+          </button>
+          <button
+            type="button"
             onClick={() => handleTabChange('preferences')}
             className="px-4 py-2 text-sm font-medium whitespace-nowrap flex-shrink-0"
             style={{
@@ -137,6 +149,8 @@ function Settings() {
           {/* Text-heavy tab: cap the measure so descriptions stay readable
               instead of spanning the full settings container. */}
           {!isLoading && activeTab === 'experiments' && <ExperimentsTab />}
+
+          {!isLoading && activeTab === 'channels' && <ChannelsTab />}
 
           {!isLoading && activeTab === 'family' && !isParent && <FamilyAccountsTab onOpenChild={openChild} />}
 

@@ -20,6 +20,10 @@ export const queryKeys = {
   models: {
     all: ['models'],
   },
+  runtimeResources: {
+    all:       ['runtime-resources'],
+    tokenizer: () => [...queryKeys.runtimeResources.all, 'tokenizer'],
+  },
   features: {
     all:  ['features'],
     list: () => [...queryKeys.features.all, 'list'],
@@ -101,6 +105,10 @@ export const queryKeys = {
   },
   settings: {
     all: ['settings'],
+    channels: {
+      all: ['settings', 'channels'],
+      wechat: () => ['settings', 'channels', 'wechat'],
+    },
     family: {
       all: ['settings', 'family'],
       children: () => [...queryKeys.settings.family.all, 'children'],

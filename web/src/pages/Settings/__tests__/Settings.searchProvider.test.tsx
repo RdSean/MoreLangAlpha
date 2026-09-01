@@ -147,6 +147,13 @@ vi.mock('@/api/user', () => ({
 
 vi.mock('@/api/model', () => ({
   getUserApiKeys: vi.fn(async () => ({ providers: [] })),
+  getTokenizerResourceStatus: vi.fn(async () => ({
+    encoding: 'cl100k_base',
+    status: 'ready',
+    exact: true,
+    error_code: null,
+  })),
+  retryTokenizerVocabularyDownload: vi.fn(),
 }));
 
 vi.mock('@/api/oauth', () => ({

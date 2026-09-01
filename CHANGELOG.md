@@ -1,6 +1,138 @@
 # 变更日志
 
+## 2026-09-01
+
+### 精确 Token 词表资源与自修复
+
+- 将官方 `cl100k_base.tiktoken` 作为经过 SHA-256 校验的代码资源提交，默认使用仓库相对目录 `var/cache/tiktoken`，不再依赖系统临时目录中的偶然缓存。
+- 服务启动时优先校验固定缓存并从内置资源原子播种；本地资源不可用时才尝试固定官方地址下载。所有精确路径失败后继续使用近似 Token 计数，不阻断 Agent run。
+- 近似编码器不再永久驻留进程，词表通过后续重试恢复后可自动切回精确计数，无需重启后端。
+- 模型设置页新增中英文显著告警和“重新下载词表”操作，后端仅允许重试固定官方资源，不接受用户提供的下载地址。
+- 后端与开发 Docker 镜像固定配置 `/app/var/cache/tiktoken`，构建时校验并预填充词表缓存，同时显式设置当前运行用户的目录所有权。
+
+### Flash 离线 Token 计数兜底
+
+- 修复 channel worker 调用 Flash 时首次加载 `cl100k_base` 依赖外网下载失败、导致微信入站反复重试后变成 `flashagenterror` 的问题。
+- tiktoken BPE 文件可用时仍使用精确计数；加载失败时切换到进程内缓存的本地近似计数，不再阻断 Agent run。
+- 新增离线加载失败回归测试。
+
+### 微信 iLink 上下文消息预算与续发
+
+- 微信适配器将连续的 Markdown 文本单元统一按 2000 字符上限贪心合并，保留自然换行和代码块围栏，避免标题、列表等短段各自占用一个聊天气泡。
+- 通道基类增加可选的每个 provider context 消息数、续发命令和提示能力；iLink 每轮最多发送 10 条，超出时保留 1 条提示并将剩余内容持久化。
+- 新增加密 `channel_continuations` 表及 epoch 校验。用户发送“继续”后使用新入站 `context_token` 恢复尾部，不调用 Agent；续发状态可跨 worker 重启并在 6 小时后过期。
+- 将 iLink `ret=-2`/业务限流响应分类为上下文预算错误，停止无意义的指数重试；已发送和未发送的 outbox 尾部会转入续发状态，且不会误标记绑定为需要重新认证。
+- 新增分块、预算、续发、业务错误和 migration 回归测试；聚焦通道测试 47 项通过。
+
+## 2026-08-31
+
+### 微信 iLink 最终消息分块与 Typing
+
+- 在通用 `ChannelAdapter` 增加 binding 生命周期、typing 刷新和最终消息预处理钩子；`GatewayRunner`
+  负责在 Agent turn 期间启动/取消 typing，并保证异常不会触发错误重试或泄漏 typing 状态。
+- 微信适配器直接复用本地 `wechatbot-sdk` 的 `ILinkApi`，支持 `getconfig`/`sendtyping`、连接上线/下线通知，
+  同时继续使用 PostgreSQL 加密 `context_token` 作为回复上下文。
+- 微信最终回复移植 Hermes 的 Markdown 标题、表格、代码块和语义分片策略，按 iLink 长度限制写入有序
+  delivery outbox；明确不实现逐 token 推送、`GENERATING` 更新或消息编辑。
+
+### 微信最终内容分块与 Typing 设计
+
+- 对照 Hermes `BasePlatformAdapter`、`stream_dispatch.py`、Weixin adapter 及本地
+  `wechatbot` SDK，明确微信采用“生成期间 typing，完成后按 Markdown 语义块和长度
+  顺序发送最终内容”的策略；不实现逐 token 推送、消息编辑或 `GENERATING` 更新。
+- 新增微信 iLink 分块交付设计文档，记录通用 ChannelAdapter、PostgreSQL
+  delivery outbox、context token、typing ticket、连接状态通知、错误恢复和测试边界。
+- 将 Hermes 与 wechatbot 的有界参考源文件保存在 `docs/references/wechat-ilink/`，
+  便于后续实现和评审时复用经过验证的协议逻辑。
+
+### 助理设置界面
+
+- 将设置页“通道”改名为“助理设置”，微信接入改为可纵向扩展的助理 group；配置按钮缩小并将扫码二维码内嵌到 group 展开区域，不再使用弹窗。
+- 修复二维码轮询响应覆盖原图片的问题，确保二维码在有效期内持续展示；二维码过期后改为显示失效状态。
+
+### 微信消息交付
+
+- 微信只接收主 Agent 的最终普通文本；过滤 reasoning、技能/工具调用、工具结果、commentary
+  及子 Agent 中间事件，内部运行历史和 Web 端 SSE 展示保持不变。
+- 修复 Flash 主 Agent 在 SSE 中使用 `model:<uuid>` 命名空间时被误判为非主 Agent 的问题；
+  现在在通道边界规范化为稳定的 `main` 身份，避免已完成的回复被 worker 重试 8 次后丢弃。
+
+### 通道结构化事件与呈现抽象
+
+- 新增 provider-neutral 的 `MessageChunk`、`MessageStop`、`Commentary`、工具调用和网关通知事件类；
+  事件仅用于展示，不写入 Agent 历史。
+- `ChannelAdapter` 现提供 Hermes 风格的平台能力默认值和消息/工具呈现钩子；
+  `ChannelEventDispatcher` 负责把结构化事件路由到 channel-specific sink，适配器可返回 `None`
+  吞掉不适合平台显示的工具 chrome。
+- Flash 只把内部 SSE 转换为结构化事件；GatewayRunner 按适配器呈现结果写入原有 PostgreSQL
+  delivery outbox，并兼容没有事件回调的旧 AgentAdapter。微信覆盖呈现策略，仅发送主 Agent 普通文本。
+
+### 微信 iLink Bot 收发链路修复
+
+- 修复入站纯文本消息写入 PostgreSQL 时可空媒体和回复上下文参数未标注类型、导致 worker 重试失败的问题。
+- 修复 OSS 模式未配置 `INTERNAL_SERVICE_TOKEN` 时，独立 channel worker 无浏览器 session cookie 被消息接口拒绝的问题；保留配置服务 token 时的严格认证。
+
+## 2026-08-30
+
+### 微信 iLink Bot 通道网关
+
+- 修复二维码无法显示的问题：iLink 的 `qrcode_img_content` 是待编码的 URL 内容，
+  现在由 `qrcode` 生成 PNG Data URL 后交给前端；不要求 HTTPS，并兼容 provider 已返回的图片 Data URL。
+- 修复二维码轮询在没有新的 provider poll state 时触发 PostgreSQL 未定类型 `NULL` 参数、
+  导致接口返回 500 的问题；显式标注 SQL 参数类型并补充回归测试。
+- 将原始 iLink 网关设计同步至已实现的通用 Adapter 契约、已绑定账号重配置、二维码
+  超时恢复和自然边界文本分片，明确 token 与旧绑定状态均不暴露给浏览器。
+- Gateway 的认证失效、图片解析、文本长度与来源平台信息改由通用 ChannelAdapter 契约提供；
+  不再导入微信异常、探测微信私有方法或按通道名称分支。Flash 内部请求会保留实际 channel 类型，
+  长文本按段落、换行和空格优先切分后才硬切，保持微信端回复可读性。
+- 已连接的微信卡片现可重新配置。二维码请求会将现有加密 iLink token 临时传给 SDK；
+  平台返回 `binded_redirect` 时原子复用当前 binding，不重置 cursor、会话或 epoch。二维码轮询本地
+  超时会释放 attempt 并继续等待，重配期间 binding 已断开则安全终态为失败而非返回服务端错误。
+- 新增基于通用 `ChannelAdapter -> GatewayRunner -> AgentAdapter` 的独立通道 worker；
+  worker 通过 PostgreSQL 租约轮询、持久化收件、调用系统内部 Flash API，并从可靠发件箱投递回复。
+- 新增 `LangAlphaFlashAdapter`：固定使用 Flash、携带所属用户的内部服务认证与稳定 request key，
+  支持 SSE 文本汇总和重复请求后的既有 run 重连，不直接导入或运行 Flash graph。
+- iLink 图片引用的 AES 元数据仅随加密入站 payload 保存；语音、文件和视频保持跳过。入站和
+  出站均支持租约恢复、确定性 client id、按会话顺序处理，并始终使用所引用入站消息的 context token。
+- 新增设置 API 回归、Flash adapter、GatewayRunner 和独立 worker 的聚焦测试；通道后端聚焦测试
+  81 项、Settings 前端测试 45 项通过，后端通道 Ruff 通过，默认/开发/中间件/NAS 组合 Compose
+  配置均可解析。
+- 设置页新增所有登录成员可见的“通道”页签与微信绑定卡片，提供二维码轮询、一次性配对码、
+  闲置会话时长、重新绑定和断开连接操作；前端 API 与 query key 均保持凭证不可见。
+- 修复 gateway 收件与发件领取 SQL 的 CTE 分隔符，并以真实独立 worker 空跑验证；同步补齐
+  家庭设置测试的查询 mock，使完整 Settings 测试覆盖恢复为通过。
+- 新增 `043` 通道可靠性迁移：以 binding epoch 围栏隔离解绑、登录失效与重新扫码前的
+  旧收件、旧媒体/回复上下文和旧发件箱；同一会话的发件改为全局单调序号，避免多条回复乱序。
+- 收件游标、首次去重、6 小时 session 轮换改在同一事务完成；二维码尝试使用短租约并在新
+  尝试、取消、过期或终态后拒绝旧轮询覆盖绑定。iLink 长轮询 binding 租约提升为 75 秒。
+- 微信上传图片在解密前按响应长度与流式密文累计值限流；缺少逐消息 `context_token` 的事件
+  记为拒绝；Flash 超长文本按 iLink 上限拆分后入发件箱；手工提交配对码成功会关闭弹窗并刷新状态。
+- 收件的图片下载、Flash 调用和发件投递前都会再次确认 binding epoch；`043` 回滚到旧 schema
+  时会移除已销毁轮询秘密的终态二维码尝试，避免旧版本读取无法解密的占位密文。
+- epoch 确认改为 PostgreSQL 共享行锁，解绑或重绑会与已开始的 Flash/微信调用明确串行；二维码
+  状态请求限制为 10 秒且小于 30 秒尝试租约。关闭会话仍可完成其已排队的历史收件确认；拒绝消息
+  保留为独立审计状态，缺少 `context_token` 的遗留发件绝不再以微信用户 ID 冒充回复令牌。
+- `043` 回滚同样会清理已销毁发件正文的终态发件箱记录，避免恢复旧版 `NOT NULL` 约束时失败。
+- iLink 收件长轮询与发件会一致地将会话失效错误转换为重新认证状态；图片同时携带两种 AES
+  key 时优先采用 `image_item.aeskey`，并将可配置的 iLink 文本上限严格限制在协议兼容的
+  2000 字符以内。
+
 ## 2026-08-28
+
+### 微信 iLink Bot 通道网关设计
+
+- 记录微信 iLink Bot 的通用 `ChannelAdapter -> GatewayRunner -> AgentAdapter`
+  设计、可靠收件箱/发件箱模型、6 小时通道会话轮换、二维码绑定流程和安全边界。
+- 汇总 iLink 协议、wechatbot SDK、Hermes 平台抽象及 LangAlpha 现有 Flash、SSE、
+  多模态和加密存储实现的参考地址与采用结论。
+- 补充 iLink 扫码可能要求的短配对码流程：该码仅用于单次状态轮询，不持久化、不
+  回显、不写日志；失败受阻后重新获取二维码。
+- 新增可按 TDD 逐项实施的微信通道网关计划，覆盖数据库租约与收发箱、Flash SSE
+  适配、独立 worker、设置页扫码流程、部署与最终验收命令。
+- 为独立 worktree 的本地调试预留 backend `8010`、frontend `5187`，明确复用该
+  worktree 的 `.env`，避免与另一开发会话的 `8000`、`5177` 服务发生串线。
+- 明确第一期对所有用户开放：支持文本和图片入站、文本回复；视频、语音和文件
+  附件跳过，Flash 原生图片输出暂不在本期解决。
 
 ### 出站 HTTPS 证书兼容性
 
@@ -21,8 +153,6 @@
 ### 自然语言布置作业边界
 
 - 新增按家庭只读列出学生账户与当前年级的数据库 helper，并固化自然语言布置文字作业工具的认证、家长权限、学生归属和姓名解析边界测试。
-
-## 2026-08-27
 
 ### 自然语言布置作业设计
 

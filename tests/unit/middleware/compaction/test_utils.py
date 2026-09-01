@@ -10,6 +10,8 @@ perturbation can't silently shift it.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ptc_agent.agent.middleware.compaction.types import CompactionEvent
@@ -19,6 +21,55 @@ from ptc_agent.agent.middleware.compaction.utils import (
     get_effective_messages,
     resolve_context_token_estimate,
 )
+
+
+def test_tiktoken_download_failure_uses_local_approximation(monkeypatch):
+    from ptc_agent.agent.middleware.compaction import utils
+
+    monkeypatch.setattr(utils, "_tiktoken_encoder", None)
+    monkeypatch.setattr(
+        utils.tiktoken,
+        "get_encoding",
+        lambda _name: (_ for _ in ()).throw(OSError("network unavailable")),
+    )
+
+    encoder = utils._get_tiktoken_encoder()
+
+    assert len(encoder.encode("hello world")) > 0
+
+
+def test_tiktoken_fallback_recovers_without_process_restart(monkeypatch):
+    from ptc_agent.agent.middleware.compaction import utils
+
+    exact_encoder = object()
+    statuses = iter(
+        [
+            SimpleNamespace(exact=False),
+            SimpleNamespace(exact=True),
+        ]
+    )
+    monkeypatch.setattr(utils, "_tiktoken_encoder", None)
+    monkeypatch.setattr(
+        utils,
+        "prepare_tokenizer_resource",
+        lambda **_kwargs: next(statuses),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        utils.tiktoken,
+        "get_encoding",
+        lambda _name: exact_encoder,
+    )
+
+    fallback = utils._get_tiktoken_encoder()
+
+    assert fallback is not exact_encoder
+    assert utils._tiktoken_encoder is None
+
+    recovered = utils._get_tiktoken_encoder()
+
+    assert recovered is exact_encoder
+    assert utils._tiktoken_encoder is exact_encoder
 
 
 def _summary() -> HumanMessage:
