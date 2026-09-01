@@ -20,6 +20,10 @@ export const queryKeys = {
   models: {
     all: ['models'],
   },
+  runtimeResources: {
+    all:       ['runtime-resources'],
+    tokenizer: () => [...queryKeys.runtimeResources.all, 'tokenizer'],
+  },
   features: {
     all:  ['features'],
     list: () => [...queryKeys.features.all, 'list'],
