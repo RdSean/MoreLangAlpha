@@ -21,6 +21,21 @@ from ptc_agent.agent.middleware.compaction.utils import (
 )
 
 
+def test_tiktoken_download_failure_uses_local_approximation(monkeypatch):
+    from ptc_agent.agent.middleware.compaction import utils
+
+    monkeypatch.setattr(utils, "_tiktoken_encoder", None)
+    monkeypatch.setattr(
+        utils.tiktoken,
+        "get_encoding",
+        lambda _name: (_ for _ in ()).throw(OSError("network unavailable")),
+    )
+
+    encoder = utils._get_tiktoken_encoder()
+
+    assert len(encoder.encode("hello world")) > 0
+
+
 def _summary() -> HumanMessage:
     return HumanMessage(content="[Context Summary] ...", id="summary")
 

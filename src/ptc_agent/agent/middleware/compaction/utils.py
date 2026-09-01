@@ -54,16 +54,34 @@ def resolve_compaction_client(config: AgentConfig) -> Any | None:
 # =============================================================================
 
 # Lazy-loaded tiktoken encoder
-_tiktoken_encoder: tiktoken.Encoding | None = None
+_tiktoken_encoder: Any | None = None
 _PROVIDER_USAGE_MULTIPLIER = 8
 _PROVIDER_USAGE_SLACK_TOKENS = 32_768
 
 
-def _get_tiktoken_encoder() -> tiktoken.Encoding:
-    """Get or create tiktoken encoder (lazy initialization)."""
+class _ApproximateTokenEncoder:
+    """Small offline fallback used when the BPE file cannot be downloaded."""
+
+    @staticmethod
+    def encode(text: str) -> range:
+        ascii_count = sum(ord(char) < 128 for char in text)
+        non_ascii_count = len(text) - ascii_count
+        estimate = max(1, (ascii_count + 3) // 4 + non_ascii_count)
+        return range(estimate)
+
+
+def _get_tiktoken_encoder() -> Any:
+    """Get the encoder, falling back when the optional BPE download is offline."""
     global _tiktoken_encoder
     if _tiktoken_encoder is None:
-        _tiktoken_encoder = tiktoken.get_encoding("cl100k_base")
+        try:
+            _tiktoken_encoder = tiktoken.get_encoding("cl100k_base")
+        except Exception as exc:
+            logger.warning(
+                "Unable to load cl100k_base locally; using approximate token counts: %s",
+                type(exc).__name__,
+            )
+            _tiktoken_encoder = _ApproximateTokenEncoder()
     return _tiktoken_encoder
 
 
