@@ -421,6 +421,61 @@ async def test_inspection_create_get_and_list_authorize_through_document(
 
 
 @pytest.mark.asyncio
+async def test_finish_inspection_updates_only_owned_pending_row(
+    mock_connection,
+    mock_cursor,
+    monkeypatch,
+) -> None:
+    _patch_connection(monkeypatch, mock_connection)
+    mock_cursor.fetchone.return_value = {"inspection_id": "ins-A1b2C3d4E5f6"}
+
+    await documents.finish_inspection(
+        owner_user_id="owner-1",
+        document_id="doc-A1b2C3d4E5f6",
+        inspection_id="ins-A1b2C3d4E5f6",
+        status="completed",
+        detected_format="pdf",
+        classification="text_based",
+        summary={"page_count": 3},
+        details={"pages_needing_ocr": []},
+        error_code=None,
+        error_message=None,
+    )
+
+    sql, params = mock_cursor.execute.await_args.args
+    assert "FROM documents" in sql
+    assert "document_inspections.status = 'pending'" in sql
+    assert "documents.owner_user_id = %s" in sql
+    assert params[-3:] == (
+        "ins-A1b2C3d4E5f6",
+        "doc-A1b2C3d4E5f6",
+        "owner-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_latest_successful_inspection_is_owner_scoped(
+    mock_connection,
+    mock_cursor,
+    monkeypatch,
+) -> None:
+    _patch_connection(monkeypatch, mock_connection)
+    mock_cursor.fetchone.return_value = {"inspection_id": "ins-A1b2C3d4E5f6"}
+
+    result = await documents.get_latest_successful_inspection(
+        owner_user_id="owner-1",
+        document_id="doc-A1b2C3d4E5f6",
+    )
+
+    assert result == {"inspection_id": "ins-A1b2C3d4E5f6"}
+    sql, params = mock_cursor.execute.await_args.args
+    assert "document_inspections.status = 'completed'" in sql
+    assert "documents.owner_user_id = %s" in sql
+    assert "LIMIT 1" in sql
+    assert params == ("doc-A1b2C3d4E5f6", "owner-1")
+
+
+@pytest.mark.asyncio
 async def test_artifact_get_and_list_authorize_through_document(
     mock_connection,
     mock_cursor,

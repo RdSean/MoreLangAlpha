@@ -563,6 +563,62 @@ async def create_inspection(
     return dict(row) if row else None
 
 
+async def finish_inspection(
+    *,
+    owner_user_id: str,
+    document_id: str,
+    inspection_id: str,
+    status: str,
+    detected_format: str | None,
+    classification: str | None,
+    summary: dict[str, object],
+    details: dict[str, object],
+    error_code: str | None,
+    error_message: str | None,
+) -> dict[str, Any] | None:
+    """Publish one terminal result for an owned pending inspection."""
+    if status not in {"completed", "failed"}:
+        raise ValueError("inspection status must be completed or failed")
+
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                UPDATE document_inspections
+                SET status = %s,
+                    detected_format = %s,
+                    classification = %s,
+                    summary = %s,
+                    details = %s,
+                    error_code = %s,
+                    error_message = %s,
+                    updated_at = NOW(),
+                    completed_at = NOW()
+                FROM documents
+                WHERE document_inspections.inspection_id = %s
+                  AND document_inspections.document_id = %s
+                  AND document_inspections.status = 'pending'
+                  AND documents.document_id = document_inspections.document_id
+                  AND documents.owner_user_id = %s
+                RETURNING document_inspections.*
+                """,
+                (
+                    status,
+                    detected_format,
+                    classification,
+                    Jsonb(summary),
+                    Jsonb(details),
+                    error_code,
+                    error_message,
+                    inspection_id,
+                    document_id,
+                    owner_user_id,
+                ),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def get_inspection(
     *,
     owner_user_id: str,
@@ -580,6 +636,33 @@ async def get_inspection(
                   AND documents.owner_user_id = %s
                 """,
                 (inspection_id, owner_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_latest_successful_inspection(
+    *,
+    owner_user_id: str,
+    document_id: str,
+) -> dict[str, Any] | None:
+    """Return the latest completed inspection for one owned Document."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT document_inspections.*
+                FROM document_inspections
+                JOIN documents
+                  ON documents.document_id = document_inspections.document_id
+                WHERE document_inspections.document_id = %s
+                  AND document_inspections.status = 'completed'
+                  AND documents.owner_user_id = %s
+                ORDER BY document_inspections.created_at DESC,
+                         document_inspections.inspection_id DESC
+                LIMIT 1
+                """,
+                (document_id, owner_user_id),
             )
             row = await cur.fetchone()
     return dict(row) if row else None

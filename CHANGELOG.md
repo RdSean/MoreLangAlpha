@@ -2,6 +2,11 @@
 
 ## 2026-09-05
 
+### 文档检测编排
+
+- 新增用户私有的文档检测服务：每次重试创建独立检测记录，将已授权原文件下载到受限临时目录，完成后无条件清理，并分别持久化成功结果或不泄露内部路径的安全错误。
+- 新增 pending 检测的 owner-safe 终态更新和最新成功检测查询；解析方法始终来自用户指定的检测记录，仅在未指定时读取该文档最新成功结果，检测过程不会自动创建解析任务。
+
 ### 文档解析 Provider 与推荐策略
 
 - 新增 AnyDoc 本地数字版 PDF parser 与共享 legacy PDF parser：AnyDoc 固定拒绝 hosted OCR，并将需 OCR 或空 Markdown 结果转为可重新选择方法的 `parser_incompatible`；legacy 方法允许发布带质量提示的部分或空 Markdown。
