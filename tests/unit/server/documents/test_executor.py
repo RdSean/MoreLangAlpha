@@ -317,3 +317,26 @@ async def test_cancel_between_stages_never_publishes_artifacts() -> None:
     assert store.puts == []
     assert repository.published is None
     assert repository.failed is None
+
+
+@pytest.mark.asyncio
+async def test_executor_publishes_only_compact_wake_hints_after_db_updates() -> None:
+    repository = _Repository()
+    hints: list[tuple[str, int]] = []
+
+    async def notify(job_id: str, status_version: int) -> None:
+        hints.append((job_id, status_version))
+
+    executor = _executor(repository, _ObjectStore(), _Parser())
+    executor.set_update_notifier(notify)
+
+    await executor.execute(
+        ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1")
+    )
+
+    assert hints == [
+        ("job-A1b2C3d4E5f6", 2),
+        ("job-A1b2C3d4E5f6", 3),
+        ("job-A1b2C3d4E5f6", 4),
+        ("job-A1b2C3d4E5f6", 5),
+    ]

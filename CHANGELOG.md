@@ -2,6 +2,11 @@
 
 ## 2026-09-05
 
+### 文档任务进度通知
+
+- 新增 PostgreSQL 权威的任务快照流：连接后先返回 owner-scoped 当前状态，订阅 Redis 后立即复读以封闭竞态，并在 hint 丢失、连接异常或 Redis 不可用时按节奏回查数据库。
+- Redis 仅发布 `job_id` 与 `status_version` 唤醒提示，executor 在已提交的阶段与终态更新后 best-effort 通知；同步等待到期只返回当前非终态快照，不取消 durable job，客户端断开也不会改变任务。
+
 ### 文档解析任务执行器
 
 - 新增带 lease/version fence 的文档任务 executor 与每进程 worker：按 preparing、parsing、storing 阶段推进，在隔离子进程中执行用户明确选择的 parser，并由 PostgreSQL claim 返回冻结的原文件与检测上下文。

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import tempfile
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -39,6 +39,8 @@ from src.server.documents.storage import DocumentObjectStore
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_ARTIFACTS = 256
+
+UpdateNotifier = Callable[[str, int], Awaitable[None]]
 
 
 class JobRepository(Protocol):
@@ -120,6 +122,11 @@ class DocumentJobExecutor:
         if self._parse_timeout_seconds <= 0 or self._max_bundle_bytes <= 0:
             raise ValueError("executor limits must be positive")
         self._id_factory = id_factory
+        self._update_notifier: UpdateNotifier | None = None
+
+    def set_update_notifier(self, notifier: UpdateNotifier | None) -> None:
+        """Attach best-effort wake delivery without coupling to Redis."""
+        self._update_notifier = notifier
 
     async def execute(
         self,
@@ -183,7 +190,8 @@ class DocumentJobExecutor:
                     if completed is None:
                         raise JobClaimLostError
                     claim.status_version = int(completed["status_version"])
-                    return completed
+                await self._notify(claim)
+                return completed
         except JobClaimLostError:
             await self._delete_uploaded(uploaded_keys)
             return None
@@ -213,6 +221,7 @@ class DocumentJobExecutor:
             if updated is None:
                 raise JobClaimLostError
             claim.status_version = int(updated["status_version"])
+        await self._notify(claim)
 
     def _validate_bundle(
         self,
@@ -291,7 +300,21 @@ class DocumentJobExecutor:
             )
             if failed is not None:
                 claim.status_version = int(failed["status_version"])
-            return failed
+        if failed is not None:
+            await self._notify(claim)
+        return failed
+
+    async def _notify(self, claim: ClaimedDocumentJob) -> None:
+        if self._update_notifier is None:
+            return
+        try:
+            await self._update_notifier(claim.job_id, claim.status_version)
+        except Exception:
+            logger.debug(
+                "Document job wake hint failed for %s",
+                claim.job_id,
+                exc_info=True,
+            )
 
     async def _delete_uploaded(self, keys: list[str]) -> None:
         for key in reversed(keys):
