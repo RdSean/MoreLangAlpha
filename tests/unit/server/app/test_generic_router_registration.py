@@ -15,7 +15,7 @@ RETIRED_ROUTE_SEGMENTS = (
     "/watchlist",
     "/portfolio",
     "/news",
-    "/calendar",
+    "/api/v1/calendar",
     "/sec-proxy",
     "/insights",
     "/ws/v1/market-data",
@@ -77,6 +77,13 @@ def test_default_api_has_no_finance_or_market_routes():
         for path in registered_paths
         if any(segment in path for segment in RETIRED_ROUTE_SEGMENTS)
     ]
+
+
+def test_default_api_registers_document_library_routes():
+    registered_paths = {route.path for route in app.routes}
+
+    assert "/api/v1/documents" in registered_paths
+    assert "/api/v1/document-jobs/{job_id}/events" in registered_paths
 
 
 def test_speech_relay_route_is_registered():

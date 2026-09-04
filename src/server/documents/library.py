@@ -31,6 +31,12 @@ class DocumentRepository(Protocol):
         self, **kwargs: object
     ) -> tuple[list[dict[str, Any]], int]: ...
 
+    async def get_dataset(self, **kwargs: str) -> dict[str, Any] | None: ...
+
+    async def update_dataset(self, **kwargs: object) -> dict[str, Any] | None: ...
+
+    async def delete_dataset(self, **kwargs: str) -> dict[str, Any] | None: ...
+
     async def list_documents(
         self, **kwargs: object
     ) -> tuple[list[dict[str, Any]], int]: ...
@@ -92,6 +98,35 @@ class DocumentLibraryService:
             description=description,
         )
 
+    async def get_dataset(
+        self, *, owner_user_id: str, dataset_id: str
+    ) -> dict[str, Any] | None:
+        return await self._repository.get_dataset(
+            owner_user_id=owner_user_id, dataset_id=dataset_id
+        )
+
+    async def patch_dataset(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        name: str,
+        description: str | None,
+    ) -> dict[str, Any] | None:
+        return await self._repository.update_dataset(
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
+            name=name.strip(),
+            description=description,
+        )
+
+    async def delete_dataset(
+        self, *, owner_user_id: str, dataset_id: str
+    ) -> dict[str, Any] | None:
+        return await self._repository.delete_dataset(
+            owner_user_id=owner_user_id, dataset_id=dataset_id
+        )
+
     async def list_datasets(
         self,
         *,
@@ -116,6 +151,13 @@ class DocumentLibraryService:
         return await self._repository.list_documents(
             owner_user_id=owner_user_id,
             filters=filters,
+        )
+
+    async def get_document(
+        self, *, owner_user_id: str, document_id: str
+    ) -> dict[str, Any] | None:
+        return await self._repository.get_document(
+            owner_user_id=owner_user_id, document_id=document_id
         )
 
     async def create_tag(
@@ -296,7 +338,11 @@ class DocumentLibraryService:
 
 def _normalize_pdf_filename(filename: str) -> str:
     normalized = PurePosixPath(filename.replace("\\", "/")).name.strip()
-    if not normalized or normalized in {".", ".."} or not normalized.lower().endswith(".pdf"):
+    if (
+        not normalized
+        or normalized in {".", ".."}
+        or not normalized.lower().endswith(".pdf")
+    ):
         raise UnsupportedMediaTypeError("Only PDF uploads are supported")
     return normalized
 

@@ -29,8 +29,7 @@ class _Repository:
         self.artifacts = [
             {
                 "storage_key": (
-                    "documents/doc-A1b2C3d4E5f6/artifacts/"
-                    "job-A1b2C3d4E5f6/document.md"
+                    "documents/doc-A1b2C3d4E5f6/artifacts/job-A1b2C3d4E5f6/document.md"
                 ),
             },
             {
@@ -244,8 +243,12 @@ async def test_delete_removes_only_keys_loaded_from_owned_rows() -> None:
 async def test_library_operations_keep_owner_and_sql_behind_service() -> None:
     repository = SimpleNamespace(
         create_dataset=AsyncMock(return_value={"dataset_id": "dts-A1b2C3d4E5f6"}),
+        get_dataset=AsyncMock(return_value={"dataset_id": "dts-A1b2C3d4E5f6"}),
+        update_dataset=AsyncMock(return_value={"dataset_id": "dts-A1b2C3d4E5f6"}),
+        delete_dataset=AsyncMock(return_value={"dataset_id": "dts-A1b2C3d4E5f6"}),
         list_datasets=AsyncMock(return_value=([], 0)),
         list_documents=AsyncMock(return_value=([], 0)),
+        get_document=AsyncMock(return_value={"document_id": "doc-A1b2C3d4E5f6"}),
         create_tag=AsyncMock(return_value={"tag_id": "tag-A1b2C3d4E5f6"}),
         list_tags=AsyncMock(return_value=[]),
         update_tag=AsyncMock(return_value={"tag_id": "tag-A1b2C3d4E5f6"}),
@@ -263,7 +266,16 @@ async def test_library_operations_keep_owner_and_sql_behind_service() -> None:
         description=None,
     )
     await service.list_datasets(owner_user_id="owner-1", limit=25, offset=0)
+    await service.get_dataset(owner_user_id="owner-1", dataset_id="dts-A1b2C3d4E5f6")
+    await service.patch_dataset(
+        owner_user_id="owner-1",
+        dataset_id="dts-A1b2C3d4E5f6",
+        name=" Languages ",
+        description="Reference books",
+    )
+    await service.delete_dataset(owner_user_id="owner-1", dataset_id="dts-A1b2C3d4E5f6")
     await service.list_documents(owner_user_id="owner-1", filters=filters)
+    await service.get_document(owner_user_id="owner-1", document_id="doc-A1b2C3d4E5f6")
     await service.create_tag(owner_user_id="owner-1", name=" Mathematics ")
     await service.list_tags(owner_user_id="owner-1")
     await service.update_tag(
@@ -292,6 +304,16 @@ async def test_library_operations_keep_owner_and_sql_behind_service() -> None:
     repository.list_documents.assert_awaited_once_with(
         owner_user_id="owner-1",
         filters=filters,
+    )
+    repository.update_dataset.assert_awaited_once_with(
+        owner_user_id="owner-1",
+        dataset_id="dts-A1b2C3d4E5f6",
+        name="Languages",
+        description="Reference books",
+    )
+    repository.get_document.assert_awaited_once_with(
+        owner_user_id="owner-1",
+        document_id="doc-A1b2C3d4E5f6",
     )
     repository.create_tag.assert_awaited_once_with(
         owner_user_id="owner-1",

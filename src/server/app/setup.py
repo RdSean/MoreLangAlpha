@@ -185,6 +185,8 @@ async def lifespan(app: FastAPI):
         store, \
         llm_service
 
+    document_job_worker = None
+
     # Configure logging based on environment settings (first thing on startup)
     configure_logging()
 
@@ -541,10 +543,36 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to start ProvenanceGCService: {e}")
 
+    # Each process may execute jobs, while PostgreSQL claims and leases remain
+    # authoritative across workers.
+    try:
+        from src.server.documents.executor import DocumentJobExecutor
+        from src.server.documents.storage import S3CompatibleDocumentStore
+        from src.server.services.document_job_events import (
+            publish_document_job_hint,
+        )
+        from src.server.services.document_job_worker import DocumentJobWorker
+
+        document_executor = DocumentJobExecutor(object_store=S3CompatibleDocumentStore())
+        document_executor.set_update_notifier(publish_document_job_hint)
+        document_job_worker = DocumentJobWorker(executor=document_executor)
+        await document_job_worker.start()
+        logger.info("DocumentJobWorker started")
+    except Exception as e:
+        logger.warning(f"Failed to start DocumentJobWorker: {e}")
+
     yield  # Server is running
 
     # Shutdown
     logger.info("Application shutdown started...")
+
+    # Stop new claims before database and Redis pools begin draining.
+    if document_job_worker is not None:
+        try:
+            await document_job_worker.shutdown()
+            logger.info("DocumentJobWorker stopped")
+        except Exception as e:
+            logger.warning(f"Error stopping DocumentJobWorker: {e}")
 
     # 0.0. Stop the recovery scanner first — no new recovery work while the
     # process drains (live runs hold their guards and are skipped anyway).
@@ -928,6 +956,7 @@ from src.server.app.mcp_servers import router as mcp_servers_router
 from src.server.app.speech import router as speech_router
 from src.server.app.channels import router as channels_router
 from src.server.app.runtime_resources import router as runtime_resources_router
+from src.server.app.documents import router as documents_router
 
 # Include all routers
 app.include_router(threads_router)  # /api/v1/threads/* - Thread CRUD, messages, control
@@ -980,6 +1009,7 @@ app.include_router(
 app.include_router(speech_router)  # /ws/v1/speech/transcribe - Backend ASR relay
 app.include_router(channels_router)  # /api/v1/channels/* - Generic channel bindings
 app.include_router(runtime_resources_router)  # /api/v1/runtime-resources/*
+app.include_router(documents_router)  # /api/v1/documents/* - User-private knowledge library
 app.include_router(health_router)  # /health - Health check
 app.include_router(
     preview_redirect_router
