@@ -115,19 +115,37 @@ async def claim_next_job(
             await cur.execute(
                 """
                 WITH candidate AS (
-                    SELECT job_id
-                    FROM document_parse_jobs
-                    WHERE cancellation_requested_at IS NULL
+                    SELECT jobs.job_id,
+                           documents.source_storage_key,
+                           documents.source_size_bytes,
+                           documents.original_filename,
+                           documents.media_type,
+                           documents.document_format,
+                           document_inspections.inspector_id,
+                           document_inspections.inspector_name,
+                           document_inspections.inspector_version,
+                           document_inspections.status AS inspection_status,
+                           document_inspections.detected_format,
+                           document_inspections.classification,
+                           document_inspections.summary AS inspection_summary,
+                           document_inspections.details AS inspection_details
+                    FROM document_parse_jobs AS jobs
+                    JOIN documents
+                      ON documents.document_id = jobs.document_id
+                    JOIN document_inspections
+                      ON document_inspections.inspection_id = jobs.inspection_id
+                     AND document_inspections.document_id = jobs.document_id
+                    WHERE jobs.cancellation_requested_at IS NULL
                       AND (
-                        status = 'queued'
+                        jobs.status = 'queued'
                         OR (
-                            status = 'running'
-                            AND lease_expires_at <= clock_timestamp()
+                            jobs.status = 'running'
+                            AND jobs.lease_expires_at <= clock_timestamp()
                         )
                       )
-                    ORDER BY created_at, job_id
+                    ORDER BY jobs.created_at, jobs.job_id
                     LIMIT 1
-                    FOR UPDATE SKIP LOCKED
+                    FOR UPDATE OF jobs SKIP LOCKED
                 )
                 UPDATE document_parse_jobs
                 SET status = 'running',
@@ -142,7 +160,20 @@ async def claim_next_job(
                     error_message = NULL
                 FROM candidate
                 WHERE document_parse_jobs.job_id = candidate.job_id
-                RETURNING document_parse_jobs.*
+                RETURNING document_parse_jobs.*,
+                          candidate.source_storage_key,
+                          candidate.source_size_bytes,
+                          candidate.original_filename,
+                          candidate.media_type,
+                          candidate.document_format,
+                          candidate.inspector_id,
+                          candidate.inspector_name,
+                          candidate.inspector_version,
+                          candidate.inspection_status,
+                          candidate.detected_format,
+                          candidate.classification,
+                          candidate.inspection_summary,
+                          candidate.inspection_details
                 """,
                 (claimed_by, lease_seconds),
             )
@@ -271,36 +302,21 @@ async def request_cancel(
                 current = await cur.fetchone()
                 if current is None:
                     return None
-                if (
-                    current["status"] in _TERMINAL_STATUSES
-                    or current.get("cancellation_requested_at") is not None
-                ):
+                if current["status"] in _TERMINAL_STATUSES:
                     return dict(current)
 
                 await cur.execute(
                     """
                     UPDATE document_parse_jobs
-                    SET cancellation_requested_at = clock_timestamp(),
-                        status = CASE
-                            WHEN status = 'queued' THEN 'cancelled'
-                            ELSE status
-                        END,
-                        stage = CASE
-                            WHEN status = 'queued' THEN 'cancelled'
-                            ELSE stage
-                        END,
-                        completed_at = CASE
-                            WHEN status = 'queued' THEN clock_timestamp()
-                            ELSE completed_at
-                        END,
-                        claimed_by = CASE
-                            WHEN status = 'queued' THEN NULL
-                            ELSE claimed_by
-                        END,
-                        lease_expires_at = CASE
-                            WHEN status = 'queued' THEN NULL
-                            ELSE lease_expires_at
-                        END,
+                    SET cancellation_requested_at = COALESCE(
+                            cancellation_requested_at,
+                            clock_timestamp()
+                        ),
+                        status = 'cancelled',
+                        stage = 'cancelled',
+                        completed_at = clock_timestamp(),
+                        claimed_by = NULL,
+                        lease_expires_at = NULL,
                         status_version = status_version + 1,
                         updated_at = clock_timestamp()
                     WHERE job_id = %s

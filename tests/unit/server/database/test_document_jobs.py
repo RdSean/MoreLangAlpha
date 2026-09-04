@@ -69,10 +69,14 @@ async def test_claim_selects_queued_or_expired_job_with_skip_locked(
 
     assert claimed is not None
     sql, params = mock_cursor.execute.await_args.args
-    assert "FOR UPDATE SKIP LOCKED" in sql
+    assert "FOR UPDATE OF jobs SKIP LOCKED" in sql
     assert "status = 'queued'" in sql
     assert "status = 'running'" in sql
     assert "lease_expires_at <= clock_timestamp()" in sql
+    assert "JOIN documents" in sql
+    assert "JOIN document_inspections" in sql
+    assert "candidate.source_storage_key" in sql
+    assert "candidate.inspection_summary" in sql
     assert "attempt_count = attempt_count + 1" in sql
     assert "status_version = status_version + 1" in sql
     assert params == ("worker-1", 60)
@@ -203,6 +207,40 @@ async def test_cancel_terminal_job_is_idempotent(
     assert "FOR UPDATE" in sql
     assert "documents.owner_user_id = %s" in sql
     assert params == ("job-A1b2C3d4E5f6", "owner-1")
+
+
+@pytest.mark.asyncio
+async def test_cancel_running_job_is_terminal_and_releases_claim(
+    mock_connection,
+    mock_cursor,
+    monkeypatch,
+) -> None:
+    _patch_connection(monkeypatch, mock_connection)
+    mock_cursor.fetchone.side_effect = [
+        {
+            "job_id": "job-A1b2C3d4E5f6",
+            "status": "running",
+            "status_version": 4,
+            "cancellation_requested_at": None,
+        },
+        {
+            "job_id": "job-A1b2C3d4E5f6",
+            "status": "cancelled",
+            "status_version": 5,
+        },
+    ]
+
+    result = await document_jobs.request_cancel(
+        owner_user_id="owner-1",
+        job_id="job-A1b2C3d4E5f6",
+    )
+
+    assert result is not None and result["status"] == "cancelled"
+    update_sql = mock_cursor.execute.await_args_list[1].args[0]
+    assert "status = 'cancelled'" in update_sql
+    assert "stage = 'cancelled'" in update_sql
+    assert "claimed_by = NULL" in update_sql
+    assert "lease_expires_at = NULL" in update_sql
 
 
 @pytest.mark.asyncio

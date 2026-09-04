@@ -2,6 +2,11 @@
 
 ## 2026-09-05
 
+### 文档解析任务执行器
+
+- 新增带 lease/version fence 的文档任务 executor 与每进程 worker：按 preparing、parsing、storing 阶段推进，在隔离子进程中执行用户明确选择的 parser，并由 PostgreSQL claim 返回冻结的原文件与检测上下文。
+- 严格校验 artifact 数量、总大小、相对路径、普通文件及 symlink，所有对象写入独立 job 前缀；上传或发布失败仅补偿本次已写 key，超时和内部错误落安全错误，取消或续租失败会终止受管执行且不能发布产物。
+
 ### 文档解析任务状态机
 
 - 新增 PostgreSQL 持久化解析任务操作：支持同一文档重复创建任务、`FOR UPDATE SKIP LOCKED` 跨 worker 抢占、过期 lease 接管、续租、单调进度、owner-safe 取消及带 attempt/status-version fencing 的失败处理。
