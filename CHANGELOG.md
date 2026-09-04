@@ -9,6 +9,11 @@
 - 定义 PostgreSQL 租约任务、同步等待转异步、跨 worker 进度恢复，以及支持 Markdown、图片、结构化 JSON 和 manifest 的 ArtifactBundle；同一原始文件允许保留多次解析任务与产物。
 - 原文件和解析产物使用独立 `documents/` MinIO/S3-compatible 前缀，业务层通过通用对象存储接口访问；短实体 ID 统一采用三字母前缀、连字符和 12 位 Base62 后缀。
 
+### 通用文档知识库实施计划
+
+- 将知识库拆分为 20 个可独立验证和提交的 TDD 任务，覆盖依赖与配置、领域契约、`045` 数据库迁移、MinIO 流式存储、PDF 检测与解析 provider、持久化任务进度、REST/SSE API、双 Tab 文档界面、解析向导及真实 PostgreSQL/MinIO/LAN 验收。
+- 固定首版路由：数字版推荐 AnyDoc；混合版、扫描版、纯图版暂用现有 pdfplumber/pypdf 尽力提取并展示质量提示；`ocr-document` 仅作为未来可见但不可执行的方法，不与输入分类混淆。
+
 ## 2026-09-01
 
 ### 精确 Token 词表资源与自修复
