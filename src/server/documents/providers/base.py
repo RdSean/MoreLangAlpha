@@ -7,7 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from src.server.documents.contracts import InspectionResult
+from src.server.documents.contracts import (
+    ArtifactBundle,
+    InspectionResult,
+    ParseRequest,
+    ParserDescriptor,
+    ParserIncompatibleError,
+    ParserUnavailableError,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +33,12 @@ class DocumentInspector(Protocol):
     async def inspect(self, source_path: Path) -> InspectionResult: ...
 
 
+class DocumentParser(Protocol):
+    descriptor: ParserDescriptor
+
+    def parse(self, request: ParseRequest) -> ArtifactBundle: ...
+
+
 class IsolatedProcessRunner(Protocol):
     async def run(
         self,
@@ -34,3 +47,24 @@ class IsolatedProcessRunner(Protocol):
         *,
         timeout_seconds: float,
     ) -> object: ...
+
+
+def validate_parse_request(
+    request: ParseRequest,
+    descriptor: ParserDescriptor,
+) -> None:
+    """Reject unavailable or incompatible selections before native execution."""
+    if not descriptor.available:
+        raise ParserUnavailableError("The selected parser is not available")
+    if request.parser_id != descriptor.parser_id:
+        raise ParserIncompatibleError("The parse request selected another parser")
+    if request.inspection.status != "completed":
+        raise ParserIncompatibleError("A completed inspection is required")
+    if (
+        request.source.document_format not in descriptor.supported_formats
+        or request.inspection.classification
+        not in descriptor.supported_classifications
+    ):
+        raise ParserIncompatibleError(
+            "The selected parser is not compatible with this document"
+        )

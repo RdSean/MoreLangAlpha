@@ -2,6 +2,7 @@
 
 from src.server.documents.providers.base import (
     DocumentInspector,
+    DocumentParser,
     InspectorDescriptor,
     IsolatedProcessRunner,
 )
@@ -10,6 +11,7 @@ from src.server.documents.providers.registry import DocumentProviderRegistry
 
 __all__ = [
     "DocumentInspector",
+    "DocumentParser",
     "DocumentProviderRegistry",
     "InspectorDescriptor",
     "IsolatedProcessRunner",

@@ -2,6 +2,11 @@
 
 ## 2026-09-05
 
+### 文档解析 Provider 与推荐策略
+
+- 新增 AnyDoc 本地数字版 PDF parser 与共享 legacy PDF parser：AnyDoc 固定拒绝 hosted OCR，并将需 OCR 或空 Markdown 结果转为可重新选择方法的 `parser_incompatible`；legacy 方法允许发布带质量提示的部分或空 Markdown。
+- Provider registry 按检测分类返回简单解析选项：数字版推荐 AnyDoc，混合版、扫描版、纯图版和未知类型推荐 legacy；未来 `ocr-document` 仅作为不可用选项展示，不注册占位执行器。
+
 ### 共享 PDF 文本提取
 
 - 将 Memo 与网页抓取器重复的 pdfplumber 优先、pypdf 回退逻辑收敛为同步共享工具，统一返回 Markdown、实际后端、成功页码和总页数，为知识库旧版 PDF parser 提供可复用基础。

@@ -52,6 +52,7 @@ class ParserDescriptor:
     available: bool
     reason: str
     warning: str | None = None
+    recommended: bool = False
 
 
 @dataclass(frozen=True, slots=True)
