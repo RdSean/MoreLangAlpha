@@ -40,6 +40,24 @@ class VolcengineAsrConfig:
     ws_url: str = "wss://openspeech.bytedance.com/api/v2/asr"
 
 
+@dataclass(frozen=True, slots=True)
+class DocumentParsingConfig:
+    """Deployment limits for document ingestion and parsing."""
+
+    max_upload_bytes: int
+    sync_wait_seconds: int
+    parse_timeout_seconds: int
+
+
+def get_document_parsing_config() -> DocumentParsingConfig:
+    """Return validated document parsing limits resolved at process startup."""
+    return DocumentParsingConfig(
+        max_upload_bytes=env.DOCUMENT_MAX_UPLOAD_BYTES,
+        sync_wait_seconds=env.DOCUMENT_SYNC_WAIT_SECONDS,
+        parse_timeout_seconds=env.DOCUMENT_PARSE_TIMEOUT_SECONDS,
+    )
+
+
 def get_volcengine_asr_config() -> VolcengineAsrConfig | None:
     """Return ASR configuration only when the required deployment values exist."""
     app_id = env.VOLCENGINE_ASR_APP_ID.strip()

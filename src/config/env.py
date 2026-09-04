@@ -7,6 +7,18 @@ No YAML dependency — pure os.getenv.
 
 import os
 
+
+def _positive_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer, got {raw_value!r}") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer, got {raw_value!r}")
+    return value
+
+
 # Deployment mode: "oss" (self-hosted) or "platform" (hosted quota service).
 HOST_MODE: str = os.getenv("HOST_MODE", "oss")
 
@@ -23,6 +35,11 @@ EDUCATION_ASSET_MAX_BYTES: int = int(os.getenv("EDUCATION_ASSET_MAX_BYTES", str(
 EDUCATION_ASSET_DOWNLOAD_TTL_SECONDS: int = int(
     os.getenv("EDUCATION_ASSET_DOWNLOAD_TTL_SECONDS", "300")
 )
+
+# Document ingestion and parser execution limits.
+DOCUMENT_MAX_UPLOAD_BYTES: int = _positive_int("DOCUMENT_MAX_UPLOAD_BYTES", 50 * 1024 * 1024)
+DOCUMENT_SYNC_WAIT_SECONDS: int = _positive_int("DOCUMENT_SYNC_WAIT_SECONDS", 30)
+DOCUMENT_PARSE_TIMEOUT_SECONDS: int = _positive_int("DOCUMENT_PARSE_TIMEOUT_SECONDS", 600)
 
 # Quota / auth enforcement service URL
 AUTH_SERVICE_URL: str = os.getenv("AUTH_SERVICE_URL", "")
