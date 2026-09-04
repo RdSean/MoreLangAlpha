@@ -24,6 +24,14 @@ from psycopg_pool import AsyncConnectionPool
 
 # Tables in dependency (FK) order -- children first so TRUNCATE CASCADE is safe
 _ALL_TABLES = [
+    "document_artifacts",
+    "document_parse_jobs",
+    "document_inspections",
+    "document_tag_assignments",
+    "document_tags",
+    "document_dataset_items",
+    "documents",
+    "document_datasets",
     "student_llm_preferences",
     "education_memberships",
     "education_households",
