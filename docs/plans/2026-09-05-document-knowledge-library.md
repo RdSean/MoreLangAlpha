@@ -1098,6 +1098,11 @@ git commit -m "feat: add guided PDF parsing workflow"
 
 ### Task 19: Prove PostgreSQL, MinIO, and full API behavior
 
+Use the pinned, license-attributed upstream compatibility candidates in
+`docs/testing/document-fixtures.md` where they add coverage beyond the local
+deterministic fixtures. Download them only for real compatibility tests and
+verify their SHA-256 digests before parsing.
+
 **Files:**
 
 - Create: `tests/integration/test_document_storage_minio.py`
