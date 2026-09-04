@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-05
+
+### 通用文档知识库与解析 Pipeline 设计
+
+- 明确新增用户私有的通用文档库：以扁平 Dataset 和多标签组织原始资产，通过 `/documents` 的 Dataset 卡片与全部文档表格两种视图访问，不依赖默认 Workspace 或教育家庭资产。
+- 设计“上传检测、返回建议、用户选定方法、再创建解析任务”的显式流程；首版使用 `pdf-inspector` 分类 PDF，以 `anydoc` 处理数字版和混合版，并保留现有 pdfplumber/pypdf 作为扫描件的尽力提取路径。
+- 定义 PostgreSQL 租约任务、同步等待转异步、跨 worker 进度恢复，以及支持 Markdown、图片、结构化 JSON 和 manifest 的 ArtifactBundle；同一原始文件允许保留多次解析任务与产物。
+- 原文件和解析产物使用独立 `documents/` MinIO/S3-compatible 前缀，业务层通过通用对象存储接口访问；短实体 ID 统一采用三字母前缀、连字符和 12 位 Base62 后缀。
+
 ## 2026-09-01
 
 ### 精确 Token 词表资源与自修复
