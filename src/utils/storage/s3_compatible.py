@@ -40,6 +40,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import boto3
 from botocore.config import Config
@@ -51,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 _VALID_ADDRESSING_STYLES = {"virtual", "path", "auto"}
+_DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 def _resolve_addressing_style() -> str:
@@ -143,7 +145,13 @@ def _reset_client_for_test() -> None:
     _CLIENT = None
 
 
-def upload_file(key: str, file_path: str, content_type: str | None = None) -> bool:
+def upload_file(
+    key: str,
+    file_path: str,
+    content_type: str | None = None,
+    *,
+    max_bytes: int | None = None,
+) -> bool:
     """Upload a local file."""
     path_obj = Path(file_path)
     if not path_obj.exists():
@@ -151,8 +159,11 @@ def upload_file(key: str, file_path: str, content_type: str | None = None) -> bo
         return False
 
     file_size = path_obj.stat().st_size
-    if file_size > StorageConfig.MAX_UPLOAD_SIZE:
-        logger.error(f"File too large: {file_size} bytes > {StorageConfig.MAX_UPLOAD_SIZE} bytes")
+    upload_cap = StorageConfig.MAX_UPLOAD_SIZE if max_bytes is None else max_bytes
+    if upload_cap < 0:
+        raise ValueError("max_bytes must be non-negative")
+    if file_size > upload_cap:
+        logger.error(f"File too large: {file_size} bytes > {upload_cap} bytes")
         return False
 
     if not content_type:
@@ -242,6 +253,77 @@ def get_bytes(key: str) -> bytes | None:
     except Exception:
         logger.exception(f"Unexpected error downloading {key}")
         return None
+
+
+def download_to_file(key: str, destination: Path, *, max_bytes: int) -> int:
+    """Stream an object into a local file without writing beyond ``max_bytes``."""
+    if max_bytes < 0:
+        raise ValueError("max_bytes must be non-negative")
+
+    body: Any | None = None
+    try:
+        response = _get_client().get_object(
+            Bucket=StorageConfig.BUCKET_NAME,
+            Key=key,
+        )
+        body = response.get("Body")
+        if body is None:
+            raise RuntimeError("storage response did not include a body")
+
+        content_length = response.get("ContentLength")
+        if isinstance(content_length, int) and content_length > max_bytes:
+            raise ValueError("object exceeds maximum size")
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        total = 0
+        with destination.open("wb") as target:
+            while True:
+                remaining = max_bytes - total
+                chunk = body.read(min(_DOWNLOAD_CHUNK_SIZE, remaining + 1))
+                if not chunk:
+                    break
+                if total + len(chunk) > max_bytes:
+                    raise ValueError("object exceeds maximum size")
+                target.write(chunk)
+                total += len(chunk)
+        return total
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        close = getattr(body, "close", None)
+        if callable(close):
+            close()
+
+
+def create_presigned_download_url(
+    key: str,
+    *,
+    expires_seconds: int,
+    download_name: str,
+) -> str:
+    """Create a private download URL with a caller-supplied short lifetime."""
+    if expires_seconds <= 0:
+        raise ValueError("expires_seconds must be positive")
+    if "\r" in download_name or "\n" in download_name:
+        raise ValueError("download_name must not contain line breaks")
+
+    normalized_name = Path(download_name.replace("\\", "/")).name or "download"
+    ascii_name = normalized_name.encode("ascii", "ignore").decode() or "download"
+    ascii_name = ascii_name.replace('"', "'")
+    disposition = (
+        f'attachment; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(normalized_name)}"
+    )
+    return _get_client().generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": StorageConfig.BUCKET_NAME,
+            "Key": key,
+            "ResponseContentDisposition": disposition,
+        },
+        ExpiresIn=expires_seconds,
+    )
 
 
 def does_object_exist(key: str) -> bool:
