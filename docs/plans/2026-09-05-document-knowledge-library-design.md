@@ -217,15 +217,19 @@ Initial providers are:
 - `PdfInspectorDetector`: calls `pdf-inspector` in detection mode and records
   `text_based`, `scanned`, `image_based`, `mixed`, or `unknown`, plus generic
   summary information and detailed OCR-routing data.
-- `AnydocExtractor` (`anydoc-local`): the recommended local extractor for
-  text-based PDFs and the initial choice for mixed PDFs. Mixed output warns that
-  pages without a text layer may be missing.
+- `AnydocExtractor` (`anydoc-local`): the recommended local extractor only for
+  text-based PDFs. The pinned anydoc release raises `NeedsOcr` instead of
+  returning partial Markdown when a PDF contains scanned pages, so it is marked
+  incompatible with mixed, scanned, and image-based classifications.
 - `LegacyPdfExtractor` (`legacy-pdf-text`): reuses the existing
-  pdfplumber/pypdf behavior as a best-effort compatibility path. It is the
-  available recommendation for scanned or image-based PDFs but clearly warns
-  that output may be empty or incomplete because it is not OCR.
+  pdfplumber-primary/pypdf-fallback behavior as a best-effort compatibility
+  path. It is the available recommendation for mixed, scanned, and image-based
+  PDFs. Mixed files may yield only pages with a text layer; scanned and
+  image-based files may yield empty output because this provider is not OCR.
 - `ocr-document`: an unavailable descriptor shown as a future option. It has no
-  executing provider in the first release.
+  executing provider in the first release. `scanned` is an input classification;
+  `ocr-document` is a future parser method that can act on scanned, image-based,
+  or mixed inputs.
 
 The method selection UI shows only a few simple cards: name, recommendation,
 one-sentence reason, availability, and quality warning. The user must explicitly
