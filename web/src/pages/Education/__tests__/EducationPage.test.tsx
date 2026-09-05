@@ -2,7 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import EducationPage from '../EducationPage';
+import EducationPage, { CreateHomeworkPage, ParentCreateDialog } from '../EducationPage';
+import type { EducationHomeworkDictionaries } from '../types';
 
 const state = vi.hoisted(() => ({
   member: null as { user_id: string; name: string; role: 'parent' | 'student' } | null,
@@ -29,8 +30,29 @@ const state = vi.hoisted(() => ({
       { code: 'schoolwork', name: '校内作业', sort_order: 1 },
       { code: 'homework', name: '校外作业', sort_order: 2 },
     ],
-  } as Record<string, unknown> | undefined,
+  } as EducationHomeworkDictionaries | undefined,
 }));
+
+function renderCreateHomeworkPage() {
+  return render(<MemoryRouter><CreateHomeworkPage /></MemoryRouter>);
+}
+
+function renderCreateHomeworkDialog() {
+  return render(
+    <MemoryRouter>
+      <ParentCreateDialog
+        students={state.members}
+        dictionaries={state.dictionaries}
+        onSubmit={state.create}
+        isPending={false}
+      />
+    </MemoryRouter>,
+  );
+}
+
+function choose(label: string) {
+  fireEvent.click(screen.getByRole('button', { name: label, exact: true }));
+}
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ member: state.member }),
@@ -105,18 +127,20 @@ describe('EducationPage', () => {
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
     state.tasks = [task('completed')];
 
-    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    const educationPage = render(<MemoryRouter><EducationPage /></MemoryRouter>);
 
     expect(screen.getByRole('heading', { name: '家庭作业' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '反馈' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '创建作业' })).toHaveAttribute('href', '/education/tasks/new');
+    educationPage.unmount();
+
+    renderCreateHomeworkPage();
     expect(state.membersEnabled).toHaveBeenCalledWith(true);
 
-    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
-    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
-    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'math' } });
-    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'practice' } });
-    fireEvent.change(screen.getByLabelText('练习来源'), { target: { value: 'schoolwork' } });
-    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '新的练习任务' } });
+    choose('数学');
+    choose('练习');
+    choose('校内作业');
+    fireEvent.change(screen.getByLabelText('说明'), { target: { value: '新的练习任务' } });
     fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
 
@@ -136,13 +160,11 @@ describe('EducationPage', () => {
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
     state.dictionaries = { ...state.dictionaries!, timezone: 'America/New_York' };
 
-    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    renderCreateHomeworkPage();
 
-    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
-    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
-    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
-    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
-    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '家庭时区作业' } });
+    choose('语文');
+    choose('阅读');
+    fireEvent.change(screen.getByLabelText('说明'), { target: { value: '家庭时区作业' } });
     fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
     expect(screen.getByText('家庭时区：America/New_York')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: '创建作业' }).at(-1)!);
@@ -172,16 +194,14 @@ describe('EducationPage', () => {
       .mockResolvedValueOnce({ asset_id: 'asset-1' })
       .mockResolvedValueOnce({ asset_id: 'asset-2' });
 
-    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    renderCreateHomeworkPage();
 
-    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
-    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
     expect(screen.getByText('当前年级：四年级')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
-    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
-    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '每周阅读' } });
+    choose('语文');
+    choose('阅读');
+    fireEvent.change(screen.getByLabelText('说明'), { target: { value: '每周阅读' } });
     fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
-    fireEvent.change(screen.getByLabelText('重复方式'), { target: { value: 'weekly' } });
+    choose('每周指定日期');
     fireEvent.click(screen.getByRole('checkbox', { name: '周一' }));
     fireEvent.click(screen.getByRole('checkbox', { name: '周三' }));
     const first = new File(['first'], 'first.jpg', { type: 'image/jpeg' });
@@ -207,15 +227,13 @@ describe('EducationPage', () => {
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
     state.create.mockRejectedValue({ response: { data: { detail: 'The initial due date must be one of the selected weekly weekdays' } } });
 
-    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    renderCreateHomeworkPage();
 
-    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
-    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
-    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
-    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
-    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '不匹配的每周阅读' } });
+    choose('语文');
+    choose('阅读');
+    fireEvent.change(screen.getByLabelText('说明'), { target: { value: '不匹配的每周阅读' } });
     fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-09T10:00' } });
-    fireEvent.change(screen.getByLabelText('重复方式'), { target: { value: 'weekly' } });
+    choose('每周指定日期');
     fireEvent.click(screen.getByRole('checkbox', { name: '周一' }));
     fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
 
@@ -229,13 +247,11 @@ describe('EducationPage', () => {
     state.create.mockRejectedValueOnce(new Error('network unavailable')).mockResolvedValueOnce(undefined);
     const attachment = new File(['first'], 'first.pdf', { type: 'application/pdf' });
 
-    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    renderCreateHomeworkPage();
 
-    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
-    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
-    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
-    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
-    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '可重试作业' } });
+    choose('语文');
+    choose('阅读');
+    fireEvent.change(screen.getByLabelText('说明'), { target: { value: '可重试作业' } });
     fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
     fireEvent.change(screen.getByLabelText('材料附件'), { target: { files: [attachment] } });
     fireEvent.click(screen.getAllByRole('button', { name: '创建作业' }).at(-1)!);
@@ -253,13 +269,12 @@ describe('EducationPage', () => {
     state.create.mockRejectedValueOnce(new Error('network unavailable'));
     const attachment = new File(['first'], 'first.pdf', { type: 'application/pdf' });
 
-    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    renderCreateHomeworkDialog();
 
     fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
-    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
-    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
-    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
-    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '关闭后回收' } });
+    choose('语文');
+    choose('阅读');
+    fireEvent.change(screen.getByLabelText('说明'), { target: { value: '关闭后回收' } });
     fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
     fireEvent.change(screen.getByLabelText('材料附件'), { target: { files: [attachment] } });
     fireEvent.click(screen.getAllByRole('button', { name: '创建作业' }).at(-1)!);
@@ -276,13 +291,12 @@ describe('EducationPage', () => {
     state.create.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveCreate = resolve; }));
     const attachment = new File(['first'], 'first.pdf', { type: 'application/pdf' });
 
-    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    renderCreateHomeworkDialog();
 
     fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
-    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
-    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
-    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
-    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '处理中作业' } });
+    choose('语文');
+    choose('阅读');
+    fireEvent.change(screen.getByLabelText('说明'), { target: { value: '处理中作业' } });
     fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
     fireEvent.change(screen.getByLabelText('材料附件'), { target: { files: [attachment] } });
     fireEvent.click(screen.getAllByRole('button', { name: '创建作业' }).at(-1)!);
@@ -299,13 +313,11 @@ describe('EducationPage', () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
 
-    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    renderCreateHomeworkPage();
 
-    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
-    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
-    fireEvent.change(screen.getByLabelText('科目'), { target: { value: 'chinese' } });
-    fireEvent.change(screen.getByLabelText('作业类型'), { target: { value: 'read' } });
-    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '附件过多' } });
+    choose('语文');
+    choose('阅读');
+    fireEvent.change(screen.getByLabelText('说明'), { target: { value: '附件过多' } });
     fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-10T10:00' } });
     fireEvent.change(screen.getByLabelText('材料附件'), {
       target: { files: Array.from({ length: 21 }, (_, index) => new File(['x'], `${index}.jpg`, { type: 'image/jpeg' })) },
@@ -321,10 +333,7 @@ describe('EducationPage', () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: null }];
 
-    render(<MemoryRouter><EducationPage /></MemoryRouter>);
-
-    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
-    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
+    renderCreateHomeworkPage();
 
     expect(screen.getByText('当前年级：未设置年级')).toBeInTheDocument();
     expect(screen.getByText('请先在‘设置 > 家庭账户’中为该学生设置当前年级。')).toBeInTheDocument();
@@ -336,10 +345,8 @@ describe('EducationPage', () => {
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
     state.dictionaries = undefined;
 
-    render(<MemoryRouter><EducationPage /></MemoryRouter>);
-
-    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
-    fireEvent.change(screen.getByLabelText('学生'), { target: { value: 'student-1' } });
+    renderCreateHomeworkPage();
+    choose('学生');
 
     expect(screen.getByText('正在加载作业字典…')).toBeInTheDocument();
     expect(screen.queryByText('当前年级：未设置年级')).not.toBeInTheDocument();

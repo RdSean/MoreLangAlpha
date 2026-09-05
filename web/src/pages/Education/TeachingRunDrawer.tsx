@@ -100,7 +100,7 @@ export default function TeachingRunDrawer({
             <div className="grid gap-0.5"><dt className="font-mono text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>最近持久心跳</dt><dd>{formatTime(job.last_heartbeat_at)}</dd></div>
           </dl>
           {isActive && <p className="mt-3 text-sm" style={{ color: 'var(--color-text-secondary)' }}>正在等待 Agent/模型响应</p>}
-          {job.error_message && <p className="mt-3 text-sm" role="alert" style={{ color: 'var(--color-danger)' }}>{job.error_message}</p>}
+          {job.error_message && <p className="mt-3 text-sm" role="alert" style={{ color: 'var(--color-loss)' }}>{job.error_message}</p>}
           {needsModelConfiguration && <Link to="/setup/method" className="mt-3 inline-flex text-sm underline" style={{ color: 'var(--color-accent-primary)' }}>配置模型服务</Link>}
         </section>
 
