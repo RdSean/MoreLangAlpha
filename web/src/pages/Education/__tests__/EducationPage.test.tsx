@@ -51,7 +51,7 @@ function renderCreateHomeworkDialog() {
 }
 
 function choose(label: string) {
-  fireEvent.click(screen.getByRole('button', { name: label, exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: label }));
 }
 
 vi.mock('@/contexts/AuthContext', () => ({
