@@ -19,8 +19,8 @@ function pageDimensions(value: JsonValue | undefined): string | undefined {
   if (!Array.isArray(value) || value.length === 0) return undefined;
   const first = value[0];
   if (!first || typeof first !== 'object' || Array.isArray(first)) return undefined;
-  const width = numberValue(first.width);
-  const height = numberValue(first.height);
+  const width = numberValue(first.width_points);
+  const height = numberValue(first.height_points);
   if (width === undefined || height === undefined) return undefined;
   return `${Math.round(width)} × ${Math.round(height)} pt`;
 }

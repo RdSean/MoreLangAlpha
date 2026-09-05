@@ -54,7 +54,7 @@ const outcome: InspectionOutcome = {
     classification: 'text_based',
     summary: {
       page_count: 12,
-      page_dimensions: [{ page: 1, width: 595, height: 842 }],
+      page_dimensions: [{ page: 1, width_points: 595, height_points: 842 }],
     },
     details: {},
   },
