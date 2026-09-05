@@ -59,6 +59,46 @@ describe('queryKeys', () => {
     });
   });
 
+  describe('documents', () => {
+    it('builds hierarchical list, detail, job, and artifact keys', () => {
+      expect(queryKeys.documents.list({ offset: 0 })).toEqual([
+        'documents',
+        'list',
+        { offset: 0 },
+      ]);
+      expect(queryKeys.documents.detail('doc-abc')).toEqual([
+        'documents',
+        'detail',
+        'doc-abc',
+      ]);
+      expect(queryKeys.documents.job('job-abc')).toEqual([
+        'documents',
+        'jobs',
+        'job-abc',
+      ]);
+      expect(queryKeys.documents.artifacts('doc-abc', 'job-abc')).toEqual([
+        'documents',
+        'artifacts',
+        'doc-abc',
+        'job-abc',
+      ]);
+    });
+
+    it('keeps all document surfaces under the same invalidation prefix', () => {
+      const prefix = queryKeys.documents.all;
+      const keys = [
+        queryKeys.documents.lists(),
+        queryKeys.documents.datasets(),
+        queryKeys.documents.tags(),
+        queryKeys.documents.jobs('doc-abc'),
+        queryKeys.documents.artifacts('doc-abc'),
+      ];
+      for (const key of keys) {
+        expect(key.slice(0, prefix.length)).toEqual(prefix);
+      }
+    });
+  });
+
   // --- threads ---
   describe('threads', () => {
     it('byWorkspace(wsId) contains the workspace id', () => {

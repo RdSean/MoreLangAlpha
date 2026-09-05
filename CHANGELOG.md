@@ -2,6 +2,11 @@
 
 ## 2026-09-05
 
+### 文档知识库前端数据层
+
+- 新增格式中立的 Dataset、文档、检测、解析任务及多类型 Artifact 前端契约，并覆盖知识库全部 REST 操作、重复 Dataset/标签上传字段和同步/异步解析响应。
+- 新增分层 React Query 缓存键与操作 hooks；解析进度按 PostgreSQL 状态版本续接 SSE，连续断流后自动降级轮询，Artifact 下载统一经过本站授权接口。
+
 ### PDF 上游兼容样本清单
 
 - 记录 AnyDoc 与 pdf-inspector MIT 测试样本的来源、大小、Git blob、SHA-256、固定版本实测分类及 OCR/提取结果；真实兼容测试按需下载并先校验摘要，不把上游 PDF 大文件直接提交到仓库。

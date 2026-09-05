@@ -103,6 +103,34 @@ export const queryKeys = {
     learning: () => [...queryKeys.education.all, 'learning'],
     assignment: (id: string) => [...queryKeys.education.learning(), id],
   },
+  documents: {
+    all: ['documents'],
+    lists: () => [...queryKeys.documents.all, 'list'],
+    list: <T extends object>(params: T) => [...queryKeys.documents.lists(), params],
+    detail: (id: string) => [...queryKeys.documents.all, 'detail', id],
+    datasets: () => [...queryKeys.documents.all, 'datasets'],
+    datasetList: <T extends object>(params: T) => [...queryKeys.documents.datasets(), params],
+    dataset: (id: string) => [...queryKeys.documents.datasets(), id],
+    tags: () => [...queryKeys.documents.all, 'tags'],
+    inspections: (documentId: string) => [...queryKeys.documents.all, 'inspections', documentId],
+    parseOptions: (documentId: string, inspectionId?: string) => [
+      ...queryKeys.documents.inspections(documentId),
+      'options',
+      inspectionId ?? 'latest',
+    ],
+    jobs: (documentId?: string) => [
+      ...queryKeys.documents.all,
+      'jobs',
+      ...(documentId ? [documentId] : []),
+    ],
+    job: (id: string) => [...queryKeys.documents.all, 'jobs', id],
+    artifacts: (documentId: string, jobId?: string) => [
+      ...queryKeys.documents.all,
+      'artifacts',
+      documentId,
+      ...(jobId ? [jobId] : []),
+    ],
+  },
   settings: {
     all: ['settings'],
     channels: {
