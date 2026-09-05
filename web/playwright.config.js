@@ -1,4 +1,4 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
 // Use a dedicated port so E2E tests never collide with the user's dev server
 // on :5177 or other local services.
@@ -17,7 +17,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `npm run dev -- --port ${E2E_PORT}`,
+      command: `pnpm dev --port ${E2E_PORT}`,
       port: E2E_PORT,
       // Always start fresh so E2E tests don't reuse a developer's live server.
       reuseExistingServer: false,
@@ -34,5 +34,10 @@ export default defineConfig({
   ],
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' } },
+    {
+      name: 'documents-mobile',
+      testMatch: /documents\.spec\.js/,
+      use: { ...devices['iPhone 13'], browserName: 'chromium' },
+    },
   ],
 });
