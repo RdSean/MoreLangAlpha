@@ -5,7 +5,7 @@ import { LayoutGrid, PanelLeftClose, PanelLeftOpen, SquarePen } from 'lucide-rea
 import logoLight from '../../assets/img/logo.svg';
 import logoDark from '../../assets/img/logo-dark.svg';
 import { useTheme } from '../../contexts/ThemeContext';
-import { NAV_ITEMS } from '../nav/navItems';
+import { getVisibleNavItems } from '../nav/navItems';
 import { useNavActive } from '../nav/useNavActive';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import NavigationPanel from '@/pages/ChatAgent/components/NavigationPanel';
@@ -57,9 +57,7 @@ function AppSidebar({ collapsed, onToggleCollapse, width, onWidthChange }: AppSi
   const { t } = useTranslation();
   const { theme } = useTheme();
   const { member } = useAuth();
-  const visibleNavItems = member?.role === 'student'
-    ? NAV_ITEMS.filter((item) => item.key !== '/automations')
-    : NAV_ITEMS;
+  const visibleNavItems = getVisibleNavItems(member?.role);
   const isActive = useNavActive();
   const logo = theme === 'light' ? logoDark : logoLight;
 

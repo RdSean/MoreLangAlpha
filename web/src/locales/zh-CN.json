@@ -100,6 +100,7 @@
   "sidebar": {
     "dashboard": "仪表盘",
     "chatAgent": "智能对话",
+    "documents": "知识库",
     "automations": "自动化",
     "education": "学习",
     "settings": "设置",
@@ -140,6 +141,14 @@
     "collapseAgents": "收起智能体",
     "expandAgents": "展开智能体",
     "removeAgent": "移除智能体"
+  },
+  "documents": {
+    "title": "知识库",
+    "viewLabel": "知识库视图",
+    "tabs": {
+      "datasets": "数据集",
+      "allDocuments": "全部文档"
+    }
   },
   "settings": {
     "title": "用户设置",

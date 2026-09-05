@@ -24,6 +24,9 @@ vi.mock('@/pages/Automations/Automations', () => ({
 vi.mock('@/pages/Settings/Settings', () => ({
   default: () => <div data-testid="settings-page" />,
 }));
+vi.mock('@/pages/Documents/DocumentsPage', () => ({
+  default: () => <div data-testid="documents-page" />,
+}));
 vi.mock('@/pages/Education/EducationPage', () => ({
   default: () => <div data-testid="education-page" />,
 }));
@@ -32,6 +35,7 @@ vi.mock('@/pages/Education/StudentFlashChat', () => ({
 }));
 
 import Main from '../Main';
+import { preloadRouteChunk, routeChunks } from '../routeChunks';
 
 function renderAt(pathname: string) {
   return render(
@@ -46,6 +50,7 @@ describe('generic application routes', () => {
     expect(NAV_ITEMS.map((item) => item.key)).toEqual([
       '/dashboard',
       '/chat',
+      '/documents',
       '/automations',
       '/education',
     ]);
@@ -59,6 +64,7 @@ describe('generic application routes', () => {
 
   it.each([
     ['/chat', 'chat-page'],
+    ['/documents', 'documents-page'],
     ['/automations', 'automations-page'],
     ['/education', 'education-page'],
     ['/settings', 'settings-page'],
@@ -66,5 +72,13 @@ describe('generic application routes', () => {
     renderAt(pathname);
 
     expect(await screen.findByTestId(pageTestId)).toBeInTheDocument();
+  });
+
+  it('preloads the documents route chunk', () => {
+    const load = vi.spyOn(routeChunks, 'documents').mockResolvedValue({ default: () => <div /> });
+
+    preloadRouteChunk('/documents');
+
+    expect(load).toHaveBeenCalledOnce();
   });
 });

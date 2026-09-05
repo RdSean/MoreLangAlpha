@@ -100,6 +100,7 @@
   "sidebar": {
     "dashboard": "Dashboard",
     "chatAgent": "Chat Agent",
+    "documents": "Knowledge Library",
     "automations": "Automations",
     "education": "Education",
     "settings": "Settings",
@@ -140,6 +141,14 @@
     "collapseAgents": "Collapse agents",
     "expandAgents": "Expand agents",
     "removeAgent": "Remove agent"
+  },
+  "documents": {
+    "title": "Knowledge Library",
+    "viewLabel": "Knowledge library views",
+    "tabs": {
+      "datasets": "Datasets",
+      "allDocuments": "All documents"
+    }
   },
   "settings": {
     "title": "User Settings",
