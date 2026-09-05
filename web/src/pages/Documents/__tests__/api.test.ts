@@ -16,6 +16,7 @@ import {
   artifactDownloadUrl,
   cancelDocumentJob,
   createDocumentParseJob,
+  fetchArtifactText,
   listDocuments,
   uploadDocument,
   watchDocumentJob,
@@ -130,6 +131,17 @@ describe('Documents API', () => {
   it('builds the authenticated redirect endpoint without exposing object storage', () => {
     expect(artifactDownloadUrl('art-A1b2C3d4E5f6')).toBe(
       'http://localhost:8000/api/v1/document-artifacts/art-A1b2C3d4E5f6/download',
+    );
+  });
+
+  it('loads a Markdown artifact through the authenticated download endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('# Lesson', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchArtifactText('art-A1b2C3d4E5f6')).resolves.toBe('# Lesson');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v1/document-artifacts/art-A1b2C3d4E5f6/download',
+      { credentials: 'include' },
     );
   });
 

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../components/DatasetGrid', () => ({ default: () => <div data-testid="dataset-grid" /> }));
 vi.mock('../components/DocumentTable', () => ({ default: () => <div data-testid="document-table" /> }));
+vi.mock('../components/DocumentWizard', () => ({ default: () => null }));
 
 import DocumentsPage from '../DocumentsPage';
 

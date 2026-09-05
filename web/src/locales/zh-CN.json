@@ -243,6 +243,92 @@
       "previous": "上一页",
       "next": "下一页",
       "pageOf": "{{page}} / {{pageCount}}"
+    },
+    "stage": {
+      "queued": "等待中",
+      "preparing": "正在准备原文件",
+      "parsing": "正在提取内容",
+      "storing": "正在保存产物",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消"
+    },
+    "wizard": {
+      "title": "解析文档",
+      "open": "上传文件",
+      "progressLabel": "文档解析步骤",
+      "steps": {
+        "file": "文件",
+        "inspection": "检测",
+        "method": "方法",
+        "progress": "进度",
+        "result": "结果"
+      },
+      "actions": {
+        "back": "返回"
+      },
+      "file": {
+        "title": "选择文件",
+        "subtitle": "上传原文件并选择知识库归类。",
+        "pick": "选择 PDF",
+        "inputLabel": "PDF 文件",
+        "datasets": "数据集",
+        "tags": "标签",
+        "submit": "上传并检测",
+        "inspectExisting": "检测文件",
+        "inspecting": "正在检测…"
+      },
+      "inspection": {
+        "title": "文件概要",
+        "subtitle": "继续前请查看文件类型与建议解析方法。",
+        "failed": "文件检测失败，无需重新上传即可重试。",
+        "recommended": "建议方法",
+        "retry": "重试检测",
+        "continue": "选择方法"
+      },
+      "summary": {
+        "filename": "文件名",
+        "size": "大小",
+        "pages": "页数",
+        "pageCount_one": "{{count}} 页",
+        "pageCount_other": "{{count}} 页",
+        "dimensions": "页面大小",
+        "classification": "文件类型"
+      },
+      "method": {
+        "title": "选择解析方法",
+        "subtitle": "只有选择方法并确认后，系统才会开始解析。",
+        "recommended": "推荐",
+        "unavailable": "暂不可用",
+        "start": "开始解析",
+        "starting": "正在启动…"
+      },
+      "progress": {
+        "title": "正在解析文档",
+        "polling": "实时更新暂不可用，系统正在定期查询进度。",
+        "cancel": "取消解析",
+        "cancelling": "正在取消…",
+        "cancelled": "解析已取消",
+        "failed": "解析失败",
+        "chooseAnother": "选择其他方法"
+      },
+      "result": {
+        "title": "解析结果",
+        "subtitle": "查看本次任务的主文档和全部解析产物。",
+        "preview": "Markdown 预览",
+        "artifacts": "解析产物",
+        "downloadLabel": "下载 {{name}}",
+        "history": "历史解析任务",
+        "parseAgain": "再次解析"
+      },
+      "errors": {
+        "upload": "无法上传文件。",
+        "inspection": "无法检测文件。",
+        "start": "无法创建解析任务。",
+        "cancel": "无法取消解析任务。",
+        "artifacts": "无法加载解析产物。",
+        "preview": "无法加载 Markdown 预览，但仍可下载产物。"
+      }
     }
   },
   "settings": {

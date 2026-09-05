@@ -149,6 +149,12 @@ export function artifactDownloadUrl(artifactId: string): string {
   return `${api.defaults.baseURL ?? ''}/api/v1/document-artifacts/${encodeURIComponent(artifactId)}/download`;
 }
 
+export async function fetchArtifactText(artifactId: string): Promise<string> {
+  const response = await fetch(artifactDownloadUrl(artifactId), { credentials: 'include' });
+  if (!response.ok) throw new Error('Artifact preview is unavailable');
+  return response.text();
+}
+
 const TERMINAL_STATUSES = new Set<ParseJob['status']>(['completed', 'failed', 'cancelled']);
 
 export interface WatchDocumentJobOptions {

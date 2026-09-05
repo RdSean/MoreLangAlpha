@@ -243,6 +243,92 @@
       "previous": "Previous page",
       "next": "Next page",
       "pageOf": "{{page}} / {{pageCount}}"
+    },
+    "stage": {
+      "queued": "Queued",
+      "preparing": "Preparing source",
+      "parsing": "Extracting content",
+      "storing": "Storing artifacts",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "wizard": {
+      "title": "Parse document",
+      "open": "Upload file",
+      "progressLabel": "Document parsing steps",
+      "steps": {
+        "file": "File",
+        "inspection": "Inspection",
+        "method": "Method",
+        "progress": "Progress",
+        "result": "Result"
+      },
+      "actions": {
+        "back": "Back"
+      },
+      "file": {
+        "title": "Select a file",
+        "subtitle": "Upload the source and choose its library organization.",
+        "pick": "Choose a PDF",
+        "inputLabel": "PDF file",
+        "datasets": "Datasets",
+        "tags": "Tags",
+        "submit": "Upload and inspect",
+        "inspectExisting": "Inspect file",
+        "inspecting": "Inspecting…"
+      },
+      "inspection": {
+        "title": "File summary",
+        "subtitle": "Review the detected file type and suggested method before continuing.",
+        "failed": "The file could not be inspected. Retry without uploading it again.",
+        "recommended": "Suggested method",
+        "retry": "Retry inspection",
+        "continue": "Choose method"
+      },
+      "summary": {
+        "filename": "Filename",
+        "size": "Size",
+        "pages": "Pages",
+        "pageCount_one": "{{count}} page",
+        "pageCount_other": "{{count}} pages",
+        "dimensions": "Page size",
+        "classification": "File type"
+      },
+      "method": {
+        "title": "Choose a parsing method",
+        "subtitle": "No method starts until you select it and confirm.",
+        "recommended": "Recommended",
+        "unavailable": "Unavailable",
+        "start": "Start parsing",
+        "starting": "Starting…"
+      },
+      "progress": {
+        "title": "Parsing document",
+        "polling": "Live updates are unavailable. Progress is being checked periodically.",
+        "cancel": "Cancel parsing",
+        "cancelling": "Cancelling…",
+        "cancelled": "Parsing cancelled",
+        "failed": "Parsing failed",
+        "chooseAnother": "Choose another method"
+      },
+      "result": {
+        "title": "Parsing result",
+        "subtitle": "Review the primary document and every artifact produced by this run.",
+        "preview": "Markdown preview",
+        "artifacts": "Artifacts",
+        "downloadLabel": "Download {{name}}",
+        "history": "Previous runs",
+        "parseAgain": "Parse again"
+      },
+      "errors": {
+        "upload": "The file could not be uploaded.",
+        "inspection": "The file could not be inspected.",
+        "start": "The parsing job could not be started.",
+        "cancel": "The parsing job could not be cancelled.",
+        "artifacts": "Artifacts could not be loaded.",
+        "preview": "The Markdown preview could not be loaded. You can still download the artifact."
+      }
     }
   },
   "settings": {

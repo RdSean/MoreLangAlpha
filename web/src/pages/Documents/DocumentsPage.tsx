@@ -1,10 +1,11 @@
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDocumentDataset } from './hooks';
 import DatasetGrid from './components/DatasetGrid';
 import DocumentTable, { type DocumentTableFilters } from './components/DocumentTable';
+import DocumentWizard from './components/DocumentWizard';
 import type { DatasetSummary, DocumentSummary } from './types';
 import './DocumentsPage.css';
 
@@ -94,6 +95,8 @@ export default function DocumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab: DocumentsTab = searchParams.get('tab') === 'documents' ? 'documents' : 'datasets';
   const selectedDatasetId = searchParams.get('dataset');
+  const selectedDocumentId = searchParams.get('document') ?? undefined;
+  const wizardOpen = searchParams.get('upload') === '1' || Boolean(selectedDocumentId);
   const datasetPage = positivePage(searchParams.get('datasets_page'));
   const allDocumentsPage = positivePage(searchParams.get('documents_page'));
   const datasetDocumentsPage = positivePage(searchParams.get('dataset_documents_page'));
@@ -119,6 +122,14 @@ export default function DocumentsPage() {
   const activeLabel = t(TABS.find((tab) => tab.id === activeTab)!.labelKey);
   const openDataset = (dataset: DatasetSummary) => updateParams((params) => params.set('dataset', dataset.dataset_id));
   const openDocument = (document: DocumentSummary) => updateParams((params) => params.set('document', document.document_id));
+  const openUpload = () => updateParams((params) => {
+    params.set('upload', '1');
+    params.delete('document');
+  });
+  const closeWizard = () => updateParams((params) => {
+    params.delete('upload');
+    params.delete('document');
+  });
   const updateDocumentFilters = (prefix: string, filters: DocumentTableFilters, resetPage: boolean) => {
     updateParams((params) => {
       writeTableFilters(params, prefix, filters);
@@ -131,6 +142,10 @@ export default function DocumentsPage() {
       <div className="documents-container">
         <header className="documents-header">
           <h1 className="documents-title title-font">{t('documents.title')}</h1>
+          <Button type="button" onClick={openUpload}>
+            <Upload className="mr-2 h-4 w-4" aria-hidden="true" />
+            {t('documents.wizard.open')}
+          </Button>
         </header>
 
         <div className="documents-tabs" role="tablist" aria-label={t('documents.viewLabel')}>
@@ -196,6 +211,12 @@ export default function DocumentsPage() {
           )}
         </section>
       </div>
+      <DocumentWizard
+        open={wizardOpen}
+        documentId={selectedDocumentId}
+        initialDatasetIds={selectedDatasetId ? [selectedDatasetId] : []}
+        onOpenChange={(open) => !open && closeWizard()}
+      />
     </div>
   );
 }

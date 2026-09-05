@@ -95,8 +95,12 @@ export function useDocumentMutations() {
     createTag: useMutation({ mutationFn: documentsApi.createTag, onSuccess: invalidateTags }),
     deleteTag: useMutation({ mutationFn: documentsApi.deleteTag, onSuccess: invalidateTags }),
     uploadDocument: useMutation({
-      mutationFn: ({ file, datasetIds, tagIds }: { file: File; datasetIds?: string[]; tagIds?: string[] }) =>
-        documentsApi.uploadDocument(file, { datasetIds, tagIds }),
+      mutationFn: ({ file, datasetIds, tagIds, onProgress }: {
+        file: File;
+        datasetIds?: string[];
+        tagIds?: string[];
+        onProgress?: (percentage: number) => void;
+      }) => documentsApi.uploadDocument(file, { datasetIds, tagIds }, onProgress),
       onSuccess: async () => { await invalidateLists(); await invalidateDatasets(); await invalidateTags(); },
     }),
     inspectDocument: useMutation({
