@@ -1,7 +1,11 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('../components/DatasetGrid', () => ({ default: () => <div data-testid="dataset-grid" /> }));
+vi.mock('../components/DocumentTable', () => ({ default: () => <div data-testid="document-table" /> }));
+
 import DocumentsPage from '../DocumentsPage';
 
 function LocationProbe() {

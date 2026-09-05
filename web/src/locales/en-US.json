@@ -148,6 +148,101 @@
     "tabs": {
       "datasets": "Datasets",
       "allDocuments": "All documents"
+    },
+    "actions": {
+      "create": "Create",
+      "save": "Save",
+      "saving": "Saving…",
+      "open": "Open",
+      "rename": "Rename",
+      "delete": "Delete",
+      "retry": "Retry",
+      "clearFilters": "Clear filters"
+    },
+    "datasets": {
+      "createAction": "Create dataset",
+      "createTitle": "Create dataset",
+      "renameTitle": "Rename dataset",
+      "name": "Name",
+      "description": "Description",
+      "searchLabel": "Search datasets",
+      "searchPlaceholder": "Search datasets",
+      "documentCount_one": "{{count}} document",
+      "documentCount_other": "{{count}} documents",
+      "openLabel": "Open {{name}}",
+      "actionsLabel": "Actions for {{name}}",
+      "back": "Back to datasets",
+      "datasetFallback": "Dataset",
+      "loading": "Loading datasets",
+      "empty": "No datasets yet",
+      "noResults": "No matching datasets",
+      "loadFailed": "Datasets could not be loaded.",
+      "createFailed": "Dataset could not be created.",
+      "updateFailed": "Dataset could not be updated.",
+      "deleteFailed": "Dataset could not be deleted.",
+      "deleteTitle": "Delete dataset",
+      "deleteMessage": "Delete “{{name}}”? Documents will remain in the library."
+    },
+    "filters": {
+      "dataset": "Dataset",
+      "allDatasets": "All datasets",
+      "tags": "Tags",
+      "selectedTags_one": "{{count}} tag",
+      "selectedTags_other": "{{count}} tags",
+      "noTags": "No tags yet",
+      "format": "Format",
+      "allFormats": "All formats",
+      "classification": "Classification",
+      "allClassifications": "All classifications",
+      "status": "Parse status",
+      "allStatuses": "All statuses"
+    },
+    "classification": {
+      "text_based": "Digital text",
+      "mixed": "Mixed",
+      "scanned": "Scanned",
+      "image_based": "Image-based",
+      "unknown": "Unknown"
+    },
+    "status": {
+      "none": "Not parsed",
+      "queued": "Queued",
+      "running": "Processing",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "table": {
+      "label": "Documents",
+      "searchLabel": "Search filename",
+      "searchPlaceholder": "Search filename",
+      "loading": "Loading documents…",
+      "empty": "No documents match these filters.",
+      "loadFailed": "Documents could not be loaded.",
+      "openLabel": "Open {{name}}",
+      "actionsLabel": "Actions for {{name}}",
+      "renameTitle": "Rename document",
+      "filename": "Filename",
+      "renameFailed": "Document could not be renamed.",
+      "deleteFailed": "Document could not be deleted.",
+      "deleteTitle": "Delete document",
+      "deleteMessage": "Permanently delete “{{name}}” and its parsed artifacts?",
+      "columns": {
+        "name": "Name",
+        "datasets": "Datasets",
+        "tags": "Tags",
+        "format": "Format",
+        "size": "Size",
+        "status": "Status",
+        "updated": "Updated",
+        "actions": "Actions"
+      }
+    },
+    "pagination": {
+      "label": "Pagination",
+      "previous": "Previous page",
+      "next": "Next page",
+      "pageOf": "{{page}} / {{pageCount}}"
     }
   },
   "settings": {

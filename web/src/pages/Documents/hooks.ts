@@ -103,6 +103,18 @@ export function useDocumentMutations() {
       mutationFn: documentsApi.inspectDocument,
       onSuccess: (_outcome, documentId) => client.invalidateQueries({ queryKey: queryKeys.documents.inspections(documentId) }),
     }),
+    updateDocument: useMutation({
+      mutationFn: ({ documentId, ...input }: {
+        documentId: string;
+        original_filename: string;
+        dataset_ids?: string[];
+        tag_ids?: string[];
+      }) => documentsApi.updateDocument(documentId, input),
+      onSuccess: async (document) => {
+        await client.invalidateQueries({ queryKey: queryKeys.documents.detail(document.document_id) });
+        await invalidateLists();
+      },
+    }),
     createParseJob: useMutation({
       mutationFn: ({ documentId, input }: { documentId: string; input: CreateParseJobInput }) =>
         documentsApi.createDocumentParseJob(documentId, input),

@@ -73,7 +73,10 @@ export async function uploadDocument(
 }
 
 export async function listDocuments(filters: DocumentFilters = {}): Promise<Paginated<DocumentSummary>> {
-  const { data } = await api.get<Paginated<DocumentSummary>>('/api/v1/documents', { params: filters });
+  const { data } = await api.get<Paginated<DocumentSummary>>('/api/v1/documents', {
+    params: filters,
+    paramsSerializer: { indexes: null },
+  });
   return data;
 }
 

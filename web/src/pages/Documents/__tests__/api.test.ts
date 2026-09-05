@@ -96,7 +96,10 @@ describe('Documents API', () => {
 
     await listDocuments(filters);
 
-    expect(mockGet).toHaveBeenCalledWith('/api/v1/documents', { params: filters });
+    expect(mockGet).toHaveBeenCalledWith('/api/v1/documents', {
+      params: filters,
+      paramsSerializer: { indexes: null },
+    });
   });
 
   it.each([200, 202] as const)('preserves parse-job HTTP status %s', async (status) => {

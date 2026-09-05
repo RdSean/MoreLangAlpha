@@ -148,6 +148,101 @@
     "tabs": {
       "datasets": "数据集",
       "allDocuments": "全部文档"
+    },
+    "actions": {
+      "create": "创建",
+      "save": "保存",
+      "saving": "正在保存…",
+      "open": "打开",
+      "rename": "重命名",
+      "delete": "删除",
+      "retry": "重试",
+      "clearFilters": "清除筛选"
+    },
+    "datasets": {
+      "createAction": "创建数据集",
+      "createTitle": "创建数据集",
+      "renameTitle": "重命名数据集",
+      "name": "名称",
+      "description": "说明",
+      "searchLabel": "搜索数据集",
+      "searchPlaceholder": "搜索数据集",
+      "documentCount_one": "{{count}} 个文档",
+      "documentCount_other": "{{count}} 个文档",
+      "openLabel": "打开 {{name}}",
+      "actionsLabel": "{{name}} 的操作",
+      "back": "返回数据集",
+      "datasetFallback": "数据集",
+      "loading": "正在加载数据集",
+      "empty": "尚未创建数据集",
+      "noResults": "没有匹配的数据集",
+      "loadFailed": "无法加载数据集。",
+      "createFailed": "无法创建数据集。",
+      "updateFailed": "无法更新数据集。",
+      "deleteFailed": "无法删除数据集。",
+      "deleteTitle": "删除数据集",
+      "deleteMessage": "删除“{{name}}”？其中的文档仍会保留在知识库中。"
+    },
+    "filters": {
+      "dataset": "数据集",
+      "allDatasets": "全部数据集",
+      "tags": "标签",
+      "selectedTags_one": "{{count}} 个标签",
+      "selectedTags_other": "{{count}} 个标签",
+      "noTags": "尚无标签",
+      "format": "格式",
+      "allFormats": "全部格式",
+      "classification": "文件类型",
+      "allClassifications": "全部类型",
+      "status": "解析状态",
+      "allStatuses": "全部状态"
+    },
+    "classification": {
+      "text_based": "数字文本",
+      "mixed": "图文混合",
+      "scanned": "扫描件",
+      "image_based": "纯图文件",
+      "unknown": "未知"
+    },
+    "status": {
+      "none": "未解析",
+      "queued": "等待中",
+      "running": "解析中",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消"
+    },
+    "table": {
+      "label": "文档",
+      "searchLabel": "搜索文件名",
+      "searchPlaceholder": "搜索文件名",
+      "loading": "正在加载文档…",
+      "empty": "没有符合当前筛选条件的文档。",
+      "loadFailed": "无法加载文档。",
+      "openLabel": "打开 {{name}}",
+      "actionsLabel": "{{name}} 的操作",
+      "renameTitle": "重命名文档",
+      "filename": "文件名",
+      "renameFailed": "无法重命名文档。",
+      "deleteFailed": "无法删除文档。",
+      "deleteTitle": "删除文档",
+      "deleteMessage": "永久删除“{{name}}”及其解析产物？",
+      "columns": {
+        "name": "名称",
+        "datasets": "数据集",
+        "tags": "标签",
+        "format": "格式",
+        "size": "大小",
+        "status": "状态",
+        "updated": "更新时间",
+        "actions": "操作"
+      }
+    },
+    "pagination": {
+      "label": "分页",
+      "previous": "上一页",
+      "next": "下一页",
+      "pageOf": "{{page}} / {{pageCount}}"
     }
   },
   "settings": {
