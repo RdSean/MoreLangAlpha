@@ -175,7 +175,6 @@ async def test_early_error_finalization_keeps_only_safe_household_snapshot(coord
     assert outcome.metadata["llm_runtime"] == {
         "credential_source": "household",
         "household_id": "11111111-1111-1111-1111-111111111111",
-        "family_endpoint_id": "22222222-2222-2222-2222-222222222222",
         "display_name": "Family DeepSeek Flash",
         "provider": "deepseek",
         "model_id": "deepseek-chat",

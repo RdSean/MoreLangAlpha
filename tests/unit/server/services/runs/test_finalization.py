@@ -36,7 +36,6 @@ async def test_finalize_allow_lists_household_model_runtime_metadata():
     assert metadata["llm_runtime"] == {
         "credential_source": "household",
         "household_id": "11111111-1111-1111-1111-111111111111",
-        "family_endpoint_id": "22222222-2222-2222-2222-222222222222",
         "display_name": "Family DeepSeek Flash",
         "provider": "deepseek",
         "model_id": "deepseek-chat",

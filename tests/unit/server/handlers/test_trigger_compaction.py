@@ -146,7 +146,10 @@ async def test_manual_compact_uses_user_compaction_model(base_config):
         }
     )
 
-    mock_mc = _mock_model_config()
+    async def _resolve_stub(base_cfg, *_args, **_kwargs):
+        resolved = base_cfg.model_copy(deep=True)
+        resolved.llm.compaction = "user-compaction-model"
+        return resolved
 
     with (
         patch("src.server.app.setup.agent_config", base_config),
@@ -161,17 +164,7 @@ async def test_manual_compact_uses_user_compaction_model(base_config):
             new_callable=AsyncMock,
             return_value=False,
         ),
-        patch(
-            f"{LLM_HANDLER}.get_model_preference",
-            new_callable=AsyncMock,
-            return_value={"compaction_model": "user-compaction-model"},
-        ),
-        patch(
-            f"{LLM_HANDLER}.resolve_oauth_llm_client",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-        patch("src.llms.llm.LLM.get_model_config", return_value=mock_mc),
+        patch(f"{LLM_HANDLER}.resolve_llm_config", new=_resolve_stub),
     ):
         await trigger_compaction("thread-1", keep_messages=5, user_id="user-1")
 

@@ -20,7 +20,7 @@ AUTOMATION_ID = str(uuid.uuid4())
 WORKSPACE_ID = str(uuid.uuid4())
 THREAD_ID = str(uuid.uuid4())
 
-_THREAD_OWNER = "src.server.database.conversation.get_thread_owner_id"
+_THREAD_AUTH_META = "src.server.database.conversation.get_thread_auth_meta"
 
 
 def _create_data(**overrides):
@@ -111,11 +111,14 @@ class TestCreateTargetOwnership:
 
     @pytest.mark.asyncio
     @patch("src.server.handlers.automation_handler.auto_db")
-    @patch(_THREAD_OWNER, new_callable=AsyncMock)
+    @patch(_THREAD_AUTH_META, new_callable=AsyncMock)
     async def test_rejects_pinned_thread_owned_by_another_user(
         self, mock_thread_owner, mock_auto_db,
     ):
-        mock_thread_owner.return_value = OTHER
+        mock_thread_owner.return_value = {
+            "user_id": OTHER,
+            "managed_execution": False,
+        }
 
         with pytest.raises(HTTPException) as exc:
             await create_automation(
@@ -130,7 +133,7 @@ class TestCreateTargetOwnership:
 
     @pytest.mark.asyncio
     @patch("src.server.handlers.automation_handler.auto_db")
-    @patch(_THREAD_OWNER, new_callable=AsyncMock)
+    @patch(_THREAD_AUTH_META, new_callable=AsyncMock)
     async def test_rejects_pinned_thread_that_does_not_exist(
         self, mock_thread_owner, mock_auto_db,
     ):
@@ -149,7 +152,7 @@ class TestCreateTargetOwnership:
 
     @pytest.mark.asyncio
     @patch("src.server.handlers.automation_handler.auto_db")
-    @patch(_THREAD_OWNER, new_callable=AsyncMock)
+    @patch(_THREAD_AUTH_META, new_callable=AsyncMock)
     @patch("src.server.handlers.automation_handler.get_workspace")
     async def test_accepts_targets_the_caller_owns(
         self, mock_get_workspace, mock_thread_owner, mock_auto_db,
@@ -157,7 +160,10 @@ class TestCreateTargetOwnership:
         mock_get_workspace.return_value = {
             "workspace_id": WORKSPACE_ID, "user_id": OWNER,
         }
-        mock_thread_owner.return_value = OWNER
+        mock_thread_owner.return_value = {
+            "user_id": OWNER,
+            "managed_execution": False,
+        }
         mock_auto_db.create_automation = AsyncMock(
             return_value={"automation_id": AUTOMATION_ID}
         )
@@ -216,12 +222,15 @@ class TestUpdateTargetOwnership:
 
     @pytest.mark.asyncio
     @patch("src.server.handlers.automation_handler.auto_db")
-    @patch(_THREAD_OWNER, new_callable=AsyncMock)
+    @patch(_THREAD_AUTH_META, new_callable=AsyncMock)
     async def test_rejects_repointing_at_another_users_thread(
         self, mock_thread_owner, mock_auto_db,
     ):
         mock_auto_db.get_automation = AsyncMock(return_value=_current_row())
-        mock_thread_owner.return_value = OTHER
+        mock_thread_owner.return_value = {
+            "user_id": OTHER,
+            "managed_execution": False,
+        }
 
         with pytest.raises(HTTPException) as exc:
             await update_automation(
