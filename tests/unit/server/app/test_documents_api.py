@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import pytest_asyncio
@@ -249,20 +250,34 @@ async def test_job_events_emit_owned_database_snapshots_as_sse(api) -> None:
 
 
 @pytest.mark.asyncio
-async def test_artifact_download_is_an_authorized_temporary_redirect(api) -> None:
+async def test_artifact_download_streams_through_the_authenticated_api(api) -> None:
     client, services = api
-    services.jobs.create_artifact_download.return_value = {
-        "url": "https://minio.example/signed",
-    }
+    close = Mock()
+    services.jobs.open_artifact_download.return_value = SimpleNamespace(
+        filename="教材.md",
+        media_type="text/markdown",
+        object_download=SimpleNamespace(
+            chunks=iter([b"# Lesson\n"]),
+            content_length=len(b"# Lesson\n"),
+            close=close,
+        ),
+    )
 
     response = await client.get(
         f"/api/v1/document-artifacts/{ART_ID}/download",
         follow_redirects=False,
     )
 
-    assert response.status_code == 307
-    assert response.headers["location"] == "https://minio.example/signed"
-    services.jobs.create_artifact_download.assert_awaited_once_with(
+    assert response.status_code == 200
+    assert response.content == b"# Lesson\n"
+    assert "location" not in response.headers
+    assert response.headers["content-type"].startswith("text/markdown")
+    assert response.headers["content-length"] == str(len(b"# Lesson\n"))
+    assert "filename*=UTF-8''%E6%95%99%E6%9D%90.md" in response.headers[
+        "content-disposition"
+    ]
+    assert close.called
+    services.jobs.open_artifact_download.assert_awaited_once_with(
         owner_user_id="owner-1", artifact_id=ART_ID
     )
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -115,28 +116,51 @@ async def test_document_store_deletes_only_the_exact_supplied_key() -> None:
 
 
 @pytest.mark.asyncio
-async def test_signed_download_uses_short_ttl() -> None:
-    calls: list[tuple[str, int, str]] = []
-
-    def create_url(
-        key: str,
-        *,
-        expires_seconds: int,
-        download_name: str,
-    ) -> str:
-        calls.append((key, expires_seconds, download_name))
-        return "https://storage.example/signed"
-
-    store = S3CompatibleDocumentStore(
-        create_presigned_download_url=create_url,
-        signed_url_ttl_seconds=300,
+async def test_document_store_opens_download_stream() -> None:
+    calls: list[str] = []
+    opened = SimpleNamespace(
+        chunks=iter([b"# Lesson\n"]),
+        content_length=9,
+        close=Mock(),
     )
+
+    def open_stream(key: str):
+        calls.append(key)
+        return opened
+
+    store = S3CompatibleDocumentStore(open_download_stream=open_stream)
     key = "documents/doc-A1b2C3d4E5f6/artifacts/job-A1b2C3d4E5f6/document.md"
 
-    result = await store.create_signed_download_url(key, download_name="教材.md")
+    result = await store.open_download(key)
 
-    assert result == "https://storage.example/signed"
-    assert calls == [(key, 300, "教材.md")]
+    assert result is opened
+    assert calls == [key]
+
+
+@pytest.mark.asyncio
+async def test_document_store_rejects_invalid_key_before_opening_download() -> None:
+    open_stream = Mock()
+    store = S3CompatibleDocumentStore(open_download_stream=open_stream)
+
+    with pytest.raises(ValueError, match="document storage key"):
+        await store.open_download("education/doc-A1b2C3d4E5f6/document.md")
+
+    open_stream.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_document_store_maps_download_open_failure_to_safe_error() -> None:
+    open_stream = Mock(side_effect=OSError("backend details"))
+    store = S3CompatibleDocumentStore(open_download_stream=open_stream)
+
+    with pytest.raises(DocumentStorageError) as exc_info:
+        await store.open_download(
+            "documents/doc-A1b2C3d4E5f6/artifacts/"
+            "job-A1b2C3d4E5f6/document.md"
+        )
+
+    assert exc_info.value.code == "storage_failed"
+    assert "backend details" not in exc_info.value.safe_message
 
 
 @pytest.mark.asyncio

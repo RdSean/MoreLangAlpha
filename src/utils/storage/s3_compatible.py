@@ -37,6 +37,8 @@ bucket double-prefixes object keys under virtual addressing.
 import base64
 import logging
 import os
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -53,6 +55,15 @@ logger = logging.getLogger(__name__)
 
 _VALID_ADDRESSING_STYLES = {"virtual", "path", "auto"}
 _DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectDownloadStream:
+    """An opened object body that can be streamed without exposing its URL."""
+
+    chunks: Iterator[bytes]
+    content_length: int | None
+    close: Callable[[], None]
 
 
 def _resolve_addressing_style() -> str:
@@ -294,6 +305,49 @@ def download_to_file(key: str, destination: Path, *, max_bytes: int) -> int:
         close = getattr(body, "close", None)
         if callable(close):
             close()
+
+
+def open_download_stream(key: str) -> ObjectDownloadStream:
+    """Open an object and expose fixed-size chunks with deterministic cleanup."""
+    response = _get_client().get_object(
+        Bucket=StorageConfig.BUCKET_NAME,
+        Key=key,
+    )
+    body = response.get("Body")
+    if body is None:
+        raise RuntimeError("storage response did not include a body")
+
+    raw_content_length = response.get("ContentLength")
+    content_length = (
+        raw_content_length
+        if isinstance(raw_content_length, int)
+        and not isinstance(raw_content_length, bool)
+        and raw_content_length >= 0
+        else None
+    )
+    closed = False
+
+    def close() -> None:
+        nonlocal closed
+        if closed:
+            return
+        closed = True
+        close_body = getattr(body, "close", None)
+        if callable(close_body):
+            close_body()
+
+    def chunks() -> Iterator[bytes]:
+        try:
+            while chunk := body.read(_DOWNLOAD_CHUNK_SIZE):
+                yield chunk if isinstance(chunk, bytes) else bytes(chunk)
+        finally:
+            close()
+
+    return ObjectDownloadStream(
+        chunks=chunks(),
+        content_length=content_length,
+        close=close,
+    )
 
 
 def create_presigned_download_url(

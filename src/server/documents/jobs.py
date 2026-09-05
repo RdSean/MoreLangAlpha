@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from src.server.database import document_jobs as default_job_repository
@@ -13,7 +14,14 @@ from src.server.documents.providers.registry import (
     DocumentProviderRegistry,
     build_default_provider_registry,
 )
-from src.server.documents.storage import DocumentObjectStore
+from src.server.documents.storage import DocumentObjectStore, OpenedDocumentObject
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactDownload:
+    filename: str
+    media_type: str
+    object_download: OpenedDocumentObject
 
 
 class DocumentMetadataRepository(Protocol):
@@ -147,9 +155,9 @@ class DocumentParseJobService:
             producer_job_id=producer_job_id,
         )
 
-    async def create_artifact_download(
+    async def open_artifact_download(
         self, *, owner_user_id: str, artifact_id: str
-    ) -> dict[str, str] | None:
+    ) -> ArtifactDownload | None:
         artifact = await self._document_repository.get_artifact(
             owner_user_id=owner_user_id, artifact_id=artifact_id
         )
@@ -157,11 +165,12 @@ class DocumentParseJobService:
             return None
         if self._object_store is None:
             raise RuntimeError("Document object store is unavailable")
-        url = await self._object_store.create_signed_download_url(
-            str(artifact["storage_key"]),
-            download_name=str(artifact["relative_path"]).rsplit("/", 1)[-1],
+        opened = await self._object_store.open_download(str(artifact["storage_key"]))
+        return ArtifactDownload(
+            filename=str(artifact["relative_path"]).rsplit("/", 1)[-1],
+            media_type=str(artifact["media_type"]),
+            object_download=opened,
         )
-        return {"url": url}
 
     async def _notify(self, job: dict[str, Any] | None) -> None:
         if job is None or self._notifier is None:

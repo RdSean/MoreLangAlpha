@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Protocol
 
@@ -14,12 +14,20 @@ from src.utils.storage import s3_compatible
 
 
 _DOCUMENT_ID_RE = re.compile(r"^doc-[0-9A-Za-z]{12}$")
-_MAX_SIGNED_URL_TTL_SECONDS = 900
-
 PutFile = Callable[..., bool]
 DownloadToFile = Callable[..., int]
 DeleteObject = Callable[[str], bool]
-CreatePresignedDownloadUrl = Callable[..., str]
+
+
+class OpenedDocumentObject(Protocol):
+    """Object content and lifecycle returned by a document storage backend."""
+
+    chunks: Iterator[bytes]
+    content_length: int | None
+    close: Callable[[], None]
+
+
+OpenDownloadStream = Callable[[str], OpenedDocumentObject]
 
 
 class DocumentObjectStore(Protocol):
@@ -43,12 +51,7 @@ class DocumentObjectStore(Protocol):
 
     async def delete(self, key: str) -> None: ...
 
-    async def create_signed_download_url(
-        self,
-        key: str,
-        *,
-        download_name: str,
-    ) -> str: ...
+    async def open_download(self, key: str) -> OpenedDocumentObject: ...
 
 
 class S3CompatibleDocumentStore:
@@ -60,28 +63,22 @@ class S3CompatibleDocumentStore:
         put_file: PutFile | None = None,
         download_to_file: DownloadToFile | None = None,
         delete_object: DeleteObject | None = None,
-        create_presigned_download_url: CreatePresignedDownloadUrl | None = None,
+        open_download_stream: OpenDownloadStream | None = None,
         max_upload_bytes: int | None = None,
-        signed_url_ttl_seconds: int = 300,
     ) -> None:
-        if not 0 < signed_url_ttl_seconds <= _MAX_SIGNED_URL_TTL_SECONDS:
-            raise ValueError("signed_url_ttl_seconds must be between 1 and 900")
-
         self._put_file = put_file or s3_compatible.upload_file
         self._download_to_file = (
             download_to_file or s3_compatible.download_to_file
         )
         self._delete_object = delete_object or s3_compatible.delete_object
-        self._create_presigned_download_url = (
-            create_presigned_download_url
-            or s3_compatible.create_presigned_download_url
+        self._open_download_stream = (
+            open_download_stream or s3_compatible.open_download_stream
         )
         self._max_upload_bytes = (
             get_document_parsing_config().max_upload_bytes
             if max_upload_bytes is None
             else max_upload_bytes
         )
-        self._signed_url_ttl_seconds = signed_url_ttl_seconds
 
     async def put_file(
         self,
@@ -131,22 +128,12 @@ class S3CompatibleDocumentStore:
         if not deleted:
             raise DocumentStorageError("Document deletion failed")
 
-    async def create_signed_download_url(
-        self,
-        key: str,
-        *,
-        download_name: str,
-    ) -> str:
+    async def open_download(self, key: str) -> OpenedDocumentObject:
         _validate_document_key(key)
         try:
-            return await asyncio.to_thread(
-                self._create_presigned_download_url,
-                key,
-                expires_seconds=self._signed_url_ttl_seconds,
-                download_name=download_name,
-            )
+            return await asyncio.to_thread(self._open_download_stream, key)
         except Exception as exc:
-            raise DocumentStorageError("Document download link failed") from exc
+            raise DocumentStorageError("Document download failed") from exc
 
 
 def _validate_document_key(key: str) -> None:

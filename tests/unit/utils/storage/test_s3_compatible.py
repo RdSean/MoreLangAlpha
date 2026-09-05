@@ -204,6 +204,12 @@ class _StreamingBody:
         self.closed = True
 
 
+class _FailingStreamingBody(_StreamingBody):
+    def read(self, size: int) -> bytes:
+        self.read_sizes.append(size)
+        raise OSError("stream failed")
+
+
 def test_download_to_file_streams_sized_chunks(tmp_path, monkeypatch):
     mod = _reload_module()
     body = _StreamingBody(b"abcdef")
@@ -241,6 +247,62 @@ def test_download_to_file_stops_before_limit_is_exceeded(tmp_path, monkeypatch):
     assert not destination.exists()
     assert body.read_sizes
     assert all(size > 0 for size in body.read_sizes)
+    assert body.closed
+
+
+def test_open_download_stream_reads_sized_chunks_and_closes(monkeypatch):
+    mod = _reload_module()
+    body = _StreamingBody(b"# Lesson\n")
+    client = MagicMock()
+    client.get_object.return_value = {
+        "Body": body,
+        "ContentLength": len(b"# Lesson\n"),
+    }
+    monkeypatch.setattr(mod, "_get_client", lambda: client)
+
+    download = mod.open_download_stream(
+        "documents/doc-A1b2C3d4E5f6/artifacts/job-A1b2C3d4E5f6/document.md"
+    )
+
+    assert download.content_length == len(b"# Lesson\n")
+    assert b"".join(download.chunks) == b"# Lesson\n"
+    assert body.read_sizes
+    assert all(size == mod._DOWNLOAD_CHUNK_SIZE for size in body.read_sizes)
+    assert body.closed
+
+
+@pytest.mark.parametrize("content_length", [True, -1, "9"])
+def test_open_download_stream_ignores_invalid_content_length(
+    monkeypatch,
+    content_length,
+):
+    mod = _reload_module()
+    body = _StreamingBody(b"x")
+    client = MagicMock()
+    client.get_object.return_value = {
+        "Body": body,
+        "ContentLength": content_length,
+    }
+    monkeypatch.setattr(mod, "_get_client", lambda: client)
+
+    download = mod.open_download_stream("documents/doc-A1b2C3d4E5f6/source")
+
+    assert download.content_length is None
+    download.close()
+    assert body.closed
+
+
+def test_open_download_stream_closes_body_when_read_fails(monkeypatch):
+    mod = _reload_module()
+    body = _FailingStreamingBody(b"")
+    client = MagicMock()
+    client.get_object.return_value = {"Body": body}
+    monkeypatch.setattr(mod, "_get_client", lambda: client)
+
+    download = mod.open_download_stream("documents/doc-A1b2C3d4E5f6/source")
+
+    with pytest.raises(OSError, match="stream failed"):
+        next(download.chunks)
     assert body.closed
 
 

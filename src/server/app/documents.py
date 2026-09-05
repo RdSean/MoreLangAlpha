@@ -9,10 +9,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import (
     JSONResponse,
-    RedirectResponse,
     Response,
     StreamingResponse,
 )
+from starlette.background import BackgroundTask
 
 from src.server.database.documents import DocumentListFilter
 from src.server.documents.contracts import (
@@ -52,6 +52,7 @@ from src.server.services.document_job_events import (
 )
 from src.server.services.education_access import require_nonstudent_agent_features
 from src.server.utils.api import CurrentUserId
+from src.server.utils.http_headers import content_disposition
 
 
 logger = logging.getLogger(__name__)
@@ -483,13 +484,21 @@ async def stream_parse_job(
 @router.get("/document-artifacts/{artifact_id}/download")
 async def download_artifact(
     artifact_id: str, user_id: CurrentUserId, service: JobService
-) -> RedirectResponse:
+) -> StreamingResponse:
     try:
-        download = await service.create_artifact_download(
+        download = await service.open_artifact_download(
             owner_user_id=user_id, artifact_id=artifact_id
         )
     except DocumentDomainError as error:
         raise _domain_error(error) from error
     if download is None:
         raise _not_found("Artifact")
-    return RedirectResponse(download["url"], status_code=307)
+    headers = {"Content-Disposition": content_disposition(download.filename)}
+    if download.object_download.content_length is not None:
+        headers["Content-Length"] = str(download.object_download.content_length)
+    return StreamingResponse(
+        download.object_download.chunks,
+        media_type=download.media_type,
+        headers=headers,
+        background=BackgroundTask(download.object_download.close),
+    )

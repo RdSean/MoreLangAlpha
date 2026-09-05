@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -101,3 +102,45 @@ async def test_create_job_rejects_unavailable_or_incompatible_parser() -> None:
             parser_options={},
             request_mode="async",
         )
+
+
+@pytest.mark.asyncio
+async def test_open_artifact_download_is_owner_scoped_and_keeps_metadata() -> None:
+    repository = AsyncMock()
+    repository.get_artifact.return_value = {
+        "storage_key": (
+            "documents/doc-A1b2C3d4E5f6/artifacts/"
+            "job-A1b2C3d4E5f6/教材.md"
+        ),
+        "relative_path": "教材.md",
+        "media_type": "text/markdown",
+    }
+    opened = SimpleNamespace(
+        chunks=iter([b"# Lesson\n"]),
+        content_length=9,
+        close=Mock(),
+    )
+    object_store = AsyncMock()
+    object_store.open_download.return_value = opened
+    service = DocumentParseJobService(
+        document_repository=repository,
+        job_repository=repository,
+        object_store=object_store,
+    )
+
+    result = await service.open_artifact_download(
+        owner_user_id="owner-1",
+        artifact_id="art-A1b2C3d4E5f6",
+    )
+
+    assert result is not None
+    assert result.filename == "教材.md"
+    assert result.media_type == "text/markdown"
+    assert result.object_download is opened
+    repository.get_artifact.assert_awaited_once_with(
+        owner_user_id="owner-1", artifact_id="art-A1b2C3d4E5f6"
+    )
+    object_store.open_download.assert_awaited_once_with(
+        "documents/doc-A1b2C3d4E5f6/artifacts/"
+        "job-A1b2C3d4E5f6/教材.md"
+    )

@@ -10,6 +10,7 @@ import ssl
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 from uuid import uuid4
 
@@ -67,9 +68,13 @@ class _LocalObjectStore:
     async def delete(self, key: str) -> None:
         self._path(key).unlink(missing_ok=True)
 
-    async def create_signed_download_url(self, key: str, *, download_name: str) -> str:
-        self._path(key)
-        return f"https://storage.test/{key}?download={download_name}"
+    async def open_download(self, key: str):
+        payload = self._path(key).read_bytes()
+        return SimpleNamespace(
+            chunks=iter([payload]),
+            content_length=len(payload),
+            close=lambda: None,
+        )
 
     def read(self, key: str) -> bytes:
         return self._path(key).read_bytes()
@@ -352,6 +357,15 @@ async def test_full_document_library_api_workflow(document_api) -> None:
     assert len(paginated.json()["items"]) == 2
 
     artifact_id = async_artifacts[0]["artifact_id"]
+    download = await client.get(
+        f"/api/v1/document-artifacts/{artifact_id}/download",
+        follow_redirects=False,
+    )
+    assert download.status_code == 200
+    assert download.content == store.read(artifact_key)
+    assert "location" not in download.headers
+    assert download.headers["content-type"].startswith("text/markdown")
+
     active_user["user_id"] = OTHER_ID
     assert (await client.get(f"/api/v1/documents/{document_id}")).status_code == 404
     assert (await client.get(f"/api/v1/document-jobs/{async_job_id}")).status_code == 404

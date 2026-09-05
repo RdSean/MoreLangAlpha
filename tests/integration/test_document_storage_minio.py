@@ -36,9 +36,9 @@ def _require_document_minio() -> None:
 def test_minio_round_trips_document_source_and_artifact_bundle(tmp_path: Path) -> None:
     _require_document_minio()
     from src.utils.storage.s3_compatible import (
-        create_presigned_download_url,
         delete_object,
         download_to_file,
+        open_download_stream,
         upload_file,
     )
 
@@ -83,14 +83,9 @@ def test_minio_round_trips_document_source_and_artifact_bundle(tmp_path: Path) -
             assert written == len(expected)
             assert destination.read_bytes() == expected
 
-        signed_url = create_presigned_download_url(
-            f"{key_root}artifacts/document.md",
-            expires_seconds=60,
-            download_name="document.md",
-        )
-        parsed = urlparse(signed_url)
-        assert parsed.scheme in {"http", "https"}
-        assert parsed.query
+        streamed = open_download_stream(f"{key_root}artifacts/document.md")
+        assert streamed.content_length == len(payloads["artifacts/document.md"])
+        assert b"".join(streamed.chunks) == payloads["artifacts/document.md"]
     finally:
         for key in reversed(created_keys):
             # Every key is explicit, unique to this test, and below documents/test-*.
