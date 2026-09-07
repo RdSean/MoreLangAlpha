@@ -13,7 +13,10 @@ services:
     ports:
       - "127.0.0.1:${PG_HOST_PORT:-5432}:5432"
     volumes:
-      - ./deploy/volumes/postgresql:/var/lib/postgresql
+      # Mount PGDATA directly. The postgres image declares /var/lib/postgresql/data
+      # as a VOLUME; mounting only its parent would otherwise create an anonymous
+      # child volume and hide the migrated host data.
+      - ./deploy/volumes/postgresql/data:/var/lib/postgresql/data
     environment:
       PGDATA: /var/lib/postgresql/data
       POSTGRES_USER: ${DB_USER:-postgres}

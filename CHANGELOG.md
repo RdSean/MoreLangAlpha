@@ -13,6 +13,11 @@
 - 支持通过 `uv run python server.py --host 0.0.0.0 --port 8000` 启动开发后端，健康检查地址为 `/health`。
 - 当前迁移后的数据库已可连接；若尚未执行项目 migration，解析任务、运行恢复和自动化调度相关表会保持不可用，服务仍会启动并明确记录告警。
 
+### PostgreSQL 数据挂载修正
+
+- 修正 PostgreSQL Compose 挂载方式，直接将 `deploy/volumes/postgresql/data` 挂载到容器的 `PGDATA`，避免镜像的匿名子卷覆盖已迁移的数据。
+- 重建开发容器后恢复原有用户和文档数据，并确认 migration 版本为 `045`；8000 后端继续从 worktree 根目录 `.env` 读取本地数据库、Redis 和对象存储配置。
+
 ## 2026-09-05
 
 ### Artifact 同源下载
