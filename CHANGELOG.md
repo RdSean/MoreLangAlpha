@@ -8,6 +8,11 @@
 - 根 Compose 与 middleware Compose 统一使用相对持久化目录；PostgreSQL 固定使用兼容现有数据的 15 版本。
 - 清空本地 override 对 Downloads 路径的隐式覆盖，保留旧容器、Docker 卷及首次初始化目录作为回滚来源。
 
+### 本地后端开发启动
+
+- 支持通过 `uv run python server.py --host 0.0.0.0 --port 8000` 启动开发后端，健康检查地址为 `/health`。
+- 当前迁移后的数据库已可连接；若尚未执行项目 migration，解析任务、运行恢复和自动化调度相关表会保持不可用，服务仍会启动并明确记录告警。
+
 ## 2026-09-05
 
 ### Artifact 同源下载
