@@ -1,13 +1,6 @@
-# Optional Mac development override. Do not include this file to keep the
-# default deploy/volumes/* paths. It is intentionally separate from backend .env.
+# Optional Mac development override.
+# The middleware compose file already defaults to deploy/volumes/* when run
+# from the repository root. This file is intentionally empty so including it
+# does not silently redirect state to an unrelated Downloads directory.
 
-services:
-  postgres:
-    volumes:
-      - /Users/seanlee/Downloads/LangOneMore/postgres:/var/lib/postgresql/data
-  redis:
-    volumes:
-      - /Users/seanlee/Downloads/LangOneMore/redis:/data
-  minio:
-    volumes:
-      - /Users/seanlee/Downloads/LangOneMore/minio:/data
+services: {}

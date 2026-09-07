@@ -15,7 +15,7 @@ cp deploy/.env.example deploy/.env
 默认数据目录均位于本目录下，且不会提交到 Git：
 
 ```text
-deploy/volumes/postgres
+deploy/volumes/postgresql
 deploy/volumes/redis
 deploy/volumes/minio
 ```
@@ -31,13 +31,9 @@ docker compose --env-file deploy/.env \
   -f deploy/docker-compose-middleware.yml up -d
 ```
 
-默认会使用 `deploy/volumes/*`。若要继续使用当前 Mac 的外部目录 `/Users/seanlee/Downloads/LangOneMore`，额外叠加 local override：
-
-```bash
-docker compose --env-file deploy/.env \
-  -f deploy/docker-compose-middleware.yml \
-  -f deploy/docker-compose-local.yml up -d
-```
+默认会使用 `deploy/volumes/*`。`docker-compose-local.yml` 保留为空的兼容入口，
+不会覆盖这些默认路径；需要外部路径时，请直接在 `deploy/.env` 设置对应的
+`*_DATA_DIR` 变量，或使用 NAS override。
 
 ## 开发服务
 

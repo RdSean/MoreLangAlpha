@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-07
+
+### 开发中间件数据目录迁移
+
+- 将开发机 PostgreSQL、Redis、MinIO 的现有数据复制到 `deploy/volumes/`，并修正容器复制产生的重复目录层级。
+- 根 Compose 与 middleware Compose 统一使用相对持久化目录；PostgreSQL 固定使用兼容现有数据的 15 版本。
+- 清空本地 override 对 Downloads 路径的隐式覆盖，保留旧容器、Docker 卷及首次初始化目录作为回滚来源。
+
 ## 2026-09-05
 
 ### Artifact 同源下载
