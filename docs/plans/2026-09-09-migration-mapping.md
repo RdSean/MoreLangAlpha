@@ -112,3 +112,11 @@ completed `049 -> 050` plus a bounded downgrade/upgrade round trip. The
 migration adds `user_vault_secrets.plugin_id`, a composite ownership FK with
 `ON DELETE SET NULL (plugin_id)`, and the plugin lookup index. The current
 database checkpoint is `050_plugin_owned_secrets`.
+
+The semantic port of remote `031_account_disable_kind` is implemented as
+`051_account_disable_kind`. Although the remote chain placed it after a
+finance-only revision, this SQL only changes the builtin-disable table and has
+no brokerage dependency. Focused tests pass. A live database check confirmed
+legacy `(user_id, name)` rows are backfilled as `kind='server'`, while a second
+`kind='bundle'` row with the same name is allowed; upgrade and rollback paths
+were also exercised. The database checkpoint is now `051_account_disable_kind`.

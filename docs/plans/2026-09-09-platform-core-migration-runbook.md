@@ -120,3 +120,8 @@ The next completed checkpoint now includes `049_agent_plugins` and
 upgrade/downgrade/upgrade checks. User plugin ownership uses RESTRICT on MCP
 and Skills, while Vault plugin ownership intentionally uses SET NULL so a
 plugin uninstall cannot be blocked by a retained credential.
+
+`051_account_disable_kind` is also complete. It extends account-wide disable
+rows with `kind='server'|'bundle'`; legacy rows are backfilled as `server`, and
+the isolated database is now at `051_account_disable_kind`. The migration has
+no brokerage schema dependency despite its later position in the remote chain.
