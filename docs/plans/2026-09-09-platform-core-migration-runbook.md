@@ -88,3 +88,28 @@ After each removal, verify `/api/v1/plugins`, `/api/v1/mcp/servers`, `/api/v1/sk
 - Never resolve Alembic conflicts by deleting local migrations or using destructive database commands.
 - Never copy old `.env` values into tracked files; use the ignored worktree `.env` only.
 - Never claim completion without verification evidence from the isolated stack.
+
+## Progress checkpoint (2026-09-09)
+
+- Worktree/branch: `feature/platform-core-migration`, based on
+  `feature/wechat-ilink-bot`.
+- Isolated Compose project: `langalpha-platform-core-migration`.
+- Host ports: backend `18000`, frontend `15177`, Postgres `15432`, Redis
+  `16379`, MinIO API/console `19000/19001`.
+- The copied `.env` is ignored and must remain untracked. The old WeChat stack
+  and its data have not been stopped, modified, or migrated.
+- Local migration baseline `001–045` passed on the empty isolated database;
+  local education, household, channel and document-library tables remain
+  present.
+- `046_mcp_platform_core` passed focused tests and upgrade/downgrade/upgrade;
+  it adds user Vault, MCP OAuth/schema, egress state and
+  `user_mcp_servers.enabled`.
+- `047_user_skills` passed focused tests and upgrade/downgrade/upgrade; it adds
+  user/workspace skill rows, archive constraints/indexes and inherited-skill
+  disable storage.
+- `048_builtin_mcp_disables` passed focused tests and upgrade/downgrade/upgrade;
+  it adds account-wide builtin MCP disable rows.
+- Database is currently at `048_builtin_mcp_disables`.
+- Commits for the completed rounds: `dc926492`, `f59cd9ad`, `36280b9f` (plus
+  documentation checkpoints `17902fd2`, `dc0322ad`, `3e5cf1f5`, `7a74e433`).
+- Next task: port remote `028_agent_plugins` as local `049_agent_plugins`.

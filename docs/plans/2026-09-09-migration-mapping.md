@@ -87,3 +87,15 @@ The semantic port of remote `027_user_mcp_builtin_disables` is implemented as
 completed both upgrade and bounded downgrade/upgrade round trips. The database
 reports `048_builtin_mcp_disables` and contains the account-scoped
 `user_mcp_builtin_disables` primary-key table.
+
+## Checkpoint index
+
+| Round | Local revision | Verification | Commit |
+|---|---|---|---|
+| MCP platform base | `046_mcp_platform_core` | focused tests; upgrade and downgrade/upgrade | `dc926492` |
+| User/workspace Skills | `047_user_skills` | focused tests; upgrade and downgrade/upgrade | `f59cd9ad` |
+| Builtin MCP disables | `048_builtin_mcp_disables` | focused tests; upgrade and downgrade/upgrade | `36280b9f` |
+
+The isolated database is intentionally left at `048_builtin_mcp_disables` for
+the next migration round. This checkpoint is the recovery point if a later
+schema port fails.
