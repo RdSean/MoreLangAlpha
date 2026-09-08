@@ -867,3 +867,4 @@
 - 按本地迁移链追加 `051_account_disable_kind`，扩展内置 MCP/Bundle 账户级禁用范围，兼容回填旧 server 行并验证同名不同 kind 共存。
 - 按本地迁移链追加 `052_in_flight_credits`，为主运行与子代理运行增加未结算额度字段、非负约束和部分索引，并验证升级回滚。
 - 按本地迁移链追加 `053_model_preference`，将模型相关偏好迁入独立 JSONB 列并保留非模型偏好，验证数据搬迁及升级回滚。
+- 按本地迁移链追加 `054_jsonb_deep_merge`，提供递归 JSONB 合并函数并验证嵌套合并、null 删除及升级回滚。

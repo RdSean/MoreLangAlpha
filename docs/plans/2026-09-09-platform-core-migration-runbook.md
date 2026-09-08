@@ -136,3 +136,9 @@ JSONB column, moves only model-related keys from `other_preference`, preserves
 feature/channel keys, and passes focused tests plus live data and
 `052 -> 053 -> 052 -> 053` checks. The runtime read-path remains intentionally
 unchanged until the corresponding service migration is ported.
+
+`054_jsonb_deep_merge` is complete. It installs the recursive JSONB merge
+function used by the new model preference shape; live PostgreSQL verification
+covered nested merge and JSON null deletion, and the bounded
+`053 -> 054 -> 053 -> 054` path passed. The database is now at
+`054_jsonb_deep_merge`.

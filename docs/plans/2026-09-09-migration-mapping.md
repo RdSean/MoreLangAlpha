@@ -139,3 +139,9 @@ not a duplicate. Focused tests pass; a live data check moved model keys out of
 database completed `052 -> 053 -> 052 -> 053`. The checkpoint is now
 `053_model_preference`. Runtime read-path cutover remains a later code task;
 this migration keeps the remote one-release rollback behavior.
+
+The semantic port of remote `035_jsonb_deep_merge` is implemented as
+`054_jsonb_deep_merge`. Focused tests pass; a live PostgreSQL call verified
+recursive object merge and JSON null key deletion, and
+`053 -> 054 -> 053 -> 054` upgrade/rollback verification completed. The
+database checkpoint is now `054_jsonb_deep_merge`.
