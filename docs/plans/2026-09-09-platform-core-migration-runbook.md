@@ -113,3 +113,10 @@ After each removal, verify `/api/v1/plugins`, `/api/v1/mcp/servers`, `/api/v1/sk
 - Commits for the completed rounds: `dc926492`, `f59cd9ad`, `36280b9f` (plus
   documentation checkpoints `17902fd2`, `dc0322ad`, `3e5cf1f5`, `7a74e433`).
 - Next task: port remote `028_agent_plugins` as local `049_agent_plugins`.
+
+The next completed checkpoint now includes `049_agent_plugins` and
+`050_plugin_owned_secrets`; the isolated database is at
+`050_plugin_owned_secrets`. Both migrations passed focused tests and bounded
+upgrade/downgrade/upgrade checks. User plugin ownership uses RESTRICT on MCP
+and Skills, while Vault plugin ownership intentionally uses SET NULL so a
+plugin uninstall cannot be blocked by a retained credential.

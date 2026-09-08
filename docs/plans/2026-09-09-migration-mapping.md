@@ -105,3 +105,10 @@ The semantic port of remote `028_agent_plugins` is implemented as
 `048 -> 049` plus a bounded downgrade/upgrade round trip. The migration adds
 `user_plugins`, MCP plugin provenance columns/indexes, and RESTRICT ownership
 foreign keys for MCP servers and Skills.
+
+The semantic port of remote `029_plugin_owned_secrets` is implemented as
+`050_plugin_owned_secrets`. Focused tests pass, and the isolated database
+completed `049 -> 050` plus a bounded downgrade/upgrade round trip. The
+migration adds `user_vault_secrets.plugin_id`, a composite ownership FK with
+`ON DELETE SET NULL (plugin_id)`, and the plugin lookup index. The current
+database checkpoint is `050_plugin_owned_secrets`.

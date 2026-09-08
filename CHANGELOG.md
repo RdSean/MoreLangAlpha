@@ -863,3 +863,4 @@
 - 按本地迁移链追加 `047_user_skills`，完成用户/工作区 Skills 表、归档约束、作用域唯一索引和继承禁用表的升级与回滚验证。
 - 按本地迁移链追加 `048_builtin_mcp_disables`，完成账户级内置 MCP 禁用表并验证升级、降级兼容性。
 - 按本地迁移链追加 `049_agent_plugins`，完成插件实体、MCP/Skills 归属字段及 RESTRICT 外键，并验证升级与回滚。
+- 按本地迁移链追加 `050_plugin_owned_secrets`，完成 Vault Secret 的插件归属、SET NULL 外键和查询索引，并验证升级与回滚。
