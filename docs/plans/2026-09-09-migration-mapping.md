@@ -73,3 +73,11 @@ pass, the isolated database upgraded `045 -> 046_mcp_platform_core`, and a
 bounded downgrade/upgrade round trip also passes. The database now reports
 `046_mcp_platform_core` and contains the user vault, OAuth connection, user
 tool-schema and sandbox egress grant tables plus `user_mcp_servers.enabled`.
+
+The semantic port of remote `026_user_skills` is implemented as
+`047_user_skills` (`047_user_skills.py`). Focused tests pass, and the isolated
+database upgraded `046_mcp_platform_core -> 047_user_skills`; a bounded
+downgrade/upgrade round trip also passes. The database reports
+`047_user_skills` and contains `user_skills`, `workspace_skill_disables`, the
+four per-scope uniqueness indexes, archive/plugin lookup indexes, and the
+archive-present check constraint.
