@@ -18,6 +18,11 @@ vi.mock('../api', () => ({
 }));
 vi.mock('@/pages/ChatAgent/components/Markdown', () => ({ default: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock('@/pages/ChatAgent/components/viewers/PdfViewer', () => ({ default: () => <div data-testid="pdf-viewer">PDF viewer</div> }));
+vi.mock('@/pages/ChatAgent/components/viewers/PreviewViewer', () => ({
+  default: ({ documentData, documentViewMode }: { documentData?: ArrayBuffer; documentViewMode?: string }) => (
+    <div data-testid="preview-viewer" data-has-document-data={String(Boolean(documentData))} data-document-mode={documentViewMode}>Preview viewer</div>
+  ),
+}));
 
 import DocumentPreviewDrawer from '../components/DocumentPreviewDrawer';
 
@@ -34,6 +39,7 @@ describe('DocumentPreviewDrawer', () => {
   it('defaults to the original tab and can switch to the parsed Markdown tab', async () => {
     const user = userEvent.setup();
     render(<DocumentPreviewDrawer open documentId="doc-1" onOpenChange={vi.fn()} />);
+    expect(screen.getByRole('tablist', { name: 'Document content' })).toHaveClass('documents-preview-segmented');
     expect(screen.getByRole('tab', { name: 'Original file' })).toHaveAttribute('aria-selected', 'true');
     await user.click(screen.getByRole('tab', { name: 'Parsed file' }));
     expect(await screen.findByText('# Lesson')).toBeInTheDocument();
@@ -48,5 +54,22 @@ describe('DocumentPreviewDrawer', () => {
     await user.click(screen.getByRole('tab', { name: 'Parsed file' }));
     await user.click(screen.getByRole('button', { name: 'Start parsing' }));
     expect(onOpenParser).toHaveBeenCalledWith('doc-1');
+  });
+
+  it('supports continuous and single-page source controls plus fullscreen', async () => {
+    const user = userEvent.setup();
+    render(<DocumentPreviewDrawer open documentId="doc-1" onOpenChange={vi.fn()} />);
+
+    expect(await screen.findByTestId('preview-viewer')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-viewer')).toHaveAttribute('data-has-document-data', 'true');
+    expect(screen.getByRole('tab', { name: 'Continuous' })).toHaveAttribute('aria-selected', 'true');
+    await user.click(screen.getByRole('tab', { name: 'Single page' }));
+    expect(screen.getByRole('tab', { name: 'Single page' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    expect(screen.getByText('2')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'View full screen' }));
+    expect(screen.getByRole('button', { name: 'Exit full screen' })).toBeInTheDocument();
   });
 });
