@@ -99,3 +99,9 @@ reports `048_builtin_mcp_disables` and contains the account-scoped
 The isolated database is intentionally left at `048_builtin_mcp_disables` for
 the next migration round. This checkpoint is the recovery point if a later
 schema port fails.
+
+The semantic port of remote `028_agent_plugins` is implemented as
+`049_agent_plugins`. Focused tests pass, and the isolated database completed
+`048 -> 049` plus a bounded downgrade/upgrade round trip. The migration adds
+`user_plugins`, MCP plugin provenance columns/indexes, and RESTRICT ownership
+foreign keys for MCP servers and Skills.
