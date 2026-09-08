@@ -6,7 +6,11 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('../components/DatasetGrid', () => ({ default: () => <div data-testid="dataset-grid" /> }));
 vi.mock('../components/DocumentTable', () => ({ default: () => <div data-testid="document-table" /> }));
 vi.mock('../components/DocumentWizard', () => ({ default: () => null }));
-vi.mock('../components/DocumentPreviewDrawer', () => ({ default: () => null }));
+vi.mock('../components/DocumentPreviewDrawer', () => ({
+  default: ({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) => (
+    open ? <button type="button" aria-label="Close preview" onClick={() => onOpenChange(false)}>Close preview</button> : null
+  ),
+}));
 
 import DocumentsPage from '../DocumentsPage';
 
@@ -58,5 +62,14 @@ describe('DocumentsPage', () => {
       documents_q: 'report',
       documents_page: '4',
     });
+  });
+
+  it('closes the preview without navigating away from the current document URL', async () => {
+    const user = userEvent.setup();
+    renderPage('/documents?document=doc-1');
+
+    await user.click(screen.getByRole('button', { name: 'Close preview' }));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('document=doc-1');
+    expect(screen.queryByRole('button', { name: 'Close preview' })).not.toBeInTheDocument();
   });
 });

@@ -55,6 +55,8 @@
 
 .documents-preview-tabs {
   display: flex;
+  width: max-content;
+  max-width: calc(100% - 36px);
   justify-content: flex-start;
   gap: 3px;
   margin: 10px 18px 0;

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Upload } from 'lucide-react';
@@ -103,6 +104,11 @@ export default function DocumentsPage() {
   const datasetDocumentsPage = positivePage(searchParams.get('dataset_documents_page'));
   const allDocumentsFilters = readTableFilters(searchParams, 'documents');
   const datasetDocumentsFilters = readTableFilters(searchParams, 'dataset_documents');
+  const [previewOpen, setPreviewOpen] = useState(Boolean(selectedDocumentId) && !wizardOpen);
+
+  useEffect(() => {
+    setPreviewOpen(Boolean(selectedDocumentId) && !wizardOpen);
+  }, [selectedDocumentId, wizardOpen]);
 
   const updateParams = (change: (params: URLSearchParams) => void) => {
     setSearchParams((current) => {
@@ -122,13 +128,16 @@ export default function DocumentsPage() {
 
   const activeLabel = t(TABS.find((tab) => tab.id === activeTab)!.labelKey);
   const openDataset = (dataset: DatasetSummary) => updateParams((params) => params.set('dataset', dataset.dataset_id));
-  const openDocument = (document: DocumentSummary) => updateParams((params) => params.set('document', document.document_id));
+  const openDocument = (document: DocumentSummary) => {
+    setPreviewOpen(true);
+    updateParams((params) => params.set('document', document.document_id));
+  };
   const openUpload = () => updateParams((params) => {
     params.set('upload', '1');
     params.delete('document');
   });
   const closeWizard = () => updateParams((params) => params.delete('upload'));
-  const closePreview = () => updateParams((params) => params.delete('document'));
+  const closePreview = () => setPreviewOpen(false);
   const openParserForDocument = (documentId: string) => updateParams((params) => {
     params.set('upload', '1');
     params.set('document', documentId);
@@ -141,7 +150,7 @@ export default function DocumentsPage() {
   };
 
   return (
-    <div className={`documents-page${selectedDocumentId && !wizardOpen ? ' documents-page--preview-open' : ''}`}>
+    <div className={`documents-page${previewOpen ? ' documents-page--preview-open' : ''}`}>
       <main className="documents-main">
       <div className="documents-container">
         <header className="documents-header">
@@ -222,7 +231,7 @@ export default function DocumentsPage() {
       />
       </main>
       <DocumentPreviewDrawer
-        open={Boolean(selectedDocumentId) && !wizardOpen}
+        open={previewOpen && Boolean(selectedDocumentId) && !wizardOpen}
         documentId={selectedDocumentId}
         onOpenChange={(open) => !open && closePreview()}
         onOpenParser={openParserForDocument}
