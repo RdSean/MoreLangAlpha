@@ -865,3 +865,4 @@
 - 按本地迁移链追加 `049_agent_plugins`，完成插件实体、MCP/Skills 归属字段及 RESTRICT 外键，并验证升级与回滚。
 - 按本地迁移链追加 `050_plugin_owned_secrets`，完成 Vault Secret 的插件归属、SET NULL 外键和查询索引，并验证升级与回滚。
 - 按本地迁移链追加 `051_account_disable_kind`，扩展内置 MCP/Bundle 账户级禁用范围，兼容回填旧 server 行并验证同名不同 kind 共存。
+- 按本地迁移链追加 `052_in_flight_credits`，为主运行与子代理运行增加未结算额度字段、非负约束和部分索引，并验证升级回滚。

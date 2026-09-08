@@ -123,3 +123,11 @@ were also exercised. The database checkpoint is now `051_account_disable_kind`.
 
 Final bounded check completed after commit: `051 -> 050 -> 051` succeeded on
 the isolated database, which remains at `051_account_disable_kind`.
+
+The semantic port of remote `033_in_flight_credits` is implemented as
+`052_in_flight_credits`. Local `conversation_responses` and `subagent_runs` had
+no equivalent ledger columns, so this migration is required rather than a
+duplicate. Focused tests pass; the isolated database contains the three
+in-flight/settled indexes and non-negative checks, and `051 -> 052 -> 051 ->
+052` upgrade/rollback verification completed. The checkpoint is now
+`052_in_flight_credits`.

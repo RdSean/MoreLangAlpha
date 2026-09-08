@@ -125,3 +125,8 @@ plugin uninstall cannot be blocked by a retained credential.
 rows with `kind='server'|'bundle'`; legacy rows are backfilled as `server`, and
 the isolated database is now at `051_account_disable_kind`. The migration has
 no brokerage schema dependency despite its later position in the remote chain.
+
+The next checkpoint `052_in_flight_credits` is complete. It adds additive,
+non-negative in-flight credit columns and partial indexes to root and subagent
+runs; focused tests and `051 -> 052 -> 051 -> 052` verification passed. The
+database is now at `052_in_flight_credits`.
