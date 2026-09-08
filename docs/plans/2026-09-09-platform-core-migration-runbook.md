@@ -22,23 +22,23 @@ Migrate the `origin/main` platform core (Plugins, MCP, Skills, Vault/OAuth and s
 
 ## Database compatibility rules
 
-Local migrations `025`–`044` are real product migrations (education, household, channel gateway, etc.) and must remain unchanged. Remote migrations `025`–`039` have conflicting revision IDs and must never be copied verbatim.
+Local migrations `025`–`045` are real product migrations (education, household, channel gateway, document library, etc.) and must remain unchanged. Remote migrations `025`–`039` have conflicting revision IDs and must never be copied verbatim.
 
-Create a new chain after the local head, using unique descriptive revision IDs and preserving semantic order, for example:
+The current execution baseline already contains local `045_add_document_library` (`045 <- 044`). Create a new chain after that actual head, using unique descriptive revision IDs and preserving semantic order, for example:
 
 ```text
-044
- └─ 045_mcp_platform_core
-    └─ 046_user_skills
-       └─ 047_builtin_mcp_disables
-          └─ 048_agent_plugins
-             └─ 049_plugin_owned_secrets
+045_add_document_library
+ └─ 046_mcp_platform_core
+    └─ 047_user_skills
+       └─ 048_builtin_mcp_disables
+          └─ 049_agent_plugins
+             └─ 050_plugin_owned_secrets
                 └─ ...
 ```
 
 Before each migration:
 
-1. Run the local chain through `044` on a disposable database.
+1. Run the local chain through the actual local head (`045` in this worktree) on a disposable database.
 2. Assert local education/family/channel tables and constraints still exist.
 3. Compare the remote SQL against local table/column/JSONB/FK/index definitions.
 4. Add only the missing schema and preserve local constraints.
