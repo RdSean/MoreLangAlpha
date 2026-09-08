@@ -60,6 +60,7 @@ describe('DocumentPreviewDrawer', () => {
     const user = userEvent.setup();
     render(<DocumentPreviewDrawer open documentId="doc-1" onOpenChange={vi.fn()} />);
 
+    expect(screen.getByRole('separator', { name: 'Resize preview' })).toHaveClass('chat-split-divider');
     expect(await screen.findByTestId('preview-viewer')).toBeInTheDocument();
     expect(screen.getByTestId('preview-viewer')).toHaveAttribute('data-has-document-data', 'true');
     expect(screen.getByRole('tab', { name: 'Continuous' })).toHaveAttribute('aria-selected', 'true');

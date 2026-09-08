@@ -1,37 +1,35 @@
-.documents-preview-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  background: rgb(0 0 0 / 35%);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 180ms ease;
+.documents-preview-panel {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  width: 0;
+  min-width: 0;
+  flex: 0 0 0;
+  overflow: visible;
+  transition: width 220ms ease, flex-basis 220ms ease;
 }
 
-.documents-preview-overlay.is-open {
-  opacity: 1;
-  pointer-events: auto;
+.documents-preview-panel.is-open {
+  width: min(42vw, 680px);
+  min-width: min(420px, 100vw);
+  flex-basis: min(42vw, 680px);
 }
 
 .documents-preview-drawer {
-  position: fixed;
-  z-index: 41;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  position: relative;
+  z-index: 1;
   display: flex;
-  width: min(68vw, 920px);
-  min-width: min(480px, 100vw);
+  width: 100%;
+  min-width: 0;
+  height: 100%;
   flex-direction: column;
   border-left: 1px solid var(--color-border-muted);
   background: var(--color-bg-canvas);
   box-shadow: -12px 0 32px rgb(0 0 0 / 18%);
-  transform: translateX(100%);
-  transition: transform 220ms ease, width 120ms ease;
+  overflow: hidden;
 }
 
-.documents-preview-drawer.is-open { transform: translateX(0); }
-.documents-preview-drawer.is-fullscreen { width: 100vw !important; min-width: 0; }
+.documents-preview-drawer.is-fullscreen { width: 100vw !important; height: 100vh; }
 
 .documents-preview-divider {
   position: absolute;
@@ -124,6 +122,6 @@
 .documents-preview-state p { max-width: 300px; margin: 0; font-size: 0.85rem; }
 
 @media (max-width: 640px) {
-  .documents-preview-drawer { width: 100vw; min-width: 0; }
+  .documents-preview-panel.is-open { width: 100vw; min-width: 0; flex-basis: 100vw; }
   .documents-preview-divider { display: none; }
 }

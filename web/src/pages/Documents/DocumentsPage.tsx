@@ -141,7 +141,8 @@ export default function DocumentsPage() {
   };
 
   return (
-    <div className="documents-page">
+    <div className={`documents-page${selectedDocumentId && !wizardOpen ? ' documents-page--preview-open' : ''}`}>
+      <main className="documents-main">
       <div className="documents-container">
         <header className="documents-header">
           <h1 className="documents-title title-font">{t('documents.title')}</h1>
@@ -219,6 +220,7 @@ export default function DocumentsPage() {
         documentId={selectedDocumentId}
         onOpenChange={(open) => !open && closeWizard()}
       />
+      </main>
       <DocumentPreviewDrawer
         open={Boolean(selectedDocumentId) && !wizardOpen}
         documentId={selectedDocumentId}
