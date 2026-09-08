@@ -145,6 +145,18 @@
   "documents": {
     "title": "知识库",
     "viewLabel": "知识库视图",
+    "preview": {
+      "title": "文档预览",
+      "titleFallback": "文档",
+      "close": "关闭预览",
+      "tabsLabel": "文档内容",
+      "sourceTab": "原始文件",
+      "parsedTab": "解析文件",
+      "sourceError": "原始文件暂时无法加载。",
+      "parsedError": "解析文件暂时无法加载。",
+      "noParsed": "这份文档还没有可预览的 Markdown 解析产物。",
+      "openParser": "开始解析"
+    },
     "tabs": {
       "datasets": "数据集",
       "allDocuments": "全部文档"

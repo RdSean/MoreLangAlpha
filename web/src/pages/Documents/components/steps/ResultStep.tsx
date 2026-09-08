@@ -25,6 +25,7 @@ export default function ResultStep({ artifacts, markdown, previewError, jobs, on
   return (
     <div className="documents-wizard-step documents-result-step">
       <div>
+        <img className="documents-result-confetti" src="/task-celebrating-confetti.svg" alt="" aria-hidden="true" />
         <h2>{t('documents.wizard.result.title')}</h2>
         <p>{t('documents.wizard.result.subtitle')}</p>
       </div>

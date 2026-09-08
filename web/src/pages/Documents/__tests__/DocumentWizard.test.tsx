@@ -9,6 +9,7 @@ const inspectDocument = { mutateAsync: vi.fn(), isPending: false };
 const createParseJob = { mutateAsync: vi.fn(), isPending: false };
 const cancelJob = { mutateAsync: vi.fn(), isPending: false };
 const createDataset = { mutateAsync: vi.fn(), isPending: false };
+const refreshDocument = vi.fn();
 const useDocument = vi.fn();
 const useDocumentJobs = vi.fn();
 const watchDocumentJob = vi.fn();
@@ -23,7 +24,7 @@ vi.mock('../hooks', () => ({
   ], total: 2 } }),
   useDocumentTags: () => ({ data: [] }),
   useDocumentJobs: (...args: unknown[]) => useDocumentJobs(...args),
-  useDocumentMutations: () => ({ uploadDocument, inspectDocument, createParseJob, cancelJob, createDataset }),
+  useDocumentMutations: () => ({ uploadDocument, inspectDocument, createParseJob, cancelJob, createDataset, refreshDocument }),
 }));
 
 vi.mock('../api', () => ({
@@ -130,6 +131,7 @@ async function uploadAndInspect(user: ReturnType<typeof userEvent.setup>) {
 describe('DocumentWizard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    refreshDocument.mockResolvedValue(undefined);
     useDocument.mockReturnValue({ data: undefined });
     useDocumentJobs.mockReturnValue({ data: [] });
     uploadDocument.mutateAsync.mockResolvedValue(document);
@@ -178,6 +180,7 @@ describe('DocumentWizard', () => {
     await user.click(screen.getByRole('button', { name: 'Start parsing' }));
     await user.click(await screen.findByRole('button', { name: 'Complete' }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(refreshDocument).toHaveBeenCalledWith(document.document_id);
   });
 
   it('uploads and inspects but does not start parsing', async () => {

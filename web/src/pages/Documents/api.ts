@@ -149,6 +149,10 @@ export function artifactDownloadUrl(artifactId: string): string {
   return `${api.defaults.baseURL ?? ''}/api/v1/document-artifacts/${encodeURIComponent(artifactId)}/download`;
 }
 
+export function documentSourceUrl(documentId: string): string {
+  return `${api.defaults.baseURL ?? ''}/api/v1/documents/${encodeURIComponent(documentId)}/source`;
+}
+
 export async function fetchArtifactText(artifactId: string): Promise<string> {
   const response = await fetch(artifactDownloadUrl(artifactId), { credentials: 'include' });
   if (!response.ok) throw new Error('Artifact preview is unavailable');

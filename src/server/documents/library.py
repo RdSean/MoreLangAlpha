@@ -7,6 +7,7 @@ import logging
 import os
 import tempfile
 from collections.abc import AsyncIterable, Callable
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
@@ -18,10 +19,17 @@ from src.server.documents.contracts import (
     UnsupportedMediaTypeError,
 )
 from src.server.documents.ids import new_public_id
-from src.server.documents.storage import DocumentObjectStore
+from src.server.documents.storage import DocumentObjectStore, OpenedDocumentObject
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class SourceDownload:
+    filename: str
+    media_type: str
+    object_download: OpenedDocumentObject
 
 
 class DocumentRepository(Protocol):
@@ -158,6 +166,23 @@ class DocumentLibraryService:
     ) -> dict[str, Any] | None:
         return await self._repository.get_document(
             owner_user_id=owner_user_id, document_id=document_id
+        )
+
+    async def open_source_download(
+        self, *, owner_user_id: str, document_id: str
+    ) -> SourceDownload | None:
+        document = await self._repository.get_document(
+            owner_user_id=owner_user_id, document_id=document_id
+        )
+        if document is None:
+            return None
+        opened = await self._object_store.open_download(
+            str(document["source_storage_key"])
+        )
+        return SourceDownload(
+            filename=str(document["original_filename"]),
+            media_type=str(document.get("media_type") or "application/pdf"),
+            object_download=opened,
         )
 
     async def create_tag(

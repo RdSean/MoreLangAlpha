@@ -282,6 +282,29 @@ async def get_document(
     return DocumentResponse.model_validate(row)
 
 
+@router.get("/documents/{document_id}/source")
+async def download_source(
+    document_id: str, user_id: CurrentUserId, service: LibraryService
+) -> StreamingResponse:
+    try:
+        download = await service.open_source_download(
+            owner_user_id=user_id, document_id=document_id
+        )
+    except DocumentDomainError as error:
+        raise _domain_error(error) from error
+    if download is None:
+        raise _not_found("Document")
+    headers = {"Content-Disposition": content_disposition(download.filename)}
+    if download.object_download.content_length is not None:
+        headers["Content-Length"] = str(download.object_download.content_length)
+    return StreamingResponse(
+        download.object_download.chunks,
+        media_type=download.media_type,
+        headers=headers,
+        background=BackgroundTask(download.object_download.close),
+    )
+
+
 @router.patch("/documents/{document_id}", response_model=DocumentResponse)
 async def update_document(
     document_id: str,

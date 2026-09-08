@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 import * as documentsApi from './api';
@@ -77,6 +78,12 @@ export function useDocumentMutations() {
   const invalidateLists = () => client.invalidateQueries({ queryKey: queryKeys.documents.lists() });
   const invalidateDatasets = () => client.invalidateQueries({ queryKey: queryKeys.documents.datasets() });
   const invalidateTags = () => client.invalidateQueries({ queryKey: queryKeys.documents.tags() });
+  const refreshDocument = useCallback(async (documentId: string) => {
+    await Promise.all([
+      client.invalidateQueries({ queryKey: queryKeys.documents.lists() }),
+      client.invalidateQueries({ queryKey: queryKeys.documents.detail(documentId) }),
+    ]);
+  }, [client]);
 
   return {
     createDataset: useMutation({
@@ -124,6 +131,7 @@ export function useDocumentMutations() {
         documentsApi.createDocumentParseJob(documentId, input),
       onSuccess: (_result, { documentId }) => client.invalidateQueries({ queryKey: queryKeys.documents.jobs(documentId) }),
     }),
+    refreshDocument,
     cancelJob: useMutation({
       mutationFn: documentsApi.cancelDocumentJob,
       onSuccess: (job) => client.invalidateQueries({ queryKey: queryKeys.documents.job(job.job_id) }),

@@ -6,6 +6,7 @@ import { useDocumentDataset } from './hooks';
 import DatasetGrid from './components/DatasetGrid';
 import DocumentTable, { type DocumentTableFilters } from './components/DocumentTable';
 import DocumentWizard from './components/DocumentWizard';
+import DocumentPreviewDrawer from './components/DocumentPreviewDrawer';
 import type { DatasetSummary, DocumentSummary } from './types';
 import './DocumentsPage.css';
 
@@ -96,7 +97,7 @@ export default function DocumentsPage() {
   const activeTab: DocumentsTab = searchParams.get('tab') === 'documents' ? 'documents' : 'datasets';
   const selectedDatasetId = searchParams.get('dataset');
   const selectedDocumentId = searchParams.get('document') ?? undefined;
-  const wizardOpen = searchParams.get('upload') === '1' || Boolean(selectedDocumentId);
+  const wizardOpen = searchParams.get('upload') === '1';
   const datasetPage = positivePage(searchParams.get('datasets_page'));
   const allDocumentsPage = positivePage(searchParams.get('documents_page'));
   const datasetDocumentsPage = positivePage(searchParams.get('dataset_documents_page'));
@@ -126,9 +127,11 @@ export default function DocumentsPage() {
     params.set('upload', '1');
     params.delete('document');
   });
-  const closeWizard = () => updateParams((params) => {
-    params.delete('upload');
-    params.delete('document');
+  const closeWizard = () => updateParams((params) => params.delete('upload'));
+  const closePreview = () => updateParams((params) => params.delete('document'));
+  const openParserForDocument = (documentId: string) => updateParams((params) => {
+    params.set('upload', '1');
+    params.set('document', documentId);
   });
   const updateDocumentFilters = (prefix: string, filters: DocumentTableFilters, resetPage: boolean) => {
     updateParams((params) => {
@@ -215,6 +218,12 @@ export default function DocumentsPage() {
         open={wizardOpen}
         documentId={selectedDocumentId}
         onOpenChange={(open) => !open && closeWizard()}
+      />
+      <DocumentPreviewDrawer
+        open={Boolean(selectedDocumentId) && !wizardOpen}
+        documentId={selectedDocumentId}
+        onOpenChange={(open) => !open && closePreview()}
+        onOpenParser={openParserForDocument}
       />
     </div>
   );

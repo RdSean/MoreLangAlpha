@@ -875,7 +875,18 @@
 }
 
 .documents-result-step {
+  position: relative;
   gap: 24px;
+}
+
+.documents-result-confetti {
+  position: absolute;
+  top: -8px;
+  right: 6px;
+  width: 72px;
+  height: 58px;
+  opacity: 0.9;
+  pointer-events: none;
 }
 
 .documents-markdown-preview {

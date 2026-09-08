@@ -319,6 +319,7 @@ def test_router_exposes_complete_document_contract() -> None:
         ("/api/v1/documents", "POST"),
         ("/api/v1/documents", "GET"),
         ("/api/v1/documents/{document_id}", "GET"),
+        ("/api/v1/documents/{document_id}/source", "GET"),
         ("/api/v1/documents/{document_id}", "PATCH"),
         ("/api/v1/documents/{document_id}", "DELETE"),
         ("/api/v1/documents/{document_id}/inspections", "POST"),
@@ -332,3 +333,29 @@ def test_router_exposes_complete_document_contract() -> None:
         ("/api/v1/document-artifacts/{artifact_id}/download", "GET"),
     }
     assert expected <= paths
+
+
+@pytest.mark.asyncio
+async def test_source_download_streams_through_authenticated_api(api) -> None:
+    client, services = api
+    close = Mock()
+    services.library.open_source_download.return_value = SimpleNamespace(
+        filename="lesson.pdf",
+        media_type="application/pdf",
+        object_download=SimpleNamespace(
+            chunks=iter([b"%PDF-demo"]),
+            content_length=9,
+            close=close,
+        ),
+    )
+
+    response = await client.get(f"/api/v1/documents/{DOC_ID}/source")
+
+    assert response.status_code == 200
+    assert response.content == b"%PDF-demo"
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert response.headers["content-length"] == "9"
+    assert close.called
+    services.library.open_source_download.assert_awaited_once_with(
+        owner_user_id="owner-1", document_id=DOC_ID
+    )

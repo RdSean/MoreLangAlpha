@@ -25,18 +25,21 @@ interface DocumentWizardProps {
   open: boolean;
   documentId?: string;
   onOpenChange: (open: boolean) => void;
+  onParseCompleted?: (documentId: string) => void;
 }
 
 export default function DocumentWizard({
   open,
   documentId,
   onOpenChange,
+  onParseCompleted,
 }: DocumentWizardProps) {
   const { t } = useTranslation();
   const existingDocument = useDocument(documentId);
   const datasets = useDocumentDatasets({ limit: 100, offset: 0 });
   const tags = useDocumentTags();
   const mutations = useDocumentMutations();
+  const refreshDocument = mutations.refreshDocument;
   const [stage, setStage] = useState<WizardStage>('file');
   const [document, setDocument] = useState<DocumentSummary>();
   const [outcome, setOutcome] = useState<InspectionOutcome>();
@@ -125,13 +128,15 @@ export default function DocumentWizard({
       } else {
         setMarkdown(undefined);
       }
+      await refreshDocument?.(snapshot.document_id);
+      onParseCompleted?.(snapshot.document_id);
       setStage('result');
       void refetchJobs();
     } catch {
       loadedJobRef.current = undefined;
       setError(t('documents.wizard.errors.artifacts'));
     }
-  }, [refetchJobs, t]);
+  }, [onParseCompleted, refetchJobs, refreshDocument, t]);
 
   const activeJobId = job?.job_id;
   useEffect(() => {

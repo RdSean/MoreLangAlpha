@@ -145,6 +145,18 @@
   "documents": {
     "title": "Knowledge Library",
     "viewLabel": "Knowledge library views",
+    "preview": {
+      "title": "Document preview",
+      "titleFallback": "Document",
+      "close": "Close preview",
+      "tabsLabel": "Document content",
+      "sourceTab": "Original file",
+      "parsedTab": "Parsed file",
+      "sourceError": "The original file could not be loaded.",
+      "parsedError": "The parsed file could not be loaded.",
+      "noParsed": "This document has no Markdown parse artifact to preview yet.",
+      "openParser": "Start parsing"
+    },
     "tabs": {
       "datasets": "Datasets",
       "allDocuments": "All documents"
