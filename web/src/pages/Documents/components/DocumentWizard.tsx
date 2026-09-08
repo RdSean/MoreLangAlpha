@@ -24,14 +24,12 @@ const TERMINAL = new Set<ParseJob['status']>(['completed', 'failed', 'cancelled'
 interface DocumentWizardProps {
   open: boolean;
   documentId?: string;
-  initialDatasetIds?: string[];
   onOpenChange: (open: boolean) => void;
 }
 
 export default function DocumentWizard({
   open,
   documentId,
-  initialDatasetIds = [],
   onOpenChange,
 }: DocumentWizardProps) {
   const { t } = useTranslation();
@@ -222,7 +220,6 @@ export default function DocumentWizard({
               document={document}
               datasets={datasets.data?.items ?? []}
               tags={tags.data ?? []}
-              initialDatasetIds={initialDatasetIds}
               pending={mutations.uploadDocument.isPending || mutations.inspectDocument.isPending}
               uploadProgress={uploadProgress}
               error={error}

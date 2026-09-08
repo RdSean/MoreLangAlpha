@@ -19,9 +19,10 @@ interface DatasetDialogProps {
   trigger?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  onCreated?: (dataset: DatasetSummary) => void;
 }
 
-export default function DatasetDialog({ dataset, trigger, open, onOpenChange }: DatasetDialogProps) {
+export default function DatasetDialog({ dataset, trigger, open, onOpenChange, onCreated }: DatasetDialogProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const mutations = useDocumentMutations();
@@ -48,7 +49,8 @@ export default function DatasetDialog({ dataset, trigger, open, onOpenChange }: 
       if (dataset) {
         await mutations.updateDataset.mutateAsync({ datasetId: dataset.dataset_id, ...input });
       } else {
-        await mutations.createDataset.mutateAsync(input);
+        const created = await mutations.createDataset.mutateAsync(input);
+        onCreated?.(created);
       }
       setOpen(false);
     } catch {

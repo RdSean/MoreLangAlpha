@@ -1,14 +1,21 @@
 import { useEffect, useState } from 'react';
-import { FileText, Upload } from 'lucide-react';
+import { Check, ChevronDown, FileText, Plus, Upload } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { DatasetSummary, DocumentSummary, Tag } from '../../types';
+import DatasetDialog from '../DatasetDialog';
 
 interface FileStepProps {
   document?: DocumentSummary;
   datasets: DatasetSummary[];
   tags: Tag[];
-  initialDatasetIds: string[];
   pending: boolean;
   uploadProgress: number;
   error?: string;
@@ -25,7 +32,6 @@ export default function FileStep({
   document,
   datasets,
   tags,
-  initialDatasetIds,
   pending,
   uploadProgress,
   error,
@@ -33,14 +39,36 @@ export default function FileStep({
 }: FileStepProps) {
   const { t } = useTranslation();
   const [file, setFile] = useState<File>();
-  const [datasetIds, setDatasetIds] = useState(initialDatasetIds);
+  const [datasetIds, setDatasetIds] = useState<string[]>([]);
   const [tagIds, setTagIds] = useState<string[]>([]);
+  const [createDatasetOpen, setCreateDatasetOpen] = useState(false);
+  const [createdDatasets, setCreatedDatasets] = useState<DatasetSummary[]>([]);
 
-  useEffect(() => setDatasetIds(initialDatasetIds), [initialDatasetIds]);
+  useEffect(() => {
+    setDatasetIds([]);
+    setTagIds([]);
+  }, [document?.document_id]);
 
-  const toggle = (values: string[], value: string, checked: boolean) => (
-    checked ? [...values, value] : values.filter((item) => item !== value)
-  );
+  const updateDatasetIds = (next: string[]) => {
+    setDatasetIds(next);
+  };
+
+  const toggleDataset = (datasetId: string) => {
+    updateDatasetIds(
+      datasetIds.includes(datasetId)
+        ? datasetIds.filter((item) => item !== datasetId)
+        : [...datasetIds, datasetId],
+    );
+  };
+
+  const availableDatasets = [...datasets, ...createdDatasets.filter((created) => !datasets.some((dataset) => dataset.dataset_id === created.dataset_id))];
+  const selectedDatasets = availableDatasets.filter((dataset) => datasetIds.includes(dataset.dataset_id));
+  const otherDatasets = availableDatasets.filter((dataset) => !datasetIds.includes(dataset.dataset_id));
+  const datasetLabel = selectedDatasets.length === 0
+    ? t('documents.wizard.file.datasetPlaceholder')
+    : selectedDatasets.length === 1
+      ? selectedDatasets[0].name
+      : t('documents.wizard.file.datasetsSelected', { count: selectedDatasets.length });
 
   return (
     <form
@@ -79,25 +107,101 @@ export default function FileStep({
         </label>
       )}
 
-      {(datasets.length > 0 || tags.length > 0) && (
-        <div className="documents-file-options">
-          {datasets.length > 0 && (
-            <fieldset>
-              <legend>{t('documents.wizard.file.datasets')}</legend>
-              <div className="documents-option-checks">
-                {datasets.map((dataset) => (
-                  <label key={dataset.dataset_id}>
-                    <input
-                      type="checkbox"
-                      checked={datasetIds.includes(dataset.dataset_id)}
-                      onChange={(event) => setDatasetIds(toggle(datasetIds, dataset.dataset_id, event.target.checked))}
-                    />
-                    <span>{dataset.name}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-          )}
+      <div className="documents-file-options">
+          <fieldset>
+            <legend>{t('documents.wizard.file.datasets')}</legend>
+            <div className="flex min-w-0 items-stretch">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-11 min-w-0 flex-1 justify-between rounded-r-none px-3 text-left font-normal"
+                    disabled={pending}
+                    aria-label={t('documents.wizard.file.datasetSelectorLabel')}
+                  >
+                    <span className="truncate">{datasetLabel}</span>
+                    <ChevronDown className="ml-2 size-4 shrink-0" aria-hidden="true" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-[min(24rem,calc(100vw-4rem))] p-2">
+                  <div className="max-h-64 overflow-y-auto">
+                    {availableDatasets.length === 0 ? (
+                      <p className="px-2 py-3 text-sm text-muted-foreground">{t('documents.wizard.file.noDatasets')}</p>
+                    ) : (
+                      <>
+                        {selectedDatasets.length > 0 && (
+                          <p className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">
+                            {t('documents.wizard.file.selectedGroup')}
+                          </p>
+                        )}
+                        {selectedDatasets.map((dataset) => (
+                          <button
+                            key={dataset.dataset_id}
+                            type="button"
+                            aria-pressed="true"
+                            className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-[var(--color-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => toggleDataset(dataset.dataset_id)}
+                          >
+                            <span className="flex size-4 shrink-0 items-center justify-center rounded-sm border border-primary bg-primary text-primary-foreground">
+                              <Check className="size-3" aria-hidden="true" />
+                            </span>
+                            <span className="min-w-0 flex-1 truncate">{dataset.name}</span>
+                          </button>
+                        ))}
+                        {otherDatasets.length > 0 && (
+                          <p className="px-2 pb-1 pt-3 text-xs font-medium text-muted-foreground">
+                            {t(selectedDatasets.length > 0 ? 'documents.wizard.file.otherGroup' : 'documents.wizard.file.allGroup')}
+                          </p>
+                        )}
+                        {otherDatasets.map((dataset) => (
+                          <button
+                            key={dataset.dataset_id}
+                            type="button"
+                            aria-pressed="false"
+                            className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-[var(--color-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => toggleDataset(dataset.dataset_id)}
+                          >
+                            <span className="size-4 shrink-0 rounded-sm border" aria-hidden="true" />
+                            <span className="min-w-0 flex-1 truncate">{dataset.name}</span>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="min-h-11 min-w-11 shrink-0 rounded-l-none border-l-0"
+                    disabled={pending}
+                    aria-label={t('documents.wizard.file.datasetActions')}
+                  >
+                    <ChevronDown className="size-4" aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => setCreateDatasetOpen(true)}>
+                    <Plus className="size-4" aria-hidden="true" />
+                    {t('documents.wizard.file.createDataset')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <DatasetDialog
+              open={createDatasetOpen}
+              onOpenChange={setCreateDatasetOpen}
+              onCreated={(dataset) => {
+                setCreatedDatasets((current) => [...current, dataset]);
+                updateDatasetIds([...datasetIds, dataset.dataset_id]);
+                setCreateDatasetOpen(false);
+              }}
+            />
+          </fieldset>
           {tags.length > 0 && (
             <fieldset>
               <legend>{t('documents.wizard.file.tags')}</legend>
@@ -107,7 +211,7 @@ export default function FileStep({
                     <input
                       type="checkbox"
                       checked={tagIds.includes(tag.tag_id)}
-                      onChange={(event) => setTagIds(toggle(tagIds, tag.tag_id, event.target.checked))}
+                      onChange={(event) => setTagIds((values) => event.target.checked ? [...values, tag.tag_id] : values.filter((item) => item !== tag.tag_id))}
                     />
                     <span>{tag.name}</span>
                   </label>
@@ -115,8 +219,7 @@ export default function FileStep({
               </div>
             </fieldset>
           )}
-        </div>
-      )}
+      </div>
 
       {error && <p className="documents-wizard-error" role="alert">{error}</p>}
       {pending && (

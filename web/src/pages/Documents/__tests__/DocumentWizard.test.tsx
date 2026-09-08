@@ -8,6 +8,7 @@ const uploadDocument = { mutateAsync: vi.fn(), isPending: false };
 const inspectDocument = { mutateAsync: vi.fn(), isPending: false };
 const createParseJob = { mutateAsync: vi.fn(), isPending: false };
 const cancelJob = { mutateAsync: vi.fn(), isPending: false };
+const createDataset = { mutateAsync: vi.fn(), isPending: false };
 const useDocument = vi.fn();
 const useDocumentJobs = vi.fn();
 const watchDocumentJob = vi.fn();
@@ -16,10 +17,13 @@ const fetchArtifactText = vi.fn();
 
 vi.mock('../hooks', () => ({
   useDocument: (...args: unknown[]) => useDocument(...args),
-  useDocumentDatasets: () => ({ data: { items: [], total: 0 } }),
+  useDocumentDatasets: () => ({ data: { items: [
+    { dataset_id: 'dts-math1234567', name: 'Mathematics', document_count: 0 },
+    { dataset_id: 'dts-language123', name: 'Language', document_count: 0 },
+  ], total: 2 } }),
   useDocumentTags: () => ({ data: [] }),
   useDocumentJobs: (...args: unknown[]) => useDocumentJobs(...args),
-  useDocumentMutations: () => ({ uploadDocument, inspectDocument, createParseJob, cancelJob }),
+  useDocumentMutations: () => ({ uploadDocument, inspectDocument, createParseJob, cancelJob, createDataset }),
 }));
 
 vi.mock('../api', () => ({
@@ -134,6 +138,21 @@ describe('DocumentWizard', () => {
     watchDocumentJob.mockResolvedValue(undefined);
     listDocumentArtifacts.mockResolvedValue([]);
     fetchArtifactText.mockResolvedValue('');
+    createDataset.mutateAsync.mockResolvedValue({ dataset_id: 'dts-science1234', name: 'Science', document_count: 0 });
+  });
+
+  it('uses an empty multi-select and creates/selects a dataset from the split action', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    expect(screen.getByRole('button', { name: 'Dataset selector' })).toHaveTextContent('No datasets selected');
+    await user.click(screen.getByRole('button', { name: 'Dataset actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Create dataset' }));
+    await user.type(screen.getByLabelText('Name'), 'Science');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(createDataset.mutateAsync).toHaveBeenCalledWith({ name: 'Science', description: null });
+    expect(screen.getByRole('button', { name: 'Dataset selector' })).toHaveTextContent('Science');
   });
 
   it('uploads and inspects but does not start parsing', async () => {

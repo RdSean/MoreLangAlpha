@@ -214,7 +214,6 @@ export default function DocumentsPage() {
       <DocumentWizard
         open={wizardOpen}
         documentId={selectedDocumentId}
-        initialDatasetIds={selectedDatasetId ? [selectedDatasetId] : []}
         onOpenChange={(open) => !open && closeWizard()}
       />
     </div>
