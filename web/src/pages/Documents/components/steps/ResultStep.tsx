@@ -11,6 +11,7 @@ interface ResultStepProps {
   previewError?: string;
   jobs: ParseJob[];
   onParseAgain: () => void;
+  onComplete: () => void;
 }
 
 function ArtifactIcon({ artifact }: { artifact: Artifact }) {
@@ -19,7 +20,7 @@ function ArtifactIcon({ artifact }: { artifact: Artifact }) {
   return <FileText className="h-4 w-4" aria-hidden="true" />;
 }
 
-export default function ResultStep({ artifacts, markdown, previewError, jobs, onParseAgain }: ResultStepProps) {
+export default function ResultStep({ artifacts, markdown, previewError, jobs, onParseAgain, onComplete }: ResultStepProps) {
   const { t } = useTranslation();
   return (
     <div className="documents-wizard-step documents-result-step">
@@ -73,6 +74,7 @@ export default function ResultStep({ artifacts, markdown, previewError, jobs, on
 
       <div className="documents-wizard-actions">
         <Button type="button" variant="outline" onClick={onParseAgain}>{t('documents.wizard.result.parseAgain')}</Button>
+        <Button type="button" onClick={onComplete}>{t('documents.wizard.result.complete')}</Button>
       </div>
     </div>
   );

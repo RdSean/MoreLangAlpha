@@ -262,6 +262,7 @@ export default function DocumentWizard({
               previewError={error}
               jobs={jobs.data ?? []}
               onParseAgain={chooseAgain}
+              onComplete={() => onOpenChange(false)}
             />
           )}
         </div>

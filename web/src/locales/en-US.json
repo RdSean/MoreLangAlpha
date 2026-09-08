@@ -274,7 +274,6 @@
         "inputLabel": "PDF file",
         "datasets": "Datasets",
         "datasetPlaceholder": "No datasets selected",
-        "datasetsSelected": "{{count}} datasets selected",
         "datasetSelectorLabel": "Dataset selector",
         "datasetActions": "Dataset actions",
         "createDataset": "Create dataset",
@@ -328,7 +327,8 @@
         "artifacts": "Artifacts",
         "downloadLabel": "Download {{name}}",
         "history": "Previous runs",
-        "parseAgain": "Parse again"
+        "parseAgain": "Parse again",
+        "complete": "Complete"
       },
       "errors": {
         "upload": "The file could not be uploaded.",

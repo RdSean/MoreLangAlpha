@@ -274,7 +274,6 @@
         "inputLabel": "PDF 文件",
         "datasets": "数据集",
         "datasetPlaceholder": "未选择数据集",
-        "datasetsSelected": "已选择 {{count}} 个数据集",
         "datasetSelectorLabel": "数据集选择器",
         "datasetActions": "数据集操作",
         "createDataset": "新建数据集",
@@ -328,7 +327,8 @@
         "artifacts": "解析产物",
         "downloadLabel": "下载 {{name}}",
         "history": "历史解析任务",
-        "parseAgain": "再次解析"
+        "parseAgain": "再次解析",
+        "complete": "完成"
       },
       "errors": {
         "upload": "无法上传文件。",

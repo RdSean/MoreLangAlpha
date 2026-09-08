@@ -64,11 +64,6 @@ export default function FileStep({
   const availableDatasets = [...datasets, ...createdDatasets.filter((created) => !datasets.some((dataset) => dataset.dataset_id === created.dataset_id))];
   const selectedDatasets = availableDatasets.filter((dataset) => datasetIds.includes(dataset.dataset_id));
   const otherDatasets = availableDatasets.filter((dataset) => !datasetIds.includes(dataset.dataset_id));
-  const datasetLabel = selectedDatasets.length === 0
-    ? t('documents.wizard.file.datasetPlaceholder')
-    : selectedDatasets.length === 1
-      ? selectedDatasets[0].name
-      : t('documents.wizard.file.datasetsSelected', { count: selectedDatasets.length });
 
   return (
     <form
@@ -120,7 +115,17 @@ export default function FileStep({
                     disabled={pending}
                     aria-label={t('documents.wizard.file.datasetSelectorLabel')}
                   >
-                    <span className="truncate">{datasetLabel}</span>
+                    {selectedDatasets.length === 0 ? (
+                      <span className="truncate">{t('documents.wizard.file.datasetPlaceholder')}</span>
+                    ) : (
+                      <span className="flex min-w-0 flex-1 flex-wrap gap-1">
+                        {selectedDatasets.map((dataset) => (
+                          <span key={dataset.dataset_id} className="inline-flex max-w-full items-center rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
+                            <span className="truncate">{dataset.name}</span>
+                          </span>
+                        ))}
+                      </span>
+                    )}
                     <ChevronDown className="ml-2 size-4 shrink-0" aria-hidden="true" />
                   </Button>
                 </PopoverTrigger>

@@ -155,6 +155,31 @@ describe('DocumentWizard', () => {
     expect(screen.getByRole('button', { name: 'Dataset selector' })).toHaveTextContent('Science');
   });
 
+  it('renders selected dataset names as labels in the multi-select', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+    await user.click(screen.getByRole('button', { name: 'Dataset selector' }));
+    await user.click(screen.getByRole('button', { name: 'Mathematics' }));
+    await user.click(screen.getByRole('button', { name: 'Language' }));
+
+    expect(screen.getByRole('button', { name: 'Dataset selector' })).toHaveTextContent('Mathematics');
+    expect(screen.getByRole('button', { name: 'Dataset selector' })).toHaveTextContent('Language');
+    expect(screen.getByRole('button', { name: 'Dataset selector' })).not.toHaveTextContent('2 datasets selected');
+  });
+
+  it('offers a completion action on the result step', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    watchDocumentJob.mockImplementation(async (_jobId, options) => options.onSnapshot(parseJob('completed', 2)));
+    render(<ThemeProvider><DocumentWizard open onOpenChange={onOpenChange} /></ThemeProvider>);
+    await uploadAndInspect(user);
+    await user.click(await screen.findByRole('button', { name: 'Choose method' }));
+    await user.click(screen.getByRole('radio', { name: /AnyDoc Local/ }));
+    await user.click(screen.getByRole('button', { name: 'Start parsing' }));
+    await user.click(await screen.findByRole('button', { name: 'Complete' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it('uploads and inspects but does not start parsing', async () => {
     const user = userEvent.setup();
     renderWizard();
