@@ -120,3 +120,6 @@ no brokerage dependency. Focused tests pass. A live database check confirmed
 legacy `(user_id, name)` rows are backfilled as `kind='server'`, while a second
 `kind='bundle'` row with the same name is allowed; upgrade and rollback paths
 were also exercised. The database checkpoint is now `051_account_disable_kind`.
+
+Final bounded check completed after commit: `051 -> 050 -> 051` succeeded on
+the isolated database, which remains at `051_account_disable_kind`.
