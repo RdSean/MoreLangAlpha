@@ -155,12 +155,14 @@ export default function DocumentPreviewDrawer({
     : sourceUrl;
 
   return (
-    <div aria-hidden={!open}>
-      <div className={`documents-preview-overlay${open ? ' is-open' : ''}`} onClick={() => onOpenChange(false)} />
+    <div
+      className={`documents-preview-panel${open ? ' is-open' : ''}`}
+      style={panelWidth ? { width: `${panelWidth}px`, flexBasis: `${panelWidth}px` } : undefined}
+      aria-hidden={!open}
+    >
       <aside
         ref={drawerRef}
-        className={`documents-preview-drawer${open ? ' is-open' : ''}${isFullscreen ? ' is-fullscreen' : ''}`}
-        style={panelWidth ? { width: `${panelWidth}px` } : undefined}
+        className={`documents-preview-drawer${isFullscreen ? ' is-fullscreen' : ''}`}
         aria-label={t('documents.preview.title')}
       >
         <div
