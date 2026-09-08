@@ -49,3 +49,18 @@ conflict.
   newly created by that same migration and the downgrade is explicitly tested.
 - Run the full local chain to `045` on a disposable database before applying
   any `046+` migration.
+
+## Baseline verification (2026-09-09)
+
+The isolated Compose project `langalpha-platform-core-migration` is running
+Postgres on host port `15432`, Redis on `16379`, and MinIO on `19000/19001`.
+Using the backend image's preinstalled Alembic client, `upgrade head` completed
+from an empty database through local revision `045`. The database reports
+`alembic_version = 045`, and the following local/platform-predecessor tables
+were confirmed present: `local_auth_accounts`, `education_tasks`,
+`channel_bindings`, `document_datasets`, `user_mcp_servers`,
+`workspace_mcp_servers`, `workspace_mcp_tool_schemas`, and
+`workspace_vault_secrets`.
+
+This proves the local business chain is runnable in the new database and that
+the platform migration work must start at a new revision after `045`.
