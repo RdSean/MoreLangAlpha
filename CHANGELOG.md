@@ -856,3 +856,7 @@
 - sandbox 不再同步 `data_client` 与 `market_protocol` 两套金融内部包。
 - 内置子 Agent 改为通用角色，`equity-analyst` 更名为 `analyst`，并同步更新默认提示词与配置。
 - 删除默认提示词中的金融工具和市场监控引导，防止模型调用已移除能力。
+## 迁移调试（2026-09-09）
+
+- 在隔离的 Postgres/Redis/MinIO 栈中完成本地数据库迁移链 `001–045` 基线验证。
+- 将远程 MCP connector 基础 schema 按本地迁移链移植为 `046_mcp_platform_core`，并通过升级、降级再升级验证。

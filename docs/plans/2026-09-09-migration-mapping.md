@@ -64,3 +64,12 @@ were confirmed present: `local_auth_accounts`, `education_tasks`,
 
 This proves the local business chain is runnable in the new database and that
 the platform migration work must start at a new revision after `045`.
+
+## First platform migration verification (2026-09-09)
+
+The semantic port of remote `025_mcp_connectors` is implemented as
+`046_mcp_platform_core` (`046_mcp_platform_core.py`). Focused migration tests
+pass, the isolated database upgraded `045 -> 046_mcp_platform_core`, and a
+bounded downgrade/upgrade round trip also passes. The database now reports
+`046_mcp_platform_core` and contains the user vault, OAuth connection, user
+tool-schema and sandbox egress grant tables plus `user_mcp_servers.enabled`.
