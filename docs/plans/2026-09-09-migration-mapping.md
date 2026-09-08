@@ -81,3 +81,9 @@ downgrade/upgrade round trip also passes. The database reports
 `047_user_skills` and contains `user_skills`, `workspace_skill_disables`, the
 four per-scope uniqueness indexes, archive/plugin lookup indexes, and the
 archive-present check constraint.
+
+The semantic port of remote `027_user_mcp_builtin_disables` is implemented as
+`048_builtin_mcp_disables`. Focused tests pass, and the isolated database
+completed both upgrade and bounded downgrade/upgrade round trips. The database
+reports `048_builtin_mcp_disables` and contains the account-scoped
+`user_mcp_builtin_disables` primary-key table.
