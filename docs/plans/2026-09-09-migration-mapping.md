@@ -131,3 +131,11 @@ duplicate. Focused tests pass; the isolated database contains the three
 in-flight/settled indexes and non-negative checks, and `051 -> 052 -> 051 ->
 052` upgrade/rollback verification completed. The checkpoint is now
 `052_in_flight_credits`.
+
+The semantic port of remote `034_model_preference` is implemented as
+`053_model_preference`. Local code had no `model_preference` column, so this is
+not a duplicate. Focused tests pass; a live data check moved model keys out of
+`other_preference` while preserving `feature_overrides`, and the isolated
+database completed `052 -> 053 -> 052 -> 053`. The checkpoint is now
+`053_model_preference`. Runtime read-path cutover remains a later code task;
+this migration keeps the remote one-release rollback behavior.

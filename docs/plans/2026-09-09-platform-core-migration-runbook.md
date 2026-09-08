@@ -130,3 +130,9 @@ The next checkpoint `052_in_flight_credits` is complete. It adds additive,
 non-negative in-flight credit columns and partial indexes to root and subagent
 runs; focused tests and `051 -> 052 -> 051 -> 052` verification passed. The
 database is now at `052_in_flight_credits`.
+
+`053_model_preference` is complete. It adds the dedicated model preference
+JSONB column, moves only model-related keys from `other_preference`, preserves
+feature/channel keys, and passes focused tests plus live data and
+`052 -> 053 -> 052 -> 053` checks. The runtime read-path remains intentionally
+unchanged until the corresponding service migration is ported.
