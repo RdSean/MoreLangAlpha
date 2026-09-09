@@ -184,10 +184,15 @@ class MCPServerConfig(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)  # For SSE/HTTP transports
     tool_exposure_mode: Literal["summary", "detailed"] | None = None  # Per-server override
     vault_blueprints: list[VaultBlueprint] = Field(default_factory=list)
-    # 'builtin' = from agent_config.yaml; 'workspace' = user-configured per-workspace.
-    # Workspace servers are untrusted: vault-only secret resolution, neutral prompt framing.
-    source: Literal["builtin", "workspace"] = "builtin"
+    # 'builtin' = from agent_config.yaml; 'workspace' = user-configured per-workspace;
+    # 'user' = user-level server inherited by every workspace of the user.
+    # Workspace and user servers are untrusted: vault-only secret resolution,
+    # neutral prompt framing and sanitized discovery.
+    source: Literal["builtin", "workspace", "user"] = "builtin"
     discovery_uses_secrets: bool = False  # workspace servers: resolve vault secrets during discovery (default off = secret-less probe)
+    # Set at resolve time when a non-revoked OAuth connection binds this server
+    # through the sandbox egress relay.
+    oauth_connection_id: str | None = None
 
 
 class MCPConfig(BaseModel):

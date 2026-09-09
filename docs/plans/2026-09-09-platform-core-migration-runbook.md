@@ -161,3 +161,10 @@ page is reachable at `/plugins`, with `/connectors` retained as a redirect.
 Frontend type-check and production build pass. Remote workspace blob migration
 is intentionally deferred because this branch still persists workspace file
 bytes inline and has no blob-backed read/write path.
+
+The PTC runtime alignment batch is also applied: MCP tool generation/setup and
+client runtime now consume the origin trust boundary and OAuth binding fields;
+Skills middleware/registry and sandbox sync consume user/workspace skill rows.
+`MCPServerConfig` accepts user-tier servers and `oauth_connection_id`. Static
+Python compilation passed. FastAPI-level backend tests are pending because the
+current backend image does not contain the local branch's `argon2` dependency.

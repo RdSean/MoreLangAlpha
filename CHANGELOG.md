@@ -14,6 +14,12 @@
 - 迁回 Plugins 管理页面、MCP/Skills/Vault 相关 hooks 与 API 类型，新增 `/plugins` 路由、旧 `/connectors` 重定向、导航入口及中英文基础文案。
 - 前端 `tsc --noEmit` 与生产构建通过；远程 workspace blob 迁移暂缓，待本地文件持久化运行时具备对象存储读写后再单独迁移。
 
+### PTC MCP 与 Skills runtime 对齐
+
+- 对齐 MCP 工具生成、sandbox MCP setup/client runtime、Skills middleware/registry 与 Skills sandbox sync，使用户级 MCP/Skills 管理数据进入 PTC 运行链路。
+- 扩展 `MCPServerConfig` 支持 `source="user"` 和 OAuth relay 的 `oauth_connection_id`，并保留本地 `is_user_server` 兼容调用。
+- 静态编译通过；后端行为测试暂受 backend 镜像缺少 `argon2` Python 依赖阻断，待镜像依赖补齐后复跑。
+
 ## 2026-09-08
 
 ### 文档预览抽屉交互增强
