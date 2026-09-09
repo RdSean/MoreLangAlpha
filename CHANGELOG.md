@@ -6,6 +6,7 @@
 
 - 补齐 `market_watch` feature catalog、market/news provider、OHLCV 与 Redis TTL 配置模型，同时保留本地教育、家庭和 WeChat channel 配置字段。
 - 修正 Skills 匿名/登录态可选认证、MCP schema cache 导入边界，并在启动时冻结 bundled component ownership，确保磁盘 bundle 变化不会影响已运行实例的禁用策略。
+- 增加 `fastmcp` 兼容依赖并适配本地 X MCP server，保留 MCP 2.x 后端与 sandbox MCP 1.x 兼容运行环境；补回 Skills slash-command alias 和 MCP 模型的本地兼容出口。
 - 在隔离测试容器中补齐 `quickjs-rs` 与 `wechatbot-sdk` 验证依赖；配置、Plugins、MCP、Egress 和 Skills delivery 共 93 项测试通过。
 - `056_workspace_file_blobs` 继续延期；workspace 文件仍走 PostgreSQL 内联持久化，MinIO blob 读写与回填暂不接入。
 

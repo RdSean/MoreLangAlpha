@@ -184,6 +184,12 @@ current backend image does not contain the local branch's `argon2` dependency.
   Skills-delivery tests in the isolated test container. The container was
   temporarily supplemented with `quickjs-rs` and `wechatbot-sdk`; these are
   already declared project dependencies and no credentials were committed.
+- Full unit-test collection now succeeds (`7139 collected, 8 deselected`). The
+  local X MCP server uses the standalone `fastmcp` package because MCP 2.x no
+  longer exports `mcp.server.fastmcp`; sandbox defaults continue to pin MCP 1.x
+  for third-party MCP entrypoints. One legacy local assertion still expects
+  literal HTTP headers to be masked, while the migrated platform contract
+  intentionally echoes non-secret literals so connector forms can round-trip.
 - `056_workspace_file_blobs` remains intentionally deferred. The current branch
   still persists workspace file bytes inline in PostgreSQL; unconnected blob and
   persistence modules are not part of this checkpoint.

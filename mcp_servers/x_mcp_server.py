@@ -17,7 +17,13 @@ from contextlib import asynccontextmanager
 from typing import Any, Optional
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+try:
+    # FastMCP moved out of the MCP 2.x package namespace. Keep the local X
+    # server usable in both the platform runtime and the sandbox's MCP 1.x
+    # compatibility environment.
+    from fastmcp import FastMCP
+except ImportError:  # pragma: no cover - exercised only by MCP 1.x images
+    from mcp.server.fastmcp import FastMCP
 
 X_API_BASE = "https://api.x.com/2"
 _HTTP_TIMEOUT = 30.0

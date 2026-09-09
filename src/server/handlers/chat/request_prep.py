@@ -394,10 +394,49 @@ def _slash_text_target(content: Any) -> tuple[str, dict | None]:
     return "", None
 
 
+def user_skill_commands(config) -> dict[str, str] | None:
+    """Build command-to-skill aliases from the resolved user configuration."""
+    if config is None:
+        return None
+    extra: dict[str, str] = {}
+    for name, command in (getattr(config, "skill_command_overrides", None) or {}).items():
+        extra[command] = name
+    specs = sorted(
+        getattr(config, "user_skills", None) or [],
+        key=lambda skill: getattr(skill, "workspace_scoped", False),
+    )
+    for skill in specs:
+        command = getattr(skill, "command", None)
+        name = getattr(skill, "name", None)
+        if command and name:
+            extra[command] = name
+    return extra or None
+
+
+def turn_skill_names(config, mode: str) -> set[str] | None:
+    """Return the effective skill names available to the current turn."""
+    if config is None:
+        return None
+    from ptc_agent.agent.middleware.skills.registry import build_effective_skill_registry
+
+    return set(
+        build_effective_skill_registry(
+            mode,
+            feature_resolver=getattr(config, "feature_enabled", None),
+            disabled_skills=getattr(config, "disabled_skills", None) or (),
+            user_skills=getattr(config, "user_skills", None) or (),
+            user_skill_dir=getattr(config, "user_skill_dir", None),
+            workspace_skill_dir=getattr(config, "workspace_skill_dir", None),
+        )
+    )
+
+
 def prepare_skill_contexts(
     messages: list[dict],
     request: ChatRequest,
     mode: str,
+    extra_commands: dict[str, str] | None = None,
+    allowed_skills: set[str] | None = None,
 ) -> list[dict]:
     """Resolve which skills this turn activates, for the agent to inject.
 
@@ -417,7 +456,12 @@ def prepare_skill_contexts(
         last_msg = messages[-1]
         msg_text, text_block = _slash_text_target(last_msg.get("content"))
         if msg_text:
-            cleaned_text, detected = detect_slash_commands(msg_text, mode=mode)
+            cleaned_text, detected = detect_slash_commands(
+                msg_text,
+                mode=mode,
+                extra_commands=extra_commands,
+                allowed_skills=allowed_skills,
+            )
             if detected:
                 skill_contexts = detected
                 if cleaned_text != msg_text:
