@@ -25,6 +25,7 @@ from ptc_agent.config.core import (
     create_default_security_config,
     validate_daytona_api_key,
 )
+from ptc_agent.config.plugins import bundled_skill_dirs
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
@@ -101,6 +102,29 @@ class FlashConfig(BaseModel):
     enabled: bool = True
 
 
+DEFAULT_USER_SKILLS_DIR = "~/.ptc-agent/skills"
+
+
+def host_skill_dirs(
+    user_skills_dir: str = DEFAULT_USER_SKILLS_DIR,
+    project_skills_dir: str = "skills",
+    *,
+    cwd: Path | None = None,
+) -> list[Path]:
+    """Return host skill sources in their last-wins resolution order.
+
+    Bundled packages are the platform source of truth. The legacy project
+    directory remains in the chain so local product skills keep their existing
+    precedence while the migration is validated.
+    """
+    base = cwd or Path.cwd()
+    return [
+        *bundled_skill_dirs(),
+        Path(user_skills_dir).expanduser(),
+        (base / project_skills_dir).resolve(),
+    ]
+
+
 class SkillsConfig(BaseModel):
     """Skills configuration for agent capabilities.
 
@@ -113,7 +137,7 @@ class SkillsConfig(BaseModel):
     """
 
     enabled: bool = True
-    user_skills_dir: str = "~/.ptc-agent/skills"
+    user_skills_dir: str = DEFAULT_USER_SKILLS_DIR
     project_skills_dir: str = (
         "skills"  # Project skills directory (relative to project root)
     )
@@ -129,12 +153,13 @@ class SkillsConfig(BaseModel):
         """
         base = cwd or Path.cwd()
 
-        user_dir = str(Path(self.user_skills_dir).expanduser())
-        project_dir = str((base / self.project_skills_dir).resolve())
-
         sources: list[tuple[str, str]] = [
-            (user_dir, self.sandbox_skills_base),
-            (project_dir, self.sandbox_skills_base),
+            (str(source), self.sandbox_skills_base)
+            for source in host_skill_dirs(
+                self.user_skills_dir,
+                self.project_skills_dir,
+                cwd=base,
+            )
         ]
         return sources
 

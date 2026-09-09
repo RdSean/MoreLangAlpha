@@ -1,10 +1,15 @@
 """Pydantic models for user records and preferences."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+def normalize_instrument_type(value: Any) -> Any:
+    """Normalize optional finance instrument types without changing local models."""
+    return value.strip().lower() if isinstance(value, str) else value
 
 
 class AgentPreference(BaseModel):

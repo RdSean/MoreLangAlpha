@@ -16,3 +16,8 @@ def get_encryption_key() -> str:
             "Required for encrypting sensitive data at rest."
         )
     return key
+
+
+def encryption_configured() -> bool:
+    """Return whether encrypted stores can be used in this deployment."""
+    return bool(os.getenv("BYOK_ENCRYPTION_KEY"))

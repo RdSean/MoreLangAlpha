@@ -68,6 +68,7 @@ INTERNAL_SERVER_ERROR_DETAIL = "Internal Server Error"
 
 # Global variables
 agent_config = None  # PTC Agent configuration (loaded from config files)
+bundle_owners = None  # Bundled component ownership snapshot used for enforcement
 session_service = None  # PTC Session service instance
 workspace_manager = None  # Workspace manager instance
 checkpointer = None  # PTC Agent LangGraph checkpointer for state persistence
@@ -179,6 +180,7 @@ async def lifespan(app: FastAPI):
     """Initialize resources when server starts, cleanup when stops."""
     global \
         agent_config, \
+        bundle_owners, \
         session_service, \
         workspace_manager, \
         checkpointer, \
@@ -280,6 +282,13 @@ async def lifespan(app: FastAPI):
 
         logger.info("Loading PTC Agent configuration...")
         agent_config = await load_from_files(context=ConfigContext.SDK)
+
+        # Freeze bundle ownership alongside the composed agent config. Runtime
+        # enforcement must match the MCP/Skills set loaded at startup, even if
+        # files on disk change while the process is running.
+        from src.server.services.plugins.bundled import component_owners
+
+        bundle_owners = component_owners()
 
         from src.server.services.platform_secret_rollout import (
             reconcile_platform_secrets_at_boot,

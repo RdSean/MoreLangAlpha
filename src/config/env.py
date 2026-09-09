@@ -22,6 +22,10 @@ def _positive_int(name: str, default: int) -> int:
 # Deployment mode: "oss" (self-hosted) or "platform" (hosted quota service).
 HOST_MODE: str = os.getenv("HOST_MODE", "oss")
 
+# Hosted auth and local OSS identity used by platform management routes.
+SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+LOCAL_DEV_USER_ID: str = os.getenv("AUTH_USER_ID", "local-dev-user")
+
 # Local authentication session policy. Secure cookies must be enabled behind HTTPS.
 LOCAL_AUTH_SESSION_TTL_DAYS: int = int(os.getenv("LOCAL_AUTH_SESSION_TTL_DAYS", "14"))
 AUTH_COOKIE_SECURE: bool = os.getenv("AUTH_COOKIE_SECURE", "false").strip().lower() in {
@@ -57,8 +61,23 @@ DB_SSLMODE: str = os.getenv("DB_SSLMODE", "prefer")
 # Only enforced in platform mode; OSS deployments are ungated.
 SEARCH_PROVIDER_MIN_TIER: int = int(os.getenv("SEARCH_PROVIDER_MIN_TIER", "1"))
 
+# Optional platform market-data endpoint used by restored validation bundles.
+GINLIX_DATA_URL: str = os.getenv("GINLIX_DATA_URL", "")
+GINLIX_DATA_WS_URL: str = os.getenv("GINLIX_DATA_WS_URL", "") or (
+    GINLIX_DATA_URL.replace("http://", "ws://").replace("https://", "wss://")
+    if GINLIX_DATA_URL
+    else ""
+)
+GINLIX_DATA_ENABLED: bool = bool(GINLIX_DATA_URL)
+
+EGRESS_RELAY_SECRET: str = os.getenv("EGRESS_RELAY_SECRET", "")
+EGRESS_RELAY_BASE_URL: str = os.getenv("EGRESS_RELAY_BASE_URL", "")
+
 # Public base URL of this server (used in agent-generated URLs like preview links)
 SERVER_BASE_URL: str = os.getenv("SERVER_BASE_URL", "http://localhost:8000")
+
+# Optional OAuth client metadata document. Empty keeps dynamic registration.
+MCP_CLIENT_METADATA_URL: str = os.getenv("MCP_CLIENT_METADATA_URL", "")
 
 # Internal base URL the server-side PDF renderer (headless Chromium) loads
 # workspace HTML from. Must be the server's own loopback listen address so

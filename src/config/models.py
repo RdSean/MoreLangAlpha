@@ -123,12 +123,15 @@ class RedisTTLConfig(BaseModel):
 
     results_list: int = Field(default=300, description="Results list cache TTL (5 minutes)")
     result_detail: int = Field(default=900, description="Result detail cache TTL (15 minutes)")
-    metadata: int = Field(default=900, description="Metadata cache TTL (15 minutes)")
+    metadata: int = Field(default=900, description="Metadata tags/tickers cache TTL (15 minutes)")
     metadata_summary: int = Field(
         default=600, description="Metadata summary cache TTL (10 minutes)"
     )
     workflow_events: int = Field(
         default=86400, description="Workflow event buffer TTL (24 hours)"
+    )
+    ohlcv: Dict[str, int] = Field(
+        default_factory=dict, description="Per-interval OHLCV cache TTLs"
     )
     workflow_status: int = Field(
         default=3600, description="TTL for completed/cancelled workflow status keys (1 hour)"
@@ -139,6 +142,7 @@ class RedisTTLConfig(BaseModel):
     steering: int = Field(
         default=3600, description="TTL for steering message Redis keys (1 hour)"
     )
+    market_watch: int = Field(default=21600, description="Market watch list TTL in seconds")
     memo_metadata_inflight: int = Field(
         default=300,
         description=(
@@ -206,6 +210,36 @@ class RedisConfig(BaseModel):
     swr: RedisSWRConfig = Field(default_factory=RedisSWRConfig)
 
 
+class MarketDataProviderConfig(BaseModel):
+    """Configuration for one market data provider in the fallback chain."""
+
+    name: str
+    markets: List[str] = Field(default_factory=lambda: ["all"])
+    intraday_markets: Optional[List[str]] = None
+    daily_markets: Optional[List[str]] = None
+    snapshot_markets: Optional[List[str]] = None
+
+
+class MarketDataConfig(BaseModel):
+    providers: List[MarketDataProviderConfig] = Field(default_factory=list)
+
+
+class NewsDataConfig(BaseModel):
+    providers: List[MarketDataProviderConfig] = Field(default_factory=list)
+
+
+class NewsPollFeedConfig(BaseModel):
+    provider: str | None = Field(default=None)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class NewsPollConfig(BaseModel):
+    enabled: bool = Field(default=True)
+    interval_seconds: int = Field(default=60, ge=10)
+    max_items: int = Field(default=100, ge=1, le=500)
+    feeds: List[NewsPollFeedConfig] = Field(default_factory=list)
+
+
 class FeatureFlagOverride(BaseModel):
     """Deployment override for a code-declared feature (src/config/features.py).
 
@@ -226,6 +260,14 @@ class FeatureFlagOverride(BaseModel):
     min_tier: Optional[int] = Field(
         default=None, description="Plan gate only: minimum platform access tier"
     )
+
+
+class MarketWatchConfig(BaseModel):
+    """Market watch tuning; feature availability is controlled by FEATURES."""
+
+    min_interval_seconds: int = Field(default=25, ge=5)
+    max_symbols: int = Field(default=10, ge=1, le=50)
+    cache_breakpoint_pin: bool = Field(default=True)
 
 
 class WorkflowOrchestrationConfig(BaseModel):
@@ -379,12 +421,19 @@ class ChannelGatewayConfig(BaseModel):
         return self
 
 
+class PromptConfig(BaseModel):
+    """Deployment-wide prompt scaffolding preference."""
+
+    guidance: Literal["auto", "lean", "detailed"] = Field(default="auto")
+
+
 class InfrastructureConfig(BaseModel):
     """Root model for infrastructure configuration (config.yaml)."""
 
     model_config = ConfigDict(extra="allow")
 
     # Application Settings
+    prompt: PromptConfig = Field(default_factory=PromptConfig)
     debug: bool = Field(default=False, description="Debug mode flag")
     ptc_recursion_limit: int = Field(default=2000, ge=1, le=10000, description="PTC agent recursion limit")
     flash_recursion_limit: int = Field(default=500, ge=1, le=10000, description="Flash agent recursion limit")
@@ -411,6 +460,7 @@ class InfrastructureConfig(BaseModel):
         default=True, description="Enable Redis cache warming on startup"
     )
     langsmith_tracing: bool = Field(default=False, description="Enable LangSmith tracing")
+    market_watch: MarketWatchConfig = Field(default_factory=MarketWatchConfig)
     # User-facing product features (deployment overrides of the code catalog
     # in src/config/features.py). Distinct from the infra toggles above, which
     # are operator-only and never exposed to users.
@@ -442,6 +492,11 @@ class InfrastructureConfig(BaseModel):
 
     # Redis Cache
     redis: RedisConfig = Field(default_factory=RedisConfig)
+
+    # Market data and news provider chains
+    market_data: MarketDataConfig = Field(default_factory=MarketDataConfig)
+    news_data: NewsDataConfig = Field(default_factory=NewsDataConfig)
+    news_poll: NewsPollConfig = Field(default_factory=NewsPollConfig)
 
     # External channel gateway controls
     channels: ChannelGatewayConfig = Field(default_factory=ChannelGatewayConfig)

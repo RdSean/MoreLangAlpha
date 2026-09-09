@@ -168,3 +168,22 @@ Skills middleware/registry and sandbox sync consume user/workspace skill rows.
 `MCPServerConfig` accepts user-tier servers and `oauth_connection_id`. Static
 Python compilation passed. FastAPI-level backend tests are pending because the
 current backend image does not contain the local branch's `argon2` dependency.
+
+## Configuration composition checkpoint (2026-09-09)
+
+- Restored the remote `market_watch` feature catalog and its deployment config,
+  including market/news provider chains, OHLCV TTLs and market-watch tuning.
+  Local `channels`, education timeouts and other business-specific settings
+  remain in `InfrastructureConfig` and `config.yaml`.
+- Added the optional local-session `OptionalUserId` dependency required by the
+  merged Skills management route without replacing the local Cookie auth path.
+- Corrected the MCP route to import discovery rows from the dedicated
+  `mcp_tool_schemas` module and added the startup `bundle_owners` snapshot used
+  by runtime enforcement.
+- Verified 93 focused configuration, bundled-plugin, Egress-session-binding and
+  Skills-delivery tests in the isolated test container. The container was
+  temporarily supplemented with `quickjs-rs` and `wechatbot-sdk`; these are
+  already declared project dependencies and no credentials were committed.
+- `056_workspace_file_blobs` remains intentionally deferred. The current branch
+  still persists workspace file bytes inline in PostgreSQL; unconnected blob and
+  persistence modules are not part of this checkpoint.

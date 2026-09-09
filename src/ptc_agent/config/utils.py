@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from ptc_agent.config.core import (
         DaytonaConfig,
@@ -89,7 +91,7 @@ DAYTONA_REQUIRED_FIELDS = [
     "python_version",
 ]
 
-MCP_REQUIRED_FIELDS = ["servers", "tool_discovery_enabled"]
+MCP_REQUIRED_FIELDS = ["tool_discovery_enabled"]
 
 LOGGING_REQUIRED_FIELDS = ["level", "file"]
 
@@ -221,16 +223,38 @@ def create_mcp_config(data: dict[str, Any]) -> MCPConfig:
         Configured MCPConfig object
     """
     from ptc_agent.config.core import MCPConfig, MCPServerConfig
+    from ptc_agent.config.plugins import bundled_mcp_servers
 
     validate_section_fields(data, MCP_REQUIRED_FIELDS, "mcp")
-    # Built-ins from agent_config.yaml are always source="builtin"; an explicit
-    # ``source`` key in YAML is ignored so a config file can't mark a server as
-    # an (untrusted) workspace server. ``headers`` passes through as a model
-    # field (built-ins may declare http/sse headers too).
-    mcp_servers = [
-        MCPServerConfig(**{k: v for k, v in server.items() if k != "source"})
-        for server in data["servers"]
-    ]
+    mcp_servers = bundled_mcp_servers()
+    bundled_count = len(mcp_servers)
+    overridden = 0
+    index = {server.name: position for position, server in enumerate(mcp_servers)}
+    for server in data.get("servers") or []:
+        fields = {key: value for key, value in server.items() if key != "source"}
+        position = index.get(fields.get("name"))
+        if position is None:
+            config = MCPServerConfig(**fields)
+            index[config.name] = len(mcp_servers)
+            mcp_servers.append(config)
+            continue
+
+        base = mcp_servers[position]
+        mcp_servers[position] = MCPServerConfig(**{**base.model_dump(), **fields})
+        overridden += 1
+        logger.info(
+            "agent_config.yaml overrides bundled MCP server %r: %s",
+            base.name,
+            ", ".join(sorted(key for key in fields if key != "name")) or "nothing",
+        )
+
+    logger.info(
+        "MCP servers configured: %d (%d bundled, %d added, %d overridden)",
+        len(mcp_servers),
+        bundled_count,
+        len(mcp_servers) - bundled_count,
+        overridden,
+    )
     return MCPConfig(
         servers=mcp_servers,
         tool_discovery_enabled=data["tool_discovery_enabled"],

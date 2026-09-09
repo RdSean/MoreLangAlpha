@@ -52,6 +52,69 @@ class FeatureNotOverridableError(PermissionError):
     """The feature's gate does not accept per-user overrides."""
 
 
+async def _get_skills_prefs(user_id: str) -> dict[str, Any]:
+    prefs = await get_user_preferences(user_id)
+    other = (prefs or {}).get("other_preference") or {}
+    skills = other.get("skills")
+    return dict(skills) if isinstance(skills, dict) else {}
+
+
+def _parse_disabled(skills: dict[str, Any]) -> set[str]:
+    raw = skills.get("disabled_builtins")
+    return {str(name) for name in raw} if isinstance(raw, list) else set()
+
+
+async def get_disabled_builtin_skills(user_id: str) -> frozenset[str]:
+    return frozenset(_parse_disabled(await _get_skills_prefs(user_id)))
+
+
+async def get_skill_command_overrides(user_id: str) -> dict[str, str]:
+    raw = (await _get_skills_prefs(user_id)).get("command_overrides")
+    return {str(k): str(v) for k, v in raw.items() if v} if isinstance(raw, dict) else {}
+
+
+async def _write_skills_prefs(user_id: str, skills: dict[str, Any]) -> None:
+    await upsert_user_preferences(
+        user_id, other_preference={"skills": skills or None}
+    )
+    await invalidate_user_prefs_cache(user_id)
+
+
+async def set_builtin_skill_disabled(
+    user_id: str, name: str, disabled: bool
+) -> frozenset[str]:
+    skills = await _get_skills_prefs(user_id)
+    current = _parse_disabled(skills)
+    if disabled:
+        current.add(name)
+    else:
+        current.discard(name)
+    if current:
+        skills["disabled_builtins"] = sorted(current)
+    else:
+        skills.pop("disabled_builtins", None)
+    await _write_skills_prefs(user_id, skills)
+    return frozenset(current)
+
+
+async def set_skill_command_override(
+    user_id: str, name: str, command: str | None
+) -> dict[str, str]:
+    skills = await _get_skills_prefs(user_id)
+    raw = skills.get("command_overrides")
+    overrides = dict(raw) if isinstance(raw, dict) else {}
+    if command is None:
+        overrides.pop(name, None)
+    else:
+        overrides[name] = command
+    if overrides:
+        skills["command_overrides"] = overrides
+    else:
+        skills.pop("command_overrides", None)
+    await _write_skills_prefs(user_id, skills)
+    return {str(k): str(v) for k, v in overrides.items()}
+
+
 async def _get_overrides(user_id: str) -> dict[str, Any]:
     prefs = await get_user_preferences(user_id)
     other = (prefs or {}).get("other_preference") or {}

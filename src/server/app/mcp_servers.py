@@ -34,7 +34,6 @@ from src.server.database.mcp_servers import (
     create_catalog_server,
     delete_workspace_server,
     get_catalog_server,
-    get_tool_schemas,
     get_workspace_servers_and_version,
     insert_workspace_server,
     list_workspace_servers,
@@ -42,6 +41,7 @@ from src.server.database.mcp_servers import (
     update_catalog_server,
     upsert_workspace_server,
 )
+from src.server.database.mcp_tool_schemas import get_tool_schemas
 from src.server.database.vault_secrets import (
     create_secret as create_secret_db,
     delete_secret as delete_secret_db,

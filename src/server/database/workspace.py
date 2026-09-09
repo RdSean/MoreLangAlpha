@@ -903,3 +903,15 @@ async def get_preview_command(
     except Exception:
         logger.debug("Failed to read preview command", exc_info=True)
         return None
+
+
+async def get_running_workspace_ids_for_user(user_id: str) -> List[str]:
+    """Return running workspace ids for user-level invalidation fan-out."""
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT workspace_id FROM workspaces "
+                "WHERE user_id = %s AND status = 'running'",
+                (user_id,),
+            )
+            return [str(row[0]) for row in await cur.fetchall()]
