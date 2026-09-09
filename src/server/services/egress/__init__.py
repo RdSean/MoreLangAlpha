@@ -26,6 +26,12 @@ def fold_tool_name(name: str | None) -> str:
     return unicodedata.normalize("NFKC", name or "").strip().casefold()
 
 
+def folded_contains(names, candidate: str | None) -> bool:
+    """Case/Unicode-insensitive membership for tool policy sets."""
+    folded = fold_tool_name(candidate)
+    return any(fold_tool_name(name) == folded for name in names)
+
+
 class RelayError(StrEnum):
     """Every value the relay can put in ``X-Relay-Error``.
 

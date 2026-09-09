@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import secrets
 import shlex
 import time
 from collections.abc import Callable, Iterable
@@ -113,6 +114,10 @@ class PTCSandbox:
     @property
     def _unified_manifest_path(self) -> str:
         return f"{self._work_dir}/_internal/.sandbox_manifest.json"
+
+    @property
+    def _egress_relay_file_path(self) -> str:
+        return f"{self._work_dir}/_internal/.egress_relay.json"
 
     # ── Effective vs built-in server views ───────────────────────────────
     #
@@ -399,6 +404,10 @@ class PTCSandbox:
     async def setup_tools_and_mcp(
         self,
         snapshot_name: str | None,
+        *,
+        tokens: dict | None = None,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         """Install tool modules and start MCP servers.
 
@@ -406,6 +415,7 @@ class PTCSandbox:
 
         Args:
             snapshot_name: Snapshot name from setup_sandbox_workspace(), or None
+            tokens: Optional scoped data-service tokens for the sandbox.
         """
         logger.info("Setting up tools and MCP servers")
 
@@ -414,6 +424,8 @@ class PTCSandbox:
             self._upload_mcp_server_files_impl(),  # → mcp_servers/
             self._upload_internal_packages(),  # → _internal/src/
         ]
+        if tokens:
+            parallel.append(self.upload_token_file(tokens))
         await asyncio.gather(*parallel)
 
         # Generate and install tool modules after mcp_servers (intent: derived from MCP definitions)
@@ -431,12 +443,26 @@ class PTCSandbox:
 
         # Write initial unified manifest so subsequent syncs can diff against it
         try:
-            manifest = await self._compute_sandbox_manifest()
+            manifest = await self._compute_sandbox_manifest(
+                tokens=tokens, user_id=user_id, workspace_id=workspace_id
+            )
             await self._write_unified_manifest(manifest)
         except Exception as e:
             logger.warning("Failed to write initial unified manifest", error=str(e))
 
         logger.info("Tools and MCP servers ready", sandbox_id=self.sandbox_id)
+
+    async def upload_token_file(self, tokens: dict) -> None:
+        """Write scoped data-service tokens into the sandbox internal area."""
+        if not tokens or not self.runtime:
+            return
+        payload = json.dumps(tokens, sort_keys=True).encode("utf-8")
+        await self._runtime_call(
+            self.runtime.upload_file,
+            payload,
+            f"{self._work_dir}/_internal/.mcp_tokens.json",
+            retry_policy=RetryPolicy.SAFE,
+        )
 
     async def upload_vault_secrets(self, secrets: dict[str, str]) -> None:
         """Write (or remove) vault secrets JSON in the sandbox.
@@ -474,6 +500,48 @@ class PTCSandbox:
             logger.info("Uploaded vault secrets file", path=vault_path)
         except Exception as e:
             logger.warning("Failed to upload vault secrets file", error=str(e))
+
+    async def upload_egress_relay_credentials(self, payload: dict | None) -> bool:
+        """Atomically publish or remove the sandbox relay credential file."""
+        if not self.runtime:
+            return False
+        path = self._egress_relay_file_path
+        if not payload:
+            try:
+                result = await self._runtime_call(
+                    self.runtime.exec,
+                    f"rm -f {shlex.quote(path)}",
+                    retry_policy=RetryPolicy.SAFE,
+                )
+                return getattr(result, "exit_code", 0) == 0
+            except Exception:
+                return False
+        tmp = f"{path}.{secrets.token_hex(8)}.tmp"
+        try:
+            await self._runtime_call(
+                self.runtime.upload_file,
+                json.dumps(payload, sort_keys=True).encode("utf-8"),
+                tmp,
+                retry_policy=RetryPolicy.SAFE,
+            )
+            result = await self._runtime_call(
+                self.runtime.exec,
+                "chmod 600 {t} && python3 -c "
+                "'import os,sys; os.replace(sys.argv[1], sys.argv[2])' "
+                "{t} {p}".format(t=shlex.quote(tmp), p=shlex.quote(path)),
+                retry_policy=RetryPolicy.SAFE,
+            )
+            return getattr(result, "exit_code", -1) == 0
+        except Exception:
+            try:
+                await self._runtime_call(
+                    self.runtime.exec,
+                    f"rm -f {shlex.quote(tmp)}",
+                    retry_policy=RetryPolicy.SAFE,
+                )
+            except Exception:
+                pass
+            return False
 
     async def ensure_sandbox_ready(self) -> None:
         await self._wait_ready()
@@ -1050,15 +1118,36 @@ class PTCSandbox:
     def _compute_user_mcp_config_hash(self) -> str:
         return _assets._compute_user_mcp_config_hash(self)
 
-    async def _compute_skills_module(self, skill_roots: list[str]) -> dict[str, Any]:
-        return await _assets._compute_skills_module(self, skill_roots)
+    async def _compute_skills_module(
+        self,
+        skill_roots: list[str],
+        *,
+        managed_root: str | None = None,
+        disabled: frozenset[str] = frozenset(),
+    ) -> dict[str, Any]:
+        return await _assets._compute_skills_module(
+            self, skill_roots, managed_root=managed_root, disabled=disabled
+        )
 
     async def _compute_sandbox_manifest(
         self,
         *,
         skill_roots: list[str] | None = None,
+        managed_skill_root: str | None = None,
+        disabled_skills: frozenset[str] = frozenset(),
+        tokens: dict | None = None,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> dict[str, Any]:
-        return await _assets._compute_sandbox_manifest(self, skill_roots=skill_roots)
+        return await _assets._compute_sandbox_manifest(
+            self,
+            skill_roots=skill_roots,
+            managed_skill_root=managed_skill_root,
+            disabled_skills=disabled_skills,
+            tokens=tokens,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        )
 
     async def _read_unified_manifest(self) -> dict[str, Any] | None:
         return await _assets._read_unified_manifest(self)
@@ -1076,11 +1165,27 @@ class PTCSandbox:
         self,
         *,
         skill_dirs: list[tuple[str, str]] | None = None,
+        user_skill_dir: tuple[str, str] | None = None,
+        disabled_skills: frozenset[str] = frozenset(),
         reusing_sandbox: bool = False,
         force_refresh: bool = False,
+        tokens: dict | None = None,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
         on_progress: Callable[[str], None] | None = None,
     ) -> SyncResult:
-        return await _assets.sync_sandbox_assets(self, skill_dirs=skill_dirs, reusing_sandbox=reusing_sandbox, force_refresh=force_refresh, on_progress=on_progress)
+        return await _assets.sync_sandbox_assets(
+            self,
+            skill_dirs=skill_dirs,
+            user_skill_dir=user_skill_dir,
+            disabled_skills=disabled_skills,
+            reusing_sandbox=reusing_sandbox,
+            force_refresh=force_refresh,
+            tokens=tokens,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            on_progress=on_progress,
+        )
 
     async def _prune_disabled_tool_modules(self) -> None:
         return await _assets._prune_disabled_tool_modules(self)

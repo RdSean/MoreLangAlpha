@@ -9,7 +9,6 @@ import asyncio
 import hashlib
 import json
 import shlex
-import textwrap
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -91,7 +90,13 @@ def _compute_user_mcp_config_hash(sandbox: "PTCSandbox") -> str:
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
-async def _compute_skills_module(sandbox: "PTCSandbox", skill_roots: list[str]) -> dict[str, Any]:
+async def _compute_skills_module(
+    sandbox: "PTCSandbox",
+    skill_roots: list[str],
+    *,
+    managed_root: str | None = None,
+    disabled: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
     """Compute a skills module manifest with content-based SHA-256 hashing.
 
         Unlike the legacy ``_compute_skills_manifest`` (size+mtime), this hashes
@@ -115,6 +120,7 @@ async def _compute_skills_module(sandbox: "PTCSandbox", skill_roots: list[str]) 
             root = Path(root_str).expanduser()
             if not root.exists():
                 continue
+            is_managed_root = managed_root is not None and root_str == managed_root
 
             for skill_dir in root.iterdir():
                 if not skill_dir.is_dir():
@@ -123,6 +129,8 @@ async def _compute_skills_module(sandbox: "PTCSandbox", skill_roots: list[str]) 
                     continue
 
                 skill_name = skill_dir.name
+                if skill_name in disabled:
+                    continue
                 # Skip flash-only skills (not needed in sandbox)
                 if (
                     skill_name not in sandbox_skill_names
@@ -155,17 +163,31 @@ async def _compute_skills_module(sandbox: "PTCSandbox", skill_roots: list[str]) 
                 meta = parse_skill_metadata(content, sandbox_path, skill_name)
                 skills_metadata[skill_name] = dict(meta)
 
-                # Build lock entry for platform skill
-                from ptc_agent.agent.middleware.skills.lock import build_lock_entry
+                # Build lock entries for platform skills and server-managed
+                # user skills with distinct ownership so reconciliation can
+                # replace only the managed tier.
+                from ptc_agent.agent.middleware.skills.lock import (
+                    MANAGED_SOURCE_TYPE,
+                    build_lock_entry,
+                )
 
                 content_hash = f"sha256:{_sha256_file(skill_dir / 'SKILL.md')}"
-                lock_entry = build_lock_entry(
-                    meta,
-                    owner="platform",
-                    source="platform",
-                    source_type="platform",
-                    content_hash=content_hash,
-                )
+                if is_managed_root:
+                    lock_entry = build_lock_entry(
+                        meta,
+                        owner="user",
+                        source=f"user:{skill_name}",
+                        source_type=MANAGED_SOURCE_TYPE,
+                        content_hash=content_hash,
+                    )
+                else:
+                    lock_entry = build_lock_entry(
+                        meta,
+                        owner="platform",
+                        source="platform",
+                        source_type="platform",
+                        content_hash=content_hash,
+                    )
                 skills_metadata[skill_name]["lock_entry"] = dict(lock_entry)
 
         version = _hash_dict(files)
@@ -194,6 +216,11 @@ async def _compute_sandbox_manifest(
     sandbox: "PTCSandbox",
     *,
     skill_roots: list[str] | None = None,
+    managed_skill_root: str | None = None,
+    disabled_skills: frozenset[str] = frozenset(),
+    tokens: dict | None = None,
+    user_id: str | None = None,
+    workspace_id: str | None = None,
 ) -> dict[str, Any]:
     """Compute the unified local manifest for all sandbox asset modules."""
     modules: dict[str, Any] = {}
@@ -268,7 +295,24 @@ async def _compute_sandbox_manifest(
 
     # ── Module: skills ──
     if skill_roots:
-        modules["skills"] = await sandbox._compute_skills_module(skill_roots)
+        modules["skills"] = await sandbox._compute_skills_module(
+            skill_roots,
+            managed_root=managed_skill_root,
+            disabled=disabled_skills,
+        )
+
+    if tokens:
+        token_config = {
+            "user_id": user_id or "",
+            "workspace_id": workspace_id or "",
+            "client_id": tokens.get("client_id", ""),
+        }
+        modules["tokens"] = {
+            "version": _hash_dict(token_config),
+            "minted_at": time.time(),
+            "user_id": user_id or "",
+            "workspace_id": workspace_id or "",
+        }
 
     return {
         "schema_version": 1,
@@ -440,8 +484,13 @@ async def sync_sandbox_assets(
     sandbox: "PTCSandbox",
     *,
     skill_dirs: list[tuple[str, str]] | None = None,
+    user_skill_dir: tuple[str, str] | None = None,
+    disabled_skills: frozenset[str] = frozenset(),
     reusing_sandbox: bool = False,
     force_refresh: bool = False,
+    tokens: dict | None = None,
+    user_id: str | None = None,
+    workspace_id: str | None = None,
     on_progress: Callable[[str], None] | None = None,
 ) -> SyncResult:
     """Sync all sandbox assets using a single unified manifest.
@@ -460,6 +509,10 @@ async def sync_sandbox_assets(
             SyncResult with list of refreshed module names.
         """
     await sandbox._wait_ready()
+
+    managed_root = user_skill_dir[0] if user_skill_dir else None
+    if user_skill_dir:
+        skill_dirs = list(skill_dirs or []) + [user_skill_dir]
 
     async with sandbox._tool_refresh_lock:
         await sandbox.ensure_sandbox_ready()
@@ -481,7 +534,14 @@ async def sync_sandbox_assets(
 
         _, local_manifest, remote_manifest = await asyncio.gather(
             sandbox._prune_disabled_tool_modules(),
-            sandbox._compute_sandbox_manifest(skill_roots=skill_roots),
+            sandbox._compute_sandbox_manifest(
+                skill_roots=skill_roots,
+                managed_skill_root=managed_root,
+                disabled_skills=disabled_skills,
+                tokens=tokens,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ),
             sandbox._read_unified_manifest(),
         )
         _mark_sync("manifest")
@@ -519,10 +579,11 @@ async def sync_sandbox_assets(
 
         async def _do_skills_upload() -> None:
             """Skills sub-chain: collect → prune → upload (internally sequential)."""
+            all_skill_dirs = skill_dirs or []
             local_skill_names = await sandbox._collect_local_skill_names(
-                [d for d, _ in skill_dirs]  # type: ignore[union-attr]
+                [d for d, _ in all_skill_dirs]
             )
-            sandbox_base = skill_dirs[-1][1].rstrip("/")  # type: ignore[index]
+            sandbox_base = (user_skill_dir or all_skill_dirs[-1])[1].rstrip("/")
 
             # Download existing lock file once (shared by prune + upload)
             existing_lock = await sandbox._download_skills_lock(sandbox_base)
@@ -533,7 +594,7 @@ async def sync_sandbox_assets(
             skills_mod = local_manifest["modules"].get("skills", {})
             if skills_mod.get("files"):
                 merged_lock = await sandbox._upload_skills(
-                    skill_dirs,
+                    all_skill_dirs,
                     manifest=skills_mod,  # type: ignore[arg-type]
                     existing_lock=existing_lock,
                 )
@@ -561,6 +622,8 @@ async def sync_sandbox_assets(
             if on_progress:
                 on_progress("Syncing skills...")
             parallel_uploads.append(("skills", _do_skills_upload()))
+        if "tokens" in changed_modules and tokens:
+            parallel_uploads.append(("tokens", sandbox.upload_token_file(tokens)))
         if parallel_uploads:
             await asyncio.gather(*[coro for _, coro in parallel_uploads])
             refreshed.extend(name for name, _ in parallel_uploads)

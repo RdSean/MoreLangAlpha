@@ -37,6 +37,11 @@ from urllib.parse import urlsplit
 
 from ptc_agent.config.core import MCPServerConfig
 from src.server.database.mcp_oauth import ConnectionStatus
+from src.server.services.tool_binding import (
+    BindingPlan,
+    inputs_from_row,
+    resolve_plan,
+)
 from src.server.services.brokerage_capabilities import (
     denied_tools,
     group_keys_for,
@@ -137,6 +142,7 @@ class ResolvedServer:
     # shipped brokerage. Empty is a real answer and distinct from None: it
     # means the user granted no group, so the server runs and offers nothing.
     denied_tools: frozenset[str] | None = None
+    binding_plan: BindingPlan | None = None
 
     @property
     def name(self) -> str:
@@ -187,6 +193,14 @@ class ResolvedMCP:
     @cached_property
     def shadowed_inherited_names(self) -> frozenset[str]:
         return self._names(Origin.USER, State.SHADOWED)
+
+    @cached_property
+    def binding_plans_by_name(self) -> dict[str, BindingPlan]:
+        return {
+            e.name: e.binding_plan
+            for e in self.entries
+            if e.state is State.ACTIVE and e.binding_plan is not None
+        }
 
     @cached_property
     def denied_tools_by_name(self) -> dict[str, frozenset[str]]:
@@ -545,6 +559,7 @@ async def resolve_mcp_config(
         for row in user_rows
         if row.get("plugin_name")
     }
+    user_row_by_name = {row["name"]: row for row in user_rows}
 
     def _denied_tools(cfg: MCPServerConfig) -> frozenset[str] | None:
         """What consent refuses for this server, or None if we curate no groups.
@@ -583,6 +598,15 @@ async def resolve_mcp_config(
         return denied_tools(vendor, capabilities or ())
 
     def _user_entry(cfg: MCPServerConfig, state: State) -> ResolvedServer:
+        connection = connection_by_server.get(cfg.name)
+        row = user_row_by_name.get(cfg.name)
+        binding_plan = None
+        if connection is not None:
+            binding_plan = resolve_plan(
+                vendor_for_url(connection.get("server_url")),
+                connection.get("granted_capabilities") or (),
+                inputs_from_row(row),
+            )
         return ResolvedServer(
             config=cfg,
             origin=Origin.USER,
@@ -590,6 +614,15 @@ async def resolve_mcp_config(
             oauth_status=oauth_status_by_name.get(cfg.name),
             plugin_name=plugin_name_by_server.get(cfg.name),
             denied_tools=_denied_tools(cfg),
+            binding_plan=binding_plan,
+        )
+
+    def _workspace_entry(cfg: MCPServerConfig, state: State) -> ResolvedServer:
+        return ResolvedServer(
+            config=cfg,
+            origin=Origin.WORKSPACE,
+            state=state,
+            binding_plan=None,
         )
 
     # Entry order IS the API's row order: the running set first (built-ins,
@@ -603,7 +636,7 @@ async def resolve_mcp_config(
         ),
         *(_user_entry(s, State.ACTIVE) for s in inherited_servers),
         *(
-            ResolvedServer(config=s, origin=Origin.WORKSPACE, state=State.ACTIVE)
+            _workspace_entry(s, State.ACTIVE)
             for s in local_servers
         ),
         *(
@@ -622,7 +655,7 @@ async def resolve_mcp_config(
         ),
         *(_user_entry(s, State.TOMBSTONED) for s in tombstoned_inherited),
         *(
-            ResolvedServer(config=s, origin=Origin.WORKSPACE, state=State.DISABLED)
+            _workspace_entry(s, State.DISABLED)
             for s in disabled_local_servers
         ),
         *(_user_entry(s, State.SHADOWED) for s in shadowed_inherited),

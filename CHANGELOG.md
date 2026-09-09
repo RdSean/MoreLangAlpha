@@ -897,3 +897,12 @@
 - 按本地迁移链追加 `052_in_flight_credits`，为主运行与子代理运行增加未结算额度字段、非负约束和部分索引，并验证升级回滚。
 - 按本地迁移链追加 `053_model_preference`，将模型相关偏好迁入独立 JSONB 列并保留非模型偏好，验证数据搬迁及升级回滚。
 - 按本地迁移链追加 `054_jsonb_deep_merge`，提供递归 JSONB 合并函数并验证嵌套合并、null 删除及升级回滚。
+## 2026-09-09
+
+### 平台运行时绑定迁移
+
+- sandbox manifest 支持用户/工作区 Skills 视图、禁用内置 Skills 与可选的作用域 token，并把对应内容变化纳入增量同步；本地教育托管会话保持原有隔离路径。
+- PTC 请求将当前 Skill delivery signature 传入 WorkspaceManager，用户 Skill 上传、删除或禁用后会绕过 warm cooldown 及时收敛。
+- MCP resolve 接入 connector binding plan、OAuth egress grant/JWT 同步，以及 direct-call 与 sandbox wrapper 的统一 schema 分流；无 OAuth 的旧会话继续使用原有兼容路径。
+- sandbox 增加 relay 凭据原子发布和 token manifest 上传能力；`056_workspace_file_blobs` 仍延期，未接入数据库文件存储主链。
+- 验证：sandbox MCP sync、WorkspaceManager MCP、Skills command、chat request preparation 共 `171 passed`。

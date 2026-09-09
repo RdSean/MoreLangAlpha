@@ -63,6 +63,7 @@ class Session:
         self.mcp_tool_summary: str | None = None
         self.mcp_config_version: int | None = None
         self.mcp_settled_servers: set[str] = set()
+        self.direct_mcp_tools: dict[str, object] = {}
         self.egress_binding: EgressBinding | None = None
         self.skills_signature: str | None = None
 

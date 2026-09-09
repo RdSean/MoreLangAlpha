@@ -4,15 +4,18 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+import httpx
+
 
 from ptc_agent.config import AgentConfig
-from ptc_agent.core.mcp_sanitize import is_user_server
+from ptc_agent.core.mcp_sanitize import is_untrusted_server, is_user_server
 from ptc_agent.core.sandbox.runtime import SandboxGoneError, SandboxTransientError
 from ptc_agent.core.session import Session, SessionManager
 
@@ -32,6 +35,11 @@ from src.observability.tracing import hash_id as _obs_hash_id
 from src.observability.tracing import safe_aspan
 
 from src.server.services.runs.executor import LocalRunExecutor
+from src.server.services.egress.session_binding import (
+    RelayBind,
+    maybe_remint_egress_jwt,
+    sync_egress_relay,
+)
 
 from src.server.database.workspace import (
     create_workspace as db_create_workspace,
@@ -340,6 +348,33 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             extra={"workspace_id": workspace_id},
         )
 
+    @staticmethod
+    async def _mint_sandbox_tokens(user_id: str, workspace_id: str) -> dict:
+        """Mint optional scoped data-service tokens for sandbox assets."""
+        auth_url = os.getenv("AUTH_SERVICE_URL", "")
+        service_token = os.getenv("INTERNAL_SERVICE_TOKEN", "")
+        data_url = os.getenv("GINLIX_DATA_URL", "")
+        if not auth_url or not service_token or not data_url:
+            return {}
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{auth_url.rstrip('/')}/api/auth/data-tokens",
+                    json={"user_id": user_id, "workspace_id": workspace_id},
+                    headers={"X-Service-Token": service_token},
+                    timeout=10,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                return payload if isinstance(payload, dict) else {}
+        except Exception as exc:
+            logger.warning(
+                "Failed to mint sandbox tokens; data-service features disabled: %s",
+                exc,
+                extra={"workspace_id": workspace_id},
+            )
+            return {}
+
     # ── Per-workspace MCP resolution + composite caching ────────────────
     #
     # Resolved once per session (under the slow path, never in the cooldown
@@ -379,6 +414,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             and session.mcp_config_version == ws_version
             and session.mcp_tool_summary is not None
         ):
+            await maybe_remint_egress_jwt(workspace_id, session)
             return None
 
         from src.server.services.mcp_config import resolve_mcp_config
@@ -395,10 +431,35 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             )
             return None
 
-        await self._install_session_composite(session, resolved)
+        egress_bind = RelayBind.APPLIED
+        had_egress_binding = (
+            getattr(session, "egress_binding", None) is not None
+            and isinstance(getattr(session.egress_binding, "grants", None), dict)
+        )
+        if any(
+            isinstance(getattr(server, "oauth_connection_id", None), str)
+            and bool(getattr(server, "oauth_connection_id", None))
+            for server in resolved.servers
+        ) or had_egress_binding:
+            try:
+                egress_bind = await sync_egress_relay(
+                    workspace_id, user_id, session, resolved
+                )
+            except Exception as exc:
+                logger.warning("[EGRESS] relay binding failed for %s: %s", workspace_id, exc)
+                egress_bind = RelayBind.REFUSED
+        await self._install_session_composite(session, resolved, user_id=user_id)
+        if egress_bind is RelayBind.SUPERSEDED:
+            session.direct_mcp_tools = {}
+            session.mcp_config_version = None
+            return None
+        if egress_bind is RelayBind.REFUSED:
+            session.mcp_config_version = None
         return resolved
 
-    async def _install_session_composite(self, session: Session, resolved: Any) -> None:
+    async def _install_session_composite(
+        self, session: Session, resolved: Any, *, user_id: str | None = None
+    ) -> None:
         """Build the composite registry + tool summary from ``resolved`` and stash.
 
         The session's CoreConfig is already a per-workspace deep copy, so we make
@@ -421,12 +482,20 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             sandbox.config.mcp.servers = list(resolved.servers)
         session.config.mcp.servers = list(resolved.servers)
 
-        # User servers (source='workspace') + their ok-status cached schemas.
-        user_servers = [s for s in resolved.servers if is_user_server(s)]
+        # Untrusted servers (workspace-local and inherited user rows) plus
+        # their current discovery snapshots. Direct bindings are split from
+        # the wrapper schemas using the same resolved policy as the relay.
+        user_servers = [s for s in resolved.servers if is_untrusted_server(s)]
         tool_schemas: dict[str, list[dict]] = {}
+        session.direct_mcp_tools = {}
         if user_servers:
+            from src.server.database.mcp_tool_schemas import get_user_tool_schemas
             from src.server.database.mcp_servers import get_tool_schemas
-            from src.server.services.mcp_discovery import mcp_discovery_fingerprint
+            from src.server.services.mcp_discovery import (
+                ToolSnapshotIndex,
+                mcp_discovery_fingerprint,
+            )
+            from src.server.services.mcp_tool_split import build_direct_entries
 
             # Load a cached snapshot only when it's for the server's CURRENT
             # config (hash match). A toggled/unrelated mutation leaves a server's
@@ -435,12 +504,23 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             # by background discovery.
             fp_by_name = {s.name: mcp_discovery_fingerprint(s) for s in user_servers}
             rows = await get_tool_schemas(session.conversation_id)
+            user_rows = await get_user_tool_schemas(user_id) if user_id else []
+            snapshots = ToolSnapshotIndex(
+                workspace_rows=rows,
+                user_rows=user_rows,
+            )
+            tool_schemas, session.direct_mcp_tools = build_direct_entries(
+                user_servers,
+                snapshots,
+                denied=getattr(resolved, "denied_tools_by_name", {}),
+                plans=getattr(resolved, "binding_plans_by_name", {}),
+            )
             for row in rows:
                 name = row["server_name"]
                 if row.get("status") == "ok" and row.get(
                     "config_hash"
                 ) == fp_by_name.get(name):
-                    tool_schemas[name] = row.get("tools") or []
+                    tool_schemas.setdefault(name, row.get("tools") or [])
 
         # Always build from the BUILTIN registry, never a prior composite —
         # session.mcp_registry may already be a composite from an earlier resolve.
@@ -543,7 +623,9 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                         self.config, user_id or "", workspace_id
                     )
                     if resolved.version == version and _session_live():
-                        await self._install_session_composite(session, resolved)
+                        await self._install_session_composite(
+                            session, resolved, user_id=user_id
+                        )
                         # Re-run sync so the new wrappers land in the sandbox.
                         await self._sync_sandbox_assets(
                             workspace_id,
@@ -620,9 +702,23 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                 _sync_times[name] = (time.time() - t0) * 1000
 
         async def _sync_assets() -> Any:
+            tokens = (
+                await self._mint_sandbox_tokens(user_id, workspace_id)
+                if reusing_sandbox and user_id
+                else {}
+            )
+            user_skill_params = await sandbox_skill_sync_params(
+                user_id,
+                self.config.skills.sandbox_skills_base,
+                workspace_id=workspace_id,
+            )
             return await sandbox.sync_sandbox_assets(
                 skill_dirs=skill_dirs,
                 reusing_sandbox=reusing_sandbox,
+                tokens=tokens or None,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                **user_skill_params,
             )
 
         tasks: list[Any] = [_timed("manifest", _sync_assets())]
@@ -734,7 +830,15 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
 
         session = SessionManager.get_session(workspace_id, core_config)
         try:
+            sandbox_tokens = (
+                await self._mint_sandbox_tokens(user_id, workspace_id)
+                if user_id
+                else {}
+            )
             await session.initialize(
+                sandbox_tokens=sandbox_tokens or None,
+                user_id=user_id,
+                workspace_id=workspace_id,
                 tier=tier,
                 auto_stop_minutes=auto_stop_minutes,
             )
@@ -1302,6 +1406,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         workspace_id: str,
         user_id: str | None = None,
         on_state_observed: Callable[[str], None] | None = None,
+        skills_signature: str | None = None,
         _attempt: int = 0,
     ) -> Session:
         """Get or restart a session for a workspace.
@@ -1411,8 +1516,14 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                 else:
                     # Sandbox ready — check if sync is needed
                     needs_deferred_sync = workspace_id in self._pending_lazy_sync
+                    skills_stale = (
+                        skills_signature is not None
+                        and session.skills_signature != skills_signature
+                    )
                     needs_sync = (
-                        not self._sync_cooldown_ok(workspace_id) or needs_deferred_sync
+                        not self._sync_cooldown_ok(workspace_id)
+                        or needs_deferred_sync
+                        or skills_stale
                     )
                     if not needs_sync:
                         # Cooldown active, skip expensive Daytona calls — warm fast
@@ -1691,6 +1802,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             mark=_mark,
             ws_mcp_version=ws_mcp_version,
             ws_platform_secret_version=ws_platform_secret_version,
+            skills_signature=skills_signature,
         )
 
         if _session_phases:
@@ -1764,6 +1876,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                 workspace_id,
                 user_id=user_id,
                 on_state_observed=on_state_observed,
+                skills_signature=skills_signature,
                 _attempt=attempt + 1,
             )
         raise RuntimeError(
@@ -1784,6 +1897,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         mark: Callable[[str], None],
         ws_mcp_version: int | None = None,
         ws_platform_secret_version: int | None = None,
+        skills_signature: str | None = None,
     ) -> Session | None:
         """Run the post-lock sync/promote step and return the usable session.
 
@@ -1932,7 +2046,10 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                         )
                         await update_workspace_activity(workspace_id)
                         self._pending_lazy_sync.discard(workspace_id)
-                elif mcp_changed:
+                elif mcp_changed or (
+                    skills_signature is not None
+                    and session.skills_signature != skills_signature
+                ):
                     # Warm re-sync path normally skips asset sync; a config-version
                     # delta means wrappers changed, so push them now (off the lock,
                     # bounded to changed modules by the manifest diff). No file
@@ -1944,6 +2061,9 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                         reusing_sandbox=True,
                     )
                     mark("mcp_asset_sync")
+
+                if skills_signature is not None:
+                    session.skills_signature = skills_signature
 
                 # Kick background discovery for user servers still lacking ok
                 # schemas (new/pending/error). Never awaited here and never under

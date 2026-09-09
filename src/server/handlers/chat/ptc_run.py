@@ -396,6 +396,12 @@ async def astream_ptc_workflow(
 
         subagents = request.subagents_enabled or config.subagents.enabled
         sandbox_id = None
+        from src.server.services.user_skills import skills_delivery_signature
+
+        skills_signature = skills_delivery_signature(
+            getattr(config, "user_skill_dir", None),
+            getattr(config, "disabled_skills", None) or (),
+        )
 
         # ``workspace_manager`` and ``needs_startup`` were resolved above for
         # the pre-steering stale-cancel hook. Reuse them — recomputing here
@@ -408,7 +414,7 @@ async def astream_ptc_workflow(
         # session in memory). The extra "starting/ready" SSE pair is harmless.
         if not needs_startup:
             session = await workspace_manager.get_session_for_workspace(
-                workspace_id, user_id=user_id
+                workspace_id, user_id=user_id, skills_signature=skills_signature
             )
         else:
             yield f"id: 0\nevent: workspace_status\ndata: {json.dumps({'status': 'starting', 'workspace_id': workspace_id})}\n\n"
@@ -431,6 +437,7 @@ async def astream_ptc_workflow(
                     workspace_id,
                     user_id=user_id,
                     on_state_observed=_on_state,
+                    skills_signature=skills_signature,
                 )
             )
 
@@ -555,6 +562,7 @@ async def astream_ptc_workflow(
             skill_contexts = None
         skill_dirs = (
             [local_dir for local_dir, _ in config.skills.local_skill_dirs_with_sandbox()]
+            + ([getattr(config, "user_skill_dir")] if getattr(config, "user_skill_dir", None) else [])
             if skill_contexts
             else None
         )

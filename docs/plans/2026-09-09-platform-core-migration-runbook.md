@@ -197,3 +197,22 @@ current backend image does not contain the local branch's `argon2` dependency.
 - `056_workspace_file_blobs` remains intentionally deferred. The current branch
   still persists workspace file bytes inline in PostgreSQL; unconnected blob and
   persistence modules are not part of this checkpoint.
+
+## Runtime binding checkpoint (2026-09-09)
+
+- Sandbox asset manifests now accept the managed user Skill view, disabled
+  builtin Skills and optional scoped data-service tokens. Token and Skill
+  changes participate in content-versioned syncs; local education-managed
+  sessions remain untouched.
+- Workspace session acquisition now accepts a per-turn Skill delivery
+  signature, bypassing the warm sync cooldown when a user/workspace Skill view
+  changes. PTC chat passes this signature into session acquisition.
+- MCP resolution now carries connector binding plans. OAuth-connected servers
+  synchronize relay grants/JWTs before composite installation; discovered tool
+  schemas are split into sandbox wrappers and direct-call entries using one
+  policy source. Non-OAuth and legacy test sessions retain the prior path.
+- Added the atomic sandbox relay credential writer and token manifest upload
+  hooks required by the runtime. `056_workspace_file_blobs` and its seven
+  untracked persistence helpers remain excluded from commits.
+- Focused verification: `171 passed` across sandbox MCP sync, WorkspaceManager
+  MCP, Skills commands and chat request preparation.

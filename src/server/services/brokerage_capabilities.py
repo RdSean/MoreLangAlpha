@@ -49,9 +49,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Literal, get_args
 
 from src.server.services.brokerages import brokerage_by_name, brokerage_for_url
 from src.server.services.egress import fold_tool_name
+
+Binding = Literal["ptc", "direct", "both"]
+ALL_BINDINGS: frozenset[Binding] = frozenset(get_args(Binding))
+BINDINGS: frozenset[str] = ALL_BINDINGS
 
 
 def vendor_for_url(server_url: str | None) -> str | None:
@@ -88,6 +93,14 @@ class CapabilityGroup:
     order: int
     tone: str
     rung: bool = False
+    default_binding: Binding = "ptc"
+    allowed_bindings: frozenset[Binding] = ALL_BINDINGS
+
+    def __post_init__(self) -> None:
+        if self.default_binding not in self.allowed_bindings:
+            raise ValueError(
+                f"{self.key!r}: default binding is not allowed"
+            )
 
 
 GROUPS: tuple[CapabilityGroup, ...] = (
@@ -96,10 +109,23 @@ GROUPS: tuple[CapabilityGroup, ...] = (
     CapabilityGroup(key="scanners", order=30, tone="neutral"),
     CapabilityGroup(key="alerts", order=40, tone="neutral"),
     CapabilityGroup(key="account", order=50, tone="caution"),
-    CapabilityGroup(key="paper_trading", order=60, tone="neutral", rung=True),
+    CapabilityGroup(
+        key="paper_trading",
+        order=60,
+        tone="neutral",
+        rung=True,
+        default_binding="direct",
+    ),
     CapabilityGroup(key="order_preview", order=70, tone="neutral", rung=True),
     CapabilityGroup(key="staged_orders", order=80, tone="caution", rung=True),
-    CapabilityGroup(key="trading", order=90, tone="danger", rung=True),
+    CapabilityGroup(
+        key="trading",
+        order=90,
+        tone="danger",
+        rung=True,
+        default_binding="direct",
+        allowed_bindings=frozenset({"direct"}),
+    ),
 )
 
 _BY_KEY: dict[str, CapabilityGroup] = {g.key: g for g in GROUPS}
@@ -532,6 +558,11 @@ def group_of_tool(brokerage: str | None, tool: str) -> str | None:
     user a declined tool is callable.
     """
     return _BY_TOOL.get(brokerage or "", {}).get(fold_tool_name(tool))
+
+
+def group_for_tool(brokerage: str | None, tool: str) -> CapabilityGroup | None:
+    key = group_of_tool(brokerage, tool)
+    return _BY_KEY.get(key) if key is not None else None
 
 
 def is_always_denied(brokerage: str | None, tool: str) -> bool:
