@@ -1,4 +1,4 @@
-import { BookOpenCheck, LayoutDashboard, LibraryBig, MessagesSquare, Settings, Timer } from 'lucide-react';
+import { Blocks, BookOpenCheck, LayoutDashboard, LibraryBig, MessagesSquare, Settings, Timer } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 export interface NavItem {
@@ -18,6 +18,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: '/documents', icon: LibraryBig, labelKey: 'sidebar.documents', match: 'exact-or-sub' },
   { key: '/automations', icon: Timer, labelKey: 'sidebar.automations', match: 'exact-or-sub' },
   { key: '/education', icon: BookOpenCheck, labelKey: 'sidebar.education', match: 'exact-or-sub' },
+  { key: '/plugins', icon: Blocks, labelKey: 'sidebar.plugins', match: 'exact-or-sub' },
 ];
 
 // Settings only appears in the mobile tab bar (desktop reaches it via AccountMenu).

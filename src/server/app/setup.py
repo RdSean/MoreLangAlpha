@@ -947,11 +947,16 @@ from src.server.app.automations import router as automations_router
 from src.server.app.oauth import router as oauth_router
 from src.server.app.public import router as public_router
 from src.server.app.skills import router as skills_router
+from src.server.app.skills import workspace_router as workspace_skills_router
 from src.server.app.vault import router as vault_router
 from src.server.app.memo import router as memo_router
 from src.server.app.memory import router as memory_router
 from src.server.app.workflows import include_workflow_router
 from src.server.app.mcp_catalog import router as mcp_catalog_router
+from src.server.app.mcp_oauth import router as mcp_oauth_router
+from src.server.app.plugins import router as plugins_router
+from src.server.app.user_vault import router as user_vault_router
+from src.server.app.egress_relay import router as egress_relay_router
 from src.server.app.mcp_servers import router as mcp_servers_router
 from src.server.app.speech import router as speech_router
 from src.server.app.channels import router as channels_router
@@ -991,6 +996,9 @@ app.include_router(
 )  # /api/v1/public/* - Public shared thread access (no auth)
 app.include_router(skills_router)  # /api/v1/skills - Available agent skills
 app.include_router(
+    workspace_skills_router
+)  # /api/v1/workspaces/{id}/skills - Workspace-scoped skills
+app.include_router(
     vault_router
 )  # /api/v1/workspaces/{id}/vault/secrets - Per-workspace secret storage
 app.include_router(
@@ -1003,6 +1011,18 @@ include_workflow_router(app)  # /api/v1/workflows/* - Reusable JavaScript workfl
 app.include_router(
     mcp_catalog_router
 )  # /api/v1/mcp/servers - User-level MCP server catalog (templates)
+app.include_router(
+    mcp_oauth_router
+)  # /api/v1/mcp/servers/{name}/oauth - MCP OAuth lifecycle
+app.include_router(
+    user_vault_router
+)  # /api/v1/mcp/vault/secrets - User-level vault
+app.include_router(
+    plugins_router
+)  # /api/v1/plugins/* - Agent Plugins packages
+app.include_router(
+    egress_relay_router
+)  # /v1/egress/{grant_id} - Sandbox egress relay
 app.include_router(
     mcp_servers_router
 )  # /api/v1/workspaces/{id}/mcp/servers - Per-workspace MCP server config

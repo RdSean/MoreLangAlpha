@@ -150,3 +150,14 @@ Upgrade preserves legacy allowlists and bumps OAuth workspace config versions;
 downgrade writes an empty allowlist before removing the denylist so rollback is
 fail-closed. Focused tests and live `054 -> 055 -> 054 -> 055` verification
 passed. The isolated database is now at `055_tool_denylist`.
+
+## Platform surface checkpoint (2026-09-09)
+
+The first platform surface batch is now present on the migration branch:
+Plugins, MCP OAuth, user Vault, egress relay, plugin/Skills services and their
+database accessors are restored from `origin/main`; local education, household,
+channel and document-library routes remain registered. The frontend Plugins
+page is reachable at `/plugins`, with `/connectors` retained as a redirect.
+Frontend type-check and production build pass. Remote workspace blob migration
+is intentionally deferred because this branch still persists workspace file
+bytes inline and has no blob-backed read/write path.

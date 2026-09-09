@@ -103,6 +103,7 @@
     "documents": "Knowledge Library",
     "automations": "Automations",
     "education": "Education",
+    "plugins": "Plugins",
     "settings": "Settings",
     "account": "Usage & Plan",
     "newChat": "New chat",
@@ -1650,5 +1651,11 @@
     "flashModelLabel": "Flash model",
     "notSet": "Not set",
     "notConfigured": "Not configured"
+  },
+  "plugins": {
+    "title": "Plugins",
+    "description": "MCP servers, skills, and credentials available to your agent.",
+    "tabs": { "mcp": "Connectors", "skills": "Skills", "secrets": "Secrets", "plugins": "Plugins", "brokerages": "Brokerages" },
+    "brokerages": { "capabilities": {} }
   }
 }

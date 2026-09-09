@@ -6,6 +6,8 @@ export const routeChunks = {
   documents: () => import('../../pages/Documents/DocumentsPage'),
   automations: () => import('../../pages/Automations/Automations'),
   education: () => import('../../pages/Education/EducationPage'),
+  plugins: () => import('../../pages/Plugins/Plugins'),
+  connectors: () => import('../../pages/Plugins/Plugins'),
   createHomework: () => import('../../pages/Education/EducationPage'),
   textbookLibrary: () => import('../../pages/Education/TextbooksPage'),
   textbookDetail: () => import('../../pages/Education/TextbookDetailPage'),
@@ -17,5 +19,5 @@ export const routeChunks = {
 export function preloadRouteChunk(pathname: string): void {
   const chunkFor: Record<string, () => Promise<unknown>> = routeChunks;
   const segment = pathname.split('/')[1] || 'dashboard';
-  void (chunkFor[segment] ?? routeChunks.dashboard)();
+  void (chunkFor[segment] ?? routeChunks.dashboard)().catch(() => {});
 }

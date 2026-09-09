@@ -103,6 +103,7 @@
     "documents": "知识库",
     "automations": "自动化",
     "education": "学习",
+    "plugins": "插件",
     "settings": "设置",
     "account": "用量与套餐",
     "newChat": "新对话",
@@ -1633,5 +1634,11 @@
     "flashModelLabel": "快速模型",
     "notSet": "未设置",
     "notConfigured": "未配置"
+  },
+  "plugins": {
+    "title": "插件",
+    "description": "可供智能体使用的 MCP 服务器、技能与凭据。",
+    "tabs": { "mcp": "连接器", "skills": "技能", "secrets": "密钥", "plugins": "插件", "brokerages": "券商" },
+    "brokerages": { "capabilities": {} }
   }
 }

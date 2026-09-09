@@ -5,28 +5,34 @@ import { VaultSecretPicker } from './VaultSecretPicker';
 import { McpDiscoverResult } from './McpDiscoverResult';
 import { parseMcpServersJson } from './mcpImport';
 import {
-  ALLOWED_COMMANDS,
+  SUGGESTED_COMMANDS,
   EXPOSURE_MODES,
   TRANSPORTS,
   collectVaultRefs,
   validateMcpServer,
 } from './mcpSchemas';
-import { formatApiErrorDetail, type McpServerInput, type McpDiscoveryResult, type EffectiveServer } from '../../utils/api';
+import {
+  formatApiErrorDetail,
+  type McpDiscoveryResult,
+  type McpServerDraft,
+  type McpServerInput,
+  type McpTransport,
+} from '../../utils/api';
 
 /**
  * Create/edit modal for a workspace (or catalog) MCP server.
  *
  * Transport selector drives conditional fields:
- *   - stdio → command (allowlist), args, env key/value editor
- *   - sse/http → url, headers key/value editor
+ *   - http/sse → url, headers key/value editor
+ *   - stdio → command (free text + suggestions), args, env key/value editor
  *
  * env/header values use `VaultSecretPicker` (emits `${vault:NAME}`).
- * `description` + `instruction` carry helper text marking them as untrusted,
- * user-provided context shown to the agent. An exposure-mode toggle picks
- * summary/detailed. "Test connection" runs the discovery probe.
+ * `description` + `instruction` both reach the agent's server manifest, so
+ * their helper text says what each one buys the user there rather than how the
+ * prompt layer treats it. An exposure-mode toggle picks summary/detailed.
+ * "Test connection" runs the discovery probe.
  */
 
-type Transport = (typeof TRANSPORTS)[number];
 type Exposure = (typeof EXPOSURE_MODES)[number];
 
 interface KV {
@@ -57,38 +63,35 @@ function mapToKVs(m: Record<string, string>): KV[] {
 }
 
 export interface McpServerModalProps {
-  workspaceId: string;
   /** Existing vault secret names for the picker. */
   secretNames: string[];
   /** When editing, the server being edited (its name field is locked). */
-  initial?: EffectiveServer | null;
+  initial?: McpServerDraft | null;
   /** Hide the "Test connection" button (e.g. in the catalog where there's no sandbox). */
   allowDiscover?: boolean;
   onClose: () => void;
   onSubmit: (body: McpServerInput) => Promise<void>;
   onDiscover?: (body: McpServerInput) => Promise<McpDiscoveryResult>;
-  onSecretCreated?: (name: string) => void;
+  /** Inline secret-create for the picker, into the tier this modal edits. */
+  createSecret: (body: { name: string; value: string }) => Promise<unknown>;
   saving?: boolean;
   submitError?: string | null;
 }
 
 export function McpServerModal({
-  workspaceId,
   secretNames,
   initial,
   allowDiscover = true,
   onClose,
   onSubmit,
   onDiscover,
-  onSecretCreated,
+  createSecret,
   saving = false,
   submitError = null,
 }: McpServerModalProps) {
   const isEdit = !!initial;
   const [name, setName] = useState(initial?.name ?? '');
-  const [transport, setTransport] = useState<Transport>(
-    (initial?.transport as Transport) ?? 'stdio',
-  );
+  const [transport, setTransport] = useState<McpTransport>(initial?.transport ?? 'stdio');
   const [command, setCommand] = useState(initial?.command ?? 'npx');
   const [args, setArgs] = useState<string[]>(initial?.args ?? []);
   const [url, setUrl] = useState(initial?.url ?? '');
@@ -283,7 +286,7 @@ export function McpServerModal({
                     placeholder={'{ "mcpServers": { "my-server": { "command": "npx", "args": ["-y", "pkg"] } } }'}
                     rows={4}
                     spellCheck={false}
-                    className="w-full px-2 py-1.5 text-[0.6875rem] rounded bg-transparent outline-none font-mono resize-none"
+                    className="w-full px-2 py-1.5 text-[0.6875rem] rounded bg-transparent font-mono resize-none"
                     style={{ color: 'var(--color-text-primary)', border: '1px solid var(--color-border-muted)' }}
                   />
                   <div className="flex items-center gap-2">
@@ -321,7 +324,7 @@ export function McpServerModal({
               onChange={(e) => setName(e.target.value)}
               disabled={isEdit}
               placeholder="my_server"
-              className="w-full px-3 py-2 text-sm rounded-md bg-transparent outline-none font-mono disabled:opacity-60"
+              className="w-full px-3 py-2 text-sm rounded-md bg-transparent font-mono disabled:opacity-60"
               style={{ color: 'var(--color-text-primary)', border: '1px solid var(--color-border-muted)' }}
               maxLength={64}
             />
@@ -351,21 +354,31 @@ export function McpServerModal({
           {/* stdio fields */}
           {transport === 'stdio' ? (
             <>
-              <Field label="Command">
-                <select
+              <Field label="Command" hint="Whatever the server's own instructions say to run.">
+                {/* Free text with suggestions rather than a picker: servers are
+                    published as npx, uvx, docker, deno, or a plain binary, and
+                    a closed list turns every unlisted one into a dead end. */}
+                <input
+                  type="text"
                   value={command ?? ''}
                   onChange={(e) => setCommand(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-md outline-none"
+                  list="mcp-command-suggestions"
+                  placeholder="npx"
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  className="w-full px-3 py-2 text-sm rounded-md"
                   style={{
                     color: 'var(--color-text-primary)',
                     backgroundColor: 'var(--color-bg-card)',
                     border: '1px solid var(--color-border-muted)',
                   }}
-                >
-                  {ALLOWED_COMMANDS.map((c) => (
-                    <option key={c} value={c}>{c}</option>
+                />
+                <datalist id="mcp-command-suggestions">
+                  {SUGGESTED_COMMANDS.map((c) => (
+                    <option key={c} value={c} />
                   ))}
-                </select>
+                </datalist>
                 <FieldError error={errorFor('command')} />
               </Field>
 
@@ -377,9 +390,8 @@ export function McpServerModal({
                 <KeyValueEditor
                   kvs={env}
                   onChange={setEnv}
-                  workspaceId={workspaceId}
                   secretNames={secretNames}
-                  onSecretCreated={onSecretCreated}
+                  createSecret={createSecret}
                   keyPlaceholder="ENV_VAR"
                 />
                 <FieldError error={errorFor('env')} />
@@ -393,7 +405,7 @@ export function McpServerModal({
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://example.com/mcp"
-                  className="w-full px-3 py-2 text-sm rounded-md bg-transparent outline-none"
+                  className="w-full px-3 py-2 text-sm rounded-md bg-transparent"
                   style={{ color: 'var(--color-text-primary)', border: '1px solid var(--color-border-muted)' }}
                 />
                 <FieldError error={errorFor('url')} />
@@ -403,9 +415,8 @@ export function McpServerModal({
                 <KeyValueEditor
                   kvs={headers}
                   onChange={setHeaders}
-                  workspaceId={workspaceId}
                   secretNames={secretNames}
-                  onSecretCreated={onSecretCreated}
+                  createSecret={createSecret}
                   keyPlaceholder="Authorization"
                 />
                 <FieldError error={errorFor('headers')} />
@@ -416,14 +427,14 @@ export function McpServerModal({
           {/* Description + instruction */}
           <Field
             label="Description"
-            hint="Shown to the agent as untrusted, user-provided context."
+            hint="Helps the agent decide when to reach for this server."
           >
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What this server does"
               rows={2}
-              className="w-full px-3 py-2 text-sm rounded-md bg-transparent outline-none resize-none"
+              className="w-full px-3 py-2 text-sm rounded-md bg-transparent resize-none"
               style={{ color: 'var(--color-text-primary)', border: '1px solid var(--color-border-muted)' }}
               maxLength={512}
             />
@@ -432,14 +443,14 @@ export function McpServerModal({
 
           <Field
             label="Instruction"
-            hint="Shown to the agent as untrusted, user-provided context."
+            hint="Extra guidance the agent reads before it calls this server's tools."
           >
             <textarea
               value={instruction}
               onChange={(e) => setInstruction(e.target.value)}
               placeholder="How the agent should use this server"
               rows={2}
-              className="w-full px-3 py-2 text-sm rounded-md bg-transparent outline-none resize-none"
+              className="w-full px-3 py-2 text-sm rounded-md bg-transparent resize-none"
               style={{ color: 'var(--color-text-primary)', border: '1px solid var(--color-border-muted)' }}
               maxLength={1024}
             />
@@ -598,7 +609,7 @@ function ArgsEditor({ args, onChange }: { args: string[]; onChange: (a: string[]
             value={a}
             onChange={(e) => onChange(args.map((x, j) => (j === i ? e.target.value : x)))}
             placeholder="argument"
-            className="flex-1 px-2 py-1 text-xs rounded bg-transparent outline-none font-mono"
+            className="flex-1 px-2 py-1 text-xs rounded bg-transparent font-mono"
             style={{ color: 'var(--color-text-primary)', border: '1px solid var(--color-border-muted)' }}
           />
           <button
@@ -628,13 +639,12 @@ function ArgsEditor({ args, onChange }: { args: string[]; onChange: (a: string[]
 interface KeyValueEditorProps {
   kvs: KV[];
   onChange: (kvs: KV[]) => void;
-  workspaceId: string;
   secretNames: string[];
-  onSecretCreated?: (name: string) => void;
+  createSecret: (body: { name: string; value: string }) => Promise<unknown>;
   keyPlaceholder: string;
 }
 
-function KeyValueEditor({ kvs, onChange, workspaceId, secretNames, onSecretCreated, keyPlaceholder }: KeyValueEditorProps) {
+function KeyValueEditor({ kvs, onChange, secretNames, createSecret, keyPlaceholder }: KeyValueEditorProps) {
   return (
     <div className="flex flex-col gap-2">
       {kvs.map((kv, i) => (
@@ -649,7 +659,7 @@ function KeyValueEditor({ kvs, onChange, workspaceId, secretNames, onSecretCreat
               value={kv.key}
               onChange={(e) => onChange(kvs.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))}
               placeholder={keyPlaceholder}
-              className="flex-1 px-2 py-1 text-xs rounded bg-transparent outline-none font-mono"
+              className="flex-1 px-2 py-1 text-xs rounded bg-transparent font-mono"
               style={{ color: 'var(--color-text-primary)', border: '1px solid var(--color-border-muted)' }}
             />
             <button
@@ -663,11 +673,10 @@ function KeyValueEditor({ kvs, onChange, workspaceId, secretNames, onSecretCreat
             </button>
           </div>
           <VaultSecretPicker
-            workspaceId={workspaceId}
             value={kv.value}
             onChange={(value) => onChange(kvs.map((x, j) => (j === i ? { ...x, value } : x)))}
             secretNames={secretNames}
-            onSecretCreated={onSecretCreated}
+            createSecret={createSecret}
           />
         </div>
       ))}

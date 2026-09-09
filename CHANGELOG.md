@@ -8,6 +8,12 @@
 - 升级时清理旧策略标记、重建允许旧/新策略并存的约束，并递增存在 OAuth 连接用户的工作区 MCP 配置版本，触发策略重新解析。
 - 回滚时先将已有拒绝策略转换为空 allowlist 再删除 denylist，确保旧代码窗口保持 fail-closed；已完成聚焦测试及 PostgreSQL `054 → 055 → 054 → 055` 往返验证。
 
+### 平台核心管理界面与后端能力迁回
+
+- 迁回 Plugins、MCP OAuth、User Vault、egress relay、Skills/插件数据库与服务层，并接入用户级、工作区级管理路由；保留本地教育、家庭成员、WeChat iLink、文档库路由。
+- 迁回 Plugins 管理页面、MCP/Skills/Vault 相关 hooks 与 API 类型，新增 `/plugins` 路由、旧 `/connectors` 重定向、导航入口及中英文基础文案。
+- 前端 `tsc --noEmit` 与生产构建通过；远程 workspace blob 迁移暂缓，待本地文件持久化运行时具备对象存储读写后再单独迁移。
+
 ## 2026-09-08
 
 ### 文档预览抽屉交互增强
