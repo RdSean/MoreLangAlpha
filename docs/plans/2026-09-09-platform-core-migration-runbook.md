@@ -190,6 +190,10 @@ current backend image does not contain the local branch's `argon2` dependency.
   for third-party MCP entrypoints. One legacy local assertion still expects
   literal HTTP headers to be masked, while the migrated platform contract
   intentionally echoes non-secret literals so connector forms can round-trip.
+- PTC/Flash request preparation now passes resolved user/workspace Skill command
+  aliases and the effective per-turn Skill set into slash-command detection and
+  metadata serialization; the focused request-preparation and Skill command
+  suite passed (`119 passed`).
 - `056_workspace_file_blobs` remains intentionally deferred. The current branch
   still persists workspace file bytes inline in PostgreSQL; unconnected blob and
   persistence modules are not part of this checkpoint.

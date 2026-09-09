@@ -69,6 +69,8 @@ from .request_prep import (
     process_hitl_response,
     serialize_context_metadata,
     setup_steering_tracking,
+    turn_skill_names,
+    user_skill_commands,
 )
 from src.server.services.runs.admission import (
     RunScope,
@@ -270,7 +272,14 @@ async def astream_flash_workflow(
                 )
 
         # Persist lightweight additional_context + slash command fallback
-        serialize_context_metadata(request, query_metadata, user_input, mode="flash")
+        serialize_context_metadata(
+            request,
+            query_metadata,
+            user_input,
+            mode="flash",
+            extra_commands=user_skill_commands(config),
+            allowed_skills=turn_skill_names(config, "flash"),
+        )
 
         # Extract HITL answer metadata for persistence
         feedback_action = None
@@ -400,7 +409,13 @@ async def astream_flash_workflow(
         # SkillsMiddleware, which dedups bodies already live in the thread. Only
         # set on normal turns; HITL/replay carry no new user message to attach to.
         if not request.hitl_response and not is_checkpoint_replay:
-            skill_contexts = prepare_skill_contexts(messages, request, mode="flash")
+            skill_contexts = prepare_skill_contexts(
+                messages,
+                request,
+                mode="flash",
+                extra_commands=user_skill_commands(config),
+                allowed_skills=turn_skill_names(config, "flash"),
+            )
         else:
             skill_contexts = None
         skill_dirs = (
