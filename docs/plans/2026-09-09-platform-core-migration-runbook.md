@@ -142,3 +142,11 @@ function used by the new model preference shape; live PostgreSQL verification
 covered nested merge and JSON null deletion, and the bounded
 `053 -> 054 -> 053 -> 054` path passed. The database is now at
 `054_jsonb_deep_merge`.
+
+`055_tool_denylist` is complete. It ports the MCP egress allowlist-to-denylist
+expand phase while retaining the old column for rolling compatibility and
+supplying the deferred finance migration's `policy_required` prerequisite.
+Upgrade preserves legacy allowlists and bumps OAuth workspace config versions;
+downgrade writes an empty allowlist before removing the denylist so rollback is
+fail-closed. Focused tests and live `054 -> 055 -> 054 -> 055` verification
+passed. The isolated database is now at `055_tool_denylist`.

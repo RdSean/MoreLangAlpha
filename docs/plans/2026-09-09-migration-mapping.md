@@ -145,3 +145,12 @@ The semantic port of remote `035_jsonb_deep_merge` is implemented as
 recursive object merge and JSON null key deletion, and
 `053 -> 054 -> 053 -> 054` upgrade/rollback verification completed. The
 database checkpoint is now `054_jsonb_deep_merge`.
+
+The semantic port of remote `038_tool_denylist` is implemented as
+`055_tool_denylist`. Because finance-only remote `036_brokerage_capabilities`
+is deferred, `055` adds the missing `policy_required` compatibility column,
+keeps `tool_allowlist` during the rolling expand phase, and bumps OAuth
+workspaces for policy re-resolution. Focused tests pass. Live PostgreSQL
+verification covered `054 -> 055`, preservation of an old allowlist, policy
+version bump, fail-closed denylist rollback (`tool_allowlist=[]`), and
+`055 -> 054 -> 055`; the isolated database is now at `055_tool_denylist`.
