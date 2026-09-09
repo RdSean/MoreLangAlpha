@@ -40,6 +40,7 @@ from src.server.services.egress.session_binding import (
     maybe_remint_egress_jwt,
     sync_egress_relay,
 )
+from src.server.services.user_skills import sandbox_skill_sync_params
 
 from src.server.database.workspace import (
     create_workspace as db_create_workspace,
@@ -1781,6 +1782,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                 user_id=user_id,
                 workspace_user_id=workspace_user_id,
                 on_state_observed=on_state_observed,
+                skills_signature=skills_signature,
                 mark=_mark,
                 attempt=_attempt,
             )
@@ -1842,6 +1844,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         user_id: str | None,
         workspace_user_id: str | None,
         on_state_observed: Callable[[str], None] | None,
+        skills_signature: str | None,
         mark: Callable[[str], None],
         attempt: int,
     ) -> Session:
