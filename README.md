@@ -69,7 +69,7 @@ to the LAN at `http://<host-ip>:5177`.
 | `src/ptc_agent/` | Agent factory, middleware, sandbox support, Skills, and subagents |
 | `src/server/` | FastAPI routes, services, raw PostgreSQL access, and SSE orchestration |
 | `src/tools/` | General-purpose web, workspace, automation, and secretary tools |
-| `skills/` | Platform Skills loaded by the agent and sandbox |
+| `plugins/` | Agent Plugins bundles that ship the built-in MCP servers and Skills |
 | `web/` | React frontend |
 | `migrations/` | PostgreSQL schema migrations |
 | `libs/ptc-cli/` | Standalone interactive PTC CLI |

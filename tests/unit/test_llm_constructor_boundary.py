@@ -96,6 +96,12 @@ ALLOWLIST: dict[tuple[str, str], int] = {
     # with choosing a model. Same five calls, same justification.
     ("src/server/services/llm/clients.py", "create_llm"): 3,
     ("src/server/services/llm/clients.py", "create_llm_from_custom"): 2,
+    # This branch has not taken the config.py/clients.py split yet: its
+    # resolution layer still keeps choosing a model and building a client in
+    # one module, and it carries the local household/student endpoint path on
+    # top. Same sanctioned home, same justification — only the path differs.
+    ("src/server/services/llm/config.py", "create_llm"): 3,
+    ("src/server/services/llm/config.py", "create_llm_from_custom"): 3,
     # user_id=None system path AND resolved-None platform fallback (two calls).
     ("src/server/services/llm/service.py", "create_llm"): 2,
 }

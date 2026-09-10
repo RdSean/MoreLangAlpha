@@ -75,14 +75,29 @@ def test_bundled_server_is_composed_before_operator_config(bundle_root: Path) ->
     assert config.servers[0].source == "builtin"
 
 
-def test_local_project_skills_remain_after_bundle_migration(
-    bundle_root: Path, tmp_path: Path
+def test_skill_sources_are_the_bundles_then_the_operator_directory(
+    bundle_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The chain is bundles first, the operator's own directory last.
+
+    This deployment used to keep a cwd-relative ``skills/`` on top of the
+    bundles. Its own skills now travel as the ``langalpha_local`` bundle, so
+    nothing resolves against the working directory: a server started from
+    anywhere finds the same set, and an operator can still override a shipped
+    name by dropping it into ``user_skills_dir`` (later sources win).
+    """
     _write_bundle(bundle_root)
-    project_skills = tmp_path / "local-skills"
-    project_skills.mkdir()
+    user_skills = tmp_path / "user-skills"
+    user_skills.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
 
-    sources = SkillsConfig(project_skills_dir=str(project_skills)).local_skill_dirs_with_sandbox()
+    sources = SkillsConfig(user_skills_dir=str(user_skills)).local_skill_dirs_with_sandbox()
+    resolved = [source for source, _ in sources]
 
-    assert str(bundle_root / "demo" / "skills") in [source for source, _ in sources]
-    assert str(project_skills.resolve()) in [source for source, _ in sources]
+    assert str(bundle_root / "demo" / "skills") in resolved
+    assert str(user_skills) in resolved
+    assert resolved[-1] == str(user_skills)
+    # Nothing in the chain is derived from where the process happens to run.
+    assert not any(str(elsewhere) in source for source in resolved)

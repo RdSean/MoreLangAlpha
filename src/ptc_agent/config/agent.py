@@ -105,24 +105,20 @@ class FlashConfig(BaseModel):
 DEFAULT_USER_SKILLS_DIR = "~/.ptc-agent/skills"
 
 
-def host_skill_dirs(
-    user_skills_dir: str = DEFAULT_USER_SKILLS_DIR,
-    project_skills_dir: str = "skills",
-    *,
-    cwd: Path | None = None,
-) -> list[Path]:
-    """Return host skill sources in their last-wins resolution order.
+def host_skill_dirs(user_skills_dir: str = DEFAULT_USER_SKILLS_DIR) -> list[Path]:
+    """Every host-side skill source, in the order that resolves them.
 
-    Bundled packages are the platform source of truth. The legacy project
-    directory remains in the chain so local product skills keep their existing
-    precedence while the migration is validated.
+    Last wins, so the operator's directory comes after the bundles. Two
+    readers that never build a config -- skill-name reservation and the
+    content route -- have to name the same sources in the same order as
+    delivery does, because both answer questions about the file the agent will
+    actually load.
+
+    This deployment's own skills ship as the ``langalpha_local`` bundle, so
+    nothing resolves against the working directory: a server started from
+    anywhere finds the same set.
     """
-    base = cwd or Path.cwd()
-    return [
-        *bundled_skill_dirs(),
-        Path(user_skills_dir).expanduser(),
-        (base / project_skills_dir).resolve(),
-    ]
+    return [*bundled_skill_dirs(), Path(user_skills_dir).expanduser()]
 
 
 class SkillsConfig(BaseModel):
@@ -132,36 +128,34 @@ class SkillsConfig(BaseModel):
     Each skill is a directory containing a SKILL.md file with YAML frontmatter.
 
     Resolution and precedence:
-    - Skills are sourced from both user and project directories.
-    - Project skills override user skills when names conflict.
+    - Skills are sourced from the shipped bundles, then the user directory.
+    - A later source overrides an earlier one when names conflict, so an
+      operator can replace a shipped skill by dropping one of the same name
+      into ``user_skills_dir``.
     """
 
     enabled: bool = True
+    #: See ``DEFAULT_USER_SKILLS_DIR``.
     user_skills_dir: str = DEFAULT_USER_SKILLS_DIR
-    project_skills_dir: str = (
-        "skills"  # Project skills directory (relative to project root)
-    )
     sandbox_skills_base: str = "/home/workspace/.agents/skills"  # Where skills live in sandbox
 
-    def local_skill_dirs_with_sandbox(
-        self, *, cwd: Path | None = None
-    ) -> list[tuple[str, str]]:
+    def local_skill_dirs_with_sandbox(self) -> list[tuple[str, str]]:
         """Return ordered (local_dir, sandbox_dir) sources.
 
         Precedence is last-wins (later sources override earlier ones).
-        Order: user skills < project skills (project wins on conflict).
-        """
-        base = cwd or Path.cwd()
+        Order: bundled skills < user skills.
 
-        sources: list[tuple[str, str]] = [
-            (str(source), self.sandbox_skills_base)
-            for source in host_skill_dirs(
-                self.user_skills_dir,
-                self.project_skills_dir,
-                cwd=base,
-            )
+        Nothing here depends on the working directory. Both sources resolve
+        from somewhere fixed -- the bundles from the installed source, the
+        operator's from their home -- so a server started from anywhere finds
+        the same skills, which a directory relative to ``cwd`` could not
+        promise once the shipped skills moved into the bundles that declare
+        them.
+        """
+        return [
+            (str(d), self.sandbox_skills_base)
+            for d in host_skill_dirs(self.user_skills_dir)
         ]
-        return sources
 
 
 class SubagentConfig(BaseModel):
@@ -478,7 +472,6 @@ class AgentConfig(BaseModel):
         skills_config = SkillsConfig(
             enabled=kwargs.pop("skills_enabled", True),
             user_skills_dir=kwargs.pop("user_skills_dir", "~/.ptc-agent/skills"),
-            project_skills_dir=kwargs.pop("project_skills_dir", "skills"),
             sandbox_skills_base=kwargs.pop(
                 "sandbox_skills_base",
                 f"{filesystem_config.working_directory}/.agents/skills",

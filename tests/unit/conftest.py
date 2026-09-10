@@ -53,3 +53,27 @@ def _default_education_membership(monkeypatch):
         "get_membership_for_user",
         AsyncMock(return_value=None),
     )
+
+
+@pytest.fixture(scope="session")
+def shipped_skill_md():
+    """Locate a shipped skill's SKILL.md on disk, by name.
+
+    A registry entry's ``skill_md_path`` is where the *agent* reaches the file
+    inside a sandbox, not where this repo keeps it: the shipped skills live in
+    the bundle that declares them, and the sync flattens every source into one
+    directory. Joining that suffix onto the repo root reads as correct and is
+    not, so the lookup asks the bundles instead.
+    """
+    from pathlib import Path
+
+    from ptc_agent.config.plugins import bundled_skill_dirs
+
+    def find(name: str) -> Path:
+        for root in bundled_skill_dirs():
+            candidate = root / name / "SKILL.md"
+            if candidate.is_file():
+                return candidate
+        raise AssertionError(f"no bundle ships a {name!r} skill")
+
+    return find

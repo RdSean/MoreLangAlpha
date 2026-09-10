@@ -306,6 +306,46 @@ collection: `7195/7203 collected`, no import errors. Live endpoints
 `/api/v1/skills` all answer 200, and the startup registry still freezes 10
 servers / 61 tools.
 
+## Skills-source alignment checkpoint (2026-09-10)
+
+The platform model is that shipped Skills come from `plugins/*/skills` bundles
+plus the operator's `user_skills_dir`; a repo-root `skills/` directory is not
+part of it. This branch still carried one, which made `SkillsConfig` depend on
+the working directory and kept twelve stale copies of bundle Skills — the
+local rewrites had removed financial wording the platform bundles keep.
+
+- This deployment's own two Skills (`book-to-skill`, `the-knowledge-guy`) moved
+  into a new bundle, `plugins/langalpha_local/`, so they still ship without
+  shadowing any vendor bundle. Nothing resolves against `cwd` any more.
+- The repo-root `skills/` directory and the stale `skills-lock.json` artifact
+  were removed. The twelve duplicates now come from the bundles that already
+  declare them, with the platform wording restored — consistent with retaining
+  the financial bundles until the dependency-ordered removal pass.
+- `host_skill_dirs` / `SkillsConfig` / the loaders took the platform shape
+  (`user_skills_dir` only). `deploy/Dockerfile.dev`, `deploy/Dockerfile.backend`
+  and `docker-compose.yml` now ship/mount `plugins/` instead of `skills/`.
+- The two education services that staged these Skills from the repo path
+  (`education_textbooks._managed_skill_hash`,
+  `education_teaching_storage.stage_managed_teaching_skills`) now resolve them
+  through `host_skill_dirs`, so they follow the bundle.
+- Registry entries for the two Skills were restored in
+  `ptc_agent/agent/middleware/skills/registry.py` — they had been lost when the
+  registry was realigned with the platform version.
+
+Superseded finance-free guards from the earlier removal phase were retired with
+this change, because they assert a state the branch deliberately no longer
+holds: `tests/unit/ptc_agent/agent/test_generic_tool_boundary.py`,
+`tests/unit/server/services/test_generic_startup_services.py`,
+`tests/unit/migrations/test_generic_migration_chain.py`, and the
+source-package half of `tests/unit/server/app/test_generic_router_registration.py`.
+The dependency-ordered removal pass should restore them from git history.
+
+Verified: `tests/unit/config` 245, `tests/unit/core`+observability+ci 552,
+`tests/unit/llms`+tools+utils 1240, `tests/unit/middleware` 484,
+`tests/unit/ptc_agent` 707, `tests/unit/server/services` 1208,
+`tests/unit/server/app`+handlers 1413, `tests/unit/server/database`+models+utils
+765, remaining root-level unit tests 125 — all passing.
+
 ## Remaining work
 
 1. Direct MCP tools are ported but not yet wired. The modules now exist

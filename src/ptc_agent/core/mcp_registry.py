@@ -65,90 +65,10 @@ class _StderrTail:
             pass
 
 
-class MCPToolInfo:
-    """Snapshot of a single tool's schema as reported by its MCP server."""
-
-    def __init__(
-        self,
-        name: str,
-        description: str,
-        input_schema: dict[str, Any],
-        server_name: str,
-    ) -> None:
-        self.name = name
-        self.description = description
-        self.input_schema = input_schema
-        self.server_name = server_name
-
-    def get_parameters(self) -> dict[str, Any]:
-        """Return ``{param_name: {type, description, required, default}}`` from input_schema."""
-        params = {}
-
-        if "properties" in self.input_schema:
-            required_params = self.input_schema.get("required", [])
-
-            for param_name, param_info in self.input_schema["properties"].items():
-                params[param_name] = {
-                    "type": param_info.get("type", "any"),
-                    "description": param_info.get("description", ""),
-                    "required": param_name in required_params,
-                    "default": param_info.get("default"),
-                }
-
-        return params
-
-    def _extract_return_type_from_description(self) -> str:
-        """Extract return type hint from description's Returns: section.
-
-        Returns:
-            Type hint string (e.g., "dict", "list[dict]") or "Any" if not found
-        """
-        import re
-
-        if not self.description:
-            return "Any"
-
-        # Look for common type indicators after "Returns:"
-        match = re.search(
-            r"Returns?:\s*\n?\s*(\w+(?:\[[\w,\s]+\])?)",
-            self.description,
-            re.IGNORECASE
-        )
-
-        if match:
-            type_str = match.group(1).lower()
-            type_map = {
-                "dict": "dict",
-                "dictionary": "dict",
-                "list": "list",
-                "array": "list",
-                "str": "str",
-                "string": "str",
-                "int": "int",
-                "integer": "int",
-                "float": "float",
-                "number": "float",
-                "bool": "bool",
-                "boolean": "bool",
-            }
-            return type_map.get(type_str, "Any")
-
-        return "Any"
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary.
-
-        Returns:
-            Dictionary representation
-        """
-        return_type = self._extract_return_type_from_description()
-        return {
-            "name": self.name,
-            "description": self.description,
-            "parameters": self.get_parameters(),
-            "server_name": self.server_name,
-            "return_type": return_type,
-        }
+# ``MCPToolInfo`` and the schema translation it relies on live in
+# ``mcp_schema`` so the registry, codegen and the prompt formatter read one
+# definition; this module re-exports the class for its existing importers.
+from .mcp_schema import MCPToolInfo  # noqa: E402
 
 
 class MCPServerConnector:

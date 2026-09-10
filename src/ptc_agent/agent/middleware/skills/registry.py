@@ -416,6 +416,27 @@ SKILL_REGISTRY: dict[str, SkillDefinition] = {
         skill_md_path="skills/ui-design/SKILL.md",
         exposure="ptc",
     ),
+    # This deployment's own skills. They ship in the ``langalpha_local`` bundle
+    # rather than a repo-root directory, which is why ``skill_md_path`` is only
+    # the sandbox-relative name: the sync flattens every source into
+    # ``.agents/skills/``, and the bundle that carries the files never appears
+    # here.
+    "book-to-skill": SkillDefinition(
+        name="book-to-skill",
+        description="Convert a PDF or EPUB into a project-local knowledge skill with chapter-level study material.",
+        tools=[],
+        skill_md_path="skills/book-to-skill/SKILL.md",
+        exposure="ptc",
+        command="book-to-skill",
+    ),
+    "the-knowledge-guy": SkillDefinition(
+        name="the-knowledge-guy",
+        description="Teach from project book knowledge skills through question answering, guided walks, and course artifacts.",
+        tools=[],
+        skill_md_path="skills/the-knowledge-guy/SKILL.md",
+        exposure="ptc",
+        command="the-knowledge-guy",
+    ),
 }
 
 

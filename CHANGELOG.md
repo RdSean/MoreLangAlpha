@@ -935,3 +935,13 @@
 - 该函数在 START 事务之前执行，所以失败的那一轮既没有写入 `conversation_queries` 也没有 `conversation_responses`；线程行与前缀标题已写，因此表现成“标题在、内容空”。修复后新对话正常落库并可回放。
 - 增加回归测试覆盖别名与有效技能集的透传；同时修正 workspace status 测试桩缺少 `skills_signature` 参数的问题。
 - 验证：以真实配置调用 PTC/Flash 两条 `serialize_context_metadata` 路径均通过；用 API 实跑一轮 Flash 对话产生 `message_chunk`/`run_end` 且无错误，`conversation_queries` 与 `conversation_responses` 均写入，`GET /threads/{id}`、`/messages/replay`、`/turns` 均返回该轮内容；`tests/unit/server/handlers` 677 项全部通过。
+## 2026-09-10
+
+### Skills 来源与平台模型对齐
+
+- 自有 Skills（`book-to-skill`、`the-knowledge-guy`）迁入新 bundle `plugins/langalpha_local/`，随镜像发布且不会遮蔽厂商 bundle；同时删除仓库根 `skills/` 目录与过期的 `skills-lock.json`，随包 Skills 一律来自 bundle。
+- `host_skill_dirs`、`SkillsConfig` 与配置加载器改为平台形态（bundle + `user_skills_dir`，不再依赖工作目录）；Dockerfile 与 compose 改为复制/挂载 `plugins/`。
+- 两个教育服务改为通过 `host_skill_dirs` 定位受管 Skill，不再硬编码仓库路径；技能注册表补回这两个 Skill 的条目（对齐平台版本时丢失）。
+- 补齐平台缺失模块 `ptc_agent/core/mcp_schema.py`，`MCPToolInfo` 改由它提供并在 registry 重导出，工具文档恢复 enum/默认值/可空类型等 schema 事实。
+- 退役与当前策略冲突的“彻底无金融”守卫测试（工具边界、启动服务、迁移链、路由注册的源码断言），它们守的是本地已主动放弃的状态；未来按依赖顺序移除金融时再从历史恢复。
+- 验证：各单测分组全部通过（config 245、core/observability/ci 552、llms/tools/utils 1240、middleware 484、ptc_agent 707、server/services 1208、server/app+handlers 1413、server/database+models+utils 765、其余根级 125）。
