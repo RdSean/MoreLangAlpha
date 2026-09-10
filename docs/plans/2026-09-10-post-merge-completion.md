@@ -400,6 +400,28 @@ PTC-only by design).
 
 ## Task 8: Close out
 
+**Status: DONE for the backend/platform scope.** Backend parity is exact — no
+file under `src/`, `mcp_servers/`, `plugins/`, `workflows/` or `scripts/` that
+upstream has is missing here — `tests/unit` is green (7494 passed, 1 xfailed),
+`ruff check src/ migrations/ scripts/ops/` is clean, and PTC + Docker sandbox
+run end to end.
+
+**Deliberately out of scope: the product frontend.** 437 files under
+`web/src/` that upstream has are absent here, and this branch keeps the local
+UI: they are `pages/{Dashboard,ChatAgent,MarketView,Onboarding,Login}` (the
+local product's own screens), the finance chart stack (`lib/bars`,
+`lib/quotes`), the Supabase auth client (`lib/auth*` — this branch uses
+first-party local sessions), and the model-tuning widgets
+(`components/model/{AccountTuningDefaults,CompactionProfilePicker,FallbackModelsPicker,PerModelMatrix}.tsx`,
+`hooks/useModelProfile.ts`) that the local `Settings/panels/ModelTab.tsx`
+replaces with its own. The config-management surfaces the merge was for —
+Plugins, MCP, Skills, Vault — were ported in the earlier phase. Bringing the
+rest across would clobber the local UI rather than restore a capability, so it
+waits for a decision instead of being assumed.
+
+The classification lists (`core-merge-*.txt`) stay until the finance removal
+pass, which is what they are for.
+
 - Update `CHANGELOG.md` (Chinese) and the runbook's remaining-work list.
 - Keep the classification lists until the merge is fully done, then remove them.
 - Final commit; leave the branch clean apart from intentionally untracked items.

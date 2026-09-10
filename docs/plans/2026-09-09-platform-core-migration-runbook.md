@@ -445,3 +445,18 @@ nine upstream routers were unregistered even though their modules were present:
 `GINLIX_DATA_URL` is unset). All are registered again — 258 route paths, up
 from 250 — and the guard test that asserted their absence now asserts their
 presence until the removal pass flips it back.
+
+### Open decision: the product frontend
+
+`web/src` is 437 files behind upstream and this branch keeps it that way. Those
+files are the upstream product screens (Dashboard, ChatAgent, MarketView,
+Onboarding, Login), the finance chart stack (`lib/bars`, `lib/quotes`), the
+Supabase auth client (this branch runs first-party local sessions instead), and
+the upstream model-tuning widgets that the local `Settings/panels/ModelTab.tsx`
+replaces. The configuration surfaces this migration was about — Plugins, MCP,
+Skills, Vault — were ported in the earlier phase and are in place.
+
+Merging the rest would replace the local UI rather than restore a missing
+capability, so it is a product decision, not a merge step. If the upstream
+model-tuning widgets are wanted, port them one at a time onto the local
+`ModelTab` rather than taking `web/src` wholesale.
