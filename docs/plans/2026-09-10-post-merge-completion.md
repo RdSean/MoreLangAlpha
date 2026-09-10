@@ -106,6 +106,45 @@ git commit -m "fix: re-apply managed-textbook hooks on the upstream runtime"
 
 ## Task 2: Re-home the household LLM resolution on the upstream split
 
+**Status: IN PROGRESS.** Done so far: `src/server/services/llm/household.py`
+exists with `get_household_context`, `_student_household_context`,
+`_household_runtime_metadata`, `_raise_no_model_available`,
+`resolve_household_llm_client` (plan A: owner's credential, client stamped
+`billing_type="byok"` + `credential_source="household"` + household ids) and
+`resolve_student_household_config` (the sealed student runtime path).
+
+**Exact next steps:**
+
+1. `git checkout origin/main -- src/server/services/llm/config.py
+   src/server/services/llm/clients.py src/server/services/llm/availability.py`
+   (this also removes the temporary `raise_byok_key_required =
+   _raise_byok_key_required` alias that is currently in `availability.py`).
+2. In upstream's `resolve_llm_config` (in `config.py`), right after `is_byok`
+   self-resolution, add:
+
+   ```python
+   from .household import resolve_student_household_config
+   household = await resolve_student_household_config(
+       base_config, user_id, request_model,
+       thread_id=thread_id, enabled_subagents=enabled_subagents,
+   )
+   if household is not None:
+       return household
+   ```
+
+   Nothing else in the upstream pipeline runs for a student — that is the
+   point of the early return.
+3. Re-point every importer of the removed monolith names to the upstream
+   module (`clients.py` for `resolve_byok_llm_client` / `resolve_model_client` /
+   `classify_model` / `LLMRole` / `ResolvedClient` / `ModelSource`, `config.py`
+   for `resolve_llm_config` / `resolved_model_name`, `household.py` for the
+   household entry points). Find them with
+   `rg -n "resolve_byok_llm_client|resolve_model_client|classify_model|resolved_model_name|resolve_household_llm_client" src tests`.
+4. `uv run pytest tests/unit/llms tests/unit/server/handlers/test_resolve_llm_config.py
+   tests/unit/server/services/test_household_shared_models.py -q` until green.
+5. Commit with message
+   `refactor: move household LLM resolution onto the upstream llm split`.
+
 **Why:** `src/server/services/llm/config.py` locally is the pre-split monolith
 (client building + BYOK walking + household resolution), while upstream split it
 into `clients.py`, `availability.py` and `config.py`. The merge keeps the monolith
