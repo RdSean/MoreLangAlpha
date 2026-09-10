@@ -358,8 +358,17 @@ async def astream_flash_workflow(
         # Runtime credit gate (None when platform gating is inactive) —
         # same wiring as the PTC path; a Flash turn is shorter but is
         # metered the same way.
+        # Billing principal: a household turn runs on the owner's credential,
+        # so the owner is who the lease and any platform spend belong to. The
+        # student stays the run's actor (and the metadata names them).
+        billing_user_id = (
+            (getattr(config, "llm_runtime_metadata", None) or {}).get(
+                "model_owner_user_id"
+            )
+            or user_id
+        )
         credit_gate = build_run_credit_gate(
-            user_id,
+            billing_user_id,
             run_id,
             token_callback,
             tool_tracker,

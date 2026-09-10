@@ -80,13 +80,28 @@ def resolve_household_llm_client(
     """Build an owner-backed client without retaining its decrypted key."""
     from src.llms.llm import create_llm_from_custom
 
-    return create_llm_from_custom(
+    client = create_llm_from_custom(
         endpoint["config"],
         api_key=endpoint.get("api_key") or "",
         base_url=endpoint.get("base_url"),
         cache_key=cache_key,
-        billing_type_override=CredentialSource.HOUSEHOLD.value,
     )
+    # Billing provenance. The credential is the household owner's, so the turn
+    # is an own-key turn (never platform credits) and the platform bills the
+    # owner; the household ids keep the per-student attribution without adding
+    # a fourth ``billing_type`` the pricing table and the metrics do not know.
+    metadata = dict(getattr(client, "metadata", None) or {})
+    metadata.update(
+        {
+            "billing_type": "byok",
+            "credential_source": CredentialSource.HOUSEHOLD.value,
+            "household_id": str(endpoint["household_id"]),
+            "model_owner_user_id": str(endpoint["owner_user_id"]),
+            "student_user_id": str(endpoint["student_user_id"]),
+        }
+    )
+    client.metadata = metadata
+    return client
 
 
 def _household_runtime_metadata(endpoint: dict[str, Any]) -> dict[str, str]:

@@ -43,6 +43,13 @@ class CredentialSource(StrEnum):
     BYOK = "byok"
     PLATFORM = "platform"
     NONE = "none"
+    #: A household member running on the household owner's credential. Local
+    #: product surface: the student has no key of their own, so this is not
+    #: BYOK — but the platform did not pay either, so it must never be metered
+    #: as PLATFORM. Billing treats it as an own-key turn and charges the owner;
+    #: ``llm_runtime_metadata`` carries ``model_owner_user_id``/``student_user_id``
+    #: so the usage can still be attributed per student.
+    HOUSEHOLD = "household"
 
 
 class CompactionConfig(BaseModel):

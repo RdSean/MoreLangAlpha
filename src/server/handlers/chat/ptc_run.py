@@ -390,8 +390,17 @@ async def astream_ptc_workflow(
         # Runtime credit gate (None when platform gating is inactive): the
         # run's spend meter, lease, and refresher. Admission above is its
         # seed verdict; the stream wrapper below owns its lifetime.
+        # Billing principal: a household turn runs on the owner's credential,
+        # so the owner is who the lease and any platform spend belong to. The
+        # student stays the run's actor (and the metadata names them).
+        billing_user_id = (
+            (getattr(config, "llm_runtime_metadata", None) or {}).get(
+                "model_owner_user_id"
+            )
+            or user_id
+        )
         credit_gate = build_run_credit_gate(
-            user_id, run_id, token_callback, tool_tracker, effective_model,
+            billing_user_id, run_id, token_callback, tool_tracker, effective_model,
             is_byok=own_key,
         )
 
