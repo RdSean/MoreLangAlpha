@@ -434,3 +434,14 @@ against the isolated stack (`15432/16379/19000`), frontend on `15177`,
 - Still open: a user-level (non-bundled) MCP connector end to end.
   `workspace_mcp_tool_schemas` stays empty until one is added to the workspace;
   the bundled stdio servers are delivered through the frozen registry instead.
+
+### Routers the local `setup.py` had dropped
+
+The hand-merged `setup.py` inherited the local "finance removed" router list, so
+nine upstream routers were unregistered even though their modules were present:
+`market_data`, `bars`, `watchlist`, `portfolio`, `news`, `calendar`,
+`sec_proxy`, `insights`, `chart_annotations`, plus the ginlix-data
+`market_data_ws` proxy (its disabled-status stub answers 200 when
+`GINLIX_DATA_URL` is unset). All are registered again — 258 route paths, up
+from 250 — and the guard test that asserted their absence now asserts their
+presence until the removal pass flips it back.

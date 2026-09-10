@@ -1043,7 +1043,16 @@ from src.server.app.workspaces import router as workspaces_router
 from src.server.app.workspace_files import router as workspace_files_router
 from src.server.app.workspace_files import wsfiles_router
 from src.server.app.workspace_sandbox import router as workspace_sandbox_router
+from src.server.app.chart_annotations import router as chart_annotations_router
 from src.server.app.workspace_sandbox import preview_redirect_router
+from src.server.app.market_data import router as market_data_router
+from src.server.app.bars import router as bars_router
+from src.server.app.watchlist import router as watchlist_router
+from src.server.app.portfolio import router as portfolio_router
+from src.server.app.news import router as news_router
+from src.server.app.calendar import router as calendar_router
+from src.server.app.sec_proxy import router as sec_proxy_router
+from src.server.app.insights import router as insights_router
 from src.server.app.user_events import router as user_events_router
 from src.server.app.auth import router as auth_router
 from src.server.app.education.assets import router as education_assets_router
@@ -1068,6 +1077,26 @@ from src.server.app.mcp_oauth import router as mcp_oauth_router
 from src.server.app.plugins import router as plugins_router
 from src.server.app.user_vault import router as user_vault_router
 from src.server.app.mcp_servers import router as mcp_servers_router
+
+# Conditionally import ginlix-data WS proxy (only when GINLIX_DATA_WS_URL is set)
+from src.config.settings import GINLIX_DATA_ENABLED
+
+if GINLIX_DATA_ENABLED:
+    from src.server.app.market_data_ws import router as market_data_ws_router
+
+    logger.info("ginlix-data WS proxy enabled")
+else:
+    # Register a minimal status endpoint so the frontend preflight check
+    # gets a clean 200 instead of a noisy 404.
+    from fastapi import APIRouter as _APIRouter
+
+    market_data_ws_router = _APIRouter()
+
+    @market_data_ws_router.get("/ws/v1/market-data/status")
+    async def market_data_ws_status_disabled():
+        return {"enabled": False}
+
+    logger.info("ginlix-data WS proxy disabled (GINLIX_DATA_URL not set)")
 from src.server.app.speech import router as speech_router
 from src.server.app.channels import router as channels_router
 from src.server.app.runtime_resources import router as runtime_resources_router
@@ -1083,7 +1112,14 @@ app.include_router(
 app.include_router(
     workspace_sandbox_router
 )  # /api/v1/workspaces/{id}/sandbox/* - Sandbox stats & packages
+app.include_router(
+    chart_annotations_router
+)  # /api/v1/workspaces/{id}/chart-annotations - Agent-drawn chart annotations
 app.include_router(cache_router)  # /api/v1/cache/* - Cache management
+app.include_router(market_data_router)  # /api/v1/market-data/* - Market data proxy
+app.include_router(
+    bars_router
+)  # /api/v1/market-data/bars/* - Protocol-native progressive bars
 app.include_router(auth_router)  # /api/v1/auth/* - Local accounts and household membership
 app.include_router(family_llm_router)  # /api/v1/family/* - Shared household models
 app.include_router(education_assets_router)  # /api/v1/education/assets/* - Private attachments
@@ -1095,11 +1131,23 @@ app.include_router(
 )  # /api/v1/users/me/thread-events - Thread lifecycle SSE feed
 app.include_router(features_router)  # /api/v1/features/* - Feature flags (per-user resolved)
 app.include_router(
+    watchlist_router
+)  # /api/v1/users/me/watchlist/* - Watchlist management
+app.include_router(
+    portfolio_router
+)  # /api/v1/users/me/portfolio/* - Portfolio management
+app.include_router(news_router)  # /api/v1/news - News feed (general + ticker-filtered)
+app.include_router(
+    calendar_router
+)  # /api/v1/calendar/* - Economic & earnings calendars
+app.include_router(sec_proxy_router)  # /api/v1/sec-proxy/* - SEC EDGAR document proxy
+app.include_router(
     api_keys_router
 )  # /api/v1/users/me/api-keys + /api/v1/models - BYOK & model config
 app.include_router(
     automations_router
 )  # /api/v1/automations/* - Scheduled automation triggers
+app.include_router(insights_router)  # /api/v1/insights/* - AI market insights
 app.include_router(oauth_router)  # /api/v1/oauth/* - OAuth provider connections (Codex)
 app.include_router(
     public_router
@@ -1149,6 +1197,9 @@ app.include_router(
     mcp_servers_router
 )  # /api/v1/workspaces/{id}/mcp/servers - Per-workspace MCP server config
 app.include_router(speech_router)  # /ws/v1/speech/transcribe - Backend ASR relay
+app.include_router(
+    market_data_ws_router
+)  # /ws/v1/market-data/* - ginlix-data WS proxy (or its status stub)
 app.include_router(channels_router)  # /api/v1/channels/* - Generic channel bindings
 app.include_router(runtime_resources_router)  # /api/v1/runtime-resources/*
 app.include_router(documents_router)  # /api/v1/documents/* - User-private knowledge library

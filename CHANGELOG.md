@@ -997,3 +997,11 @@
 - 停止工作区触发沙盒落库：`workspace_files` 写入 `kind`、`pack_sha256` 且内联列为空，`workspace_file_blobs` 登记 1 条 4.8MB pack 记录，证明“打包 → 上传 → 登记”整条 blob 链路可用（这也是 `058` 属于必需而非可选的原因）。
 - 尚未完成：用户级（非内置）MCP 连接器的真实端到端；`workspace_mcp_tool_schemas` 在未添加用户服务器前保持为空。
 - 验证：新增 `tests/unit/migrations/test_restore_finance_schema_migration.py`；隔离库完成 `059 → 060 → 059 → 060` 往返；前端 15177 与后端 18000 均 200。
+## 2026-09-10
+
+### 补回被本地移除的金融/行情路由
+
+- 合并后的 `setup.py` 曾沿用了本地“已删金融面”的路由清单，导致 `market_data`、`bars`、`watchlist`、`portfolio`、`news`、`calendar`、`sec_proxy`、`insights`、`chart_annotations` 与 ginlix-data 的 `market_data_ws`（未配置时退化为 `/ws/v1/market-data/status` 返回 200 的状态桩）全部未注册；按“先整体迁回、后续再定点移除”的策略恢复注册，路由数由 250 增至 258。
+- `test_generic_router_registration.py` 中的本地守卫 `test_default_api_has_no_finance_or_market_routes` 改为 `test_finance_routes_are_registered`：当前断言这些路由**必须**在册，移除金融时再翻转回原来的断言（与源码包守卫同一处理方式）。
+- 实跑验证（宿主后端 18000）：`/api/v1/users/me/watchlists`、`/api/v1/users/me/portfolio`、`/api/v1/market-data/market-status`、`/api/v1/news`、`/api/v1/insights/today`、`/api/v1/calendar/earnings` 均返回 200；`/api/v1/sec-proxy/document` 返回 502（上游 SEC 代理按预期转发失败）。
+- 验证：`uv run pytest tests/unit -q -p no:randomly` → **7494 passed, 1 xfailed**；`ruff check src/` 通过。

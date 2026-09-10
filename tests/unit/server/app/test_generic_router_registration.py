@@ -1,9 +1,10 @@
-"""The generic platform must not register financial HTTP surfaces.
+"""The generic platform's non-finance HTTP surfaces must survive every trim.
 
-The source-package half of this file's original guard is retired while the
-financial bundles are intentionally retained for validation: `src/data_client`
-and `src/market_protocol` ship again with them. The dependency-ordered removal
-pass restores that assertion (see the migration runbook).
+Both halves of this file's original guard are retired while the financial
+bundles are intentionally retained: `src/data_client` and `src/market_protocol`
+ship again with them, and the finance routers are registered again with them.
+The dependency-ordered removal pass flips ``test_finance_routes_are_registered``
+back to asserting their absence (see the migration runbook).
 """
 
 from __future__ import annotations
@@ -29,14 +30,20 @@ RETIRED_ROUTE_SEGMENTS = (
 
 
 
-def test_default_api_has_no_finance_or_market_routes():
+def test_finance_routes_are_registered():
+    """Restored on purpose: this branch takes the platform surface wholesale.
+
+    The removal pass walks the runbook's dependency order and turns this back
+    into "no finance route may be registered".
+    """
     registered_paths = {route.path for route in app.routes}
 
-    assert not [
-        path
-        for path in registered_paths
-        if any(segment in path for segment in RETIRED_ROUTE_SEGMENTS)
-    ]
+    missing = sorted(
+        segment
+        for segment in RETIRED_ROUTE_SEGMENTS
+        if not any(segment in path for path in registered_paths)
+    )
+    assert not missing, f"finance surfaces missing from the router: {missing}"
 
 
 def test_default_api_registers_document_library_routes():
