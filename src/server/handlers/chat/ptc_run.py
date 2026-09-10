@@ -1003,6 +1003,7 @@ async def astream_ptc_workflow(
             msg_type="ptc",
             log_prefix="PTC_CHAT",
             timezone_str=timezone_str,
+            llm_runtime_metadata=getattr(config, "llm_runtime_metadata", None),
         ):
             yield event
 

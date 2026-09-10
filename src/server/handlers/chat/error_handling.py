@@ -219,6 +219,8 @@ async def handle_workflow_error(
     _tz = timezone_str or getattr(request, "timezone", None)
     if _tz:
         persist_metadata["timezone"] = _tz
+    # Household provenance survives a failed turn: the run row still has to
+    # name the owner/student it would have billed, and never a credential.
     from src.server.services.llm.runtime_metadata import safe_llm_runtime_metadata
 
     llm_runtime = safe_llm_runtime_metadata(llm_runtime_metadata)
@@ -241,7 +243,9 @@ async def handle_workflow_error(
         abort the terminal transaction mid-flight."""
         if run_handle is None or run_handle.finalized:
             return False
-        records = token_callback.per_call_records if token_callback else None
+        # Snapshot under the tracker's lock — the error path fires while
+        # background subagent writers may still be appending.
+        records = token_callback.get_per_call_records() if token_callback else None
         tools = handler.get_tool_usage() if handler else None
         if not (run_handle.workspace_id and run_handle.user_id):
             records = None
@@ -481,7 +485,7 @@ async def handle_workflow_error(
                 return  # durable cancel won — no failure surface
 
             error_data = {
-                "message": f"Workflow failed after {MAX_RETRIES} retry attempts",
+                "message": f"Turn failed after {MAX_RETRIES} retry attempts",
                 "error_type": error_type,
                 "error_class": type(e).__name__,
                 "retry_count": retry_count,
@@ -514,7 +518,7 @@ async def handle_workflow_error(
                 return  # durable cancel won — cancelled, not retryable: no retry SSE
 
             retry_data = {
-                "message": "Temporary error occurred, you can retry or resume the workflow",
+                "message": "Temporary error occurred, you can retry or resume the turn",
                 "thread_id": thread_id,
                 "auto_retry": True,
                 "error_type": error_type,

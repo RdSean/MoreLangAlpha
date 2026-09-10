@@ -27,6 +27,7 @@ from src.config.settings import (
     get_max_concurrent_workflows,
     get_workflow_result_ttl,
     get_abandoned_workflow_timeout,
+    get_education_teaching_abandoned_timeout,
     get_cleanup_interval,
     is_intermediate_storage_enabled,
     get_max_stored_messages_per_agent,
@@ -149,6 +150,13 @@ class LocalRunExecutor:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
+
+    def _abandoned_timeout_for_metadata(self, metadata: dict[str, Any]) -> int:
+        """Keep a managed textbook root alive through its longer reconnect window."""
+        managed = metadata.get("managed_execution")
+        if isinstance(managed, dict) and managed.get("kind") == "education_teaching":
+            return get_education_teaching_abandoned_timeout()
+        return self.abandoned_timeout
 
     # ---------- helpers ----------
 
@@ -328,7 +336,6 @@ class LocalRunExecutor:
     async def _cleanup_abandoned_tasks(self):
         """Clean up abandoned and completed tasks based on TTL."""
         now = datetime.now()
-        abandoned_threshold = now - timedelta(seconds=self.abandoned_timeout)
         completed_threshold = now - timedelta(seconds=self.result_ttl)
 
         to_remove: list[TaskKey] = []
@@ -346,6 +353,9 @@ class LocalRunExecutor:
                         )
 
                 elif info.status == LocalRunStatus.RUNNING:
+                    abandoned_threshold = now - timedelta(
+                        seconds=self._abandoned_timeout_for_metadata(info.metadata)
+                    )
                     if info.active_connections == 0 and info.last_access_at < abandoned_threshold:
                         # Locally cold — candidate only. The cross-worker
                         # consumer signal is consulted outside the lock
@@ -382,7 +392,9 @@ class LocalRunExecutor:
                     info is None
                     or info.status is not LocalRunStatus.RUNNING
                     or info.active_connections != 0
-                    or info.last_access_at >= abandoned_threshold
+                    or info.last_access_at
+                    >= now
+                    - timedelta(seconds=self._abandoned_timeout_for_metadata(info.metadata))
                 ):
                     continue
                 if info.task and not info.task.done():

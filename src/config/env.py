@@ -83,13 +83,38 @@ EGRESS_RELAY_LOOPBACK_URL: str = os.getenv(
 # Public base URL of this server (used in agent-generated URLs like preview links)
 SERVER_BASE_URL: str = os.getenv("SERVER_BASE_URL", "http://localhost:8000")
 
-# Optional OAuth client metadata document. Empty keeps dynamic registration.
+# Where this deployment serves its OAuth client metadata document (CIMD). An
+# authorization server advertising client_id_metadata_document_supported fetches
+# this URL and treats it as the client_id, so there is no registration call and
+# no per-user client to store. Must be HTTPS on a non-root path, and the
+# document's own client_id must be this same URL — that self-reference is what
+# replaces registration. Unset means Dynamic Client Registration, which is what
+# every server advertising a registration_endpoint uses.
 MCP_CLIENT_METADATA_URL: str = os.getenv("MCP_CLIENT_METADATA_URL", "")
 
 # Internal base URL the server-side PDF renderer (headless Chromium) loads
 # workspace HTML from. Must be the server's own loopback listen address so
 # Chromium fetches bytes from this process, not the public ingress.
 PDF_RENDER_INTERNAL_BASE: str = os.getenv("PDF_RENDER_INTERNAL_BASE", "http://127.0.0.1:8000")
+
+# Shared HS256 secret authenticating sandboxes to the egress relay
+# (/v1/egress/*). Empty disables the relay — OAuth-connected MCP servers
+# then have no execution path, but nothing else is affected.
+EGRESS_RELAY_SECRET: str = os.getenv("EGRESS_RELAY_SECRET", "")
+
+# Base URL sandboxes use to reach the egress relay (the generated client
+# appends /v1/egress/{grant_id}). Sandboxes are remote (or in OSS Docker, on a
+# different network), so this must be a sandbox-reachable address. Empty means
+# unconfigured: services/egress/reachability.py then falls back to the server
+# base, adapted per sandbox provider (Docker host gateway) or warned about
+# (Daytona + a local address). Point it at the API origin, not an SPA-fallback
+# frontend.
+EGRESS_RELAY_BASE_URL: str = os.getenv("EGRESS_RELAY_BASE_URL", "")
+
+# Where THIS process reaches its own egress relay for directly bound MCP
+# tools. Loopback on purpose: the host-side call takes the same route, policy
+# and audit as a sandbox call, without leaving the box.
+EGRESS_RELAY_LOOPBACK_URL: str = os.getenv("EGRESS_RELAY_LOOPBACK_URL", "http://127.0.0.1:8000")
 
 # Credit conversion rate (USD → credits).  Override with USD_TO_CREDITS_RATE env var.
 USD_TO_CREDITS_RATE: int = int(os.getenv("USD_TO_CREDITS_RATE", "1000"))

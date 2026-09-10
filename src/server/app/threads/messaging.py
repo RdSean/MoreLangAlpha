@@ -446,6 +446,7 @@ async def _handle_send_message(
             fast_mode=getattr(request, "fast_mode", None),
             thread_id=thread_id,
             enabled_subagents=request.subagents_enabled,
+            workspace_id=workspace_id,
         )
 
         # A student household endpoint is a server-resolved credential, so it
@@ -474,10 +475,8 @@ async def _handle_send_message(
             CredentialSource.HOUSEHOLD,
         )
 
-        # Credit check: always enforce.
-        # - Platform-served (is_byok=False): block when daily limit reached.
-        # - BYOK/OAuth (is_byok=True): block only on negative balance (outstanding
-        #   debt from past platform usage, e.g. fallback routing).
+        # Credit check: always ask, whoever's key this is. Which pools apply to
+        # an own-key turn is the quota service's call, not ours.
         await enforce_credit_limit(user_id, byok=is_byok)
 
         # I6: Redis down at START = 503 before any durable row. Ordered after
@@ -1299,7 +1298,7 @@ async def offload_thread(thread_id: str, x_user_id: CurrentUserId):
     await auth_api.require_thread_owner(thread_id, x_user_id)
     from src.server.handlers.thread_maintenance import trigger_offload
 
-    return await trigger_offload(thread_id)
+    return await trigger_offload(thread_id, user_id=x_user_id)
 
 
 @router.get("/{thread_id}/turns")

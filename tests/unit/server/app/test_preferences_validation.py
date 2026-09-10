@@ -45,7 +45,7 @@ class TestValidateCustomModels:
 
         if mc is None:
             mc = _mock_model_config()
-        with patch("src.llms.llm.ModelConfig", return_value=mc):
+        with patch("src.llms.llm.LLM.get_model_config", return_value=mc):
             _validate_custom_models(models, providers)
 
     def test_valid_model(self):
@@ -211,7 +211,7 @@ class TestValidateCustomProviders:
 
         if mc is None:
             mc = _mock_model_config()
-        with patch("src.llms.llm.ModelConfig", return_value=mc):
+        with patch("src.llms.llm.LLM.get_model_config", return_value=mc):
             _validate_custom_providers(providers)
 
     def test_valid_provider(self):

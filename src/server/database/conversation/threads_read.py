@@ -492,6 +492,10 @@ async def get_thread_auth_meta(thread_id: str) -> Optional[Dict[str, Any]]:
     Lets ``/status`` authorize the caller, read share state, and pick the
     report-back read model (flash watch set vs PTC task outbox) from a
     single round-trip. Returns ``None`` if the thread doesn't exist.
+
+    Local: ``managed_execution`` rides along from the workspace config, because
+    a teaching-job thread must read as not-found to every user-facing gate that
+    would otherwise treat its household owner as an ordinary thread owner.
     """
     # Same UUID normalization as get_thread_owner_id: a non-UUID id can't match
     # the column, so treat it as not-found (clean 404) rather than risk a 500.
@@ -503,7 +507,8 @@ async def get_thread_auth_meta(thread_id: str) -> Optional[Dict[str, Any]]:
             async with conn.cursor(row_factory=dict_row) as cur:
                 await cur.execute(
                     """
-                    SELECT w.user_id, t.is_shared, t.msg_type
+                    SELECT w.user_id, t.is_shared, t.msg_type,
+                           w.config->'managed_execution' AS managed_execution
                     FROM conversation_threads t
                     JOIN workspaces w ON w.workspace_id = t.workspace_id
                     WHERE t.conversation_thread_id = %s

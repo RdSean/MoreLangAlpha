@@ -34,11 +34,13 @@ os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.gzip import GZipMiddleware
 
 from ptc_agent.core.sandbox.platform_secrets import PlatformSecretError
+from ptc_agent.core.sandbox.runtime import SandboxGoneError, SandboxTransientError
 from src.config.logging_config import configure_logging
 from src.config.settings import (
     get_allowed_origins,
@@ -47,6 +49,10 @@ from src.observability import init_otel, init_otel_runtime, shutdown_otel_runtim
 from src.server.services.runs.executor import LocalRunExecutor
 from src.server.services.background_registry_store import BackgroundRegistryStore
 from src.server.utils.api import find_malformed_route_ids  # TEMP (malformed-id-diag)
+from src.server.utils.error_sanitization import (
+    sandbox_unreachable_detail,
+    single_line,
+)
 
 # Phase 1: install fork-safe class-level instrumentor patches BEFORE FastAPI(...)
 # is constructed. FastAPIInstrumentor patches the FastAPI class — must run
@@ -68,7 +74,12 @@ INTERNAL_SERVER_ERROR_DETAIL = "Internal Server Error"
 
 # Global variables
 agent_config = None  # PTC Agent configuration (loaded from config files)
-bundle_owners = None  # Bundled component ownership snapshot used for enforcement
+# Which bundle owns each shipped MCP server and skill, as of the read that
+# composed `agent_config`. Enforcement reads this rather than re-reading
+# plugins/, so it cannot disagree with the server set actually running; the
+# Plugins page keeps the live read, where showing an edited manifest at once
+# is the point. See services/plugins/bundled.enforcement_owners.
+bundle_owners = None
 session_service = None  # PTC Session service instance
 workspace_manager = None  # Workspace manager instance
 checkpointer = None  # PTC Agent LangGraph checkpointer for state persistence
@@ -105,6 +116,9 @@ _REDIS_BACKGROUND_SINGLETONS: tuple[tuple[str, str], ...] = (
     # Tells apart "Redis is slow" from "this worker's loop was blocked", which
     # read identically at the redis-py boundary.
     ("EventLoopLagMonitor", "src.observability.loop_lag"),
+    # Refreshes expiring MCP OAuth connections ahead of the hot path; the
+    # per-connection advisory try-lock dedups it across workers.
+    ("McpOAuthRefreshSweeper", "src.server.services.mcp_oauth.sweep"),
 )
 
 
@@ -569,6 +583,23 @@ async def lifespan(app: FastAPI):
         logger.info("DocumentJobWorker started")
     except Exception as e:
         logger.warning(f"Failed to start DocumentJobWorker: {e}")
+    # Start WorkspaceFileGCService (condemn-then-reap of unreferenced file blobs)
+    try:
+        from src.server.services.workspace_file_gc import WorkspaceFileGCService
+
+        await WorkspaceFileGCService.get_instance().start()
+    except Exception as e:
+        logger.warning(f"Failed to start WorkspaceFileGCService: {e}")
+
+    # Confirm the runtime credit gate can reach its lease service, and on
+    # terms its refresher can work with. Both failures it catches are silent
+    # at request time.
+    try:
+        from src.server.services.credit_gate_port import verify_credit_gate_wiring
+
+        await verify_credit_gate_wiring()
+    except Exception as e:
+        logger.warning(f"Credit gate wiring check failed: {e}")
 
     yield  # Server is running
 
@@ -602,6 +633,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Error stopping PlatformSecretSweeper: {e}")
 
+    try:
+        from src.server.services.egress.relay import close_relay_client
+
+        await close_relay_client()
+    except Exception as e:
+        logger.warning(f"Error closing egress relay client: {e}")
+
     # 0.0b. Stop the turn-cancel nudge listener.
     try:
         from src.server.services.runs.cancel import TurnCancelListener
@@ -625,6 +663,39 @@ async def lifespan(app: FastAPI):
         await ProvenanceGCService.get_instance().stop()
     except Exception as e:
         logger.warning(f"Error shutting down ProvenanceGCService: {e}")
+
+    try:
+        from src.server.services.workspace_file_gc import WorkspaceFileGCService
+
+        await WorkspaceFileGCService.get_instance().stop()
+    except Exception as e:
+        logger.warning(f"Error shutting down WorkspaceFileGCService: {e}")
+
+    # 0.2. Shutdown NewsRefreshService
+    try:
+        from src.server.services.news_refresh_service import NewsRefreshService
+
+        await NewsRefreshService.get_instance().stop()
+    except Exception as e:
+        logger.warning(f"Error shutting down NewsRefreshService: {e}")
+
+    # 0.3. Shutdown MarketInsightService
+    try:
+        from src.server.services.insight_service import InsightService
+
+        insight_svc = InsightService.get_instance()
+        await insight_svc.shutdown()
+    except Exception as e:
+        logger.warning(f"Error shutting down MarketInsightService: {e}")
+
+    # 0.5. Shutdown PriceMonitorService (before scheduler so executions can drain)
+    try:
+        from src.server.services.price_monitor import PriceMonitorService
+
+        price_mon = PriceMonitorService.get_instance()
+        await price_mon.stop()
+    except Exception as e:
+        logger.warning(f"Error shutting down PriceMonitorService: {e}")
 
     # 1. Shutdown AutomationScheduler
     try:
@@ -931,6 +1002,36 @@ app.add_middleware(
 
 
 # ============================================================================
+# Exception Handlers
+# ============================================================================
+
+
+async def _sandbox_unreachable_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Map an unreachable sandbox to 503 once, for every route.
+
+    The detail wording is a wire contract, not a message: the file panel
+    categorizes the error by matching this string, so it must stay identical
+    across producers rather than being re-spelled per route. It is built by
+    ``sandbox_unreachable_detail`` because the raw exception carries provider
+    URLs and SDK response bodies that must not leave the server.
+    """
+    # The exception is the live carrier: it quotes provider response bodies, so
+    # it can hold a newline and a forged entry. Starlette's path is already
+    # CR/LF-free (urlsplit drops them); it is escaped to keep the rule uniform.
+    logger.warning(
+        f"Sandbox unreachable for {single_line(request.url.path)}: {single_line(str(exc))}"
+    )
+    return JSONResponse(
+        status_code=503,
+        content={"detail": sandbox_unreachable_detail(exc)},
+    )
+
+
+app.add_exception_handler(SandboxGoneError, _sandbox_unreachable_handler)
+app.add_exception_handler(SandboxTransientError, _sandbox_unreachable_handler)
+
+
+# ============================================================================
 # Router Registration
 # ============================================================================
 # Import routers
@@ -961,11 +1062,11 @@ from src.server.app.vault import router as vault_router
 from src.server.app.memo import router as memo_router
 from src.server.app.memory import router as memory_router
 from src.server.app.workflows import include_workflow_router
+from src.server.app.egress_relay import router as egress_relay_router
 from src.server.app.mcp_catalog import router as mcp_catalog_router
 from src.server.app.mcp_oauth import router as mcp_oauth_router
 from src.server.app.plugins import router as plugins_router
 from src.server.app.user_vault import router as user_vault_router
-from src.server.app.egress_relay import router as egress_relay_router
 from src.server.app.mcp_servers import router as mcp_servers_router
 from src.server.app.speech import router as speech_router
 from src.server.app.channels import router as channels_router
@@ -1019,7 +1120,19 @@ app.include_router(
 include_workflow_router(app)  # /api/v1/workflows/* - Reusable JavaScript workflows
 app.include_router(
     mcp_catalog_router
-)  # /api/v1/mcp/servers - User-level MCP server catalog (templates)
+)  # /api/v1/mcp/servers - User-level MCP servers (Plugins backing store)
+app.include_router(
+    mcp_oauth_router
+)  # /api/v1/mcp/servers/{name}/oauth + /api/v1/mcp/oauth/callback - MCP OAuth
+app.include_router(
+    user_vault_router
+)  # /api/v1/mcp/vault/secrets - User-level vault (merged into sandbox pushes)
+app.include_router(
+    plugins_router
+)  # /api/v1/plugins/* - Agent Plugins packages (install/manage/export)
+app.include_router(
+    egress_relay_router
+)  # /v1/egress/{grant_id} - Sandbox egress relay (relay-JWT auth, not user auth)
 app.include_router(
     mcp_oauth_router
 )  # /api/v1/mcp/servers/{name}/oauth - MCP OAuth lifecycle

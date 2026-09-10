@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from src.config import env
-
 from src.config.core import get_infrastructure_config
 from src.config.models import (
     ChannelGatewayConfig,
@@ -29,13 +28,34 @@ from src.config.env import (  # noqa: F401
     GINLIX_DATA_ENABLED,
     GINLIX_DATA_URL,
     GINLIX_DATA_WS_URL,
+    AUTH_COOKIE_SECURE,
     HOST_MODE,
+    LOCAL_AUTH_SESSION_TTL_DAYS,
     LOCAL_DEV_USER_ID,
     SEARCH_PROVIDER_MIN_TIER,
     SUPABASE_URL,
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class VolcengineAsrConfig:
+    """Deployment credentials and endpoint for the server-side ASR relay."""
+
+    app_id: str
+    access_token: str = field(repr=False)
+    cluster: str
+    ws_url: str = "wss://openspeech.bytedance.com/api/v2/asr"
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentParsingConfig:
+    """Deployment limits for document ingestion and parsing."""
+
+    max_upload_bytes: int
+    sync_wait_seconds: int
+    parse_timeout_seconds: int
 
 
 def background_dispatch_requires_token() -> bool:
@@ -621,34 +641,6 @@ def get_langsmith_metadata(
         metadata["platform"] = platform
 
     return metadata
-
-
-# ---------------------------------------------------------------------------
-# Local product configuration
-#
-# The channel gateway, document parsing and the server-side ASR relay are this
-# deployment's own services, so their accessors live here beside the shared
-# ones rather than in a module of their own.
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class VolcengineAsrConfig:
-    """Deployment credentials and endpoint for the server-side ASR relay."""
-
-    app_id: str
-    access_token: str = field(repr=False)
-    cluster: str
-    ws_url: str = "wss://openspeech.bytedance.com/api/v2/asr"
-
-
-@dataclass(frozen=True)
-class DocumentParsingConfig:
-    """Deployment limits for document ingestion and parsing."""
-
-    max_upload_bytes: int
-    sync_wait_seconds: int
-    parse_timeout_seconds: int
 
 
 def get_document_parsing_config() -> DocumentParsingConfig:

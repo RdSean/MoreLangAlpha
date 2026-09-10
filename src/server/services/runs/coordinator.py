@@ -593,6 +593,7 @@ class RunCoordinator:
                 status=final_status,
                 conn=conn,
                 is_byok=outcome.metadata.get("is_byok", handle.is_byok),
+                llm_runtime_metadata=outcome.metadata.get("llm_runtime"),
             )
             if not ok:
                 # persist_usage swallows into False; inside the finalize txn

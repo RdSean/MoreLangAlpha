@@ -707,6 +707,7 @@ async def astream_flash_workflow(
             msg_type="flash",
             log_prefix="FLASH_CHAT",
             timezone_str=timezone_str,
+            llm_runtime_metadata=getattr(config, "llm_runtime_metadata", None),
         ):
             yield event
 

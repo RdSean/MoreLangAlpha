@@ -25,6 +25,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from src.server.utils.api import CurrentUserId, require_workspace_owner
+from src.server.services.education_access import require_nonstudent_agent_features
 from src.server.database.workspace import (
     get_preview_command,
     get_workspace as db_get_workspace,
@@ -35,11 +36,7 @@ from src.utils.cache.redis_cache import get_cache_client
 
 logger = logging.getLogger(__name__)
 
-
 async def _require_nonstudent_sandbox_access(user_id: CurrentUserId) -> None:
-    """Keep the sandbox surface parent-only (local student rule)."""
-    from src.server.services.education_access import require_nonstudent_agent_features
-
     await require_nonstudent_agent_features(user_id)
 
 

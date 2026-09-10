@@ -965,3 +965,14 @@
 - 测试目标重新指向拆分后的模块归属（`llm.clients` / `llm.user_models` / `llm.household`）；`tests/unit/server/handlers/test_resolve_llm_config.py` 与 `chat/test_resolve_llm_config_credential.py` 以远端版本为基座，仅叠加本地 household 与平台模型档用例。
 - 顺带修正合并残留：`src/server/models/user.py` 重复的 `normalize_instrument_type` 定义，以及 `education_teaching_storage.py` / `workspace_manager.py` 的未使用导入。
 - 验证：`tests/unit/server`（排除两个 workspace_manager 收集文件）由 164 failed/3450 passed 变为 99 failed/3520 passed；`tests/unit/llms` 553 passed，`tests/unit/server/handlers/chat` 296 passed，`tests/unit/config` + `tests/unit/core` 817 passed，`tests/unit/utils` + `tests/unit/ptc_agent` 883 passed；`ruff check src/` 通过。
+## 2026-09-10
+
+### 手工合并剩余平台文件，全量单测转绿
+
+- 13 个“双方都改过”的文件改用三方合并（fork 点 `4f56db64` 作 base）后逐个裁决：`app/setup.py`、`app/users.py`、`app/api_keys.py`、`app/vault.py`、`app/workspaces.py`、`app/mcp_servers.py`、`app/workspace_sandbox.py`、`app/threads/{create,messaging}.py`、`database/user.py`、`handlers/chat/{request_prep,error_handling}.py`、`services/persistence/usage.py`、`services/runs/recovery.py`、`services/user_data_io.py`、`config/{env,settings}.py`；`utils/api.py` 与本地一致（首方会话鉴权本地为准），不取远端。
+- 远端新增能力随之上线：`users` 的 auth sync 与模型 tuning 校验、`database/user` 的 `migrate_user_id`/`create_user_from_auth` 与 JSONB 深合并子句、`api_keys` 的 `byok_eligible` 默认值与 `prompt_guidance` 默认档、`settings` 的市场/新闻/OHLCV 配置访问器、`setup` 的 WorkspaceFileGC 与 credit-gate 接线。
+- 本地产品面按上游形态回补：`ChatRequest` 补回 `education_assignment_id` / `education_chapter_id`；`s3_compatible` 回补 `download_to_file` / `open_download_stream` / `create_presigned_download_url`；`run executor` 回补托管教学断连窗口 `_abandoned_timeout_for_metadata`；`coordinator` 回补 `llm_runtime_metadata` 透传；`skills registry` 回补 `book-to-skill`、`the-knowledge-guy`；`threads_read.get_thread_auth_meta` 回补 `managed_execution` 列，配套 `utils/api`、provenance、automation 归属校验。
+- 学生/家庭守卫统一走 `education_access.is_student_account`（`users` 偏好写、`api_keys` 个人模型配置），避免每轮打一次 household JOIN，也让单测默认匿名桩覆盖到全部入口；`tests/unit/conftest.py` 增加技能 bundle 与 household 成员默认桩。
+- 退役两个与“先整体迁回金融、后续再定点移除”冲突的本地守卫测试：`server/database/test_generic_user_preferences.py`（断言偏好表不得出现 risk/investment 列）；`test_generic_router_registration.py` 的 trigger_type 断言放宽为“通用触发器必须在”。
+- 修正单测污染：`test_preferences_validation.py` 改为 patch `LLM.get_model_config()` 而不是 `ModelConfig`（后者会把 MagicMock 写进类级单例，污染同进程后续用例）；`test_llm_constructor_boundary.py` 为 `llm/household.py` 的 `create_llm_from_custom` 补白名单说明。
+- 验证：`uv run pytest tests/unit -q -p no:randomly` 全绿 **7486 passed, 1 xfailed**；`ruff check src/` 通过。

@@ -324,6 +324,12 @@ class ChatRequest(BaseModel):
         description="Additional context to be included. Supports: skills (skill instructions)",
     )
 
+    # Student textbook-learning chat references. The server resolves published
+    # chapter material from these IDs; browser content never becomes textbook
+    # context.
+    education_assignment_id: Optional[str] = Field(default=None, max_length=64)
+    education_chapter_id: Optional[str] = Field(default=None, max_length=64)
+
     # LLM selection (optional - defaults to agent_config.yaml setting)
     llm_model: Optional[str] = Field(
         default=None,
@@ -461,5 +467,4 @@ class SubagentMessageRequest(BaseModel):
     """Request model for sending a message to a running subagent."""
 
     content: str = Field(..., description="The instruction/message to send to the subagent")
-
 

@@ -69,7 +69,8 @@ def test_general_automation_routes_and_schedule_contract_remain_available():
         ("POST", "/api/v1/automations/{automation_id}/resume"),
         ("GET", "/api/v1/automations/{automation_id}/executions"),
     } <= registered_methods
-    assert set(get_args(AutomationCreate.model_fields["trigger_type"].annotation)) == {
-        "cron",
-        "once",
-    }
+    # The general triggers must survive every product trim; the finance-only
+    # ``price`` trigger is part of the restored platform surface.
+    assert {"cron", "once"} <= set(
+        get_args(AutomationCreate.model_fields["trigger_type"].annotation)
+    )

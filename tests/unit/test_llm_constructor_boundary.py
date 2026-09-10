@@ -96,6 +96,10 @@ ALLOWLIST: dict[tuple[str, str], int] = {
     # with choosing a model. Same five calls, same justification.
     ("src/server/services/llm/clients.py", "create_llm"): 3,
     ("src/server/services/llm/clients.py", "create_llm_from_custom"): 2,
+    # Household (family) tier: the student's model comes from the owner's stored
+    # endpoint, so the client has to be built here — it is the same resolution
+    # layer, split out of clients.py so the sealed student path is one module.
+    ("src/server/services/llm/household.py", "create_llm_from_custom"): 1,
     # user_id=None system path AND resolved-None platform fallback (two calls).
     ("src/server/services/llm/service.py", "create_llm"): 2,
 }
