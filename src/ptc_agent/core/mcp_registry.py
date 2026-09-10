@@ -163,6 +163,13 @@ class MCPServerConnector:
         self.config = config
         self.session: ClientSession | None = None
         self.tools: list[MCPToolInfo] = []
+        # The server's own business card from the handshake, as the wire spelled
+        # it, so a builtin and a sandbox-discovered server hand the UI the same
+        # shape. Survives disconnect for the same reason ``tools`` does: this
+        # process asked once at startup and the answer is what it serves. None
+        # on the legacy ``ClientSession`` path, which has no discover step to
+        # read a card from.
+        self.server_info: dict[str, Any] | None = None
 
         # Background task management
         self._connection_task: asyncio.Task | None = None

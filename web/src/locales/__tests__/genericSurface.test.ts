@@ -26,8 +26,19 @@ describe('generic workspace locale boundary', () => {
   });
 
   it('does not retain financial product language in either catalog', () => {
-    expect(JSON.stringify(enUS)).not.toMatch(/TradingView|Watchlist|Price Alert|MarketView|market watch|SEC filings|Stock Prices|Options chain|Pre-Market|Portfolio/i);
-    expect(JSON.stringify(zhCN)).not.toMatch(/TradingView|自选股|投资组合|价格提醒|财报|证券文件|实时行情|市场总览|股票价格|期权链|盘前|持仓/);
+    // The brokerage consent dialog is the one deliberate exception: its
+    // capability groups name what a connection may do, so `watchlists` and
+    // `alerts` have to say so. Everything else stays out — a retired market
+    // surface must not creep back in through a label.
+    const withoutBrokerageConsent = (catalog: unknown) => {
+      const clone = structuredClone(catalog) as {
+        plugins?: { brokerages?: { capabilities?: unknown } };
+      };
+      if (clone.plugins?.brokerages) delete clone.plugins.brokerages.capabilities;
+      return JSON.stringify(clone);
+    };
+    expect(withoutBrokerageConsent(enUS)).not.toMatch(/TradingView|Watchlist|Price Alert|MarketView|market watch|SEC filings|Stock Prices|Options chain|Pre-Market|Portfolio/i);
+    expect(withoutBrokerageConsent(zhCN)).not.toMatch(/TradingView|自选股|投资组合|价格提醒|财报|证券文件|实时行情|市场总览|股票价格|期权链|盘前|持仓/);
   });
 
   it('does not retain retired financial packages or E2E response fixtures', () => {

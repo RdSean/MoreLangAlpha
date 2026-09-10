@@ -73,6 +73,13 @@ GINLIX_DATA_ENABLED: bool = bool(GINLIX_DATA_URL)
 EGRESS_RELAY_SECRET: str = os.getenv("EGRESS_RELAY_SECRET", "")
 EGRESS_RELAY_BASE_URL: str = os.getenv("EGRESS_RELAY_BASE_URL", "")
 
+# Where THIS process reaches its own egress relay for directly bound MCP
+# tools. Loopback on purpose: the host-side call takes the same route, policy
+# and audit as a sandbox call, without leaving the box.
+EGRESS_RELAY_LOOPBACK_URL: str = os.getenv(
+    "EGRESS_RELAY_LOOPBACK_URL", "http://127.0.0.1:8000"
+)
+
 # Public base URL of this server (used in agent-generated URLs like preview links)
 SERVER_BASE_URL: str = os.getenv("SERVER_BASE_URL", "http://localhost:8000")
 

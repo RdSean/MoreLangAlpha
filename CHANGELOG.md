@@ -916,3 +916,14 @@
 - 本地 `scrapling` stdio server 因 `scrapling==0.4.7` 仍依赖已被 mcp 2.0 移除的 `mcp.server.fastmcp` 而关闭；同等的抓取能力由 bundled `alternative_data/scrape` 服务器经 `mcp_servers/_browser.py` 提供。
 - 宿主开发模式启动说明与端口/连接参数写入迁移 runbook；后端 `18000`、前端 `15177`，基础设施复用隔离 Compose 栈的 `15432/16379/19000`。
 - 验证：宿主栈启动后注册 10 个 MCP server、61 个工具且无连接失败；`/health` 与前端均返回 200；数据库位于 `055_tool_denylist (head)`；相关聚焦测试 `54 passed`。
+## 2026-09-10
+
+### 平台 MCP 管理面补齐
+
+- 补回远端 MCP catalog 路由（catalog CRUD、批量导入、binding 设置、内置服务器列表与开关、券商注册表与图标、工具列表）；此前本地仅保留了最小旧版，导致 Plugins 页连接器列表整页报错。
+- 补回远端 workspace MCP 路由，并保留本地教育账号守卫（学生 household 成员仍被拒绝访问工作区 MCP 能力）。
+- 修正 `get_db_connection` 缺少可复用连接参数的问题：迁移过来的数据库模块均以 `get_db_connection(conn)` 复用调用方事务，本地旧签名会让所有 catalog 接口直接 500。
+- 迁移链新增 `056_mcp_tool_binding`（工具绑定映射/预设/审批列）与 `057_brokerage_capabilities`（连接级能力同意列及回填），均在隔离库完成升级验证。
+- 接入远端 `tool_binding`、`egress_grants`、`relay_jwt`、工具错误格式化实现，并补入 direct MCP 运行时模块（middleware、direct_tools、flash_binding、grant_resync）；这些模块已就位但尚未接到图形与 Flash 构建入口。
+- 前端合并远端 `plugins`、`mcp`、`vault` 三个文案命名空间，Plugins/连接器页面不再出现未翻译 key；本地金融用语守卫改为排除刻意保留的券商能力分组文案。
+- 验证：MCP catalog/workspace/model 三组测试由 58 个失败变为 `264 passed`；前端 Plugins、hooks 与 locales 共 `359 passed`（1 个失败源自本地 `TestStorage` 测试替身）；后端单测收集 `7195/7203`，无导入错误；实跑接口 `/api/v1/mcp/servers`、`/builtin-servers`、`/brokerages`、`/api/v1/plugins`、`/api/v1/skills` 均返回 200，启动仍注册 10 个 MCP server / 61 个工具。

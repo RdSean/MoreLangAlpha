@@ -269,31 +269,70 @@ Verified on the host stack: 10 MCP servers and 61 tools registered at startup
 with no connection failures; `/health` returns 200 and the frontend serves 200
 on `15177`. Database is at `055_tool_denylist (head)`.
 
+## MCP surface parity checkpoint (2026-09-10)
+
+The Connectors tab loaded empty because the platform MCP surface had not been
+ported, not because of a runtime fault. Fixed in this pass:
+
+- `src/server/app/mcp_catalog.py` replaced with the platform router (16 routes:
+  catalog CRUD, `/servers/import`, `/servers/{name}/binding`, `/builtin-servers`,
+  `/brokerages`, icon routes, tools listings).
+- `src/server/app/mcp_servers.py` replaced with the platform workspace router.
+  The local education guard is preserved by re-attaching
+  `_require_nonstudent_mcp_access` as a router-level dependency, which the
+  platform version does not have.
+- `src/server/database/pool.py`: `get_db_connection(conn=None)` now yields a
+  caller-supplied connection. Without it every migrated database module raised
+  `TypeError` and the whole catalog answered 500.
+- Binding columns and consent: local migrations
+  `056_mcp_tool_binding` (ports `041_tool_binding`) and
+  `057_brokerage_capabilities` (ports the remaining half of
+  `036_brokerage_capabilities`; `policy_required` already arrived via
+  `055_tool_denylist`). `tool_binding.py`, `egress_grants.py`,
+  `relay_jwt.py` and `tool/error_handling.py` replaced with the platform
+  versions.
+- Frontend catalogs: the `plugins`, `mcp` and `vault` namespaces were merged
+  from `origin/main` (origin wins on conflicts, local-only keys survive). The
+  local financial-language guard now excludes `plugins.brokerages.capabilities`,
+  which deliberately ships the `watchlists`/`alerts` consent labels.
+
+Verification: `tests/unit/server/app/test_mcp_catalog.py`,
+`test_mcp_servers.py` and `tests/unit/server/models/test_mcp_server_models.py`
+went from 58 failures to `264 passed`; frontend
+`src/pages/Plugins` + `src/hooks/__tests__` + locales report `359 passed,
+1 failed` with the failure being the `TestStorage` artifact above. Backend unit
+collection: `7195/7203 collected`, no import errors. Live endpoints
+`/api/v1/mcp/servers`, `/builtin-servers`, `/brokerages`, `/api/v1/plugins` and
+`/api/v1/skills` all answer 200, and the startup registry still freezes 10
+servers / 61 tools.
+
 ## Remaining work
 
-1. Direct MCP tool path is only half wired. `session.direct_mcp_tools` is
-   populated, but the consumers are missing: `src/server/services/egress/direct_tools.py`,
-   `src/server/services/egress/flash_binding.py`, and
-   `src/ptc_agent/agent/middleware/direct_mcp.py`, plus the `direct_mcp=`
-   parameter on `build_ptc_graph_with_session` / `create_agent`. Until then every
-   MCP tool reaches the model as a sandbox wrapper and per-call consent is not
-   re-read.
-2. Reconcile the legacy MCP catalog/server route tests with the platform
-   contract (`ResolvedMCP` construction, tool counts, applied-version
-   surfacing). The current run reports 58 failures, all in
-   `tests/unit/server/app/test_mcp_catalog.py`,
-   `tests/unit/server/app/test_mcp_servers.py` and
-   `tests/unit/server/models/test_mcp_server_models.py`, plus the deliberate
-   literal-header round-trip change.
-3. `056_workspace_file_blobs` stays deferred. Workspace file bytes are still
-   inline in PostgreSQL; the seven untracked persistence/blob modules must be
-   wired as one unit (read/write, backup, restore, backfill, GC).
-4. Connector/OAuth consent end-to-end: verify brokerage capability groups,
-   egress grants and the tools endpoint against a live OAuth connection once
-   the direct path lands.
-5. `channel-gateway` (WeChat iLink worker) is not part of the host launcher
+1. Direct MCP tools are ported but not yet wired. The modules now exist
+   (`ptc_agent/agent/middleware/direct_mcp.py`, `egress/direct_tools.py`,
+   `egress/flash_binding.py`, `egress/grant_resync.py`) and
+   `session.direct_mcp_tools` is populated, but `build_ptc_graph_with_session`
+   and `create_agent` still take no `direct_mcp=`, so every MCP tool reaches
+   the model as a sandbox wrapper. Flash still cannot run MCP tools at all
+   until that lands.
+2. `056_workspace_file_blobs` stays deferred; the numbers `056` and `057` are
+   now taken by `mcp_tool_binding` and `brokerage_capabilities`. Workspace file
+   bytes are still inline in PostgreSQL; the seven untracked persistence/blob
+   modules must be wired as one unit (read/write, backup, restore, backfill, GC).
+3. Connector/OAuth consent end-to-end still needs a live OAuth connection.
+   Host-side egress is currently blocked on this machine: the platform pins and
+   dials the resolved IP with `trust_env=False`, so it neither follows the
+   macOS HTTP proxy nor accepts the proxy's fake-IP DNS answers. Options are a
+   proxy `redir-host` DNS mode (keeps TUN, returns public IPs), or an env-gated
+   local allowance threaded into `pin_public_url`.
+4. `channel-gateway` (WeChat iLink worker) is not part of the host launcher
    above; start it separately (`python -m src.server.services.channels.worker`)
    when testing channel behaviour.
-6. Financial capability removal stays a later, dependency-ordered pass
+5. Financial capability removal stays a later, dependency-ordered pass
    (`bundle manifest → backend APIs → MCP servers/tools → Skills → frontend →
    migrations/data`), after the platform baseline is green.
+6. Local test-infra divergences worth revisiting: `web/src/test/setup.ts`
+   installs a hand-rolled `TestStorage` that is not a real `Storage` instance,
+   so `connectReturn.test.ts`'s `vi.spyOn(Storage.prototype, …)` case cannot
+   intercept it. The catalog command denylist (`bash`/`sh`/`curl`/`rm`) also
+   stays local-only and is asserted by the ported catalog test.
