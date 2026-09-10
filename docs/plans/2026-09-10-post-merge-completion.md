@@ -113,6 +113,25 @@ exists with `get_household_context`, `_student_household_context`,
 `billing_type="byok"` + `credential_source="household"` + household ids) and
 `resolve_student_household_config` (the sealed student runtime path).
 
+**Status: DONE** (as landed, slightly wider than sketched below). What landed:
+the three upstream files taken verbatim; the household early-return inside
+upstream's `resolve_llm_config` right after the BYOK self-resolution; the local
+**platform model profile** hooks re-applied onto upstream `clients.py`
+(`resolve_model_client` prefers `resolve_platform_llm_client`, the role
+materialization gate gains the `PLATFORM + profile` exception); `resolved_model`
++ `llm_runtime_metadata` back on `AgentConfig` and re-emitted from PTC/Flash
+query metadata and the SSE metadata frame; `tests/unit/conftest.py` gains the
+upstream `_empty_user_skill_bundle` stub and a household-membership stub;
+`tests/unit/server/services/conftest.py` restored from upstream; the two
+resolver test files rebuilt on top of upstream's versions with only the
+household and profile cases re-added.
+
+Verified: `tests/unit/server` (minus the two `test_workspace_manager*` files,
+which still fail to collect) 164 failed → 99 failed, 3450 → 3520 passed;
+`tests/unit/llms` 553 passed; `tests/unit/server/handlers/chat` 296 passed;
+`tests/unit/{config,core}` 817 passed; `tests/unit/{utils,ptc_agent}` 883
+passed; `ruff check src/` clean.
+
 **Exact next steps:**
 
 1. `git checkout origin/main -- src/server/services/llm/config.py

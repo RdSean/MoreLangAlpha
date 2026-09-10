@@ -18,16 +18,6 @@ def normalize_symbol(symbol: str) -> str:
     return symbol.strip().upper()
 
 
-def normalize_instrument_type(value: Any) -> Any:
-    """Normalize an optional instrument type without touching other values.
-
-    Local helper kept alongside the upstream model: the workspace/user-data
-    writers pass instrument types (``stock``, ``etf``) rather than symbols, and
-    those compare case-insensitively.
-    """
-    return value.strip().lower() if isinstance(value, str) else value
-
-
 # =============================================================================
 # Instrument Types
 # =============================================================================

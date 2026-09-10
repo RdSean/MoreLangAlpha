@@ -521,6 +521,15 @@ async def resolve_model_client(
     # Platform fallback — only for SYSTEM-catalog models. Reached when OAuth and
     # BYOK both miss.
     if allow_platform_fallback and source == ModelSource.SYSTEM:
+        # This deployment may route the whole turn through a service-account
+        # model profile. It is the approved provider, so it wins over the
+        # environment-keyed client whenever it is configured.
+        from .platform_profile import resolve_platform_llm_client
+
+        platform_client = await resolve_platform_llm_client(cache_key=cache_key)
+        if platform_client is not None:
+            return ResolvedClient(platform_client, source, CredentialSource.PLATFORM)
+
         from src.llms.llm import create_llm
 
         client = create_llm(
@@ -654,6 +663,22 @@ def _tier_for(fast_mode: bool | None) -> str | None:
     return "priority" if fast_mode else None
 
 
+def _resolved_model_name(client, requested_model: str | None) -> str | None:
+    """Return the non-secret model identity represented by a built client.
+
+    A deployment model profile can route a logical catalog model through a
+    deployment-managed model. The client metadata is the authoritative,
+    already-sanitized identity for display and durable turn metadata; when no
+    eager client exists, the requested model is also the effective model.
+    """
+    metadata = getattr(client, "metadata", None)
+    if isinstance(metadata, dict):
+        manifest_model = metadata.get("manifest_model")
+        if isinstance(manifest_model, str) and manifest_model.strip():
+            return manifest_model.strip()
+    return requested_model
+
+
 def _stamp(config, client, prompt_guidance: str | None) -> None:
     """Put the turn-shaping facts the factory cannot see on a built client.
 
@@ -673,6 +698,7 @@ def _stamp(config, client, prompt_guidance: str | None) -> None:
 async def _resolve_role_clients(
     config, user_id: str, roles: list[LLMRole], model_pref: dict,
     byok_cache: dict, *, is_byok: bool, cache_key: str | None,
+    platform_profile_configured: bool = False,
 ) -> None:
     """Resolve compaction/fetch/subagent role clients onto ``config`` in place.
 
@@ -680,9 +706,10 @@ async def _resolve_role_clients(
     ``config.llm_client`` are set. A keyless role for an OAUTH/BYOK user is
     seeded with a copy of the main client (BYOK-pure), while PLATFORM/NONE users
     store nothing so the cheap name-based path stays -- unless the role is
-    tuned, which ``_needs_own_client`` decides. Each role's I/O (OAuth check +
-    BYOK walk) runs concurrently; writes happen after the gather so the SSE hot
-    path waits one round-trip, not N.
+    tuned, which ``_needs_own_client`` decides, or the deployment runs a model
+    profile, whose custom client has no matching environment-backed role model.
+    Each role's I/O (OAuth check + BYOK walk) runs concurrently; writes happen
+    after the gather so the SSE hot path waits one round-trip, not N.
     """
 
     def _needs_own_client(role: LLMRole) -> bool:
@@ -738,9 +765,18 @@ async def _resolve_role_clients(
     # SIGNAL: by the primitive's invariant OAUTH/BYOK ⟹ llm_client is set, so a
     # main-client copy is safe. PLATFORM/NONE users store nothing → cheap name
     # path stays (a non-BYOK reasoning user's PLATFORM client is NOT copied).
-    # The explicit None check makes the invariant a guard, not an assumption.
+    # A deployment model profile is the exception: role names still come from
+    # agent_config, but the sole approved provider is the profile's
+    # pre-resolved main client. The explicit None check makes the invariant a
+    # guard, not an assumption.
     if (
-        config.credential_source in (CredentialSource.OAUTH, CredentialSource.BYOK)
+        (
+            config.credential_source in (CredentialSource.OAUTH, CredentialSource.BYOK)
+            or (
+                config.credential_source == CredentialSource.PLATFORM
+                and platform_profile_configured
+            )
+        )
         and config.llm_client is not None
     ):
         for role in roles:
@@ -750,11 +786,18 @@ async def _resolve_role_clients(
                 # role's own name stops being the answer for it.
                 if config.prompt_guidance:
                     config.role_prompt_guidance[role.key] = config.prompt_guidance
-                logger.info(
-                    "[CHAT] Role '%s' has no own key; falling back to the user's "
-                    "main client (cost shifts to main-model rate).",
-                    role.key,
-                )
+                if config.credential_source == CredentialSource.PLATFORM:
+                    logger.info(
+                        "[CHAT] Role '%s' has no own platform client; using the "
+                        "deployment model profile's main client.",
+                        role.key,
+                    )
+                else:
+                    logger.info(
+                        "[CHAT] Role '%s' has no own key; falling back to the user's "
+                        "main client (cost shifts to main-model rate).",
+                        role.key,
+                    )
 
 
 async def _resolve_fallback_clients(
@@ -880,11 +923,17 @@ async def resolve_clients(
     # non-credentialed reasoning request gets an eager platform client (tagged
     # PLATFORM); a non-reasoning non-credentialed request leaves llm_client=None
     # (NONE) for the lazy OSS path. An OAuth-required HTTPException propagates.
+    from .platform_profile import is_platform_model_profile_configured
+
+    platform_profile_configured = is_platform_model_profile_configured()
+
     main = await resolve_model_client(
         user_id, effective_model, is_byok=is_byok, cache_key=thread_id,
         reasoning_effort=main_tuning.reasoning_effort,
         service_tier=_tier_for(main_tuning.fast_mode),
-        allow_platform_fallback=bool(main_tuning.reasoning_effort),
+        allow_platform_fallback=(
+            bool(main_tuning.reasoning_effort) or platform_profile_configured
+        ),
         _pref_cache=model_pref, _byok_cache=byok_cache,
     )
     # Always store credential_source (even NONE) — single source of truth
@@ -896,6 +945,12 @@ async def resolve_clients(
     elif user_defined:
         # Custom model selected but no usable key — fail loud with a CTA.
         raise_byok_key_required(effective_model)
+
+    # The non-secret identity of the model this turn actually runs. A
+    # deployment model profile routes a logical catalog name through a managed
+    # model, and the UI/run metadata should name the one that ran, not the one
+    # that was asked for.
+    config.resolved_model = _resolved_model_name(main.client, effective_model)
 
     # Stash on config so the lazy ``AgentConfig.get_llm_client()`` path forwards
     # it to ``create_llm`` when no client was pre-built.
@@ -910,6 +965,7 @@ async def resolve_clients(
         _resolve_role_clients(
             config, user_id, roles, model_pref, byok_cache,
             is_byok=is_byok, cache_key=thread_id,
+            platform_profile_configured=platform_profile_configured,
         ),
         _resolve_fallback_clients(
             config, user_id, model_pref, byok_cache,

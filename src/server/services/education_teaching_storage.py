@@ -8,7 +8,6 @@ import io
 import json
 import re
 import zipfile
-from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, Protocol
 from uuid import UUID

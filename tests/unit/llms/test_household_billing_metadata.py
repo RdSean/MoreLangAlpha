@@ -11,7 +11,7 @@ def test_keyless_household_client_is_family_funded_not_platform():
     travel alongside for per-student attribution. ``billing_type`` stays one of
     the values the pricing table and metrics know.
     """
-    from src.server.services.llm.config import resolve_household_llm_client
+    from src.server.services.llm.household import resolve_household_llm_client
 
     client = MagicMock()
     client.metadata = {}

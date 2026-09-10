@@ -8,7 +8,7 @@ import os
 from src.server.database.api_keys import is_byok_active
 from src.server.database.user import find_user_by_email
 
-from .config import resolve_byok_llm_client
+from .clients import resolve_byok_llm_client
 
 logger = logging.getLogger(__name__)
 

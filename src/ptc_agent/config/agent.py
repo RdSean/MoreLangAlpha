@@ -314,6 +314,12 @@ class AgentConfig(BaseModel):
     credential_source: CredentialSource = Field(
         default=CredentialSource.NONE, exclude=True
     )
+    # Non-secret model identity represented by the resolved client. This can
+    # differ from ``llm`` when a platform model profile serves the request.
+    resolved_model: str | None = Field(default=None, exclude=True)
+    # Safe credential/model provenance copied into run metadata. Never store
+    # decrypted credentials here: config instances can reach checkpoints.
+    llm_runtime_metadata: dict[str, str] | None = Field(default=None, exclude=True)
     subsidiary_llm_clients: dict[str, Any] = Field(default_factory=dict, exclude=True)
     # Scaffolding level per role key, for the model that role actually runs.
     # Written alongside the clients above, because a role without a client of

@@ -954,3 +954,14 @@
 - 托管模式不再携带环境工具：`AskUserQuestion`、`RunWorkflow`、金融工具、Web/Site-crawl 一律按 `managed_policy` 关闭；技能注册表按 `allowed_skill_names` 过滤。
 - 退役与当前策略冲突的本地测试 `test_generic_sandbox_packages.py`（断言跳过退役金融包，而本分支保留金融）。
 - 验证：`tests/unit/ptc_agent` 763 passed、1 xfailed/xpassed；相关文件 ruff 通过。
+## 2026-09-10
+
+### 家庭模型解析与平台模型档迁回远端 LLM 分层
+
+- 采用远端拆分后的 `llm/{availability,clients,config}` 三件套，移除合并时保留的旧单体 `config.py`；家庭（household）解析移入新模块 `llm/household.py`，`resolve_llm_config` 在 BYOK 自解析后立刻尝试 `resolve_student_household_config`，学生账号命中即早返回，不进入任何个人偏好分支。
+- 平台模型档（`PLATFORM_LLM_SOURCE_EMAIL` + `PLATFORM_LLM_MODEL`）改接在远端 `resolve_model_client` 的 SYSTEM 平台回退口：配置存在时优先使用服务账号客户端；角色客户端物化闸门增加 `PLATFORM + 已配置档` 例外，使压缩/抓取/子代理角色复用主客户端。
+- `AgentConfig` 补回 `resolved_model` 与 `llm_runtime_metadata` 两个本地运行时字段（远端已无），并在 PTC/Flash 落库元数据与 SSE 首帧 metadata 里重新发出 `resolved_llm_model`，前端“实际运行模型”显示恢复。
+- 单测基座补齐：`tests/unit/conftest.py` 增加远端 `_empty_user_skill_bundle` 桩并把 household 成员查询纳入默认匿名桩（`resolve_llm_config` 每轮都会查家庭层级）；补回远端新增但合并时遗漏的 `tests/unit/server/services/conftest.py`。
+- 测试目标重新指向拆分后的模块归属（`llm.clients` / `llm.user_models` / `llm.household`）；`tests/unit/server/handlers/test_resolve_llm_config.py` 与 `chat/test_resolve_llm_config_credential.py` 以远端版本为基座，仅叠加本地 household 与平台模型档用例。
+- 顺带修正合并残留：`src/server/models/user.py` 重复的 `normalize_instrument_type` 定义，以及 `education_teaching_storage.py` / `workspace_manager.py` 的未使用导入。
+- 验证：`tests/unit/server`（排除两个 workspace_manager 收集文件）由 164 failed/3450 passed 变为 99 failed/3520 passed；`tests/unit/llms` 553 passed，`tests/unit/server/handlers/chat` 296 passed，`tests/unit/config` + `tests/unit/core` 817 passed，`tests/unit/utils` + `tests/unit/ptc_agent` 883 passed；`ruff check src/` 通过。
