@@ -319,12 +319,15 @@ servers / 61 tools.
    now taken by `mcp_tool_binding` and `brokerage_capabilities`. Workspace file
    bytes are still inline in PostgreSQL; the seven untracked persistence/blob
    modules must be wired as one unit (read/write, backup, restore, backfill, GC).
-3. Connector/OAuth consent end-to-end still needs a live OAuth connection.
-   Host-side egress is currently blocked on this machine: the platform pins and
-   dials the resolved IP with `trust_env=False`, so it neither follows the
-   macOS HTTP proxy nor accepts the proxy's fake-IP DNS answers. Options are a
-   proxy `redir-host` DNS mode (keeps TUN, returns public IPs), or an env-gated
-   local allowance threaded into `pin_public_url`.
+3. Connector/OAuth consent end-to-end still needs a live OAuth connection, but
+   host-side egress now works. The machine's Clash Verge profile was switched
+   from fake-IP to real-IP DNS with TUN on, so `pin_public_url` resolves and
+   dials public addresses again — the earlier failure was the guard rejecting
+   `198.18.0.0/15` fake addresses, not a code defect. Verified: pinned GETs
+   reach all four brokerage endpoints (405/401/404/401, i.e. transport works),
+   moomoo's `/.well-known/oauth-protected-resource` and
+   `/.well-known/oauth-authorization-server` both answer 200, and plugin plus
+   brokerage icon routes return real images.
 4. `channel-gateway` (WeChat iLink worker) is not part of the host launcher
    above; start it separately (`python -m src.server.services.channels.worker`)
    when testing channel behaviour.
