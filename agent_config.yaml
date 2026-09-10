@@ -12,7 +12,7 @@ llm:
   compaction: "" # blank → same model as flash
   fetch: ""         # blank → same model as flash
   fallback:
-    - "deepseek-v4-pro"
+    - "deepseek-flash"
     - "glm-5.2"
 
 sandbox:
@@ -50,9 +50,35 @@ sandbox:
     #   - "/data/datasets:/mnt/datasets:ro"
 
 mcp:
-  # MCP server configurations
-  # Note: Filesystem is now a first-class tool (see filesystem section below)
-  # Each server can have 'enabled: true/false' to enable/disable it (default: true)
+  # The servers that ship with LangAlpha are declared by the bundles under
+  # plugins/, one Agent Plugins package per group -- see plugins/README.md.
+  # This list is yours: servers you add, and overrides for the ones we ship.
+  #
+  # A name no bundle declares ADDS a server. A name a bundle already declares
+  # OVERRIDES it -- the keys you write here are laid over the shipped server
+  # and every key you leave out keeps its shipped value. Switching one off is
+  # two lines, and changing one field never means restating the command:
+  #
+  #   - name: "price_data"          # stop launching a server we ship
+  #     enabled: false
+  #
+  #   - name: "yf_price"            # keep ours, show the agent every tool
+  #     tool_exposure_mode: "detailed"
+  #
+  #   - name: "fundamentals"        # keep our description, run your own build
+  #     command: "uvx"
+  #     args: ["--from", "my-fundamentals-mcp", "serve"]
+  #
+  # Overriding here rather than editing plugins/ keeps your choice out of a
+  # file the next pull overwrites. `env` and `headers` replace the shipped map
+  # whole rather than merging key by key, so you can take a variable away as
+  # well as add one.
+  #
+  # Third-party stdio servers: always launch isolated -- uvx/npx with pinned
+  # versions -- never from the shared environment, whose dependency pins
+  # (including the mcp SDK) will strand them on the next SDK major. Builtin
+  # servers under plugins/ are era-proof via _bootstrap and run with
+  # `uv run python`.
   servers:
     - name: "tavily"
       enabled: false
@@ -108,6 +134,22 @@ mcp:
           # without being too strict about the exact character set.
           regex: "^[A-Za-z0-9%_-]{20,}$"
 
+    # A no-op override, here so the shape is in front of you. Flip it to
+    # false and price_data stops launching on the next restart.
+    - name: "price_data"
+      enabled: true
+
+    # Adding a server of your own looks like this:
+    # - name: "tavily"
+    #   description: "Web search engine for finding current information online"
+    #   instruction: "Use for web searches, news, research, and real-time information."
+    #   tool_exposure_mode: "summary"
+    #   transport: "stdio"
+    #   command: "npx"
+    #   args: ["-y", "tavily-mcp@latest"]
+    #   env:
+    #     TAVILY_API_KEY: "${TAVILY_API_KEY}"
+
   # Tool discovery settings
   tool_discovery_enabled: true
   lazy_load: true # Load tools on-demand
@@ -149,12 +191,12 @@ agent:
 
 # Subagent configuration
 subagents:
-  # List of enabled subagents (available: research, general-purpose, data-prep, analyst, report-builder, plus user-defined)
+  # List of enabled subagents (available: research, general-purpose, data-prep, equity-analyst, report-builder, plus user-defined)
   enabled:
     - general-purpose
     - research
     - data-prep
-    - analyst
+    - equity-analyst
     - report-builder
 
   # User-defined subagents (optional). Each key becomes a subagent name.
@@ -223,10 +265,3 @@ web_fetch:
   sitemap_max_urls: 100 # Max URLs to fetch from sitemap
   sitemap_max_examples: 3 # Max example URLs per path prefix in summary
   sitemap_timeout: 10 # Timeout in seconds for sitemap fetch
-
-# Embedding Model Configuration (Currently not in use)
-embedding:
-  model: embedding-small # Options: embedding-small, embedding-large (see src/llms/llm_config.json)
-  batch_size: 100 # Number of texts to embed in a single batch
-  enable_auto_embedding: true
-  hybrid_search_alpha: 0.5 # Balance between semantic (0.0) and keyword search (1.0)

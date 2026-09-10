@@ -365,6 +365,18 @@ as the fallback when object storage is unconfigured.
 
 ## Task 7: End-to-end verification — PTC agent plus Docker sandbox
 
+**Status: DONE** (one item left open on purpose). Evidence in the runbook's
+"End-to-end verification (2026-09-10)" section. The check found and fixed two
+real defects that no unit test could see: `agent_config.yaml` still enabled the
+retired `analyst` subagent (PTC init failed outright), and the schema the local
+baseline had dropped (`risk_preference` / `investment_preference`,
+`watchlists`, `watchlist_items`, `user_portfolios`, `market_insights`) had to be
+restored as `060_restore_finance_schema` before any turn could resolve a model.
+Verified: Docker sandbox container starts, two PTC turns complete (one plain,
+one writing and reading a file inside the sandbox), and stopping the workspace
+syncs the sandbox into `workspace_files`/`workspace_file_blobs` through the
+packed-blob path. Still open: a user-level MCP connector end to end.
+
 **Step 1:** Restart the host backend against the isolated infra:
 
 ```bash

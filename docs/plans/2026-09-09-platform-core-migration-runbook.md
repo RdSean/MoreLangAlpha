@@ -370,8 +370,9 @@ Verified: `tests/unit/config` 245, `tests/unit/core`+observability+ci 552,
    | `038_tool_denylist` | `055_tool_denylist` | |
    | `039_workspace_file_blobs` | `058_workspace_file_blobs` | `workspace_file_blobs` registry, the `blob_sha256`/`pack_sha256`/`kind`/`symlink_target`/`pack_offset` columns, `workspaces.files_restore_incomplete_at`, partial indexes |
    | `040_direct_tools` | `059_direct_tools` | `sandbox_egress_grants.tool_direct_only` + `mcp_config_version` bump |
-   | `041_tool_binding` | `056_mcp_tool_binding` | |
-   | `037_free_webull_name` | **skipped on purpose** | one-shot data repair for user MCP servers already sitting on the `webull` name; it builds on upstream's `030`/`032`, which this chain never ran. No row here holds such a name; port it as `060` if that ever changes. |
+  | `041_tool_binding` | `056_mcp_tool_binding` | |
+  | `037_free_webull_name` | **skipped on purpose** | one-shot data repair for user MCP servers already sitting on the `webull` name; it builds on upstream's `030`/`032`, which this chain never ran. No row here holds such a name; port it as `060` if that ever changes. |
+   | *(local 001 / 005 / 007 edits)* | `060_restore_finance_schema` | the local baseline had dropped `user_preferences.risk_preference` / `investment_preference` and the `watchlists`, `watchlist_items`, `user_portfolios`, `market_insights` tables; local `005`/`007` are empty stubs, so their index and VARCHAR conversion are folded into `060` |
 
    Verified on the isolated stack (`15432`): `057 → 058 → 059`, then
    `059 → 057 → 059`; afterwards `workspace_files` and `sandbox_egress_grants`
@@ -401,3 +402,35 @@ Verified: `tests/unit/config` 245, `tests/unit/core`+observability+ci 552,
    so `connectReturn.test.ts`'s `vi.spyOn(Storage.prototype, …)` case cannot
    intercept it. The catalog command denylist (`bash`/`sh`/`curl`/`rm`) also
    stays local-only and is asserted by the ported catalog test.
+
+## End-to-end verification (2026-09-10)
+
+Environment: host backend `uv run python server.py --host 0.0.0.0 --port 18000`
+against the isolated stack (`15432/16379/19000`), frontend on `15177`,
+`SANDBOX_PROVIDER=docker`, image `langalpha-sandbox:latest`.
+
+- Startup is clean: `PTC Agent configuration loaded successfully`, 12 MCP servers
+  (10 bundled + 2 added), registry frozen at 61 tools, checkpointer healthy
+  (`pool_min=1 pool_max=25`), `/health` 200.
+- `agent_config.yaml` needed one fix on the way: it still enabled the subagent
+  name `analyst`, which upstream renamed to `equity-analyst`. With it enabled,
+  PTC Agent initialisation failed outright.
+- `POST /api/v1/workspaces` created workspace
+  `1957a6e6-…` with sandbox `docker-9d2ebd6f5759`; container
+  `langalpha-sandbox-docker-9d2ebd6f5759` came up on `langalpha-sandbox:latest`,
+  and the asset sync uploaded 10 MCP servers / 61 tools plus the skill tree.
+- Turn 1 (plain question) → `conversation_responses.status=completed`, assistant
+  answered `pong`, `context_window` reported 17 494 input tokens, one
+  `conversation_usages` row.
+- Turn 2 (write + read a file in the sandbox) → `completed` with
+  `tool_calls` / `tool_call_result` / `artifact` / `provenance` events; the
+  artifact payload is `Write work/sandbox_check/hello.txt` with content
+  `step-ok`.
+- `POST /workspaces/{id}/stop` synced the sandbox into the database: 200+
+  `workspace_files` rows with `kind` set (`file`/`dir`), `pack_sha256` non-null
+  and **no** inline content, plus a `workspace_file_blobs` registry row
+  (4 824 172 bytes). That exercises the whole blob path — pack, upload,
+  register — which is what made `058` mandatory rather than optional.
+- Still open: a user-level (non-bundled) MCP connector end to end.
+  `workspace_mcp_tool_schemas` stays empty until one is added to the workspace;
+  the bundled stdio servers are delivered through the frozen registry instead.

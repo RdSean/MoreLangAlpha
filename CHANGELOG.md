@@ -987,3 +987,13 @@
 - 远端 `037_free_webull_name` 有意跳过：它依赖本链从未执行过的远端 `030`/`032`，且只是把存量用户 MCP 行从 `webull` 改名的一次性数据修复；本地无此类数据，将来需要时再作为 `060` 补。
 - 新增 `tests/unit/migrations/test_workspace_file_blobs_migration.py`、`test_direct_tools_migration.py`；在隔离库（15432）完成 `057 → 058 → 059` 与 `059 → 057 → 059` 往返验证，并确认新列与新索引落库。
 - 验证：`uv run pytest tests/unit -q -p no:randomly` → **7491 passed, 1 xfailed**；`ruff check src/ scripts/ops/` 通过。
+## 2026-09-10
+
+### 回补金融偏好与自选/持仓/洞察表，PTC + Docker 沙盒端到端跑通
+
+- 端到端实测暴露本地基线 `001_initial_schema` 曾删除的金融 schema：`user_preferences.risk_preference` / `investment_preference` 两列，以及 `watchlists`、`watchlist_items`、`user_portfolios`、`market_insights` 四张表。合并进来的 `database/user.py` 每轮都会 SELECT 那两列，`/api/v1/watchlist`、持仓路由与洞察服务读那四张表，因此新增 `060_restore_finance_schema` 按远端 `001` 重建，并把本地已成为空壳的 `005`（generating 唯一索引）与 `007`（user_id UUID→VARCHAR）的效果折进来；降级在仍有数据时拒绝执行。
+- `agent_config.yaml` 修正启用子代理名 `analyst` → `equity-analyst`（远端重命名后，旧名字会让 PTC Agent 初始化直接失败），并按上游形态补回 `price_data` MCP 条目与上游新注释。
+- 端到端验证（宿主后端 18000 + 隔离栈 15432/16379/19000 + Docker 沙盒）：启动无告警，注册 12 个 MCP server / 61 个工具，checkpointer 健康；创建 PTC 工作区拉起容器 `langalpha-sandbox-docker-9d2ebd6f5759`；两轮对话均 `completed`——第一轮直答 `pong` 并上报 17494 input tokens，第二轮在沙盒内写读文件并产出 `Write work/sandbox_check/hello.txt`（content `step-ok`）artifact。
+- 停止工作区触发沙盒落库：`workspace_files` 写入 `kind`、`pack_sha256` 且内联列为空，`workspace_file_blobs` 登记 1 条 4.8MB pack 记录，证明“打包 → 上传 → 登记”整条 blob 链路可用（这也是 `058` 属于必需而非可选的原因）。
+- 尚未完成：用户级（非内置）MCP 连接器的真实端到端；`workspace_mcp_tool_schemas` 在未添加用户服务器前保持为空。
+- 验证：新增 `tests/unit/migrations/test_restore_finance_schema_migration.py`；隔离库完成 `059 → 060 → 059 → 060` 往返；前端 15177 与后端 18000 均 200。
