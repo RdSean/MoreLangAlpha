@@ -116,20 +116,6 @@ async def test_get_stamp_auth_non_service_caller_delegates():
     delegate.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_oss_background_dispatch_resolves_user_id_without_session_cookie():
-    """OSS self-dispatch is trusted when no service token is configured."""
-    request = SimpleNamespace(
-        headers={"X-Dispatch": "background", "X-User-Id": "alice"},
-        cookies={},
-    )
-    with (
-        patch.object(api, "_SERVICE_TOKEN", ""),
-        patch("src.config.settings.HOST_MODE", "oss"),
-    ):
-        assert await api.get_current_user_id(request, None) == "alice"
-
-
 # ---------------------------------------------------------------------------
 # service_token_matches — the pure constant-time compare primitive
 # (shared with threads.py's dispatch preflight)

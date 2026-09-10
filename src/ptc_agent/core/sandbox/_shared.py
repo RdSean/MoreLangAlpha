@@ -16,17 +16,31 @@ logger = structlog.get_logger(__name__)
 # change on every computation and would force needless re-uploads.
 _LOCK_VOLATILE_KEYS: frozenset[str] = frozenset({"installedAt", "updatedAt"})
 
-# Shared runtime modules used by bundled MCP servers. They are not server entry
-# points, so the per-server upload loop never sees them; ship and hash them
-# explicitly whenever a bundled server file ships.
+# Shared runtime modules the builtin MCP server files import as siblings
+# (``import _bootstrap`` / ``from mcp_servers._envelope import ...``). They are
+# not server entry points, so the per-server upload loop never sees them —
+# ship and hash them explicitly whenever any builtin server file ships, or the
+# servers crash on import in synced sandboxes (and prune would delete them).
 _MCP_SHARED_RUNTIME_FILES: tuple[str, ...] = (
     "_bootstrap.py",
+    "_browser.py",
+    "_envelope.py",
+    "_extract.py",
+    "_schemas.py",
+    "_yf_common.py",
 )
 
-# Internal ``src.<pkg>`` packages mirrored into the sandbox's ``_internal/src/``.
-# The generic runtime has no built-in application packages; custom MCP servers
-# remain independently configurable and do not require source-tree mirroring.
-_SANDBOX_INTERNAL_PACKAGES: tuple[str, ...] = ()
+# Internal ``src.<pkg>`` packages mirrored into the sandbox's ``_internal/src/``
+# so sandbox code and the builtin MCP servers can ``import src.<pkg>`` without
+# the full repo. Shipped and hashed as ONE manifest module (``internal_packages``)
+# because the upload is all-or-nothing; every regular file ships so data seeds
+# (e.g. ``market_protocol/instruments.yaml``) can never silently drop.
+_SANDBOX_INTERNAL_PACKAGES: tuple[str, ...] = ("data_client", "market_protocol")
+
+#: Backend-owned script that walks, hashes and moves workspace files inside the
+#: sandbox. Lives beside this module on the host; ships to ``_internal/src/``.
+TRANSFER_RUNTIME_SANDBOX_NAME = "wsfiles_transfer.py"
+_TRANSFER_RUNTIME_SOURCE = Path(__file__).with_name("wsfiles_transfer_runtime.py")
 
 
 @dataclass
@@ -47,8 +61,6 @@ class ExecutionResult:
     stdout: str
     stderr: str
     duration: float
-    files_created: list[str]
-    files_modified: list[str]
     execution_id: str
     code_hash: str
     charts: list[ChartData] = field(default_factory=list)
@@ -85,6 +97,10 @@ def _internal_package_files(src_dir: Path) -> list[tuple[Path, Path]]:
     if not src_init.exists():
         return []
     files: list[tuple[Path, Path]] = [(src_init, Path("__init__.py"))]
+    # The file-transfer runtime rides the same all-or-nothing module so it is
+    # hashed into the manifest and re-shipped whenever it changes; the vault
+    # helper's unhashed upload is the precedent this deliberately avoids.
+    files.append((_TRANSFER_RUNTIME_SOURCE, Path(TRANSFER_RUNTIME_SANDBOX_NAME)))
     for pkg in _SANDBOX_INTERNAL_PACKAGES:
         pkg_dir = (src_dir / pkg).resolve()
         if not pkg_dir.exists():
@@ -136,3 +152,4 @@ def _get_sandbox_eligible_skills() -> tuple[set[str], set[str]]:
     from ptc_agent.agent.middleware.skills import SKILL_REGISTRY, get_sandbox_skill_names
 
     return get_sandbox_skill_names(), set(SKILL_REGISTRY.keys())
+

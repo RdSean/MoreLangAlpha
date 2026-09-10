@@ -15,7 +15,7 @@ logger = structlog.get_logger(__name__)
 
 class FilesystemRoute(Protocol):
     """Structural contract for a prefix-mounted route (StoreBackend,
-    WorkflowsBackend, …): the composite dispatches these
+    WorkflowsBackend, UserDataBackend, …): the composite dispatches these
     seven members and nothing else."""
 
     @property

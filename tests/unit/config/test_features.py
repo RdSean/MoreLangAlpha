@@ -26,8 +26,8 @@ def _add_feature(monkeypatch, key, **kwargs):
     )
 
 
-def test_site_crawl_is_cataloged_enabled_opt_in():
-    spec = FEATURES["site_crawl"]
+def test_market_watch_is_cataloged_enabled_opt_in():
+    spec = FEATURES["market_watch"]
     assert spec.enabled is True
     assert spec.gate is FeatureGate.OPT_IN
     assert spec.label and spec.description
@@ -35,38 +35,38 @@ def test_site_crawl_is_cataloged_enabled_opt_in():
 
 
 def test_system_flag_partial_override_merges_with_catalog(monkeypatch):
-    _stub_config(monkeypatch, site_crawl={"gate": "opt_out"})
-    flag = system_flag("site_crawl")
+    _stub_config(monkeypatch, market_watch={"gate": "opt_out"})
+    flag = system_flag("market_watch")
     assert flag.enabled is True  # unset field inherits the catalog
     assert flag.gate is FeatureGate.OPT_OUT
 
-    _stub_config(monkeypatch, site_crawl={"enabled": False})
-    assert is_feature_enabled_system("site_crawl") is False
+    _stub_config(monkeypatch, market_watch={"enabled": False})
+    assert is_feature_enabled_system("market_watch") is False
 
 
 def test_kill_switch_beats_every_gate(monkeypatch):
-    _stub_config(monkeypatch, site_crawl={"enabled": False, "gate": "none"})
-    assert effective_flags({"site_crawl": True})["site_crawl"] is False
+    _stub_config(monkeypatch, market_watch={"enabled": False, "gate": "none"})
+    assert effective_flags({"market_watch": True})["market_watch"] is False
 
 
 def test_gate_none_is_on_for_everyone_and_ignores_overrides(monkeypatch):
-    _stub_config(monkeypatch, site_crawl={"gate": "none"})
-    assert effective_flags(None)["site_crawl"] is True
-    assert effective_flags({"site_crawl": False})["site_crawl"] is True
+    _stub_config(monkeypatch, market_watch={"gate": "none"})
+    assert effective_flags(None)["market_watch"] is True
+    assert effective_flags({"market_watch": False})["market_watch"] is True
 
 
 def test_gate_opt_in_defaults_off_until_user_opts_in(monkeypatch):
     _stub_config(monkeypatch)  # catalog default: opt_in
-    assert effective_flags(None)["site_crawl"] is False
-    assert effective_flags({"site_crawl": True})["site_crawl"] is True
-    assert effective_flags({"site_crawl": "yes"})["site_crawl"] is False
+    assert effective_flags(None)["market_watch"] is False
+    assert effective_flags({"market_watch": True})["market_watch"] is True
+    assert effective_flags({"market_watch": "yes"})["market_watch"] is False
 
 
 def test_gate_opt_out_defaults_on_until_user_opts_out(monkeypatch):
-    _stub_config(monkeypatch, site_crawl={"gate": "opt_out"})
-    assert effective_flags(None)["site_crawl"] is True
-    assert effective_flags({"site_crawl": False})["site_crawl"] is False
-    assert effective_flags({"site_crawl": "no"})["site_crawl"] is True
+    _stub_config(monkeypatch, market_watch={"gate": "opt_out"})
+    assert effective_flags(None)["market_watch"] is True
+    assert effective_flags({"market_watch": False})["market_watch"] is False
+    assert effective_flags({"market_watch": "no"})["market_watch"] is True
 
 
 def test_gate_plan_platform_mode_requires_tier(monkeypatch):
@@ -110,7 +110,7 @@ def test_unknown_override_keys_are_ignored(monkeypatch):
 
 def test_default_feature_enabled_no_user_context(monkeypatch):
     _stub_config(monkeypatch)
-    assert default_feature_enabled("site_crawl") is False  # opt_in
-    _stub_config(monkeypatch, site_crawl={"gate": "opt_out"})
-    assert default_feature_enabled("site_crawl") is True
+    assert default_feature_enabled("market_watch") is False  # opt_in
+    _stub_config(monkeypatch, market_watch={"gate": "opt_out"})
+    assert default_feature_enabled("market_watch") is True
     assert default_feature_enabled("no_such_feature") is False

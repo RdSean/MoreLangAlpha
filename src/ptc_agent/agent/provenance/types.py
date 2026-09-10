@@ -38,13 +38,16 @@ class ProvenanceSource:
     """
 
     record_id: str
-    source_type: str  # web_search|web_fetch|file_read|memo_read|memory_read|mcp_tool
-    identifier: str  # url | file_path | "server:tool"
+    source_type: str  # web_search|web_fetch|file_read|memo_read|memory_read|sec_filing|market_data|mcp_tool
+    identifier: str  # url | file_path | symbol | "server:tool"
     timestamp: str  # ISO 8601
     title: str | None = None
-    # Optional stable source-detail slug for UI presentation.
+    # Kind of data within this source type, as a stable slug the UI i18n-maps
+    # (e.g. "company_overview", "daily_prices"). Lets the Sources panel group by
+    # identifier yet still distinguish, in a hover, the several data products a
+    # single ticker was accessed through. None when there's nothing to add.
     detail: str | None = None
-    provider: str | None = None  # tavily|"mcp:{server}"
+    provider: str | None = None  # tavily|edgar|market_data_proxy|"mcp:{server}"
     tool_call_id: str | None = None
     args_fingerprint: dict | None = None
     # Tool-call args with secrets filtered out (deny-list); reaches shared chats.

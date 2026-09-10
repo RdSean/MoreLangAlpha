@@ -58,12 +58,6 @@ ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]{0,127}$")
 # their runtime (including the mcp SDK), so an SDK-major bump can kill a server
 # born outside it — the uvx/npx form is immune.
 SHARED_ENV_COMMANDS = frozenset({"uv", "python", "python3", "node"})
-# Backward-compatible name used by the local validation test/tooling surface.
-# Runtime validation intentionally remains permissive because commands execute
-# inside the already-isolated sandbox; this set documents the platform image's
-# shared launchers rather than imposing a second policy boundary.
-ALLOWED_COMMANDS = SHARED_ENV_COMMANDS
-_BLOCKED_COMMANDS = frozenset({"bash", "sh", "zsh", "/bin/bash", "curl", "rm"})
 
 
 def isolation_warnings(server: "McpServerInput") -> list[str]:
@@ -275,8 +269,6 @@ class McpServerInput(BaseModel):
         if self.transport == "stdio":
             if not self.command:
                 raise ValueError("stdio transport requires a command")
-            if self.command in _BLOCKED_COMMANDS:
-                raise ValueError(f"command {self.command!r} is not allowed")
             if self.url:
                 raise ValueError("stdio transport must not set url")
             if self.headers:
@@ -334,11 +326,9 @@ class McpServerInput(BaseModel):
 
 
 class BindingInput(BaseModel):
-    """PATCH body for a row's tool-binding settings.
-
-    Every field is optional and only the ones sent are written, so the page can
-    flip one switch without re-sending the map.
-    """
+    """PATCH body for a row's tool-binding settings. Every field is optional
+    and only the ones sent are written, so the page can flip one switch
+    without re-sending the map."""
 
     # A delta, not the map: a client that re-sends the whole map writes back
     # whatever it last read, so a second tab editing another tool of the same
@@ -908,10 +898,10 @@ def catalog_row_to_response(
         # SELECT, so a missing key is a projection bug and should say so here
         # rather than silently reading as an unowned row. Matches the skills
         # projection, which makes the same argument.
-            plugin_name=row.get("plugin_name"),
-            plugin_enabled=(
-                bool(row.get("plugin_enabled"))
-                if row.get("plugin_enabled") is not None
-                else None
-            ),
+        plugin_name=row["plugin_name"],
+        plugin_enabled=(
+            bool(row["plugin_enabled"])
+            if row["plugin_enabled"] is not None
+            else None
+        ),
     )

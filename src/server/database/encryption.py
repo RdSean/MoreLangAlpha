@@ -19,5 +19,6 @@ def get_encryption_key() -> str:
 
 
 def encryption_configured() -> bool:
-    """Return whether encrypted stores can be used in this deployment."""
+    """True when the at-rest encryption key is set — i.e. encrypted stores
+    (vault secrets, BYOK keys, OAuth tokens) can hold data at all."""
     return bool(os.getenv("BYOK_ENCRYPTION_KEY"))

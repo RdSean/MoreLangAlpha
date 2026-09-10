@@ -313,7 +313,7 @@ class TestStoreResultBodiesBatch:
 
     @pytest.mark.asyncio
     async def test_dedups_repeated_sha_to_one_row(self, patched_db, mock_cursor):
-        # Parallel research can repeat the same (sha, body); the batch
+        # Market fan-out repeats the same (sha, body) across symbols; the batch
         # must collapse them to a single row rather than re-upserting N times.
         items = [(SHA, "body", 4, None)] * 5
         with patch(f"{MOD}.is_storage_enabled", return_value=False):

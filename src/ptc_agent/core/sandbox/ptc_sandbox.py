@@ -21,6 +21,7 @@ from ptc_agent.core.sandbox.retry import RetryPolicy, async_retry_with_backoff
 from ptc_agent.core.sandbox.runtime import (
     PreviewInfo,
     RuntimeState,
+    SandboxFailureKind,
     SandboxGoneError,
     SandboxRuntime,
     SandboxTransientError,
@@ -28,7 +29,7 @@ from ptc_agent.core.sandbox.runtime import (
 
 from ..mcp_registry import MCPRegistry
 from ..mcp_sanitize import (
-    is_user_server,
+    is_untrusted_server,
 )
 from ..tool_generator import ToolFunctionGenerator
 
@@ -51,6 +52,13 @@ class PTCSandbox:
 
     SNAPSHOT_PYTHON_VERSION = SNAPSHOT_PYTHON_VERSION
     DEFAULT_DEPENDENCIES = DEFAULT_DEPENDENCIES
+
+    # Fallback only, for a mint response that carries no expires_in. The live
+    # threshold derives from it (see _token_needs_refresh): the TTL is set
+    # platform-side, so hardcoding it here lets the two drift apart silently.
+    TOKEN_FRESHNESS_SECONDS = 10 * 60
+    # Re-upload once the sandbox's copy is this far through the token's life.
+    TOKEN_REFRESH_FRACTION = 0.6
 
     def __init__(
         self, config: CoreConfig, mcp_registry: MCPRegistry | None = None
@@ -116,6 +124,10 @@ class PTCSandbox:
         return f"{self._work_dir}/_internal/.sandbox_manifest.json"
 
     @property
+    def _token_file_path(self) -> str:
+        return f"{self._work_dir}/_internal/.mcp_tokens.json"
+
+    @property
     def _egress_relay_file_path(self) -> str:
         return f"{self._work_dir}/_internal/.egress_relay.json"
 
@@ -123,7 +135,7 @@ class PTCSandbox:
     #
     # ``self.config.mcp.servers`` holds the per-workspace EFFECTIVE set the
     # WorkspaceManager installs at session build: built-ins (minus disables) plus
-    # the workspace's user (``source='workspace'``) servers. Most host-side
+    # untrusted (``source`` 'workspace' or 'user') servers. Most host-side
     # operations must see ONLY the built-ins — user stdio servers are fetched by
     # npx/uvx at call time inside the sandbox, never pre-installed/pre-started on
     # the host path, and their secrets resolve vault-only (never host os.environ).
@@ -131,25 +143,38 @@ class PTCSandbox:
     # the same objects and byte-identical to pre-change behavior (regression #1).
 
     def _builtin_servers(self) -> list:
-        """Built-in servers only (``source != 'workspace'``) from the effective set."""
-        return [s for s in self.config.mcp.servers if not is_user_server(s)]
+        """Built-in servers only (trusted ``source``) from the effective set."""
+        return [s for s in self.config.mcp.servers if not is_untrusted_server(s)]
 
     def _user_servers(self) -> list:
-        """User-configured servers (``source == 'workspace'``) from the effective set."""
-        return [s for s in self.config.mcp.servers if is_user_server(s)]
+        """Untrusted servers (``source`` 'workspace' or 'user') from the effective set."""
+        return [s for s in self.config.mcp.servers if is_untrusted_server(s)]
 
     async def _wait_ready(self) -> None:
-        """Wait for sandbox to be ready. Call at start of methods needing sandbox."""
+        """Wait for sandbox to be ready. Call at start of methods needing sandbox.
+
+        Raises typed sandbox errors, never a bare ``RuntimeError``: this runs
+        *before* the ``try`` that normalizes each operation's failures, so an
+        untyped error here escapes every classifier downstream — the HTTP layer
+        turns "sandbox isn't up yet" into a 500 instead of a 503, and the chat
+        funnel stops recognizing it as a sandbox condition at all.
+
+        The wording matters too. The file panel selects its "starting" card by
+        looking for that word in the detail, so only the genuinely-in-flight case
+        may claim it.
+        """
         if self._ready_event is None:
             # Not using lazy init - sandbox should already be ready
             if self.runtime is None:
-                raise RuntimeError("Sandbox not initialized")
+                raise SandboxTransientError("Sandbox is not initialized")
             return
 
         try:
             await asyncio.wait_for(self._ready_event.wait(), timeout=300)
         except asyncio.TimeoutError:
-            raise RuntimeError("Sandbox initialization timed out after 300s")
+            raise SandboxTransientError(
+                "Sandbox is still starting: initialization timed out after 300s"
+            )
 
         if self._init_error:
             raise self._init_error
@@ -203,6 +228,12 @@ class PTCSandbox:
         if self._init_task is not None:
             return  # Already started
 
+        # Bind the intended identity synchronously. ``reconnect`` only sets
+        # ``sandbox_id`` after ``provider.get`` returns, so without this a
+        # still-initializing sandbox has no identity for callers to validate
+        # against the workspace row — and a stale handle would be handed out on
+        # the "still initializing" fast path unchecked.
+        self.sandbox_id = sandbox_id
         self._ready_event = asyncio.Event()
         self._init_task = asyncio.create_task(
             self._lazy_reconnect(sandbox_id, on_state_observed=on_state_observed)
@@ -225,7 +256,9 @@ class PTCSandbox:
             # with no error, and concurrent _wait_ready() callers
             # proceed with a None runtime.
             logger.debug("Lazy sandbox init cancelled", sandbox_id=sandbox_id)
-            self._init_error = RuntimeError("Sandbox init was cancelled")
+            # Typed, because _wait_ready re-raises this verbatim — see its
+            # docstring on why a bare RuntimeError escapes every classifier.
+            self._init_error = SandboxTransientError("Sandbox init was cancelled")
         except Exception as e:
             logger.error("Lazy sandbox init failed", error=str(e))
             self._init_error = e
@@ -270,6 +303,10 @@ class PTCSandbox:
             # Playwright browsers are installed to /usr/local/ms-playwright
             # in the snapshot image; tell the Python package where to find them.
             "PLAYWRIGHT_BROWSERS_PATH": "/usr/local/ms-playwright",
+            # Tell the in-sandbox ginlix-data client the exact path the host
+            # uploads the token file to. It must not key off $HOME — Daytona
+            # runs as root ($HOME=/root) while the working dir is /home/workspace.
+            "GINLIX_TOKEN_FILE": self._token_file_path,
         }
 
         # MCP server env vars (resolve ${VAR} placeholders from host).
@@ -370,37 +407,6 @@ class PTCSandbox:
         logger.info("Sandbox workspace ready", sandbox_id=self.sandbox_id)
         return snapshot_name
 
-    async def setup_managed_textbook_job(self, policy: Any) -> None:
-        """Create a service-owned sandbox without the normal workspace spine.
-
-        Managed textbook generation receives a CoreConfig already reduced to one
-        job root. It deliberately does not create standard workspace folders,
-        upload internal packages, bind platform secrets, install MCP packages,
-        start MCP servers, or sync user resources. The education service stages
-        its frozen inputs and the two allowed Skill files afterwards.
-        """
-        root = policy.filesystem_root
-        if self.config.filesystem.working_directory != root:
-            raise ValueError("Managed sandbox config must use the policy filesystem root")
-
-        self.runtime = await self._runtime_call(
-            self.provider.create,
-            env_vars=None,
-            platform_secret_bindings=None,
-            mcp_packages=[],
-            retry_policy=RetryPolicy.SAFE,
-            allow_reconnect=False,
-        )
-        assert self.runtime is not None
-        self.sandbox_id = self.runtime.id
-        self._work_dir = root
-        await self._runtime_call(
-            self.runtime.exec,
-            f"mkdir -p {shlex.quote(root)}",
-            retry_policy=RetryPolicy.SAFE,
-        )
-        logger.info("Managed textbook sandbox ready", sandbox_id=self.sandbox_id)
-
     async def setup_tools_and_mcp(
         self,
         snapshot_name: str | None,
@@ -415,17 +421,22 @@ class PTCSandbox:
 
         Args:
             snapshot_name: Snapshot name from setup_sandbox_workspace(), or None
-            tokens: Optional scoped data-service tokens for the sandbox.
+            tokens: Pre-minted OAuth tokens (written to initial manifest).
+            user_id: User ID for token tracking in manifest.
+            workspace_id: Workspace ID for token tracking in manifest.
         """
         logger.info("Setting up tools and MCP servers")
 
-        # Upload MCP server files and internal packages in parallel (disjoint paths).
+        # Upload MCP server files, internal packages, and tokens in parallel (disjoint paths).
+        # Tokens must be on disk before _start_internal_mcp_servers reads them.
         parallel = [
             self._upload_mcp_server_files_impl(),  # → mcp_servers/
             self._upload_internal_packages(),  # → _internal/src/
         ]
         if tokens:
-            parallel.append(self.upload_token_file(tokens))
+            parallel.append(
+                self.upload_token_file(tokens)
+            )  # → _internal/.mcp_tokens.json
         await asyncio.gather(*parallel)
 
         # Generate and install tool modules after mcp_servers (intent: derived from MCP definitions)
@@ -453,16 +464,42 @@ class PTCSandbox:
         logger.info("Tools and MCP servers ready", sandbox_id=self.sandbox_id)
 
     async def upload_token_file(self, tokens: dict) -> None:
-        """Write scoped data-service tokens into the sandbox internal area."""
+        """Write scoped auth tokens to a file in the sandbox.
+
+        Tokens are written as a JSON file (not env vars) because refresh tokens
+        rotate on each use and the MCP server needs to update them in-place.
+        Tokens carry deterministic prefixes (gxsa_, gxsr_) so the host-side
+        LeakDetectionMiddleware can pattern-match them without knowing exact values.
+        """
+        import os
+
         if not tokens or not self.runtime:
             return
-        payload = json.dumps(tokens, sort_keys=True).encode("utf-8")
-        await self._runtime_call(
-            self.runtime.upload_file,
-            payload,
-            f"{self._work_dir}/_internal/.mcp_tokens.json",
-            retry_policy=RetryPolicy.SAFE,
+
+        # Sandboxes are remote, so these must stay publicly reachable even when
+        # the host reaches the same services over a private address.
+        public_base = os.getenv("PUBLIC_API_BASE_URL", "").rstrip("/")
+
+        token_data = json.dumps(
+            {
+                "access_token": tokens["access_token"],
+                "refresh_token": tokens["refresh_token"],
+                "client_id": tokens["client_id"],
+                "auth_service_url": public_base or os.getenv("AUTH_SERVICE_URL", ""),
+                "ginlix_data_url": public_base or os.getenv("GINLIX_DATA_URL", ""),
+            }
         )
+
+        try:
+            await self._runtime_call(
+                self.runtime.upload_file,
+                token_data.encode("utf-8"),
+                self._token_file_path,
+                retry_policy=RetryPolicy.SAFE,
+            )
+            logger.debug("Uploaded sandbox token file", path=self._token_file_path)
+        except Exception as e:
+            logger.warning("Failed to upload sandbox token file", error=str(e))
 
     async def upload_vault_secrets(self, secrets: dict[str, str]) -> None:
         """Write (or remove) vault secrets JSON in the sandbox.
@@ -502,10 +539,33 @@ class PTCSandbox:
             logger.warning("Failed to upload vault secrets file", error=str(e))
 
     async def upload_egress_relay_credentials(self, payload: dict | None) -> bool:
-        """Atomically publish or remove the sandbox relay credential file."""
+        """Write (or remove) the egress-relay credential file in the sandbox.
+
+        Carries the relay base URL, the sandbox's relay JWT, and the
+        server→grant map. The generated MCP client reads it at call time, so a
+        re-upload (JWT remint, grant change) needs no sandbox convergence.
+
+        The write is atomic: content goes to a per-write temp path, gets its
+        0600 mode, then replaces the target with a same-directory
+        ``os.replace`` (rename(2), which fails rather than copies across a
+        filesystem boundary — unlike ``mv``). A reader — the in-sandbox client
+        reads this on every tool call — therefore sees either the complete old
+        file or the complete new one, never a truncated write. That atomicity is
+        what lets two uvicorn workers push the same workspace concurrently
+        without a cross-worker lock: the last rename wins, both relay JWTs are
+        independently valid, and the grant map converges on the next push.
+
+        Returns ``True`` only on **confirmed** success — a nonzero exit from the
+        sandbox is a failure, not a raised exception, so the exit code is
+        checked explicitly. The caller must not record a fresh binding on a
+        ``False`` return, or the process would believe it published a token it
+        did not and skip reminting until that phantom token nears expiry.
+        """
         if not self.runtime:
             return False
+
         path = self._egress_relay_file_path
+
         if not payload:
             try:
                 result = await self._runtime_call(
@@ -514,29 +574,48 @@ class PTCSandbox:
                     retry_policy=RetryPolicy.SAFE,
                 )
                 return getattr(result, "exit_code", 0) == 0
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to remove egress relay file", error=str(e))
                 return False
-        tmp = f"{path}.{secrets.token_hex(8)}.tmp"
+
+        # 128-bit unique temp so concurrent writers to the same sandbox never
+        # share (and corrupt) a staging file before either renames it into place.
+        tmp_path = f"{path}.{secrets.token_hex(16)}.tmp"
         try:
             await self._runtime_call(
                 self.runtime.upload_file,
-                json.dumps(payload, sort_keys=True).encode("utf-8"),
-                tmp,
+                json.dumps(payload).encode("utf-8"),
+                tmp_path,
                 retry_policy=RetryPolicy.SAFE,
             )
+            # chmod the temp before the rename so the file is 0600 the instant
+            # it appears at the real path — the relay JWT is never briefly
+            # world-readable there (tar/dev uploads land 0644). os.replace is a
+            # same-directory rename(2): atomic, and it raises (nonzero exit)
+            # rather than silently doing a non-atomic cross-fs copy the way
+            # ``mv`` would. argv-passing keeps the paths out of the shell.
             result = await self._runtime_call(
                 self.runtime.exec,
                 "chmod 600 {t} && python3 -c "
                 "'import os,sys; os.replace(sys.argv[1], sys.argv[2])' "
-                "{t} {p}".format(t=shlex.quote(tmp), p=shlex.quote(path)),
+                "{t} {p}".format(t=shlex.quote(tmp_path), p=shlex.quote(path)),
                 retry_policy=RetryPolicy.SAFE,
             )
-            return getattr(result, "exit_code", -1) == 0
-        except Exception:
+            if getattr(result, "exit_code", -1) != 0:
+                raise RuntimeError(
+                    f"publish exec exit={getattr(result, 'exit_code', '?')} "
+                    f"stderr={getattr(result, 'stderr', '')[:200]}"
+                )
+            logger.debug("Uploaded egress relay credentials", path=path)
+            return True
+        except Exception as e:
+            logger.warning("Failed to upload egress relay credentials", error=str(e))
+            # A failed rename would otherwise orphan the staging file; a warm
+            # sandbox reminting every few minutes must not accumulate them.
             try:
                 await self._runtime_call(
                     self.runtime.exec,
-                    f"rm -f {shlex.quote(tmp)}",
+                    f"rm -f {shlex.quote(tmp_path)}",
                     retry_policy=RetryPolicy.SAFE,
                 )
             except Exception:
@@ -623,8 +702,25 @@ class PTCSandbox:
                 retry_policy=RetryPolicy.SAFE,
                 allow_reconnect=False,
             )
+        except SandboxTransientError:
+            # A transport blip is NOT a missing sandbox. Converting every failure
+            # here into SandboxGoneError made a network hiccup trigger recovery —
+            # which creates a replacement sandbox and abandons the real one, and
+            # several workers can do it at once.
+            raise
         except Exception as e:
-            raise SandboxGoneError(sandbox_id, f"not found: {e}") from e
+            # Only a positively identified absence may authorize Gone. The caller
+            # answers Gone by building a replacement and abandoning this sandbox,
+            # so an undecidable failure must not reach it: UNKNOWN is where a
+            # rotated or under-privileged provider key (401/403) lands, and there
+            # the sandbox is fine and the credential is not. Treating that as
+            # absence recreates a live sandbox on every request and leaks the
+            # original each time.
+            if self.provider.classify_error(e) is SandboxFailureKind.SANDBOX_GONE:
+                raise SandboxGoneError(sandbox_id, f"not found: {e}") from e
+            raise SandboxTransientError(
+                f"Could not reach sandbox {sandbox_id}: {e}"
+            ) from e
         _mark_rc("provider_get")
 
         assert self.runtime is not None
@@ -677,9 +773,16 @@ class PTCSandbox:
                 if state_value == "running":
                     break
             if state_value != "running":
-                raise SandboxGoneError(
-                    sandbox_id,
-                    f"stuck in state '{state_value}', expected 'running'",
+                # Transient, not gone: the state was just read back, which is
+                # positive evidence the sandbox exists. ``SandboxGoneError`` is
+                # the authorization to replace, and its handlers in
+                # ``workspace_manager`` call ``_clear_session`` first, which
+                # deletes the runtime — so calling a slow boot "gone" destroys a
+                # live sandbox and restores it from a DB backup. The word
+                # "starting" is load-bearing: it is what renders the retry card.
+                raise SandboxTransientError(
+                    f"Sandbox {sandbox_id} is still starting "
+                    f"(state '{state_value}' after ~20s)"
                 )
             _mark_rc("wait_starting")
         elif state_value == "stopping":
@@ -711,9 +814,11 @@ class PTCSandbox:
                     retry_policy=RetryPolicy.SAFE,
                 )
             else:
-                raise SandboxGoneError(
-                    sandbox_id,
-                    f"stuck in state '{state_value}', expected 'stopped'",
+                # Same reasoning as the 'starting' wait above: still mid-stop is
+                # a sandbox that exists, so this is a retry, not a replacement.
+                raise SandboxTransientError(
+                    f"Sandbox {sandbox_id} has not finished stopping "
+                    f"(state '{state_value}' after ~10s)"
                 )
             _mark_rc("wait_stopping")
         elif state_value == "archived":
@@ -954,6 +1059,37 @@ class PTCSandbox:
 
 
     @staticmethod
+    def _token_needs_refresh(
+        remote_token_mod: dict[str, Any] | None,
+        tokens: dict | None,
+        user_id: str | None,
+        workspace_id: str | None,
+    ) -> bool:
+        """Check whether tokens need to be re-uploaded based on freshness."""
+        if not tokens:
+            return False
+        if remote_token_mod is None:
+            return True
+        # Re-mint if user or workspace changed
+        if remote_token_mod.get("user_id") != (user_id or ""):
+            return True
+        if remote_token_mod.get("workspace_id") != (workspace_id or ""):
+            return True
+        # Re-mint once the remote copy is most of the way through its life.
+        ttl = tokens.get("expires_in") or 0
+        threshold = (
+            ttl * PTCSandbox.TOKEN_REFRESH_FRACTION
+            if ttl > 0
+            else PTCSandbox.TOKEN_FRESHNESS_SECONDS
+        )
+        minted_at = remote_token_mod.get("minted_at", 0)
+        age = time.time() - minted_at
+        if age > threshold:
+            return True
+        return False
+
+
+    @staticmethod
     def _classify_execution_error(
         e: Exception,
         duration: float,
@@ -1016,11 +1152,38 @@ class PTCSandbox:
             retry_policy=retry_policy,
             is_transient=self.provider.is_transient_error,
             on_transient=on_transient,
+            rebind=self._make_rebinder(self.runtime) if allow_reconnect else None,
             retries=retries,
             initial_delay_s=initial_delay_s,
             total_timeout=total_timeout,
             **kwargs,
         )
+
+    def _make_rebinder(
+        self, entry_runtime: SandboxRuntime | None
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Build the retry-loop hook that re-resolves a method onto a new runtime.
+
+        Callers pass already-bound methods (``sandbox.runtime.download_file``), so
+        after ``_ensure_sandbox_connected`` swaps ``self.runtime`` every remaining
+        attempt ran against the old runtime — whose provider had just been closed,
+        making retries 2-5 guaranteed failures.
+
+        Narrow by construction: rebinding happens only for a method bound to the
+        exact runtime this call started with. ``provider.create``/``provider.get``
+        are bound to the provider, so they are never touched.
+        """
+
+        def rebind(func: Callable[..., Any]) -> Callable[..., Any]:
+            current = self.runtime
+            if entry_runtime is None or current is None or current is entry_runtime:
+                return func
+            if getattr(func, "__self__", None) is not entry_runtime:
+                return func
+            replacement = getattr(current, getattr(func, "__name__", ""), None)
+            return replacement if callable(replacement) else func
+
+        return rebind
 
 
     # Bound concurrent discovery so a burst of servers can't exhaust the
@@ -1125,9 +1288,7 @@ class PTCSandbox:
         managed_root: str | None = None,
         disabled: frozenset[str] = frozenset(),
     ) -> dict[str, Any]:
-        return await _assets._compute_skills_module(
-            self, skill_roots, managed_root=managed_root, disabled=disabled
-        )
+        return await _assets._compute_skills_module(self, skill_roots, managed_root=managed_root, disabled=disabled)
 
     async def _compute_sandbox_manifest(
         self,
@@ -1139,15 +1300,7 @@ class PTCSandbox:
         user_id: str | None = None,
         workspace_id: str | None = None,
     ) -> dict[str, Any]:
-        return await _assets._compute_sandbox_manifest(
-            self,
-            skill_roots=skill_roots,
-            managed_skill_root=managed_skill_root,
-            disabled_skills=disabled_skills,
-            tokens=tokens,
-            user_id=user_id,
-            workspace_id=workspace_id,
-        )
+        return await _assets._compute_sandbox_manifest(self, skill_roots=skill_roots, managed_skill_root=managed_skill_root, disabled_skills=disabled_skills, tokens=tokens, user_id=user_id, workspace_id=workspace_id)
 
     async def _read_unified_manifest(self) -> dict[str, Any] | None:
         return await _assets._read_unified_manifest(self)
@@ -1174,26 +1327,10 @@ class PTCSandbox:
         workspace_id: str | None = None,
         on_progress: Callable[[str], None] | None = None,
     ) -> SyncResult:
-        return await _assets.sync_sandbox_assets(
-            self,
-            skill_dirs=skill_dirs,
-            user_skill_dir=user_skill_dir,
-            disabled_skills=disabled_skills,
-            reusing_sandbox=reusing_sandbox,
-            force_refresh=force_refresh,
-            tokens=tokens,
-            user_id=user_id,
-            workspace_id=workspace_id,
-            on_progress=on_progress,
-        )
+        return await _assets.sync_sandbox_assets(self, skill_dirs=skill_dirs, user_skill_dir=user_skill_dir, disabled_skills=disabled_skills, reusing_sandbox=reusing_sandbox, force_refresh=force_refresh, tokens=tokens, user_id=user_id, workspace_id=workspace_id, on_progress=on_progress)
 
     async def _prune_disabled_tool_modules(self) -> None:
         return await _assets._prune_disabled_tool_modules(self)
-
-    async def _collect_local_skill_names(
-        self, local_skill_roots: list[str]
-    ) -> set[str]:
-        return await _assets._collect_local_skill_names(self, local_skill_roots)
 
     async def _download_skills_lock(
         self, sandbox_skills_base: str
@@ -1207,9 +1344,6 @@ class PTCSandbox:
         sandbox_skills_base: str,
     ) -> None:
         return _assets._build_complete_skills_cache(self, skills_mod, merged_lock, sandbox_skills_base)
-
-    async def sync_skills_lock(self) -> None:
-        return await _assets.sync_skills_lock(self)
 
     async def _prune_remote_skills(
         self,
@@ -1226,8 +1360,9 @@ class PTCSandbox:
         *,
         manifest: dict[str, Any] | None = None,
         existing_lock: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
-        return await _assets._upload_skills(self, local_skills_dirs, manifest=manifest, existing_lock=existing_lock)
+        disabled: frozenset[str] = frozenset(),
+    ) -> tuple[dict[str, Any] | None, set[str]]:
+        return await _assets._upload_skills(self, local_skills_dirs, manifest=manifest, existing_lock=existing_lock, disabled=disabled)
 
 
     # -- mcp_setup --
@@ -1290,10 +1425,6 @@ class PTCSandbox:
         self, bash_id: str, full_command: str
     ) -> tuple[str, str]:
         return _execution._build_trace_env_command(self, bash_id, full_command)
-
-    async def _list_result_files(self) -> list[str]:
-        return await _execution._list_result_files(self)
-
 
     # -- sessions --
 

@@ -1,8 +1,8 @@
 """Tests for ProvenanceMiddleware's per-tool source extraction + emission.
 
 Covers web_search multi-URL (shared tool_call_id), web_fetch url-from-args,
-file/memo/memory prefix classification, the extractor-raises safety net, and
-execute_code MCP trace extraction. Neutral placeholder data.
+SEC multi-filing, file/memo/memory prefix classification, the extractor-raises
+safety net, and execute_code mcp_trace extraction. Neutral placeholder data.
 """
 
 from types import SimpleNamespace
@@ -180,6 +180,151 @@ async def test_web_fetch_error_artifact_not_recorded(middleware):
     )
 
     assert emitted == []
+
+
+@pytest.mark.asyncio
+async def test_sec_multi_filing_extraction(middleware):
+    artifact = {
+        "type": "sec_filing",
+        "symbol": "TESTCO",
+        "filing_type": "8-K",
+        "filings": [
+            {"filing_date": "2026-01-01", "source_url": "https://sec.test/1"},
+            {"filing_date": "2026-02-01", "source_url": "https://sec.test/2"},
+        ],
+    }
+    emitted = []
+
+    await _run(
+        middleware,
+        _make_request("get_sec_filing", {"symbol": "TESTCO"}),
+        _result(content="filing markdown", artifact=artifact),
+        emitted,
+    )
+
+    assert [e["identifier"] for e in emitted] == [
+        "https://sec.test/1",
+        "https://sec.test/2",
+    ]
+    assert {e["source_type"] for e in emitted} == {"sec_filing"}
+    assert {e["provider"] for e in emitted} == {"edgar"}
+    assert {e["title"] for e in emitted} == {"TESTCO"}
+
+
+@pytest.mark.asyncio
+async def test_sec_single_filing_top_level_source_url(middleware):
+    artifact = {
+        "type": "sec_filing",
+        "symbol": "TESTCO",
+        "filing_type": "10-K",
+        "source_url": "https://sec.test/10k",
+    }
+    emitted = []
+
+    await _run(
+        middleware,
+        _make_request("get_sec_filing", {"symbol": "TESTCO"}),
+        _result(content="x", artifact=artifact),
+        emitted,
+    )
+
+    assert len(emitted) == 1
+    assert emitted[0]["identifier"] == "https://sec.test/10k"
+    assert emitted[0]["provider"] == "edgar"
+
+
+@pytest.mark.asyncio
+async def test_market_data_identifier_from_symbol(middleware):
+    emitted = []
+    await _run(
+        middleware,
+        _make_request("get_daily_prices", {"symbol": "TST"}),
+        _result(content="prices", artifact={"symbol": "TST"}),
+        emitted,
+    )
+
+    assert len(emitted) == 1
+    event = emitted[0]
+    assert event["source_type"] == "market_data"
+    assert event["identifier"] == "TST"
+    assert event["provider"] == "market_data_proxy"
+    # Symbol-bearing market tools tag a data-kind so the panel can distinguish,
+    # under one ticker, the several data products it was accessed through.
+    assert event["detail"] == "daily_prices"
+
+
+@pytest.mark.asyncio
+async def test_market_data_kind_distinguishes_tools_on_same_symbol(middleware):
+    """Two different market tools on the same ticker carry different `detail`
+    slugs (so the Sources panel doesn't collapse them into one indistinct row)."""
+    overview = []
+    await _run(
+        middleware,
+        _make_request("get_company_overview", {"symbol": "TST"}),
+        _result(content="overview", artifact={"symbol": "TST"}),
+        overview,
+    )
+    prices = []
+    await _run(
+        middleware,
+        _make_request("get_daily_prices", {"symbol": "TST"}),
+        _result(content="prices", artifact={"symbol": "TST"}),
+        prices,
+    )
+    assert overview[0]["identifier"] == prices[0]["identifier"] == "TST"
+    assert overview[0]["detail"] == "company_overview"
+    assert prices[0]["detail"] == "daily_prices"
+
+
+@pytest.mark.asyncio
+async def test_market_data_one_event_per_index(middleware):
+    emitted = []
+    await _run(
+        middleware,
+        _make_request("get_market_overview", {"indices": ["^AAA", "^BBB"]}),
+        _result(content="indices"),
+        emitted,
+    )
+
+    assert [e["identifier"] for e in emitted] == ["^AAA", "^BBB"]
+    assert {e["source_type"] for e in emitted} == {"market_data"}
+    # Explicit `indices` yields symbol-bearing rows, so they carry the
+    # data-kind slug; the no-arg form stays keyed by tool name (below).
+    assert {e["detail"] for e in emitted} == {"market_overview"}
+
+
+@pytest.mark.asyncio
+async def test_market_data_one_event_per_symbol_list(middleware):
+    """get_quote's `symbols` list arg gets the same per-ticker treatment as
+    get_market_overview's `indices` list arg."""
+    emitted = []
+    await _run(
+        middleware,
+        _make_request("get_quote", {"symbols": ["nvda", "tsla"]}),
+        _result(content="quotes"),
+        emitted,
+    )
+
+    assert [e["identifier"] for e in emitted] == ["NVDA", "TSLA"]
+    assert {e["source_type"] for e in emitted} == {"market_data"}
+    assert {e["detail"] for e in emitted} == {"quote"}
+
+
+@pytest.mark.asyncio
+async def test_market_data_no_symbol_falls_back_to_tool_name(middleware):
+    emitted = []
+    await _run(
+        middleware,
+        _make_request("get_market_movers", {"direction": "gainers"}),
+        _result(content="movers"),
+        emitted,
+    )
+
+    assert len(emitted) == 1
+    assert emitted[0]["identifier"] == "get_market_movers"
+    # Symbol-less tools surface the tool name as the identifier already, so no
+    # redundant kind label.
+    assert emitted[0]["detail"] is None
 
 
 @pytest.mark.parametrize(
@@ -520,6 +665,20 @@ async def test_null_writer_is_noop(middleware):
 
 
 @pytest.mark.asyncio
+async def test_market_error_artifact_not_recorded(middleware):
+    # Market tools catch failures and return {"error": ...} with a success
+    # status; that's not a real access, so no provenance is emitted.
+    emitted = []
+    await _run(
+        middleware,
+        _make_request("get_daily_prices", {"symbol": "TST"}),
+        _result(content="", artifact={"error": "upstream 500"}),
+        emitted,
+    )
+    assert emitted == []
+
+
+@pytest.mark.asyncio
 async def test_web_fetch_error_string_not_recorded(middleware):
     emitted = []
     await _run(
@@ -827,6 +986,41 @@ async def test_web_fetch_captures_redacted_args(middleware):
 
 
 @pytest.mark.asyncio
+async def test_sec_filing_captures_redacted_args(middleware):
+    artifact = {
+        "symbol": "TESTCO",
+        "filings": [{"source_url": "https://sec.test/1"}],
+    }
+    emitted = []
+    await _run(
+        middleware,
+        _make_request("get_sec_filing", {"symbol": "TESTCO", "token": "abc"}),
+        _result(content="x", artifact=artifact),
+        emitted,
+    )
+    assert len(emitted) == 1
+    assert emitted[0]["args"]["symbol"] == "TESTCO"
+    assert emitted[0]["args"]["token"] == "[redacted]"
+
+
+@pytest.mark.asyncio
+async def test_market_data_captures_redacted_args(middleware):
+    emitted = []
+    await _run(
+        middleware,
+        _make_request(
+            "get_daily_prices", {"symbol": "AAPL", "api_key": "sk-secret"}
+        ),
+        _result(content="prices", artifact={"symbol": "AAPL"}),
+        emitted,
+    )
+    assert len(emitted) == 1
+    # Planted secret never leaks; the meaningful arg is kept verbatim.
+    assert emitted[0]["args"]["symbol"] == "AAPL"
+    assert emitted[0]["args"]["api_key"] == "[redacted]"
+
+
+@pytest.mark.asyncio
 async def test_file_read_captures_redacted_args(middleware):
     emitted = []
     await _run(
@@ -866,3 +1060,73 @@ async def test_execute_code_trace_entry_secret_never_leaks(middleware):
     assert emitted[0]["args"]["api_key"] == "[redacted]"
     # The legacy fingerprint is kept alongside the readable redacted args.
     assert set(emitted[0]["args_fingerprint"]) == {"sha256"}
+
+
+# ---------------------------------------------------------------------------
+# Directly bound MCP tools
+# ---------------------------------------------------------------------------
+
+
+def _direct_request(server, tool, args=None, name=None):
+    """A call on a tool the binder stamped, with the alias the model sees."""
+    from ptc_agent.agent.middleware.direct_mcp import METADATA_KEY
+
+    request = _make_request(name or f"mcp__{server}__{tool}", args or {})
+    request.tool = SimpleNamespace(
+        metadata={METADATA_KEY: {"server": server, "tool": tool}}
+    )
+    return request
+
+
+@pytest.mark.asyncio
+async def test_a_direct_tool_call_is_recorded_like_the_sandbox_path(middleware):
+    emitted = []
+    await _run(
+        middleware,
+        _direct_request("moomoo", "get_positions", {"account_id": "9"}),
+        _result(content='{"positions": []}'),
+        emitted,
+    )
+    assert len(emitted) == 1
+    event = emitted[0]
+    assert event["source_type"] == "mcp_tool"
+    assert event["identifier"] == "moomoo:get_positions"
+    assert event["provider"] == "mcp:moomoo"
+    assert event["tool_call_id"] == "call-1"
+    assert event["result_sha256"]
+
+
+@pytest.mark.asyncio
+async def test_a_digest_alias_still_records_the_vendor_names(middleware):
+    """The stamp is read, not the name, which is exactly why it exists."""
+    emitted = []
+    await _run(
+        middleware,
+        _direct_request("desk__prod", "place", name="mcp__desk_prod_3a2b092c__place"),
+        _result(content="{}"),
+        emitted,
+    )
+    assert emitted[0]["identifier"] == "desk__prod:place"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_direct_call_records_nothing(middleware):
+    """The gate's refusal is an error result, and errors are not attested."""
+    emitted = []
+    result = SimpleNamespace(
+        content="Refused: the connection to moomoo does not permit x",
+        artifact=None,
+        status="error",
+    )
+    await _run(middleware, _direct_request("moomoo", "x"), result, emitted)
+    assert emitted == []
+
+
+@pytest.mark.asyncio
+async def test_an_unstamped_tool_is_still_left_alone(middleware):
+    """The fallback keys off the stamp, not off the mcp__ prefix."""
+    emitted = []
+    request = _make_request("mcp__looks__direct", {})
+    request.tool = SimpleNamespace(metadata=None)
+    await _run(middleware, request, _result(content="{}"), emitted)
+    assert emitted == []

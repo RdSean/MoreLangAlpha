@@ -1,7 +1,11 @@
 """
 Tests for InfrastructureConfig (src/config/models.py) — typed config.yaml model.
 
-Covers generic infrastructure configuration and settings accessors.
+Covers:
+- InfrastructureConfig loads all sections from config.yaml
+- BackgroundExecutionConfig subagent timeouts
+- MarketDataConfig / NewsDataConfig
+- settings.py accessors delegate to InfrastructureConfig (backward compat)
 """
 
 import math
@@ -13,12 +17,36 @@ from pydantic import ValidationError
 from src.config.models import (
     BackgroundExecutionConfig,
     InfrastructureConfig,
+    MarketDataConfig,
+    MarketDataProviderConfig,
+    NewsDataConfig,
 )
 
 
 # ---------------------------------------------------------------------------
 # New model fields
 # ---------------------------------------------------------------------------
+
+
+class TestMarketDataConfig:
+    def test_defaults(self):
+        cfg = MarketDataConfig()
+        assert cfg.providers == []
+
+    def test_with_providers(self):
+        cfg = MarketDataConfig(providers=[
+            MarketDataProviderConfig(name="fmp", markets=["all"]),
+            MarketDataProviderConfig(name="ginlix-data", markets=["us"]),
+        ])
+        assert len(cfg.providers) == 2
+        assert cfg.providers[0].name == "fmp"
+        assert cfg.providers[1].markets == ["us"]
+
+
+class TestNewsDataConfig:
+    def test_defaults(self):
+        cfg = NewsDataConfig()
+        assert cfg.providers == []
 
 
 class TestBackgroundExecutionSubagentTimeouts:
@@ -69,6 +97,15 @@ class TestInfrastructureConfigComplete:
         cfg = InfrastructureConfig(unknown_future_field="hello")
         assert cfg.unknown_future_field == "hello"
 
+    def test_market_data_defaults(self):
+        cfg = InfrastructureConfig()
+        assert isinstance(cfg.market_data, MarketDataConfig)
+        assert cfg.market_data.providers == []
+
+    def test_news_data_defaults(self):
+        cfg = InfrastructureConfig()
+        assert isinstance(cfg.news_data, NewsDataConfig)
+
     def test_full_config_yaml_shape(self):
         """Test loading a dict that mirrors real config.yaml structure."""
         data = {
@@ -88,6 +125,18 @@ class TestInfrastructureConfigComplete:
                 "cache_enabled": True,
                 "max_connections": 20,
             },
+            "market_data": {
+                "providers": [
+                    {"name": "ginlix-data", "markets": ["us"]},
+                    {"name": "fmp", "markets": ["all"]},
+                ],
+            },
+            "news_data": {
+                "providers": [
+                    {"name": "ginlix-data"},
+                    {"name": "fmp"},
+                ],
+            },
         }
         cfg = InfrastructureConfig(**data)
         assert cfg.debug is True
@@ -95,6 +144,9 @@ class TestInfrastructureConfigComplete:
         assert cfg.ptc_recursion_limit == 3000
         assert cfg.flash_recursion_limit == 800
         assert cfg.background_execution.subagent_collector_timeout == 60
+        assert len(cfg.market_data.providers) == 2
+        assert cfg.market_data.providers[0].name == "ginlix-data"
+        assert len(cfg.news_data.providers) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +186,13 @@ class TestSettingsBackwardCompat:
         from src.config.settings import is_redis_cache_enabled
         with self._patch_infra_config(redis={"cache_enabled": False}):
             assert is_redis_cache_enabled() is False
+
+    def test_get_market_data_providers(self):
+        from src.config.settings import get_market_data_providers
+        providers = [{"name": "fmp", "markets": ["all"]}]
+        with self._patch_infra_config(market_data={"providers": providers}):
+            result = get_market_data_providers()
+            assert result[0]["name"] == "fmp"
 
     def test_get_sse_keepalive_interval(self):
         from src.config.settings import get_sse_keepalive_interval

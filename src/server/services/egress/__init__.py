@@ -7,6 +7,7 @@ resolver layer is the extension point for further credential kinds.
 """
 
 import unicodedata
+from collections.abc import Iterable
 from enum import StrEnum
 
 
@@ -26,10 +27,12 @@ def fold_tool_name(name: str | None) -> str:
     return unicodedata.normalize("NFKC", name or "").strip().casefold()
 
 
-def folded_contains(names, candidate: str | None) -> bool:
-    """Case/Unicode-insensitive membership for tool policy sets."""
-    folded = fold_tool_name(candidate)
-    return any(fold_tool_name(name) == folded for name in names)
+def folded(names: Iterable[str | None] | None) -> frozenset[str]:
+    return frozenset(fold_tool_name(name) for name in names or ())
+
+
+def folded_contains(names: Iterable[str | None] | None, tool: str | None) -> bool:
+    return fold_tool_name(tool) in folded(names)
 
 
 class RelayError(StrEnum):

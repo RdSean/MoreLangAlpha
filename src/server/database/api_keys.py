@@ -53,8 +53,9 @@ async def get_user_api_keys(user_id: str) -> Dict[str, Any]:
 async def get_owner_api_keys(owner_user_id: str) -> Dict[str, Any]:
     """Return the designated household owner's model credentials.
 
-    This named wrapper makes the ownership boundary explicit at call sites;
-    credentials still use the canonical user API-key query and are never
+    Local product surface: a student runs on the household owner's model pool,
+    so this named wrapper makes the ownership boundary explicit at call sites.
+    Credentials still come from the canonical user API-key query and are never
     copied into household tables or student records.
     """
     return await get_user_api_keys(owner_user_id)

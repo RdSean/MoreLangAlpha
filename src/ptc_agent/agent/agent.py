@@ -36,8 +36,10 @@ from ptc_agent.agent.middleware import (
     PlanModeMiddleware,
     SubagentEventCaptureMiddleware,
     MultimodalMiddleware,
+    MultimodalStripMiddleware,
     create_plan_mode_interrupt_config,
     CodeValidationMiddleware,
+    CreditGateMiddleware,
     EmptyToolCallRetryMiddleware,
     LeakDetectionMiddleware,
     ProtectedPathMiddleware,
@@ -51,6 +53,7 @@ from ptc_agent.agent.middleware import (
     CompactionMiddleware,
     resolve_compaction_client,
     LargeResultEvictionMiddleware,
+    MarketWatchMiddleware,
     SteeringMiddleware,
     SubagentSteeringMiddleware,
     WorkspaceContextMiddleware,
@@ -60,35 +63,43 @@ from ptc_agent.agent.middleware import (
     MemoAwarenessMiddleware,
     ReasoningCompatibilityMiddleware,
 )
+from ptc_agent.agent.middleware.direct_mcp import (
+    DirectMcpPolicyMiddleware,
+    DirectToolSet,
+    direct_tool_summary,
+)
 from ptc_agent.core.paths import (
     MEMO_INDEX_FILENAME,
     MEMO_USER_DIR,
     MEMORY_INDEX_FILENAME,
     MEMORY_USER_DIR,
     MEMORY_WORKSPACE_DIR,
+    USER_PROFILE_DATA_DIR,
     WORKFLOW_DIR,
 )
 from ptc_agent.agent.middleware.background_subagent.workflow.prebuilt import (
     get_prebuilt_workflows,
 )
+from ptc_agent.agent.backends.user_data import UserDataBackend
 from ptc_agent.agent.middleware.image_capture import ImageCaptureMiddleware
 from ptc_agent.agent.middleware.openai_prompt_caching import OpenAIPromptCachingMiddleware
 from ptc_agent.agent.middleware.runtime_context import RuntimeContextMiddleware
 from ptc_agent.agent.middleware.background_subagent.registry import (
     BackgroundTaskRegistry,
 )
-from ptc_agent.agent.managed_execution import ManagedExecutionPolicy, managed_skill_root
 from ptc_agent.agent.middleware.skills.discovery import SkillMetadata
-from ptc_agent.agent.middleware.skills.registry import get_skill_registry
+from ptc_agent.agent.middleware.skills.registry import (
+    build_effective_skill_registry,
+)
 from ptc_agent.agent.prompts import (
     build_tool_summary_from_registry,
     format_current_time,
     format_subagent_summary,
     get_loader,
+    guidance_template_vars,
 )
 from ptc_agent.agent.subagents import (
     SubagentCompiler,
-    SubagentDefinition,
     SubagentRegistry,
     create_subagents,
 )
@@ -106,6 +117,16 @@ from ptc_agent.agent.tools import (
 from src.tools.web.search import get_web_search_tool
 from src.tools.web.fetch import web_fetch_tool
 from src.tools.web.crawl import create_crawl_tools
+from src.tools.sec.tool import get_sec_filing
+from src.tools.market_data.tool import (
+    get_daily_prices,
+    get_company_overview,
+    get_market_overview,
+    get_options_chain,
+    get_quote,
+    screen_stocks,
+)
+from src.tools.market_watch import watch_market
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.mcp_registry import MCPRegistry
 from ptc_agent.core.sandbox import PTCSandbox
@@ -115,10 +136,7 @@ try:
 except ImportError:
     HumanInTheLoopMiddleware = None  # type: ignore[misc,assignment]
 
-from ptc_agent.agent.middleware.model_resilience import (
-    ModelResilienceMiddleware,
-    build_fallback_pairs,
-)
+from ptc_agent.agent.turn import build_model_resilience_middleware, turn_model
 
 try:
     from langgraph.types import Checkpointer
@@ -129,33 +147,6 @@ logger = structlog.get_logger(__name__)
 
 
 DEFAULT_MAX_CONCURRENT_TASK_UNITS = 3
-
-_MANAGED_TEXTBOOK_SUBAGENTS = {
-    "textbook-chapter-worker": SubagentDefinition(
-        name="textbook-chapter-worker",
-        description=(
-            "Delegate one frozen textbook chapter or coverage check. The worker inherits "
-            "the managed textbook sandbox and can only inspect or write the fixed asset contract."
-        ),
-        mode="ptc",
-        role_prompt=(
-            "Work only on the assigned frozen textbook unit. Read the staged managed contract "
-            "before writing a fixed v2 asset. Do not access web, MCP, Vault, user data, or paths "
-            "outside the managed task root. Report concise results to the parent root."
-        ),
-        tools=["filesystem", "bash", "todo"],
-        max_iterations=30,
-        stateful=True,
-        sections={
-            "workspace_paths": False,
-            "tool_guide": False,
-            "data_processing": False,
-            "visualizations": False,
-        },
-    )
-}
-DEFAULT_MAX_TASK_ITERATIONS = 3
-DEFAULT_MAX_GENERAL_ITERATIONS = 10
 
 
 @dataclass(frozen=True)
@@ -170,6 +161,7 @@ class _IdentityGates:
     user_memory: bool
     workspace_memory: bool
     memo: bool
+    user_data: bool
     workflow: bool
     workflow_fs: bool
     workflow_tool: bool
@@ -194,6 +186,10 @@ def _resolve_identity_gates(
         user_memory=identified,
         workspace_memory=identified and bool(workspace_id),
         memo=identified,
+        # Independent of `store`: the user-profile data backend (portfolio +
+        # watchlist + preferences) talks to the application DB tables, not the
+        # LangGraph store.
+        user_data=bool(user_id),
         workflow=workflow,
         workflow_fs=workflow and identified,
         # RunWorkflow dispatches subagents, so it drops with the recursion
@@ -222,20 +218,26 @@ class PTCAgent:
         self,
         tool_summary: str,
         subagent_summary: str,
+        guidance: str,
         plan_mode: bool = False,
         thread_id: str | None = None,
         memory_enabled: bool = True,
         memo_enabled: bool = True,
         crawl_enabled: bool = False,
+        direct_tool_summary: str = "",
     ) -> str:
-        """Build the static system prompt (excludes time/profile for cacheability)."""
-        loader = get_loader()
+        """Build the static system prompt (excludes time/profile for cacheability).
 
+        ``guidance`` shapes the cached prefix, so the prefix varies by (model,
+        guidance) rather than (model), which only splits when a user pins the
+        level themselves.
+        """
+        loader = get_loader()
         return loader.get_system_prompt(
+            **guidance_template_vars(guidance),
             tool_summary=tool_summary,
             subagent_summary=subagent_summary,
             max_concurrent_task_units=DEFAULT_MAX_CONCURRENT_TASK_UNITS,
-            max_task_iterations=DEFAULT_MAX_TASK_ITERATIONS,
             ask_user_enabled=True,
             plan_mode=plan_mode,
             include_examples=True,
@@ -244,29 +246,10 @@ class PTCAgent:
             working_directory=self.config.filesystem.working_directory,
             memory_enabled=memory_enabled,
             memo_enabled=memo_enabled,
+            market_watch_enabled=self.config.feature_enabled("market_watch"),
             crawl_enabled=crawl_enabled,
+            direct_tool_summary=direct_tool_summary,
         )
-
-    def _build_model_resilience_middleware(self) -> list[Any]:
-        """Retry + fallback + client-visible progress in a single middleware."""
-        fallbacks = build_fallback_pairs(self.config)
-        if fallbacks:
-            logger.debug(
-                "Model fallback enabled",
-                fallback_models=[name for name, _ in fallbacks],
-            )
-        return [
-            ModelResilienceMiddleware(
-                primary_name=self.config.llm.name,
-                primary_client=self.llm,
-                fallbacks=fallbacks,
-                max_retries=3,
-                backoff_factor=2.0,
-                initial_delay=1.0,
-                max_delay=60.0,
-                jitter=True,
-            )
-        ]
 
     def _get_tool_summary(self, mcp_registry: MCPRegistry) -> str:
         return build_tool_summary_from_registry(
@@ -289,7 +272,7 @@ class PTCAgent:
         (memory.md, the memo count block) — one list because they share that
         position.
         """
-        if not (gates.memory or gates.memo or gates.workflow):
+        if not (gates.memory or gates.memo or gates.user_data or gates.workflow):
             return backend, []
 
         # One cache per agent (≈ per request). Shared by every memory/memo
@@ -398,6 +381,15 @@ class PTCAgent:
             else:
                 routes.append(prebuilt_route)
 
+        if gates.user_data:
+            routes.append(
+                UserDataBackend(
+                    user_id=user_id,
+                    sandbox_backend=backend,
+                    root_prefix=f"{sandbox_root}/{USER_PROFILE_DATA_DIR}/",
+                )
+            )
+
         if not routes:
             return backend, []
 
@@ -448,14 +440,17 @@ class PTCAgent:
         user_profile: dict | None = None,
         plan_mode: bool = False,
         thread_id: str | None = None,
+        workspace_name: str = "",
+        workspace_description: str = "",
         on_agent_md_write: Any | None = None,
         store: Any | None = None,
         on_signed_url: Any | None = None,
         vault_secrets: dict[str, str] | None = None,
         user_id: str | None = None,
+        user_data_counts: dict[str, Any] | None = None,
         tool_summary: str | None = None,
         disable_subagents: bool = False,
-        managed_policy: ManagedExecutionPolicy | None = None,
+        direct_mcp: DirectToolSet | None = None,
     ) -> Any:
         """Create a deepagent with PTC pattern capabilities.
 
@@ -477,25 +472,7 @@ class PTCAgent:
         Returns:
             Configured BackgroundSubagentOrchestrator wrapping the deepagent.
         """
-        if managed_policy is not None:
-            # The managed graph is service-owned rather than a variant of a
-            # parent's chat. Defend this lower boundary too because PTCAgent is
-            # also used directly by internal runners.
-            disable_subagents = not managed_policy.allow_subagents
-            plan_mode = False
-            # A WriterGuard is a service-owned checkpoint lease, not an
-            # inherited parent capability. Fixed managed workers need it to
-            # write their task namespaces through the root's fenced saver.
-            namespace_owner = (
-                namespace_owner if managed_policy.allow_subagents else None
-            )
-            store = None
-            user_id = None
-            user_profile = None
-            on_signed_url = None
-            vault_secrets = None
-
-        model = llm if llm is not None else self.llm
+        turn = turn_model(self.config, llm, self.llm, flash=False)
 
         # Freeze current time for this request (refreshes on each new query)
         request_time = datetime.now(tz=UTC)
@@ -505,15 +482,7 @@ class PTCAgent:
         # Compute short thread ID for thread-scoped storage
         short_thread_id = thread_id[:8] if thread_id else ""
 
-        if managed_policy is not None:
-            disable_subagents = not managed_policy.allow_subagents
-            backend = SandboxBackend(
-                sandbox,
-                root_dir=managed_policy.filesystem_root,
-                operation_callback=operation_callback,
-            )
-        else:
-            backend = SandboxBackend(sandbox, operation_callback=operation_callback)
+        backend = SandboxBackend(sandbox, operation_callback=operation_callback)
 
         # Memory is opt-in: disabled entirely when identity is missing rather
         # than falling back to a shared namespace that would cross-pollinate
@@ -545,56 +514,31 @@ class PTCAgent:
         )
 
         # Create the execute_code tool for MCP invocation
-        execute_code_tool = None
-        bash_output_tool = None
-        preview_url_tool = None
-        show_widget_tool = None
-        if managed_policy is None:
-            execute_code_tool = create_execute_code_tool(
-                backend, mcp_registry, thread_id=short_thread_id
-            )
-            bash_tool = create_execute_bash_tool(backend, thread_id=short_thread_id)
-            bash_output_tool = create_bash_output_tool(backend)
-            workspace_id = getattr(session, "conversation_id", "") if session else ""
-            preview_url_tool = create_preview_url_tool(
-                backend, workspace_id=workspace_id, on_signed_url=on_signed_url
-            )
-            show_widget_tool = create_show_widget_tool(backend)
-            tools: list[Any] = [
-                execute_code_tool,
-                bash_tool,
-                bash_output_tool,
-                preview_url_tool,
-                show_widget_tool,
-                TodoWrite,
-            ]
-        else:
-            from ptc_agent.agent.managed_execution import validate_managed_bash_command
+        execute_code_tool = create_execute_code_tool(
+            backend, mcp_registry, thread_id=short_thread_id
+        )
 
-            bash_tool = create_execute_bash_tool(
-                backend,
-                thread_id=short_thread_id,
-                command_validator=lambda command: validate_managed_bash_command(
-                    command, managed_policy
-                ),
-                fixed_working_dir=managed_policy.filesystem_root,
-            )
-            tools = [bash_tool, TodoWrite]
+        # Create the Bash tool for shell command execution
+        bash_tool = create_execute_bash_tool(backend, thread_id=short_thread_id)
+        bash_output_tool = create_bash_output_tool(backend)
+
+        # Create the preview URL tool for sandbox service previews
+        workspace_id = getattr(session, "conversation_id", "") if session else ""
+        preview_url_tool = create_preview_url_tool(backend, workspace_id=workspace_id, on_signed_url=on_signed_url)
+
+        # Create the show widget tool for inline HTML visualizations
+        show_widget_tool = create_show_widget_tool(backend)
+
+        # Start with base tools
+        tools: list[Any] = [execute_code_tool, bash_tool, bash_output_tool, preview_url_tool, show_widget_tool, TodoWrite]
 
         # Create custom filesystem tools (override deepagents middleware tools).
         # `filesystem_backend` is the composite when a store is wired; otherwise
         # it's the plain sandbox backend. Tools see a uniform rich-method
         # surface either way.
-        write_validator = None
-        if managed_policy is not None:
-            from ptc_agent.agent.managed_execution import validate_managed_textbook_write
-
-            def write_validator(path: str, content: str) -> str | None:
-                return validate_managed_textbook_write(path, content, managed_policy)
         read_file, write_file, edit_file = create_filesystem_tools(
             filesystem_backend,
             operation_callback=operation_callback,
-            write_validator=write_validator,
         )
         filesystem_tools = [
             read_file,  # overrides middleware read_file
@@ -605,42 +549,53 @@ class PTCAgent:
         ]
         tools.extend(filesystem_tools)
 
-        web_search_tool = None
-        if managed_policy is None or managed_policy.enable_web:
-            web_search_tool = get_web_search_tool(
-                max_search_results=10,
-                time_range=None,
-                verbose=False,
-                provider=self.config.search_api,
-                depth=self.config.search_depth,
-            )
-            tools.append(web_search_tool)
-            tools.append(web_fetch_tool)
+        web_search_tool = get_web_search_tool(
+            max_search_results=10,
+            time_range=None,
+            verbose=False,
+            provider=self.config.search_api,
+            depth=self.config.search_depth,
+        )
+        tools.append(web_search_tool)
+        tools.append(web_fetch_tool)
 
         # Site-crawl tools (PTC-only): experimental opt-in feature, further
         # tier-gated at resolve time. The factory returns [] when the crawl
         # provider's API key is unset.
         crawl_tools: list[Any] = []
-        if managed_policy is None and self.config.feature_enabled("site_crawl"):
+        if self.config.feature_enabled("site_crawl"):
             crawl_tools = create_crawl_tools(filesystem_backend)
             tools.extend(crawl_tools)
 
+        finance_tools = [
+            get_sec_filing,  # SEC filing extraction (10-K, 10-Q, 8-K)
+            get_quote,  # Real-time quotes (cheap — price freshness)
+            get_daily_prices,  # Stock OHLCV price data
+            get_company_overview,  # Company investment analysis (includes real-time quote)
+            get_market_overview,  # Single-day market snapshot (indices + US sectors)
+            get_options_chain,  # Options contracts chain with snapshot pricing
+            screen_stocks,  # Stock screener with filters
+        ]
+        if self.config.feature_enabled("market_watch"):
+            finance_tools.append(watch_market)  # Market watch start/stop (live price injection)
+        tools.extend(finance_tools)
+
         if subagent_names is None:
-            subagent_names = (
-                ["textbook-chapter-worker"]
-                if managed_policy is not None and managed_policy.allow_subagents
-                else self.config.subagents.enabled
-            )
+            subagent_names = self.config.subagents.enabled
 
         # --- Build shared middleware (for both main agent and subagents) ---
         shared_middleware: list[Any] = []
 
         leak_detection = LeakDetectionMiddleware(
-            mcp_servers=self.config.mcp.servers if managed_policy is None else [],
-            vault_secrets=vault_secrets if managed_policy is None else None,
+            mcp_servers=self.config.mcp.servers,
+            vault_secrets=vault_secrets,
         )
         shared_middleware.extend(
             [
+                # First so a stop fires before any per-boundary work below;
+                # shared placement gives subagent lanes the same gate. Inert
+                # unless the server installed a gate state for the lane.
+                CreditGateMiddleware(),
                 ToolArgumentParsingMiddleware(),
                 ProtectedPathMiddleware(
                     denied_directories=self.config.filesystem.denied_directories,
@@ -665,9 +620,7 @@ class PTCAgent:
         shared_middleware.append(TodoWriteMiddleware())
 
         skill_sources = (
-            [managed_skill_root(managed_policy)]
-            if managed_policy is not None
-            else [f"{self.config.skills.sandbox_skills_base}/"]
+            [f"{self.config.skills.sandbox_skills_base}/"]
             if self.config.skills.enabled
             else []
         )
@@ -679,18 +632,16 @@ class PTCAgent:
                 for name, meta in backend.skills_manifest["skills"].items()
             }
 
-        # Per-user feature resolution: inject this build's feature gate so a
-        # skill whose owning feature is off for this user drops out (the
-        # registry default only applies the system gate).
-        skill_registry = get_skill_registry(
-            "ptc", feature_resolver=self.config.feature_enabled
+        # Per-user registry: this build's feature gate (the registry default
+        # only applies the system gate), builtin disables, and user skills.
+        skill_registry = build_effective_skill_registry(
+            "ptc",
+            feature_resolver=self.config.feature_enabled,
+            disabled_skills=self.config.disabled_skills,
+            user_skills=self.config.user_skills,
+            user_skill_dir=self.config.user_skill_dir,
+            workspace_skill_dir=self.config.workspace_skill_dir,
         )
-        if managed_policy is not None:
-            skill_registry = {
-                name: definition
-                for name, definition in skill_registry.items()
-                if name in managed_policy.allowed_skill_names
-            }
         # RunWorkflow is skill-gated: the run-workflow skill hides the tool from
         # model requests until the agent reads its SKILL.md. Drop the skill on
         # any build that registers no tool for it to gate.
@@ -703,6 +654,10 @@ class PTCAgent:
             backend=backend,
             sources=skill_sources,
             known_skills=known_skills,
+            skill_dirs=[
+                d for d, _ in self.config.skills.local_skill_dirs_with_sandbox()
+            ],
+            disabled_skills=self.config.disabled_skills,
         )
         shared_middleware.append(skill_loader_middleware)
         tools.extend(skill_loader_middleware.tools)
@@ -712,8 +667,13 @@ class PTCAgent:
         main_only_middleware: list[Any] = []
 
         # Must be first: steering context must be visible before any other middleware.
-        if managed_policy is None:
-            main_only_middleware.append(SteeringMiddleware())
+        main_only_middleware.append(SteeringMiddleware())
+
+        # Consent is re-read per call here, so a tool the connection no longer
+        # covers is refused rather than reaching the vendor.
+        direct_tools = list(direct_mcp.tools) if direct_mcp is not None else []
+        if direct_tools:
+            main_only_middleware.append(DirectMcpPolicyMiddleware(direct_mcp))
 
         _bg_registry = background_registry or BackgroundTaskRegistry()
         event_capture_middleware = SubagentEventCaptureMiddleware(registry=_bg_registry)
@@ -729,7 +689,7 @@ class PTCAgent:
         if not disable_subagents:
             tools.extend(background_middleware.tools)
 
-        if managed_policy is None and HumanInTheLoopMiddleware is not None:
+        if HumanInTheLoopMiddleware is not None:
             interrupt_config: Any = create_plan_mode_interrupt_config()
             hitl_middleware = HumanInTheLoopMiddleware(interrupt_on=interrupt_config)
             main_only_middleware.append(hitl_middleware)
@@ -740,32 +700,31 @@ class PTCAgent:
                 main_only_middleware.append(plan_middleware)
                 tools.extend(plan_middleware.tools)
 
-        if managed_policy is None:
-            ask_user_middleware = AskUserMiddleware()
-            main_only_middleware.append(ask_user_middleware)
-            tools.extend(ask_user_middleware.tools)
+        ask_user_middleware = AskUserMiddleware()
+        main_only_middleware.append(ask_user_middleware)
+        tools.extend(ask_user_middleware.tools)
 
         from ptc_agent.agent.tools import think_tool
 
-        subagent_registry = (
-            SubagentRegistry(builtins=_MANAGED_TEXTBOOK_SUBAGENTS)
-            if managed_policy is not None
-            else SubagentRegistry(
-                user_definitions=(
-                    self.config.subagents.definitions
-                    if self.config.subagents.definitions
-                    else None
-                ),
-            )
+        subagent_registry = SubagentRegistry(
+            user_definitions=(
+                self.config.subagents.definitions
+                if self.config.subagents.definitions
+                else None
+            ),
         )
         subagent_tool_sets: dict[str, list[Any]] = {
-            "execute_code": [execute_code_tool] if execute_code_tool else [],
+            "execute_code": [execute_code_tool],
             "bash": [bash_tool],
             "filesystem": list(filesystem_tools) if filesystem_tools else [],
-            "web_search": [web_search_tool, web_fetch_tool] if web_search_tool else [],
+            "web_search": [web_search_tool, web_fetch_tool],
+            "finance": finance_tools,
             "think": [think_tool],
             "todo": [TodoWrite],
         }
+        # The compiler gets its own registry: same per-user gates, but
+        # mode-unfiltered — subagent definitions may be flash-mode and preload
+        # flash-only skills the ptc-filtered registry above excludes.
         subagent_compiler = SubagentCompiler(
             sandbox=sandbox,
             mcp_registry=mcp_registry,
@@ -774,6 +733,17 @@ class PTCAgent:
             current_time=current_time,
             thread_id=short_thread_id,
             config=self.config,
+            skill_registry=build_effective_skill_registry(
+                None,
+                feature_resolver=self.config.feature_enabled,
+                disabled_skills=self.config.disabled_skills,
+                user_skills=self.config.user_skills,
+                user_skill_dir=self.config.user_skill_dir,
+                workspace_skill_dir=self.config.workspace_skill_dir,
+            ),
+            skill_dirs=[
+                d for d, _ in self.config.skills.local_skill_dirs_with_sandbox()
+            ],
         )
         if disable_subagents:
             # Recursion gate: no subagents compiled, none advertised in the
@@ -807,11 +777,13 @@ class PTCAgent:
         system_prompt = self._build_system_prompt(
             tool_summary,
             subagent_summary,
+            turn.guidance,
             plan_mode=plan_mode,
             thread_id=short_thread_id,
             memory_enabled=gates.memory,
             memo_enabled=gates.memo,
             crawl_enabled=bool(crawl_tools),
+            direct_tool_summary=direct_tool_summary(direct_tools),
         )
 
         logger.debug(
@@ -830,39 +802,40 @@ class PTCAgent:
             compaction_config["_llm_client"] = client
         compaction = CompactionMiddleware.from_config(config=compaction_config, backend=backend)
 
-        model_resilience = self._build_model_resilience_middleware()
+        model_resilience = [build_model_resilience_middleware(self.config, turn)]
 
-        # Inside model_resilience so it strips against the post-fallback model:
-        # a vision primary falling back to a text-only candidate would otherwise
-        # replay image/PDF blocks and earn the 400 the fallback exists to avoid.
-        # In both stacks because a subagent on its own model needs the same
-        # protection; it reads that model off each request, so the two stacks
-        # can share one instance rather than needing one apiece.
-        multimodal = (
-            MultimodalMiddleware(
-                sandbox=sandbox,
-                model_name=self.config.llm.name,
-                custom_modalities=self.config.input_modalities,
-            )
-            if self.config.llm
-            else None
+        # The strip goes inside model_resilience so it judges the post-fallback
+        # model: a vision primary falling back to a text-only candidate would
+        # otherwise replay image/PDF blocks and earn the 400 the fallback exists
+        # to avoid. Both halves go in both stacks because a subagent on its own
+        # model needs the same treatment; the strip reads that model off each
+        # request, so the two stacks share one instance rather than one apiece.
+        #
+        # Unconditional, unlike the read half's old combined form, because the
+        # two halves are no longer switched on together. ``model_name`` only
+        # decides whether the user's per-model override applies; the target is
+        # read off each request, and an unresolvable one is judged text-only. So
+        # a config with no llm gets a strip that removes everything rather than
+        # no strip at all, which is the safe direction: without it the read half
+        # would keep attaching blocks that nothing removes.
+        multimodal_strip = MultimodalStripMiddleware(
+            model_name=self.config.llm.name if self.config.llm else None,
+            custom_modalities=self.config.input_modalities,
+            can_extract=True,
         )
+        multimodal_read = MultimodalMiddleware(sandbox=sandbox)
 
         # Placed before (outer to) model_resilience so sandbox images are
         # captured once, on the final response only — not per retry attempt.
         image_capture = (
-            ImageCaptureMiddleware(session=session)
-            if session is not None and managed_policy is None
-            else None
+            ImageCaptureMiddleware(session=session) if session is not None else None
         )
 
         # SubagentSteeringMiddleware must be first so follow-up messages are visible before other middleware.
         subagent_middleware = [
             m
             for m in [
-                SubagentSteeringMiddleware(registry=background_middleware.registry)
-                if managed_policy is None
-                else None,
+                SubagentSteeringMiddleware(registry=background_middleware.registry),
                 LargeResultEvictionMiddleware(
                     backend=backend, eviction_dir=eviction_dir
                 ),
@@ -870,7 +843,8 @@ class PTCAgent:
                 image_capture,
                 compaction,
                 *model_resilience,
-                multimodal,
+                multimodal_strip,
+                multimodal_read,
                 AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
                 OpenAIPromptCachingMiddleware(),
                 EmptyToolCallRetryMiddleware(),
@@ -882,8 +856,14 @@ class PTCAgent:
 
         # Workspace context middleware (agent.md injection — main agent only)
         workspace_context_middleware: list[Any] = []
-        if session is not None and managed_policy is None:
-            workspace_context_middleware = [WorkspaceContextMiddleware(session=session)]
+        if session is not None:
+            workspace_context_middleware = [
+                WorkspaceContextMiddleware(
+                    session=session,
+                    name=workspace_name,
+                    description=workspace_description,
+                )
+            ]
 
         # Positioned after the prompt-cache breakpoint (innermost) so dynamic
         # content doesn't invalidate the cached prefix.
@@ -891,6 +871,7 @@ class PTCAgent:
             RuntimeContextMiddleware(
                 current_time=current_time,
                 user_profile=user_profile,
+                user_data_counts=user_data_counts,
                 sandbox_enabled=True,
             )
         ]
@@ -906,7 +887,7 @@ class PTCAgent:
         # RunWorkflow drops with it below.
         subagent_task_middleware = (
             SubAgentMiddleware(
-                default_model=model,
+                default_model=turn.client,
                 default_tools=list(tools),
                 subagents=subagents if subagents else [],
                 default_middleware=subagent_middleware,
@@ -965,9 +946,20 @@ class PTCAgent:
                 image_capture,
                 compaction,
                 *model_resilience,
-                multimodal,
+                multimodal_strip,
+                multimodal_read,
                 AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
                 OpenAIPromptCachingMiddleware(),
+                # Market watch (main agent only): appends the ephemeral
+                # <market-watch> price stamp. Inside model_resilience so it
+                # sees the post-fallback model — its provider-specific cache
+                # breakpoints (Anthropic cache_control / OpenAI
+                # prompt_cache_breakpoint) must never reach another provider.
+                *(
+                    [MarketWatchMiddleware()]
+                    if self.config.feature_enabled("market_watch")
+                    else []
+                ),
                 EmptyToolCallRetryMiddleware(),
                 PatchToolCallsMiddleware(),
                 *workspace_context_middleware,
@@ -978,8 +970,14 @@ class PTCAgent:
             if m is not None
         ]
 
+        # Main agent only, added after the subagent snapshot was taken above:
+        # directly bound MCP tools are the ones a policy has to see every
+        # call, and a subagent runs no main-only middleware.
+        if direct_tools:
+            tools = [*tools, *direct_tools]
+
         agent: Any = create_agent(
-            model,
+            turn.client,
             system_prompt=system_prompt,
             tools=tools,
             middleware=deepagent_middleware,

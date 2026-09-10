@@ -137,11 +137,6 @@ def is_untrusted_server(server) -> bool:
     return getattr(server, "source", "builtin") in ("workspace", "user")
 
 
-def is_user_server(server) -> bool:
-    """Backward-compatible name used by local workspace/session code."""
-    return is_untrusted_server(server)
-
-
 def discovery_should_use_secrets(server) -> bool:
     """Whether tool discovery should resolve vault secrets for a server.
 

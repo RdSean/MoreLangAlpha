@@ -13,66 +13,29 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from src.config import env
+
 from src.config.core import get_infrastructure_config
-from src.config.models import ChannelGatewayConfig, WorkflowOrchestrationConfig
+from src.config.models import (
+    ChannelGatewayConfig,
+    NewsPollConfig,
+    WorkflowOrchestrationConfig,
+)
 
 # Re-export env-var constants for backward compatibility
 from src.config.env import (  # noqa: F401
     AUTH_SERVICE_URL,
     AUTOMATION_WEBHOOK_SECRET,
     AUTOMATION_WEBHOOK_URL,
-    AUTH_COOKIE_SECURE,
+    GINLIX_DATA_ENABLED,
+    GINLIX_DATA_URL,
+    GINLIX_DATA_WS_URL,
     HOST_MODE,
-    LOCAL_AUTH_SESSION_TTL_DAYS,
+    LOCAL_DEV_USER_ID,
     SEARCH_PROVIDER_MIN_TIER,
+    SUPABASE_URL,
 )
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class VolcengineAsrConfig:
-    """Deployment credentials and endpoint for the server-side ASR relay."""
-
-    app_id: str
-    access_token: str = field(repr=False)
-    cluster: str
-    ws_url: str = "wss://openspeech.bytedance.com/api/v2/asr"
-
-
-@dataclass(frozen=True, slots=True)
-class DocumentParsingConfig:
-    """Deployment limits for document ingestion and parsing."""
-
-    max_upload_bytes: int
-    sync_wait_seconds: int
-    parse_timeout_seconds: int
-
-
-def get_document_parsing_config() -> DocumentParsingConfig:
-    """Return validated document parsing limits resolved at process startup."""
-    return DocumentParsingConfig(
-        max_upload_bytes=env.DOCUMENT_MAX_UPLOAD_BYTES,
-        sync_wait_seconds=env.DOCUMENT_SYNC_WAIT_SECONDS,
-        parse_timeout_seconds=env.DOCUMENT_PARSE_TIMEOUT_SECONDS,
-    )
-
-
-def get_volcengine_asr_config() -> VolcengineAsrConfig | None:
-    """Return ASR configuration only when the required deployment values exist."""
-    app_id = env.VOLCENGINE_ASR_APP_ID.strip()
-    access_token = env.VOLCENGINE_ASR_ACCESS_TOKEN.strip()
-    cluster = env.VOLCENGINE_ASR_CLUSTER.strip()
-    if not app_id or not access_token or not cluster:
-        return None
-
-    return VolcengineAsrConfig(
-        app_id=app_id,
-        access_token=access_token,
-        cluster=cluster,
-        ws_url=env.VOLCENGINE_ASR_WS_URL.strip()
-        or "wss://openspeech.bytedance.com/api/v2/asr",
-    )
 
 
 def background_dispatch_requires_token() -> bool:
@@ -106,24 +69,9 @@ def get_workflow_timeout() -> int:
     return get_infrastructure_config().workflow_timeout
 
 
-def get_education_teaching_workflow_timeout() -> int:
-    """Dedicated wall-clock timeout for one managed textbook PTC root."""
-    return get_infrastructure_config().education_teaching_workflow_timeout
-
-
-def get_education_teaching_abandoned_timeout() -> int:
-    """Dedicated disconnected-run recovery window for managed textbook work."""
-    return get_infrastructure_config().education_teaching_abandoned_timeout
-
-
 def get_workflow_orchestration_config() -> WorkflowOrchestrationConfig:
     """Caps and timeouts for RunWorkflow programmatic subagent runs."""
     return get_infrastructure_config().workflow
-
-
-def get_channel_gateway_config() -> ChannelGatewayConfig:
-    """Return bounded configuration shared by all external channel workers."""
-    return get_infrastructure_config().channels
 
 
 def get_sse_keepalive_interval() -> float:
@@ -131,9 +79,33 @@ def get_sse_keepalive_interval() -> float:
     return get_infrastructure_config().sse_keepalive_interval
 
 
+def get_prompt_guidance_default() -> str | None:
+    """Deployment-pinned prompt scaffolding level, or None for 'auto'."""
+    guidance = get_infrastructure_config().prompt.guidance
+    return None if guidance == "auto" else guidance
+
+
 # =============================================================================
 # Feature Flags
 # =============================================================================
+
+
+def get_market_data_providers() -> list[dict]:
+    """Return the ordered provider list from ``market_data.providers`` in config.yaml."""
+    cfg = get_infrastructure_config()
+    providers = cfg.market_data.providers
+    if not providers:
+        return [{"name": "fmp", "markets": ["all"]}]
+    return [p.model_dump() for p in providers]
+
+
+def get_news_data_providers() -> list[dict]:
+    """Return the ordered provider list from ``news_data.providers`` in config.yaml."""
+    cfg = get_infrastructure_config()
+    providers = cfg.news_data.providers
+    if not providers:
+        return [{"name": "fmp"}]
+    return [p.model_dump() for p in providers]
 
 
 def is_result_log_db_enabled() -> bool:
@@ -227,6 +199,11 @@ def get_locale_config(locale: str, prompt_language: str) -> Dict[str, str]:
 
 def is_redis_cache_enabled() -> bool:
     return get_infrastructure_config().redis.cache_enabled
+
+
+def get_news_poll_config() -> NewsPollConfig:
+    """News refresh poller config (enabled / interval / max_items / feeds)."""
+    return get_infrastructure_config().news_poll
 
 
 def get_redis_max_connections() -> int:
@@ -398,6 +375,22 @@ def get_redis_ttl_steering() -> int:
     return get_infrastructure_config().redis.ttl.steering
 
 
+def get_market_watch_min_interval() -> int:
+    return get_infrastructure_config().market_watch.min_interval_seconds
+
+
+def get_market_watch_max_symbols() -> int:
+    return get_infrastructure_config().market_watch.max_symbols
+
+
+def get_market_watch_cache_pin() -> bool:
+    return get_infrastructure_config().market_watch.cache_breakpoint_pin
+
+
+def get_redis_ttl_market_watch() -> int:
+    return get_infrastructure_config().redis.ttl.market_watch
+
+
 def get_redis_ttl_memo_metadata_inflight() -> int:
     """Cross-worker visibility key TTL for in-flight memo metadata tasks (seconds)."""
     return get_infrastructure_config().redis.ttl.memo_metadata_inflight
@@ -410,6 +403,26 @@ def get_redis_ttl_memo_metadata_cancel() -> int:
 
 def is_cache_invalidate_on_write_enabled() -> bool:
     return get_infrastructure_config().redis.cache_invalidate_on_write
+
+
+# Fallback TTLs matching config.yaml defaults (interval_seconds × 1.5)
+_DEFAULT_OHLCV_TTLS: Dict[str, int] = {
+    "1min": 90,
+    "5min": 360,
+    "15min": 1080,
+    "30min": 2100,
+    "1hour": 4200,
+    "4hour": 16200,
+    "1day": 86400,
+}
+
+
+def get_ohlcv_ttl(interval: str) -> int:
+    """Get the Redis TTL for a given OHLCV interval."""
+    cfg = get_infrastructure_config()
+    if interval in cfg.redis.ttl.ohlcv:
+        return cfg.redis.ttl.ohlcv[interval]
+    return _DEFAULT_OHLCV_TTLS.get(interval, 90)
 
 
 # =============================================================================
@@ -575,13 +588,17 @@ def get_langsmith_metadata(
     locale: Optional[str] = None,
     timezone: Optional[str] = None,
     llm_model: Optional[str] = None,
-    reasoning_effort: Optional[str] = None,
-    fast_mode: Optional[bool] = None,
     plan_mode: bool = False,
-    is_byok: bool = False,
     platform: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Build LangSmith metadata dict for a workflow run (omits None values)."""
+    """Build LangSmith metadata dict for a workflow run (omits None values).
+
+    Turn identity only. How the model was tuned for a call — effort, guidance,
+    compaction preset, billing — is stamped on the client in ``LLM.get_llm``
+    and lands on the LLM run, because a subagent inherits this dict wholesale
+    while running a different model. ``llm_model`` stays as the turn's own
+    selection, which is a different question from what any one call hit.
+    """
     metadata = {}
 
     if user_id:
@@ -598,15 +615,78 @@ def get_langsmith_metadata(
         metadata["timezone"] = timezone
     if llm_model:
         metadata["llm_model"] = llm_model
-    if reasoning_effort:
-        metadata["reasoning_effort"] = reasoning_effort
-    if fast_mode is not None:
-        metadata["fast_mode"] = fast_mode
     if plan_mode:
         metadata["plan_mode"] = plan_mode
-    if is_byok:
-        metadata["is_byok"] = is_byok
     if platform:
         metadata["platform"] = platform
 
     return metadata
+
+
+# ---------------------------------------------------------------------------
+# Local product configuration
+#
+# The channel gateway, document parsing and the server-side ASR relay are this
+# deployment's own services, so their accessors live here beside the shared
+# ones rather than in a module of their own.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VolcengineAsrConfig:
+    """Deployment credentials and endpoint for the server-side ASR relay."""
+
+    app_id: str
+    access_token: str = field(repr=False)
+    cluster: str
+    ws_url: str = "wss://openspeech.bytedance.com/api/v2/asr"
+
+
+@dataclass(frozen=True)
+class DocumentParsingConfig:
+    """Deployment limits for document ingestion and parsing."""
+
+    max_upload_bytes: int
+    sync_wait_seconds: int
+    parse_timeout_seconds: int
+
+
+def get_document_parsing_config() -> DocumentParsingConfig:
+    """Return validated document parsing limits resolved at process startup."""
+    return DocumentParsingConfig(
+        max_upload_bytes=env.DOCUMENT_MAX_UPLOAD_BYTES,
+        sync_wait_seconds=env.DOCUMENT_SYNC_WAIT_SECONDS,
+        parse_timeout_seconds=env.DOCUMENT_PARSE_TIMEOUT_SECONDS,
+    )
+
+
+def get_volcengine_asr_config() -> VolcengineAsrConfig | None:
+    """Return ASR configuration only when the required deployment values exist."""
+    app_id = env.VOLCENGINE_ASR_APP_ID.strip()
+    access_token = env.VOLCENGINE_ASR_ACCESS_TOKEN.strip()
+    cluster = env.VOLCENGINE_ASR_CLUSTER.strip()
+    if not app_id or not access_token or not cluster:
+        return None
+
+    return VolcengineAsrConfig(
+        app_id=app_id,
+        access_token=access_token,
+        cluster=cluster,
+        ws_url=env.VOLCENGINE_ASR_WS_URL.strip()
+        or "wss://openspeech.bytedance.com/api/v2/asr",
+    )
+
+
+def get_education_teaching_workflow_timeout() -> int:
+    """Dedicated wall-clock timeout for one managed textbook PTC root."""
+    return get_infrastructure_config().education_teaching_workflow_timeout
+
+
+def get_education_teaching_abandoned_timeout() -> int:
+    """Dedicated disconnected-run recovery window for managed textbook work."""
+    return get_infrastructure_config().education_teaching_abandoned_timeout
+
+
+def get_channel_gateway_config() -> ChannelGatewayConfig:
+    """Return bounded configuration shared by all external channel workers."""
+    return get_infrastructure_config().channels

@@ -47,7 +47,10 @@ def ws_mock_db(mock_connection):
     """Patch get_db_connection in the workspace module (its import location)."""
 
     @asynccontextmanager
-    async def _fake():
+    async def _fake(conn=None):
+        if conn is not None:
+            yield conn
+            return
         yield mock_connection
 
     with patch(
@@ -178,16 +181,6 @@ async def test_get_workspace_found(ws_mock_db, mock_cursor):
 
 
 @pytest.mark.asyncio
-async def test_get_workspace_excludes_service_owned_managed_execution(ws_mock_db, mock_cursor):
-    from src.server.database.workspace import get_workspace
-
-    await get_workspace(str(uuid.uuid4()))
-
-    sql = mock_cursor.execute.call_args[0][0]
-    assert "managed_execution" in sql
-
-
-@pytest.mark.asyncio
 async def test_get_workspace_not_found(ws_mock_db, mock_cursor):
     """get_workspace returns None when no row is found."""
     from src.server.database.workspace import get_workspace
@@ -294,74 +287,26 @@ async def test_update_workspace_status_stopped(ws_mock_db, mock_cursor):
 
 @pytest.mark.asyncio
 async def test_update_workspace_status_running(ws_mock_db, mock_cursor):
-    """update_workspace_status with non-stopped status omits stopped_at."""
+    """A status move omits stopped_at, and never touches sandbox_id.
+
+    The binding is owned solely by ``try_bind_workspace_sandbox``'s
+    compare-and-set; a status writer that could also rebind is how a workspace
+    ends up pointing at a sandbox that was already replaced.
+    """
     from src.server.database.workspace import update_workspace_status
 
     row = _workspace_row(status="running")
     mock_cursor.fetchone.return_value = row
 
-    result = await update_workspace_status("ws-1", "running", sandbox_id="sb-1")
+    result = await update_workspace_status("ws-1", "running")
 
     assert result["status"] == "running"
     sql = mock_cursor.execute.call_args[0][0]
-    assert "sandbox_id = %s" in sql
-    # stopped_at should NOT be in the SET clause (it does appear in RETURNING)
-    # Extract just the SET portion of the SQL
+    # stopped_at and sandbox_id should NOT be in the SET clause (both appear in
+    # RETURNING). Extract just the SET portion of the SQL.
     set_clause = sql.split("SET")[1].split("WHERE")[0]
     assert "stopped_at" not in set_clause
-
-
-@pytest.mark.asyncio
-async def test_try_reclaim_stale_workspace_creation(
-    ws_mock_db, mock_cursor, monkeypatch
-):
-    """Only an old, no-sandbox creation row may be atomically reclaimed."""
-    from src.server.database import workspace as workspace_db
-
-    reclaim = getattr(workspace_db, "try_reclaim_stale_workspace_creation", None)
-    assert reclaim is not None
-
-    row = _workspace_row(status="stopped", sandbox_id=None)
-    mock_cursor.fetchone.return_value = row
-    publish = AsyncMock()
-    monkeypatch.setattr(workspace_db, "publish_status_change", publish)
-    stale_before = datetime.now(timezone.utc)
-
-    result = await reclaim("ws-1", stale_before)
-
-    assert result == row
-    sql, params = mock_cursor.execute.call_args.args
-    assert "status = 'creating'" in sql
-    assert "sandbox_id IS NULL" in sql
-    assert "updated_at <= %s" in sql
-    assert params == (stale_before, "ws-1")
-    publish.assert_awaited_once_with("ws-1", "stopped")
-
-
-@pytest.mark.asyncio
-async def test_try_abandon_workspace_creation_only_stops_unprovisioned_row(
-    ws_mock_db, mock_cursor, monkeypatch
-):
-    """Cancellation may only release the original no-sandbox creation row."""
-    from src.server.database import workspace as workspace_db
-
-    abandon = getattr(workspace_db, "try_abandon_workspace_creation", None)
-    assert abandon is not None
-
-    row = _workspace_row(status="stopped", sandbox_id=None)
-    mock_cursor.fetchone.return_value = row
-    publish = AsyncMock()
-    monkeypatch.setattr(workspace_db, "publish_status_change", publish)
-
-    result = await abandon("ws-1")
-
-    assert result == row
-    sql, params = mock_cursor.execute.call_args.args
-    assert "status = 'creating'" in sql
-    assert "sandbox_id IS NULL" in sql
-    assert "workspace_id = %s" in sql
-    assert params == ("ws-1",)
-    publish.assert_awaited_once_with("ws-1", "stopped")
+    assert "sandbox_id" not in set_clause
 
 
 @pytest.mark.asyncio

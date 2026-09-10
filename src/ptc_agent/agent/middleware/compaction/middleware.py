@@ -18,7 +18,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, cast
 
-from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.messages.human import HumanMessage
 from langchain_core.messages.utils import trim_messages
 from langchain_core.exceptions import ContextOverflowError
@@ -56,9 +56,10 @@ from ptc_agent.agent.middleware.compaction.utils import (
     build_compaction_event,
     build_summary_message,
     count_tokens_tiktoken,
+    find_group_safe_cutoff,
     get_effective_messages,
-    resolve_context_token_estimate,
     strip_base64_from_messages,
+    partition_at_cutoff,
     truncate_message_args,
     truncate_read_results,
 )
@@ -272,27 +273,17 @@ class CompactionMiddleware(AgentMiddleware):
             request.messages, previous_event
         )
 
-        # 3. Count locally every time, then accept prior provider usage only
-        # when it remains plausible. OpenAI-compatible providers can report
-        # cumulative usage, which would otherwise force a compaction loop.
-        counted_msgs = (
-            [request.system_message, *effective_messages]
-            if request.system_message is not None
-            else effective_messages
-        )
-        local_total_tokens = self.token_counter(counted_msgs)
-        total_tokens = resolve_context_token_estimate(
-            local_estimate=local_total_tokens,
-            cached_input_tokens=cached_input_tokens,
-            cached_output_tokens=cached_output_tokens,
-        )
-        provider_total_tokens = cached_input_tokens + cached_output_tokens
-        if provider_total_tokens and total_tokens != provider_total_tokens:
-            logger.warning(
-                "[Compaction] Ignoring implausible provider usage: reported=%d local=%d",
-                provider_total_tokens,
-                local_total_tokens,
+        # 3. Count tokens once (prefer cached from last model call, fall back to tiktoken).
+        #    Pass through to _truncate_args / _truncate_read_results to avoid recomputing.
+        if cached_input_tokens > 0:
+            total_tokens = cached_input_tokens + cached_output_tokens
+        else:
+            counted_msgs = (
+                [request.system_message, *effective_messages]
+                if request.system_message is not None
+                else effective_messages
             )
+            total_tokens = self.token_counter(counted_msgs)
 
         # 4. TIER 1: Truncate tool args in old messages (batch gated)
         truncated_messages, truncated, originals = self._truncate_args(
@@ -411,7 +402,7 @@ class CompactionMiddleware(AgentMiddleware):
                 ),
             )
 
-        messages_to_summarize, preserved_messages = self._partition_messages(
+        messages_to_summarize, preserved_messages = partition_at_cutoff(
             truncated_messages, cutoff_index
         )
 
@@ -438,8 +429,6 @@ class CompactionMiddleware(AgentMiddleware):
             preserved_messages=preserved_messages,
             summary_message=summary_message,
             file_path=file_path,
-            effective_cutoff=cutoff_index,
-            previous_event=previous_event,
         )
 
         # Call handler with summarized messages
@@ -537,24 +526,10 @@ class CompactionMiddleware(AgentMiddleware):
         if state_changed:
             last_truncation_msg_count = len(effective_messages)
 
-        counted_msgs = (
-            [request.system_message, *truncated_messages]
-            if request.system_message is not None
-            else truncated_messages
-        )
-        local_total_tokens = self.token_counter(counted_msgs)
-        total_tokens = resolve_context_token_estimate(
-            local_estimate=local_total_tokens,
-            cached_input_tokens=cached_input_tokens,
-            cached_output_tokens=cached_output_tokens,
-        )
-        provider_total_tokens = cached_input_tokens + cached_output_tokens
-        if provider_total_tokens and total_tokens != provider_total_tokens:
-            logger.warning(
-                "[Compaction] Ignoring implausible provider usage: reported=%d local=%d",
-                provider_total_tokens,
-                local_total_tokens,
-            )
+        if cached_input_tokens > 0:
+            total_tokens = cached_input_tokens + cached_output_tokens
+        else:
+            total_tokens = self.token_counter(truncated_messages)
 
         if not self._should_summarize(truncated_messages, total_tokens):
             try:
@@ -598,7 +573,7 @@ class CompactionMiddleware(AgentMiddleware):
                 ),
             )
 
-        messages_to_summarize, preserved_messages = self._partition_messages(
+        messages_to_summarize, preserved_messages = partition_at_cutoff(
             truncated_messages, cutoff_index
         )
 
@@ -623,8 +598,6 @@ class CompactionMiddleware(AgentMiddleware):
             preserved_messages=preserved_messages,
             summary_message=summary_message,
             file_path=file_path,
-            effective_cutoff=cutoff_index,
-            previous_event=previous_event,
         )
 
         modified_messages = [summary_message, *preserved_messages]
@@ -988,7 +961,7 @@ class CompactionMiddleware(AgentMiddleware):
                 return 0
             cutoff_candidate = len(messages) - 1
 
-        return self._find_safe_cutoff_point(messages, cutoff_candidate)
+        return find_group_safe_cutoff(messages, cutoff_candidate)
 
     def _get_profile_limits(self) -> int | None:
         """Retrieve max input token limit from the model profile."""
@@ -1115,17 +1088,6 @@ class CompactionMiddleware(AgentMiddleware):
             "_cached_output_tokens": cached_output_tokens,
         }
 
-    def _partition_messages(
-        self,
-        conversation_messages: list[AnyMessage],
-        cutoff_index: int,
-    ) -> tuple[list[AnyMessage], list[AnyMessage]]:
-        """Partition messages into those to summarize and those to preserve."""
-        messages_to_summarize = conversation_messages[:cutoff_index]
-        preserved_messages = conversation_messages[cutoff_index:]
-
-        return messages_to_summarize, preserved_messages
-
     def _find_safe_cutoff(
         self, messages: list[AnyMessage], messages_to_keep: int
     ) -> int:
@@ -1134,17 +1096,7 @@ class CompactionMiddleware(AgentMiddleware):
             return 0
 
         target_cutoff = len(messages) - messages_to_keep
-        return self._find_safe_cutoff_point(messages, target_cutoff)
-
-    def _find_safe_cutoff_point(
-        self, messages: list[AnyMessage], cutoff_index: int
-    ) -> int:
-        """Find a safe cutoff point that doesn't split AI/Tool message pairs."""
-        while cutoff_index < len(messages) and isinstance(
-            messages[cutoff_index], ToolMessage
-        ):
-            cutoff_index += 1
-        return cutoff_index
+        return find_group_safe_cutoff(messages, target_cutoff)
 
     def _create_summary(
         self, messages_to_summarize: list[AnyMessage], *, original_count: int = 0

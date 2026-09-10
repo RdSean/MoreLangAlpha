@@ -211,7 +211,12 @@ class RedisConfig(BaseModel):
 
 
 class MarketDataProviderConfig(BaseModel):
-    """Configuration for one market data provider in the fallback chain."""
+    """Configuration for a single market data provider.
+
+    Per-capability market lists override ``markets`` for that capability
+    only (None = no override). Market tokens: region codes plus ``all``
+    and ``non-us``.
+    """
 
     name: str
     markets: List[str] = Field(default_factory=lambda: ["all"])
@@ -221,19 +226,33 @@ class MarketDataProviderConfig(BaseModel):
 
 
 class MarketDataConfig(BaseModel):
+    """Market data provider chain configuration."""
+
     providers: List[MarketDataProviderConfig] = Field(default_factory=list)
 
 
 class NewsDataConfig(BaseModel):
+    """News data provider chain configuration."""
+
     providers: List[MarketDataProviderConfig] = Field(default_factory=list)
 
 
 class NewsPollFeedConfig(BaseModel):
+    """One global feed kept warm by the news refresh poller.
+
+    ``provider`` None targets the provider chain (Market general feed); a name
+    (e.g. ``tickertick``) targets that source directly. Always polled with no
+    tickers, so it maps to a global cache key — ``news:tickertick:general:50``
+    with a provider, ``news:general:50`` without one.
+    """
+
     provider: str | None = Field(default=None)
     limit: int = Field(default=50, ge=1, le=100)
 
 
 class NewsPollConfig(BaseModel):
+    """News refresh poller — delta-merges the latest page into a rolling buffer."""
+
     enabled: bool = Field(default=True)
     interval_seconds: int = Field(default=60, ge=10)
     max_items: int = Field(default=100, ge=1, le=500)
@@ -263,11 +282,19 @@ class FeatureFlagOverride(BaseModel):
 
 
 class MarketWatchConfig(BaseModel):
-    """Market watch tuning; feature availability is controlled by FEATURES."""
+    """Market watch tuning (the on/off flag lives in the features registry)."""
 
-    min_interval_seconds: int = Field(default=25, ge=5)
-    max_symbols: int = Field(default=10, ge=1, le=50)
-    cache_breakpoint_pin: bool = Field(default=True)
+    min_interval_seconds: int = Field(
+        default=25, ge=5, description="Throttle between injections per thread"
+    )
+    max_symbols: int = Field(default=10, ge=1, le=50, description="Watch list cap")
+    cache_breakpoint_pin: bool = Field(
+        default=True,
+        description=(
+            "Pin a provider cache breakpoint on the last durable message so the "
+            "ephemeral stamp doesn't break incremental caching"
+        ),
+    )
 
 
 class WorkflowOrchestrationConfig(BaseModel):
@@ -384,7 +411,11 @@ class WorkflowOrchestrationConfig(BaseModel):
 
 
 class ChannelGatewayConfig(BaseModel):
-    """Bounded runtime controls for durable external messaging channels."""
+    """Bounded runtime controls for durable external messaging channels.
+
+    Local product surface: the WeChat iLink gateway runs as its own worker and
+    needs lease and budget knobs the upstream config has no place for.
+    """
 
     default_idle_timeout_seconds: int = Field(
         default=21_600,
@@ -422,9 +453,17 @@ class ChannelGatewayConfig(BaseModel):
 
 
 class PromptConfig(BaseModel):
-    """Deployment-wide prompt scaffolding preference."""
+    """Deployment-wide prompt settings."""
 
-    guidance: Literal["auto", "lean", "detailed"] = Field(default="auto")
+    guidance: Literal["auto", "lean", "detailed"] = Field(
+        default="auto",
+        description=(
+            "Prompt scaffolding level for this deployment. 'auto' defers to the "
+            "model's prompt_guidance in models.json; 'lean'/'detailed' pin it. A "
+            "per-user model_preference.prompt_guidance still wins over this — a "
+            "profile for the running model first, then the account-wide value."
+        ),
+    )
 
 
 class InfrastructureConfig(BaseModel):
@@ -432,22 +471,13 @@ class InfrastructureConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    # Application Settings
     prompt: PromptConfig = Field(default_factory=PromptConfig)
+
+    # Application Settings
     debug: bool = Field(default=False, description="Debug mode flag")
     ptc_recursion_limit: int = Field(default=2000, ge=1, le=10000, description="PTC agent recursion limit")
     flash_recursion_limit: int = Field(default=500, ge=1, le=10000, description="Flash agent recursion limit")
     workflow_timeout: int = Field(default=21600, description="Workflow timeout in seconds")
-    education_teaching_workflow_timeout: int = Field(
-        default=86400,
-        ge=1,
-        description="Managed textbook PTC root timeout in seconds",
-    )
-    education_teaching_abandoned_timeout: int = Field(
-        default=86400,
-        ge=1,
-        description="Managed textbook disconnected-run recovery window in seconds",
-    )
     sse_keepalive_interval: float = Field(
         default=15.0, description="SSE keepalive interval in seconds"
     )
@@ -461,6 +491,19 @@ class InfrastructureConfig(BaseModel):
     )
     langsmith_tracing: bool = Field(default=False, description="Enable LangSmith tracing")
     market_watch: MarketWatchConfig = Field(default_factory=MarketWatchConfig)
+
+    # Local product: managed textbook (education) workflow budgets.
+    education_teaching_workflow_timeout: int = Field(
+        default=86400,
+        ge=1,
+        description="Managed textbook PTC root timeout in seconds",
+    )
+    education_teaching_abandoned_timeout: int = Field(
+        default=86400,
+        ge=1,
+        description="Managed textbook disconnected-run recovery window in seconds",
+    )
+
     # User-facing product features (deployment overrides of the code catalog
     # in src/config/features.py). Distinct from the infra toggles above, which
     # are operator-only and never exposed to users.
@@ -493,15 +536,15 @@ class InfrastructureConfig(BaseModel):
     # Redis Cache
     redis: RedisConfig = Field(default_factory=RedisConfig)
 
-    # Market data and news provider chains
+    # Market Data
     market_data: MarketDataConfig = Field(default_factory=MarketDataConfig)
     news_data: NewsDataConfig = Field(default_factory=NewsDataConfig)
     news_poll: NewsPollConfig = Field(default_factory=NewsPollConfig)
-
-    # External channel gateway controls
-    channels: ChannelGatewayConfig = Field(default_factory=ChannelGatewayConfig)
 
     # RunWorkflow orchestration caps
     workflow: WorkflowOrchestrationConfig = Field(
         default_factory=WorkflowOrchestrationConfig
     )
+
+    # External channel gateway controls (local WeChat iLink worker).
+    channels: ChannelGatewayConfig = Field(default_factory=ChannelGatewayConfig)

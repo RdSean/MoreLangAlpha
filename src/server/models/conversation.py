@@ -25,7 +25,8 @@ class WorkspaceThreadListItem(BaseModel):
     )
     platform: Optional[str] = Field(
         None,
-        description="Surface the thread originated from, such as 'web' or a channel name. NULL for "
+        description="Surface the thread originated from: 'web', 'market_view:<SYMBOL>', "
+        "or channel name ('telegram', 'slack', 'discord', 'feishu'). NULL for "
         "pre-tracking rows and system-initiated threads.",
     )
     metadata: Dict[str, Any] = Field(
@@ -90,8 +91,8 @@ class WorkspaceThreadListItem(BaseModel):
             "thread_index": 0,
             "current_status": "completed",
             "msg_type": "ptc",
-            "title": "Research notes",
-            "platform": "web:embedded",
+            "title": "Tesla Stock Analysis",
+            "platform": "market_view:TSLA",
             "is_shared": False,
             "created_at": "2025-10-15T10:30:00Z",
             "updated_at": "2025-10-15T14:45:00Z",
@@ -225,12 +226,13 @@ class ThreadCreateRequest(BaseModel):
         return v[:4000]
     agent_mode: Literal["flash", "ptc"] = Field("ptc")
     # Same contract as ChatRequest.platform (see models/chat.py for the format
-    # rationale). Pre-created threads preserve their original client surface.
+    # rationale) — pre-created MarketView threads must carry their tag since
+    # ensure_thread_exists never updates platform on an existing row.
     platform: Optional[str] = Field(
         default=None,
         pattern=r"^[a-z_]+(:[A-Z0-9][A-Z0-9.-]*)?$",
         max_length=50,
-        description="Origin/platform identifier, e.g. 'web' or 'telegram'.",
+        description="Origin/platform identifier, e.g. 'web', 'market_view:AAPL'.",
     )
     timezone: Optional[str] = Field(
         default=None,
@@ -271,7 +273,7 @@ class ThreadUpdateRequest(BaseModel):
     )
 
     model_config = ConfigDict(json_schema_extra={
-        "example": {"title": "Quarterly research brief"},
+        "example": {"title": "Tesla Stock Analysis"},
     })
 
 
@@ -369,3 +371,4 @@ class FeedbackResponse(BaseModel):
     consent_human_review: bool = False
     review_status: Optional[str] = None
     created_at: str
+

@@ -7,8 +7,8 @@ adapter instead of rippling through replay.
 
 Artifact derivation mirrors the live emitters: ``file_operation``/``todo_update``
 payloads are rebuilt from tool-call args (the same source the middleware reads),
-``html_widget``/``preview_url`` from the checkpointed ToolMessage artifact, and
-``task`` from ``additional_kwargs.task_artifact``.
+``html_widget``/``preview_url``/``chart_annotation`` from the checkpointed
+ToolMessage artifact, and ``task`` from ``additional_kwargs.task_artifact``.
 Non-derivable payloads (image URL rewrites, widget ``data``) are merged by the
 replay endpoint from persisted sources, not synthesized here.
 """
@@ -51,10 +51,22 @@ _STEERING_MARKERS = (
     "[Follow-up Instructions from Orchestrator]\n",
 )
 
+# Written by src/ptc_agent/agent/middleware/market_watch.py — the lc_source tag
+# and the content stamp prefix that mark a live-price injection.
+_MARKET_WATCH_SOURCE = "market_watch"
+_MARKET_WATCH_STAMP_OPEN = "<market-watch>"
+
+# Written by src/server/utils/credit_resume_context.py — the lc_source tag on
+# the record of gate-stopped background tasks injected when a credit-paused
+# turn resumes.
+_CREDIT_GATE_SOURCE = "credit_gate"
+
 _FILE_OPERATION_TOOLS = {"Write", "Edit"}
 _ARTIFACT_FROM_TOOL_MESSAGE = {
     "ShowWidget": "html_widget",
     "GetPreviewUrl": "preview_url",
+    "draw_chart_annotation": "chart_annotation",
+    "manage_chart_annotations": "chart_annotation",
 }
 
 
@@ -157,6 +169,8 @@ def history_events_to_sse(
                 data["content_type"] = event.data.get("content_type") or "text"
             if event.data.get("artifact"):
                 data["artifact"] = event.data["artifact"]
+            if event.data.get("status"):
+                data["status"] = event.data["status"]
             items.append(_sse("tool_call_result", data))
         elif event.kind == "artifact":
             items.append(
@@ -215,20 +229,34 @@ def _sse(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _human_message_kind(message: HumanMessage) -> str:
-    """Classify a HumanMessage as steering, summarization, or user input."""
+    """Classify a HumanMessage by its injection stamp: ``market-watch``,
+    ``steering``, ``summarization``, ``credit-gate``, or ``plain`` (real
+    user input).
+
+    Every stamp a writer emits must be registered here. ``plain`` is the
+    fallback, and it is load-bearing — it is what ``is_run_boundary_message``
+    treats as a run's opening input, so an unregistered stamp would open a
+    run it only landed inside.
+    """
     kwargs = message.additional_kwargs or {}
     source = kwargs.get("lc_source")
     content = message.content if isinstance(message.content, str) else ""
+    if source == _MARKET_WATCH_SOURCE or content.startswith(_MARKET_WATCH_STAMP_OPEN):
+        # Both guards stay: the content-prefix check is the safety net for
+        # any ephemeral stamp that reaches a message unstamped.
+        return "market-watch"
     if source == "steering" or content.startswith(_STEERING_MARKERS):
         return "steering"
     if source == "summarization":
         return "summarization"
+    if source == _CREDIT_GATE_SOURCE:
+        return "credit-gate"
     return "plain"
 
 
 def is_run_boundary_message(message: AnyMessage) -> bool:
     """A plain HumanMessage opens a run in a task namespace (the spawn or
-    resume input); stamped injections (steering and summaries)
+    resume input); stamped injections (steering, market-watch, summaries)
     land mid-run and never open one."""
     return isinstance(message, HumanMessage) and _human_message_kind(message) == "plain"
 
@@ -245,6 +273,12 @@ def _project_human_message(message: HumanMessage, agent: str) -> list[HistoryEve
     kwargs = message.additional_kwargs or {}
     content = message.content if isinstance(message.content, str) else ""
     kind = _human_message_kind(message)
+
+    if kind in ("market-watch", "credit-gate"):
+        # Model-facing only. Returning here rather than falling through also
+        # keeps them out of a task namespace's ``user-message`` projection,
+        # where the raw reminder would surface as if the user had typed it.
+        return []
 
     if kind == "steering":
         payload = kwargs.get("steering_delivered")
@@ -392,6 +426,11 @@ def _project_tool_message(
                 "content": content,
                 "content_type": content_type,
                 "artifact": artifact if artifact else None,
+                # The whole status travels, not just the failing one. An
+                # explicit success is what stops a client from reading prose
+                # that merely looks like a failure, so dropping it here would
+                # make the success case indistinguishable from no status.
+                "status": getattr(message, "status", None),
             },
         )
     )

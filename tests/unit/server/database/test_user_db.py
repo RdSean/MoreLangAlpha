@@ -85,6 +85,8 @@ def _prefs_row(user_id="user-1", **overrides):
     row = {
         "user_preference_id": str(uuid.uuid4()),
         "user_id": user_id,
+        "risk_preference": {},
+        "investment_preference": {},
         "agent_preference": {},
         "other_preference": {},
         "created_at": now,
@@ -245,8 +247,11 @@ async def test_get_user_with_preferences(user_mock_db, mock_cursor):
         "updated_at": now,
         "last_login_at": None,
         "user_preference_id": "pref-1",
+        "risk_preference": {"level": "high"},
+        "investment_preference": {},
         "agent_preference": {},
         "other_preference": {},
+        "model_preference": {},
         "pref_created_at": now,
         "pref_updated_at": now,
     }
@@ -258,7 +263,7 @@ async def test_get_user_with_preferences(user_mock_db, mock_cursor):
     assert "user" in result
     assert "preferences" in result
     assert result["user"]["user_id"] == "user-1"
-    assert result["preferences"]["agent_preference"] == {}
+    assert result["preferences"]["risk_preference"] == {"level": "high"}
 
 
 @pytest.mark.asyncio
@@ -283,6 +288,8 @@ async def test_get_user_with_preferences_no_prefs(user_mock_db, mock_cursor):
         "updated_at": now,
         "last_login_at": None,
         "user_preference_id": None,  # No preferences
+        "risk_preference": None,
+        "investment_preference": None,
         "agent_preference": None,
         "other_preference": None,
         "pref_created_at": None,

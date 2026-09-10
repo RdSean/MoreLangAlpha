@@ -173,33 +173,21 @@ async def test_create_duplicate_409(client):
 
 
 @pytest.mark.asyncio
-async def test_create_permits_ordinary_launchers_and_refuses_shells(client):
-    """Local divergence from the platform contract, kept deliberately.
-
-    The platform accepts any stdio command on the grounds that the sandbox
-    already runs whatever the agent asks it to. This branch keeps a small
-    command denylist (shells, ``curl``, ``rm``) in front of that, so a catalog
-    row can never name one. ``docker`` still passes validation and reaches the
-    writer, which is what proves the gate is the denylist and not a general
-    stdio refusal.
-    """
-    with patch(
-        "src.server.app.mcp_catalog.create_catalog_server",
-        new=AsyncMock(side_effect=ValueError("already exists")),
-    ):
-        allowed = await client.post(
-            "/api/v1/mcp/servers",
-            json={"name": "srv", "transport": "stdio", "command": "docker"},
-        )
-    # 409, not 422: it got past validation and reached the writer.
-    assert allowed.status_code == 409
-
-    for command in ("bash", "sh", "/bin/bash", "curl", "rm"):
-        refused = await client.post(
-            "/api/v1/mcp/servers",
-            json={"name": "srv", "transport": "stdio", "command": command},
-        )
-        assert refused.status_code == 422, command
+async def test_create_accepts_any_command(client):
+    # A shell and a container runtime are both ordinary ways to launch a
+    # published MCP server, and the sandbox they land in already runs whatever
+    # the agent asks it to.
+    for command in ("bash", "docker"):
+        with patch(
+            "src.server.app.mcp_catalog.create_catalog_server",
+            new=AsyncMock(side_effect=ValueError("already exists")),
+        ):
+            resp = await client.post(
+                "/api/v1/mcp/servers",
+                json={"name": "srv", "transport": "stdio", "command": command},
+            )
+        # 409, not 422: it got past validation and reached the writer.
+        assert resp.status_code == 409
 
 
 @pytest.mark.asyncio

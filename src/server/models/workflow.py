@@ -5,9 +5,11 @@ This module provides Pydantic models for retrieving and displaying
 historical workflow states from LangGraph checkpoints.
 """
 
-from typing import Optional, List, Dict, Any, Literal
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
+
+from src.llms.reasoning import ReasoningLevel
 
 
 def serialize_message(message: Any) -> Dict[str, Any]:
@@ -189,6 +191,7 @@ class PlanStepResponse(BaseModel):
 class PlanResponse(BaseModel):
     """Represents the research plan."""
     title: str = Field(..., description="Plan title")
+    market_type: Optional[str] = Field(None, description="Market type (e.g. US stocks, China A-shares)")
     locale: Optional[str] = Field(None, description="Locale (zh-CN, en-US, etc.)")
     steps: List[PlanStepResponse] = Field(default_factory=list, description="Plan steps")
 
@@ -218,6 +221,7 @@ class WorkflowStateResponse(BaseModel):
 
     # State metadata
     research_topic: Optional[str] = Field(None, description="Research topic/query")
+    market_type: Optional[str] = Field(None, description="Market type identified")
     locale: Optional[str] = Field(None, description="Locale/language")
     deepthinking: bool = Field(False, description="Deep thinking mode enabled")
     auto_accepted_plan: bool = Field(True, description="Plan auto-accepted")
@@ -236,22 +240,23 @@ class WorkflowStateResponse(BaseModel):
             "thread_id": "3d4e5f6g-7h8i-9j0k-1l2m-3n4o5p6q7r8s",
             "checkpoint_id": "1ef1234-...",
             "messages": [
-                {"role": "human", "content": "Research recent remote-work trends"},
-                {"role": "ai", "content": "I will prepare a research brief..."}
+                {"role": "human", "content": "Analyze AAPL stock price"},
+                {"role": "ai", "content": "I will analyze AAPL stock price for you..."}
             ],
             "plan": {
-                "title": "Remote Work Research Plan",
+                "title": "AAPL Stock Analysis Plan",
+                "market_type": "US",
                 "steps": [
                     {
-                        "title": "Collect primary sources",
-                        "description": "Find recent studies and reports",
+                        "title": "Get AAPL basic info",
+                        "description": "Fetch company fundamentals",
                         "step_type": "DATA",
                         "execution_res": "completed"
                     }
                 ]
             },
-            "final_report": "Remote work research brief...",
-            "research_topic": "Remote Work Trends",
+            "final_report": "AAPL stock analysis report...",
+            "research_topic": "AAPL Stock Analysis",
             "completed": True
         }
     })
@@ -358,7 +363,7 @@ class CheckpointResponse(BaseModel):
             "pending_tasks": 0,
             "completed": True,
             "state_preview": {
-                "research_topic": "Remote Work Trends",
+                "research_topic": "AAPL Stock Analysis",
                 "plan_iterations": 1,
                 "has_final_report": True,
                 "message_count": 5
@@ -393,7 +398,7 @@ class CheckpointHistoryResponse(BaseModel):
                     "next_nodes": [],
                     "pending_tasks": 0,
                     "completed": True,
-                    "state_preview": {"research_topic": "Remote Work Trends"}
+                    "state_preview": {"research_topic": "AAPL Stock Analysis"}
                 }
             ]
         }
@@ -461,5 +466,5 @@ class RetryRequest(BaseModel):
         description="Model override for the retry attempt (the chat input's "
         "current selection); None = per-user default.",
     )
-    reasoning_effort: Optional[Literal["low", "medium", "high", "xhigh"]] = Field(None)
+    reasoning_effort: Optional[ReasoningLevel] = Field(None)
     fast_mode: Optional[bool] = Field(None)

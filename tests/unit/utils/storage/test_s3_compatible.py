@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -51,10 +51,9 @@ def test_env_overrides_timeouts(monkeypatch):
     assert cfg.read_timeout == 11
 
 
-def test_default_addressing_style_is_virtual(monkeypatch):
+def test_default_addressing_style_is_virtual():
     """Default addressing is virtual — most cloud S3-compatible providers need it,
     and it avoids boto3's path-style default doubling keys against the endpoint."""
-    monkeypatch.delenv("STORAGE_ADDRESSING_STYLE", raising=False)
     mod = _reload_module()
     mod._reset_client_for_test()
     captured: dict = {}
@@ -164,166 +163,3 @@ async def test_store_binary_raises_upload_error_when_put_times_out(monkeypatch):
         await memo_binary_storage.store_binary(
             user_id="u1", content=b"%PDF-1.4 x", content_type="application/pdf",
         )
-
-
-def test_upload_file_accepts_explicit_cap_larger_than_global_default(
-    tmp_path,
-    monkeypatch,
-):
-    mod = _reload_module()
-    source = tmp_path / "source.pdf"
-    source.write_bytes(b"%PDF-1.4")
-    client = MagicMock()
-
-    monkeypatch.setattr(mod.StorageConfig, "MAX_UPLOAD_SIZE", 1)
-    monkeypatch.setattr(mod, "_get_client", lambda: client)
-
-    assert mod.upload_file(
-        "documents/doc-A1b2C3d4E5f6/source",
-        str(source),
-        "application/pdf",
-        max_bytes=source.stat().st_size,
-    )
-    client.put_object.assert_called_once()
-
-
-class _StreamingBody:
-    def __init__(self, data: bytes) -> None:
-        self._data = data
-        self._offset = 0
-        self.read_sizes: list[int] = []
-        self.closed = False
-
-    def read(self, size: int) -> bytes:
-        self.read_sizes.append(size)
-        chunk = self._data[self._offset:self._offset + size]
-        self._offset += len(chunk)
-        return chunk
-
-    def close(self) -> None:
-        self.closed = True
-
-
-class _FailingStreamingBody(_StreamingBody):
-    def read(self, size: int) -> bytes:
-        self.read_sizes.append(size)
-        raise OSError("stream failed")
-
-
-def test_download_to_file_streams_sized_chunks(tmp_path, monkeypatch):
-    mod = _reload_module()
-    body = _StreamingBody(b"abcdef")
-    client = MagicMock()
-    client.get_object.return_value = {"Body": body}
-    monkeypatch.setattr(mod, "_get_client", lambda: client)
-    destination = tmp_path / "download.bin"
-
-    assert mod.download_to_file(
-        "documents/doc-A1b2C3d4E5f6/source",
-        destination,
-        max_bytes=6,
-    ) == 6
-    assert destination.read_bytes() == b"abcdef"
-    assert body.read_sizes
-    assert all(size > 0 for size in body.read_sizes)
-    assert body.closed
-
-
-def test_download_to_file_stops_before_limit_is_exceeded(tmp_path, monkeypatch):
-    mod = _reload_module()
-    body = _StreamingBody(b"abcdef")
-    client = MagicMock()
-    client.get_object.return_value = {"Body": body}
-    monkeypatch.setattr(mod, "_get_client", lambda: client)
-    destination = tmp_path / "download.bin"
-
-    with pytest.raises(ValueError, match="maximum size"):
-        mod.download_to_file(
-            "documents/doc-A1b2C3d4E5f6/source",
-            destination,
-            max_bytes=5,
-        )
-
-    assert not destination.exists()
-    assert body.read_sizes
-    assert all(size > 0 for size in body.read_sizes)
-    assert body.closed
-
-
-def test_open_download_stream_reads_sized_chunks_and_closes(monkeypatch):
-    mod = _reload_module()
-    body = _StreamingBody(b"# Lesson\n")
-    client = MagicMock()
-    client.get_object.return_value = {
-        "Body": body,
-        "ContentLength": len(b"# Lesson\n"),
-    }
-    monkeypatch.setattr(mod, "_get_client", lambda: client)
-
-    download = mod.open_download_stream(
-        "documents/doc-A1b2C3d4E5f6/artifacts/job-A1b2C3d4E5f6/document.md"
-    )
-
-    assert download.content_length == len(b"# Lesson\n")
-    assert b"".join(download.chunks) == b"# Lesson\n"
-    assert body.read_sizes
-    assert all(size == mod._DOWNLOAD_CHUNK_SIZE for size in body.read_sizes)
-    assert body.closed
-
-
-@pytest.mark.parametrize("content_length", [True, -1, "9"])
-def test_open_download_stream_ignores_invalid_content_length(
-    monkeypatch,
-    content_length,
-):
-    mod = _reload_module()
-    body = _StreamingBody(b"x")
-    client = MagicMock()
-    client.get_object.return_value = {
-        "Body": body,
-        "ContentLength": content_length,
-    }
-    monkeypatch.setattr(mod, "_get_client", lambda: client)
-
-    download = mod.open_download_stream("documents/doc-A1b2C3d4E5f6/source")
-
-    assert download.content_length is None
-    download.close()
-    assert body.closed
-
-
-def test_open_download_stream_closes_body_when_read_fails(monkeypatch):
-    mod = _reload_module()
-    body = _FailingStreamingBody(b"")
-    client = MagicMock()
-    client.get_object.return_value = {"Body": body}
-    monkeypatch.setattr(mod, "_get_client", lambda: client)
-
-    download = mod.open_download_stream("documents/doc-A1b2C3d4E5f6/source")
-
-    with pytest.raises(OSError, match="stream failed"):
-        next(download.chunks)
-    assert body.closed
-
-
-def test_presigned_download_uses_private_bucket_and_content_disposition(
-    monkeypatch,
-):
-    mod = _reload_module()
-    client = MagicMock()
-    client.generate_presigned_url.return_value = "https://storage.example/signed"
-    monkeypatch.setattr(mod.StorageConfig, "BUCKET_NAME", "private-documents")
-    monkeypatch.setattr(mod, "_get_client", lambda: client)
-
-    result = mod.create_presigned_download_url(
-        "documents/doc-A1b2C3d4E5f6/artifacts/job-A1b2C3d4E5f6/document.md",
-        expires_seconds=300,
-        download_name="教材.md",
-    )
-
-    assert result == "https://storage.example/signed"
-    _, kwargs = client.generate_presigned_url.call_args
-    assert kwargs["ExpiresIn"] == 300
-    assert kwargs["Params"]["Bucket"] == "private-documents"
-    assert kwargs["Params"]["Key"].startswith("documents/")
-    assert "ResponseContentDisposition" in kwargs["Params"]

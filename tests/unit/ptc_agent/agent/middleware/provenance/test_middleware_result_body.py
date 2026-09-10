@@ -96,35 +96,35 @@ def test_execute_code_body_is_per_call_not_aggregate(middleware):
     """Construct a trace with multiple entries, each a distinct result_body, and
     assert every yielded source carries its own entry's body — not the others'
     and not the aggregate ExecuteCode stdout."""
-    body_a = json.dumps({"assignment_id": "math-1", "score": 91})
-    body_b = json.dumps({"assignment_id": "science-2", "score": 88})
-    body_c = json.dumps({"student_id": "student-3", "status": "submitted"})
-    aggregate_stdout = "AGGREGATE CODE STDOUT: processed 3 school records."
+    body_a = json.dumps({"price": 101.5, "symbol": "AAA"})
+    body_b = json.dumps({"price": 202.5, "symbol": "BBB"})
+    body_c = json.dumps({"shares": 333, "symbol": "CCC"})
+    aggregate_stdout = "AGGREGATE CODE STDOUT: printed 3 quotes, done."
 
     artifact = {
         "mcp_trace": [
             {
-                "server": "school-records",
-                "tool": "get_submission",
-                "args": {"assignment_id": "math-1"},
+                "server": "marketdata",
+                "tool": "quote",
+                "args": {"symbol": "AAA"},
                 "result_sha256": hashlib.sha256(body_a.encode()).hexdigest(),
                 "result_size": len(body_a.encode()),
                 "result_snippet": body_a[:50],
                 "result_body": body_a,
             },
             {
-                "server": "school-records",
-                "tool": "get_submission",
-                "args": {"assignment_id": "science-2"},
+                "server": "marketdata",
+                "tool": "quote",
+                "args": {"symbol": "BBB"},
                 "result_sha256": hashlib.sha256(body_b.encode()).hexdigest(),
                 "result_size": len(body_b.encode()),
                 "result_snippet": body_b[:50],
                 "result_body": body_b,
             },
             {
-                "server": "school-records",
-                "tool": "get_student_status",
-                "args": {"student_id": "student-3"},
+                "server": "positions",
+                "tool": "holdings",
+                "args": {"symbol": "CCC"},
                 "result_sha256": hashlib.sha256(body_c.encode()).hexdigest(),
                 "result_size": len(body_c.encode()),
                 "result_snippet": body_c[:50],
@@ -160,9 +160,9 @@ def test_execute_code_body_absent_when_entry_omits_it(middleware):
     artifact = {
         "mcp_trace": [
             {
-                "server": "school-records",
-                "tool": "get_submission",
-                "args": {"assignment_id": "math-1"},
+                "server": "marketdata",
+                "tool": "quote",
+                "args": {"symbol": "AAA"},
                 "result_sha256": hashlib.sha256(body.encode()).hexdigest(),
                 "result_size": len(body.encode()),
                 "result_snippet": body[:50],
@@ -187,8 +187,8 @@ def test_execute_code_host_reclamps_oversized_trace_body(middleware):
     artifact = {
         "mcp_trace": [
             {
-                "server": "school-records",
-                "tool": "get_submission",
+                "server": "marketdata",
+                "tool": "quote",
                 "args": {},
                 "result_sha256": "a" * 64,
                 "result_size": len(oversized.encode()),
@@ -209,8 +209,8 @@ def test_execute_code_host_reclamps_oversized_trace_body(middleware):
 
 
 # ---------------------------------------------------------------------------
-# Per-item web-search results set result_body per item, hash-consistent with
-# that item's result_sha256.
+# Per-item fan-out: web_search per item + sec_filing per filing set result_body
+# per item, hash-consistent with that item's result_sha256.
 # ---------------------------------------------------------------------------
 
 
@@ -235,6 +235,56 @@ def test_web_search_body_is_per_item_hash_consistent(middleware):
         )
 
 
+def test_sec_filing_body_is_per_filing_hash_consistent(middleware):
+    filing_a = {"filing_date": "2026-01-01", "source_url": "https://sec.test/1"}
+    filing_b = {"filing_date": "2026-02-01", "source_url": "https://sec.test/2"}
+    artifact = {
+        "type": "sec_filing",
+        "symbol": "TESTCO",
+        "filings": [filing_a, filing_b],
+    }
+    request = _make_request("get_sec_filing", {"symbol": "TESTCO"})
+
+    sources = list(
+        middleware._extract_sec_filing(
+            request, _result(content="x", artifact=artifact)
+        )
+    )
+
+    assert len(sources) == 2
+    assert sources[0].result_body == _canonical(filing_a)
+    assert sources[1].result_body == _canonical(filing_b)
+    assert sources[0].result_body != sources[1].result_body
+    for src in sources:
+        assert (
+            hashlib.sha256(src.result_body.encode("utf-8")).hexdigest()
+            == src.result_sha256
+        )
+
+
+def test_sec_single_filing_body_is_artifact_hash_consistent(middleware):
+    """The single-filing branch (10-K/10-Q) hashes the whole artifact; the body
+    must be that same artifact value."""
+    artifact = {
+        "type": "sec_filing",
+        "symbol": "TESTCO",
+        "source_url": "https://sec.test/10k",
+        "text": "filing body text",
+    }
+    request = _make_request("get_sec_filing", {"symbol": "TESTCO"})
+    sources = list(
+        middleware._extract_sec_filing(
+            request, _result(content="x", artifact=artifact)
+        )
+    )
+    assert len(sources) == 1
+    assert sources[0].result_body == _canonical(artifact)
+    assert (
+        hashlib.sha256(sources[0].result_body.encode("utf-8")).hexdigest()
+        == sources[0].result_sha256
+    )
+
+
 def test_web_fetch_body_is_content_hash_consistent(middleware):
     content = "fetched markdown body, the agent reasoned over this"
     request = _make_request("WebFetch", {"url": "https://docs.test/page"})
@@ -247,6 +297,24 @@ def test_web_fetch_body_is_content_hash_consistent(middleware):
         hashlib.sha256(sources[0].result_body.encode("utf-8")).hexdigest()
         == sources[0].result_sha256
     )
+
+
+def test_market_data_body_shared_across_symbols(middleware):
+    """One market call may yield several symbol rows; each carries the same
+    fingerprinted body (the single result they all came from)."""
+    artifact = {"indices": ["^AAA", "^BBB"], "data": [1, 2, 3]}
+    request = _make_request("get_market_overview", {"indices": ["^AAA", "^BBB"]})
+    sources = list(
+        middleware._extract_market_data(request, _result(artifact=artifact))
+    )
+    assert len(sources) == 2
+    assert sources[0].result_body == _canonical(artifact)
+    assert sources[0].result_body == sources[1].result_body
+    for src in sources:
+        assert (
+            hashlib.sha256(src.result_body.encode("utf-8")).hexdigest()
+            == src.result_sha256
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -386,9 +454,9 @@ def _mcp_artifact(body, sha, *, size=None):
     return {
         "mcp_trace": [
             {
-                "server": "school-records",
-                "tool": "get_submission",
-                "args": {"assignment_id": "math-1"},
+                "server": "marketdata",
+                "tool": "quote",
+                "args": {"symbol": "AAA"},
                 "result_sha256": sha,
                 "result_size": size if size is not None else len(body.encode()),
                 "result_snippet": body[:50],
@@ -401,7 +469,7 @@ def _mcp_artifact(body, sha, *, size=None):
 @pytest.mark.asyncio
 async def test_mcp_body_with_matching_sha_is_stored_and_sha_kept():
     mw = ProvenanceMiddleware()
-    body = json.dumps({"assignment_id": "math-1", "score": 91})
+    body = json.dumps({"price": 101.5, "symbol": "AAA"})
     real_sha = hashlib.sha256(body.encode()).hexdigest()
     store = AsyncMock()
     emitted = []
@@ -422,7 +490,7 @@ async def test_mcp_body_with_matching_sha_is_stored_and_sha_kept():
 @pytest.mark.asyncio
 async def test_mcp_body_with_forged_sha_is_dropped_and_record_sha_nulled():
     mw = ProvenanceMiddleware()
-    body = json.dumps({"assignment_id": "math-1", "score": 91})
+    body = json.dumps({"price": 101.5, "symbol": "AAA"})
     forged_sha = "f" * 64  # body does NOT hash to this
     store = AsyncMock()
     emitted = []
@@ -463,7 +531,9 @@ async def test_mcp_truncated_body_cannot_verify_and_is_dropped():
 
 @pytest.mark.asyncio
 async def test_host_path_sha_trusted_even_when_body_diverges():
-    """Host-computed hashes are trusted even if a redacted WebFetch body differs."""
+    """Host-computed shas (web/sec/market) are NOT subject to the gate: a redacted
+    web_fetch body diverges from its sha by design, yet it is still stored and the
+    record keeps its (trusted) sha."""
     secret = "Bearer host-secret-token"
     mw = ProvenanceMiddleware(
         redactor=lambda s: s.replace(secret, "[REDACTED]") if s else s

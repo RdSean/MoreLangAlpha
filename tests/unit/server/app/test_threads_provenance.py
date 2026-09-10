@@ -94,14 +94,8 @@ def _patch_body_store(owner, rows, bodies, *, full_body=None):
 
     patches = [
         patch(
-            "src.server.database.conversation.get_thread_auth_meta",
-            new=AsyncMock(
-                return_value=(
-                    {"user_id": owner, "managed_execution": False}
-                    if owner is not None
-                    else None
-                )
-            ),
+            "src.server.database.conversation.get_thread_owner_id",
+            new=AsyncMock(return_value=owner),
         ),
         patch(
             f"{THREADS_MOD}.get_provenance_body_refs",
@@ -273,7 +267,7 @@ class TestGetProvenanceAuth:
     @pytest.mark.asyncio
     async def test_unknown_thread_returns_404(self, threads_client):
         with patch(
-            "src.server.database.conversation.get_thread_auth_meta",
+            "src.server.database.conversation.get_thread_owner_id",
             new=AsyncMock(return_value=None),
         ):
             resp = await threads_client.get(f"/api/v1/threads/{THREAD_ID}/provenance")
@@ -282,13 +276,8 @@ class TestGetProvenanceAuth:
     @pytest.mark.asyncio
     async def test_non_owner_returns_403(self, threads_client):
         with patch(
-            "src.server.database.conversation.get_thread_auth_meta",
-            new=AsyncMock(
-                return_value={
-                    "user_id": "someone-else",
-                    "managed_execution": False,
-                }
-            ),
+            "src.server.database.conversation.get_thread_owner_id",
+            new=AsyncMock(return_value="someone-else"),
         ):
             resp = await threads_client.get(f"/api/v1/threads/{THREAD_ID}/provenance")
         assert resp.status_code == 403
@@ -305,13 +294,8 @@ class TestGetProvenanceShape:
         ]
         with (
             patch(
-                "src.server.database.conversation.get_thread_auth_meta",
-                new=AsyncMock(
-                    return_value={
-                        "user_id": OWNER_ID,
-                        "managed_execution": False,
-                    }
-                ),
+                "src.server.database.conversation.get_thread_owner_id",
+                new=AsyncMock(return_value=OWNER_ID),
             ),
             patch(
                 f"{THREADS_MOD}.get_provenance_for_thread",
@@ -337,13 +321,8 @@ class TestGetProvenanceShape:
     async def test_empty_provenance(self, threads_client):
         with (
             patch(
-                "src.server.database.conversation.get_thread_auth_meta",
-                new=AsyncMock(
-                    return_value={
-                        "user_id": OWNER_ID,
-                        "managed_execution": False,
-                    }
-                ),
+                "src.server.database.conversation.get_thread_owner_id",
+                new=AsyncMock(return_value=OWNER_ID),
             ),
             patch(
                 f"{THREADS_MOD}.get_provenance_for_thread",
@@ -365,13 +344,8 @@ class TestGetProvenanceShape:
         row["source_timestamp"] = ts
         with (
             patch(
-                "src.server.database.conversation.get_thread_auth_meta",
-                new=AsyncMock(
-                    return_value={
-                        "user_id": OWNER_ID,
-                        "managed_execution": False,
-                    }
-                ),
+                "src.server.database.conversation.get_thread_owner_id",
+                new=AsyncMock(return_value=OWNER_ID),
             ),
             patch(
                 f"{THREADS_MOD}.get_provenance_for_thread",

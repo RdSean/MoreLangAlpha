@@ -26,18 +26,18 @@ def _resolved_secret():
             daytona=DaytonaConfig(api_key="daytona-key", secret_namespace="prod"),
             platform_secrets=(
                 PlatformSecretDefinition(
-                    source_env_var="PLATFORM_SECRET_API_KEY",
-                    sandbox_env_var="PLATFORM_SECRET_API_KEY",
-                    name_suffix="platform-secret",
-                    description="Platform API key",
-                    hosts=("example.invalid",),
+                    source_env_var="FMP_API_KEY",
+                    sandbox_env_var="FMP_API_KEY",
+                    name_suffix="platform-fmp-api-key",
+                    description="Platform FMP API key",
+                    hosts=("financialmodelingprep.com",),
                 ),
             ),
         )
     )
     return resolve_platform_secrets(
         config,
-        environ={"PLATFORM_SECRET_API_KEY": "never-log-this-value"},
+        environ={"FMP_API_KEY": "never-log-this-value"},
         host_mode="platform",
     )
 
@@ -55,7 +55,7 @@ def _provider(client):
 def _secret_meta(
     *,
     secret_id: str = "secret-id",
-    name: str = "prod-platform-secret",
+    name: str = "prod-platform-fmp-api-key",
 ):
     return SimpleNamespace(
         id=secret_id,
@@ -76,16 +76,16 @@ async def test_reconcile_creates_absent_secret():
     reconciled = await provider.reconcile_platform_secrets(_resolved_secret())
 
     params = client.secret.create.await_args.args[0]
-    assert params.name == "prod-platform-secret"
+    assert params.name == "prod-platform-fmp-api-key"
     assert params.value == "never-log-this-value"
-    assert params.hosts == ["example.invalid"]
+    assert params.hosts == ["financialmodelingprep.com"]
     assert reconciled[0].provider_secret_id == "secret-id"
 
 
 @pytest.mark.asyncio
 async def test_reconcile_paginates_exact_match_and_updates():
     client = MagicMock()
-    partial = SimpleNamespace(id="partial", name="prod-platform-secret-copy")
+    partial = SimpleNamespace(id="partial", name="prod-platform-fmp-api-key-copy")
     exact = _secret_meta(secret_id="exact-id")
     client.secret.list = AsyncMock(
         side_effect=[
@@ -303,12 +303,12 @@ async def test_create_forwards_secret_bindings():
     with patch.object(provider, "_ensure_snapshot", AsyncMock(return_value=None)):
         await provider.create(
             env_vars={"ORDINARY": "value"},
-            platform_secret_bindings={"PLATFORM_SECRET_API_KEY": "prod-platform-secret"},
+            platform_secret_bindings={"FMP_API_KEY": "prod-platform-fmp-api-key"},
         )
 
     params = client.create.await_args.args[0]
     assert params.env_vars == {"ORDINARY": "value"}
-    assert params.secrets == {"PLATFORM_SECRET_API_KEY": "prod-platform-secret"}
+    assert params.secrets == {"FMP_API_KEY": "prod-platform-fmp-api-key"}
 
 
 @pytest.mark.asyncio
@@ -320,10 +320,10 @@ async def test_runtime_wraps_update_env_and_update_secrets():
     sdk_sandbox.update_secrets = AsyncMock()
     runtime = DaytonaRuntime(sdk_sandbox)
 
-    await runtime.update_env({}, unset=["PLATFORM_SECRET_API_KEY"])
-    await runtime.update_secrets({"PLATFORM_SECRET_API_KEY": "prod-platform-secret"})
+    await runtime.update_env({}, unset=["FMP_API_KEY"])
+    await runtime.update_secrets({"FMP_API_KEY": "prod-platform-fmp-api-key"})
 
-    sdk_sandbox.update_env.assert_awaited_once_with({}, unset=["PLATFORM_SECRET_API_KEY"])
+    sdk_sandbox.update_env.assert_awaited_once_with({}, unset=["FMP_API_KEY"])
     sdk_sandbox.update_secrets.assert_awaited_once_with(
-        {"PLATFORM_SECRET_API_KEY": "prod-platform-secret"}
+        {"FMP_API_KEY": "prod-platform-fmp-api-key"}
     )

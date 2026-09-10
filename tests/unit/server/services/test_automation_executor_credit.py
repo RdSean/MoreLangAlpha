@@ -14,7 +14,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from ptc_agent.config.agent import CredentialSource
 from src.server.services.automation_executor import AutomationExecutor
 
 # ---------------------------------------------------------------------------
@@ -61,7 +60,6 @@ _PATCHES = {
     "enforce_credit": "src.server.services.automation_executor.enforce_credit_limit",
     "auto_db": "src.server.services.automation_executor.auto_db",
     "flash_ws": "src.server.services.automation_executor.get_or_create_flash_workspace",
-    "resolve_config": "src.server.services.llm.config.resolve_llm_config",
     "btm": "src.server.services.runs.executor.LocalRunExecutor",
     "fire_webhook": "src.server.services.automation_executor.AutomationExecutor._fire_webhook",
 }
@@ -89,21 +87,6 @@ def _patch_all(
             _PATCHES["flash_ws"],
             new=AsyncMock(return_value={"workspace_id": _WS_ID}),
         ),
-        "resolve_config": patch(
-            _PATCHES["resolve_config"],
-            new=AsyncMock(
-                return_value=MagicMock(
-                    name="resolved_config",
-                    credential_source=(
-                        CredentialSource.BYOK
-                        if is_byok
-                        else CredentialSource.OAUTH
-                        if has_oauth
-                        else CredentialSource.PLATFORM
-                    ),
-                )
-            ),
-        ),
         "fire_webhook": patch(
             _PATCHES["fire_webhook"], new=AsyncMock(return_value=None)
         ),
@@ -128,7 +111,6 @@ class TestCredentialGate:
             patches["is_byok_active"] as mock_byok,
             patches["has_any_oauth"],
             patches["enforce_credit"] as mock_credit,
-            patches["resolve_config"],
             patches["auto_db"] as mock_adb,
             patches["flash_ws"],
             patches["fire_webhook"],
@@ -147,18 +129,20 @@ class TestCredentialGate:
 
         mock_byok.assert_awaited_once_with(_USER_ID)
         mock_credit.assert_awaited_once_with(_USER_ID, byok=True)
+
         _assert_astream_called_with_byok(mock_astream, expected_byok=True)
 
     @pytest.mark.asyncio
     async def test_oauth_only_user_flash(self):
-        """OAuth-only user is a resolved non-platform workflow credential."""
+        """OAuth-only user: credit gate sees has_cred=True (not mis-gated as a
+        platform user), but the workflow gets is_byok=False — the BYOK ladder is
+        not attempted for a user with no BYOK keys."""
         patches = _patch_all(is_byok=False, has_oauth=True)
 
         with (
             patches["is_byok_active"],
             patches["has_any_oauth"] as mock_oauth,
             patches["enforce_credit"] as mock_credit,
-            patches["resolve_config"],
             patches["auto_db"] as mock_adb,
             patches["flash_ws"],
             patches["fire_webhook"],
@@ -176,11 +160,11 @@ class TestCredentialGate:
             await executor.execute(automation, _EXEC_ID)
 
         mock_oauth.assert_awaited_once_with(_USER_ID)
-        # The resolver receives the raw BYOK state, but the resolved OAuth source
-        # controls the gate and compatibility flag used by the workflow.
+        # Credit gate keys off has_cred (BYOK or OAuth); workflow is_byok keys
+        # off has_byok alone — OAuth-only ⟹ gate byok=True, workflow is_byok=False.
         mock_credit.assert_awaited_once_with(_USER_ID, byok=True)
 
-        _assert_astream_called_with_byok(mock_astream, expected_byok=True)
+        _assert_astream_called_with_byok(mock_astream, expected_byok=False)
 
     @pytest.mark.asyncio
     async def test_no_cred_user_flash(self):
@@ -191,7 +175,6 @@ class TestCredentialGate:
             patches["is_byok_active"],
             patches["has_any_oauth"],
             patches["enforce_credit"] as mock_credit,
-            patches["resolve_config"],
             patches["auto_db"] as mock_adb,
             patches["flash_ws"],
             patches["fire_webhook"],
@@ -221,7 +204,6 @@ class TestCredentialGate:
             patches["is_byok_active"],
             patches["has_any_oauth"],
             patches["enforce_credit"] as mock_credit,
-            patches["resolve_config"],
             patches["auto_db"] as mock_adb,
             patches["flash_ws"],
             patches["fire_webhook"],
@@ -278,64 +260,28 @@ class TestCredentialGate:
         mock_adb.increment_failure_count.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_empty_household_pool_fails_before_workspace_or_workflow(self):
-        """Automation must resolve no-model before it can create a chat run."""
-        from src.server.app import setup as setup_module
+    async def test_our_own_outage_does_not_burn_a_strike(self):
+        """The credit gate fails closed on 503, and that must not auto-disable.
 
-        no_model = HTTPException(
-            status_code=409,
-            detail={"type": "no_model_available"},
+        The quota service restarts on every deploy. If a restart landing on a
+        schedule window counted as this automation's failure, a few unlucky
+        coincidences would quietly switch off something the user built, for a
+        reason that was never theirs.
+        """
+        exc = HTTPException(
+            status_code=503,
+            detail={"message": "Service temporarily unavailable.", "type": "service_unavailable"},
         )
-        patches = _patch_all(is_byok=False, has_oauth=False)
+        patches = _patch_all(is_byok=False, has_oauth=False, credit_raises=exc)
 
         with (
             patches["is_byok_active"],
             patches["has_any_oauth"],
             patches["enforce_credit"],
             patches["auto_db"] as mock_adb,
-            patches["flash_ws"] as flash_workspace,
-            patches["fire_webhook"],
-            patches["btm"] as mock_btm_cls,
-            patch.object(setup_module, "agent_config", MagicMock()),
-            patch(
-                "src.server.services.llm.config.resolve_llm_config",
-                new=AsyncMock(side_effect=no_model),
-            ) as resolve_config,
-            patch("src.server.handlers.chat.astream_flash_workflow") as astream,
-        ):
-            _setup_auto_db(mock_adb)
-            _setup_btm(mock_btm_cls)
-
-            await AutomationExecutor().execute(
-                _make_automation(agent_mode="flash"), _EXEC_ID
-            )
-
-        resolve_config.assert_awaited_once()
-        flash_workspace.assert_not_awaited()
-        astream.assert_not_called()
-        _assert_execution_marked_failed(mock_adb)
-
-    @pytest.mark.asyncio
-    async def test_household_credential_uses_non_platform_credit_path(self):
-        """A family model is charged like a resolved user credential."""
-        patches = _patch_all(is_byok=False, has_oauth=False)
-        household_config = MagicMock(
-            name="household_config",
-            credential_source=CredentialSource.HOUSEHOLD,
-        )
-
-        with (
-            patches["is_byok_active"],
-            patches["has_any_oauth"],
-            patches["enforce_credit"] as mock_credit,
-            patches["auto_db"] as mock_adb,
             patches["flash_ws"],
             patches["fire_webhook"],
             patches["btm"] as mock_btm_cls,
-            patch(
-                _PATCHES["resolve_config"],
-                new=AsyncMock(return_value=household_config),
-            ) as resolve_config,
             patch(
                 "src.server.handlers.chat.astream_flash_workflow",
                 side_effect=_empty_async_gen,
@@ -344,14 +290,14 @@ class TestCredentialGate:
             _setup_auto_db(mock_adb)
             _setup_btm(mock_btm_cls)
 
-            await AutomationExecutor().execute(
-                _make_automation(agent_mode="flash"), _EXEC_ID
-            )
+            executor = AutomationExecutor()
+            await executor.execute(_make_automation(agent_mode="flash"), _EXEC_ID)
 
-        mock_credit.assert_awaited_once_with(_USER_ID, byok=True)
-        resolve_config.assert_awaited_once()
-        assert resolve_config.await_args.args[3] is False
-        _assert_astream_called_with_byok(mock_astream, expected_byok=True)
+        mock_astream.assert_not_called()
+        # The run still didn't happen, so the execution row is honest about it.
+        _assert_execution_marked_failed(mock_adb)
+        # But the automation itself is not held responsible.
+        mock_adb.increment_failure_count.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -364,7 +310,6 @@ def _assert_astream_called_with_byok(mock_astream, *, expected_byok: bool):
     mock_astream.assert_called_once()
     _, kwargs = mock_astream.call_args
     assert "is_byok" in kwargs, "astream call missing is_byok kwarg"
-    assert "config" in kwargs, "astream call missing pre-resolved config"
     assert kwargs["is_byok"] is expected_byok, (
         f"expected is_byok={expected_byok}, got {kwargs['is_byok']}"
     )

@@ -33,6 +33,33 @@ class TestCreateUser:
         with pytest.raises(ValueError, match="already exists"):
             await create_user(user_id="dup-user", email="dup2@example.com")
 
+    async def test_create_user_from_auth_idempotent(
+        self, patched_get_db_connection
+    ):
+        from src.server.database.user import create_user_from_auth, get_user
+
+        # First call creates
+        user1 = await create_user_from_auth(
+            user_id="auth-user-1",
+            email="auth@example.com",
+            name="Auth User",
+            auth_provider="google",
+        )
+        assert user1["auth_provider"] == "google"
+
+        # Second call is idempotent upsert
+        user2 = await create_user_from_auth(
+            user_id="auth-user-1",
+            email="auth-updated@example.com",
+            name="Auth User v2",
+            auth_provider="github",  # should NOT overwrite existing provider
+        )
+
+        # Email should be updated, auth_provider should remain google (COALESCE logic)
+        assert user2["email"] == "auth-updated@example.com"
+        assert user2["auth_provider"] == "google"
+
+
 class TestGetUser:
     """Test user retrieval."""
 

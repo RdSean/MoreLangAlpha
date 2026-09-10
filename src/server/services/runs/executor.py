@@ -27,7 +27,6 @@ from src.config.settings import (
     get_max_concurrent_workflows,
     get_workflow_result_ttl,
     get_abandoned_workflow_timeout,
-    get_education_teaching_abandoned_timeout,
     get_cleanup_interval,
     is_intermediate_storage_enabled,
     get_max_stored_messages_per_agent,
@@ -91,11 +90,6 @@ class LocalRunExecution:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     completion_callback: Optional[Callable[["LocalRunExecution"], Coroutine[Any, Any, None]]] = None
-    # Product-owned workflows sometimes need to settle their own projection for
-    # every durable terminal result, not just a successful stream end.
-    terminal_callback: Optional[
-        Callable[["LocalRunExecution", str], Coroutine[Any, Any, None]]
-    ] = None
 
     persistence_complete: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -155,13 +149,6 @@ class LocalRunExecutor:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
-
-    def _abandoned_timeout_for_metadata(self, metadata: dict[str, Any]) -> int:
-        """Keep a managed textbook root alive through its longer reconnect window."""
-        managed = metadata.get("managed_execution")
-        if isinstance(managed, dict) and managed.get("kind") == "education_teaching":
-            return get_education_teaching_abandoned_timeout()
-        return self.abandoned_timeout
 
     # ---------- helpers ----------
 
@@ -341,6 +328,7 @@ class LocalRunExecutor:
     async def _cleanup_abandoned_tasks(self):
         """Clean up abandoned and completed tasks based on TTL."""
         now = datetime.now()
+        abandoned_threshold = now - timedelta(seconds=self.abandoned_timeout)
         completed_threshold = now - timedelta(seconds=self.result_ttl)
 
         to_remove: list[TaskKey] = []
@@ -358,9 +346,6 @@ class LocalRunExecutor:
                         )
 
                 elif info.status == LocalRunStatus.RUNNING:
-                    abandoned_threshold = now - timedelta(
-                        seconds=self._abandoned_timeout_for_metadata(info.metadata)
-                    )
                     if info.active_connections == 0 and info.last_access_at < abandoned_threshold:
                         # Locally cold — candidate only. The cross-worker
                         # consumer signal is consulted outside the lock
@@ -397,9 +382,7 @@ class LocalRunExecutor:
                     info is None
                     or info.status is not LocalRunStatus.RUNNING
                     or info.active_connections != 0
-                    or info.last_access_at
-                    >= now
-                    - timedelta(seconds=self._abandoned_timeout_for_metadata(info.metadata))
+                    or info.last_access_at >= abandoned_threshold
                 ):
                     continue
                 if info.task and not info.task.done():
@@ -478,7 +461,6 @@ class LocalRunExecutor:
         workflow_generator: Any,
         metadata: Optional[Dict[str, Any]] = None,
         completion_callback: Optional[Callable[["LocalRunExecution"], Coroutine[Any, Any, None]]] = None,
-        terminal_callback: Optional[Callable[["LocalRunExecution", str], Coroutine[Any, Any, None]]] = None,
         graph: Optional[Any] = None,
     ) -> LocalRunExecution:
         """Start a workflow as a background task."""
@@ -507,7 +489,6 @@ class LocalRunExecutor:
                 created_at=datetime.now(),
                 metadata=metadata or {},
                 completion_callback=completion_callback,
-                terminal_callback=terminal_callback,
                 graph=graph,
             )
             task_info.task = asyncio.create_task(
@@ -906,7 +887,6 @@ class LocalRunExecutor:
             return
         info.graph = None
         info.completion_callback = None
-        info.terminal_callback = None
         if info.inner_task is not None and info.inner_task.done():
             info.inner_task = None
         info.metadata.pop("handler", None)
@@ -943,7 +923,6 @@ class LocalRunExecutor:
             metadata = task_info.metadata
             cancelled_by_user = bool(task_info.user_stop)
             completion_callback = task_info.completion_callback
-            terminal_callback = task_info.terminal_callback
             graph = task_info.graph
 
         handle = metadata.get("run_handle")
@@ -1040,7 +1019,6 @@ class LocalRunExecutor:
                 status=status,
                 task_info=task_info,
                 completion_callback=completion_callback,
-                terminal_callback=terminal_callback,
                 execution_time=execution_time,
                 interrupt_reason=interrupt_reason,
                 error=error,
@@ -1120,7 +1098,6 @@ class LocalRunExecutor:
         status: str,
         task_info,
         completion_callback,
-        terminal_callback,
         execution_time,
         interrupt_reason: Optional[str],
         error: Optional[str],
@@ -1146,16 +1123,6 @@ class LocalRunExecutor:
                     logger.error(
                         f"[LocalRunExecutor] completion side-effect callback "
                         f"failed for {key} (run remains completed)",
-                        exc_info=True,
-                    )
-
-            if terminal_callback:
-                try:
-                    await terminal_callback(task_info, status)
-                except Exception:
-                    logger.error(
-                        f"[LocalRunExecutor] terminal side-effect callback "
-                        f"failed for {key} (run remains {status})",
                         exc_info=True,
                     )
 

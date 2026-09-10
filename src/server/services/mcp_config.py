@@ -142,6 +142,9 @@ class ResolvedServer:
     # shipped brokerage. Empty is a real answer and distinct from None: it
     # means the user granted no group, so the server runs and offers nothing.
     denied_tools: frozenset[str] | None = None
+    # How each granted tool reaches the model (sandbox wrapper, JSON tool, or
+    # both), with the set the sandbox must not wrap. None for a server nothing
+    # binds directly.
     binding_plan: BindingPlan | None = None
 
     @property
@@ -196,10 +199,13 @@ class ResolvedMCP:
 
     @cached_property
     def binding_plans_by_name(self) -> dict[str, BindingPlan]:
+        """ACTIVE servers with a plan that binds at least one tool directly."""
         return {
             e.name: e.binding_plan
             for e in self.entries
-            if e.state is State.ACTIVE and e.binding_plan is not None
+            if e.state is State.ACTIVE
+            and e.binding_plan is not None
+            and e.binding_plan.direct
         }
 
     @cached_property
@@ -497,6 +503,7 @@ async def resolve_mcp_config(
     inherited_servers: list[MCPServerConfig] = []
     tombstoned_inherited: list[MCPServerConfig] = []
     shadowed_inherited: list[MCPServerConfig] = []
+    user_row_by_name = {row["name"]: row for row in user_rows}
     for row in user_rows:
         name = row["name"]
         if name in builtin_name_set:
@@ -559,7 +566,6 @@ async def resolve_mcp_config(
         for row in user_rows
         if row.get("plugin_name")
     }
-    user_row_by_name = {row["name"]: row for row in user_rows}
 
     def _denied_tools(cfg: MCPServerConfig) -> frozenset[str] | None:
         """What consent refuses for this server, or None if we curate no groups.
@@ -597,16 +603,21 @@ async def resolve_mcp_config(
             )
         return denied_tools(vendor, capabilities or ())
 
-    def _user_entry(cfg: MCPServerConfig, state: State) -> ResolvedServer:
+    def _binding_plan(cfg: MCPServerConfig) -> BindingPlan | None:
+        """Which path each granted tool takes. Same identity rule as the
+        denial: the consented URL, never the row name. A direct call dials the
+        relay under the connection's grant, so without a connection there is
+        nothing to bind and the plan is None whatever the row asks for."""
         connection = connection_by_server.get(cfg.name)
-        row = user_row_by_name.get(cfg.name)
-        binding_plan = None
-        if connection is not None:
-            binding_plan = resolve_plan(
-                vendor_for_url(connection.get("server_url")),
-                connection.get("granted_capabilities") or (),
-                inputs_from_row(row),
-            )
+        if connection is None:
+            return None
+        return resolve_plan(
+            vendor_for_url(connection.get("server_url")),
+            connection.get("granted_capabilities") or (),
+            inputs_from_row(user_row_by_name.get(cfg.name)),
+        )
+
+    def _user_entry(cfg: MCPServerConfig, state: State) -> ResolvedServer:
         return ResolvedServer(
             config=cfg,
             origin=Origin.USER,
@@ -614,15 +625,7 @@ async def resolve_mcp_config(
             oauth_status=oauth_status_by_name.get(cfg.name),
             plugin_name=plugin_name_by_server.get(cfg.name),
             denied_tools=_denied_tools(cfg),
-            binding_plan=binding_plan,
-        )
-
-    def _workspace_entry(cfg: MCPServerConfig, state: State) -> ResolvedServer:
-        return ResolvedServer(
-            config=cfg,
-            origin=Origin.WORKSPACE,
-            state=state,
-            binding_plan=None,
+            binding_plan=_binding_plan(cfg),
         )
 
     # Entry order IS the API's row order: the running set first (built-ins,
@@ -636,7 +639,7 @@ async def resolve_mcp_config(
         ),
         *(_user_entry(s, State.ACTIVE) for s in inherited_servers),
         *(
-            _workspace_entry(s, State.ACTIVE)
+            ResolvedServer(config=s, origin=Origin.WORKSPACE, state=State.ACTIVE)
             for s in local_servers
         ),
         *(
@@ -655,7 +658,7 @@ async def resolve_mcp_config(
         ),
         *(_user_entry(s, State.TOMBSTONED) for s in tombstoned_inherited),
         *(
-            _workspace_entry(s, State.DISABLED)
+            ResolvedServer(config=s, origin=Origin.WORKSPACE, state=State.DISABLED)
             for s in disabled_local_servers
         ),
         *(_user_entry(s, State.SHADOWED) for s in shadowed_inherited),

@@ -1,5 +1,5 @@
 """Bocha provider: AI Search optimized for Chinese-language queries and
-Chinese-language content.
+Chinese market content.
 
 Auth via ``Authorization: Bearer`` (BOCHA_API_KEY).
 """
@@ -355,6 +355,9 @@ def build_web_search_tool(
                 Returns results from this date onwards.
             end_date: End date for filtering results (YYYY-MM-DD format).
                 Returns results up to this date.
+
+        Returns:
+            Ranked results as titles, snippets and URLs — not full page text.
         """
         try:
             # Validate date formats

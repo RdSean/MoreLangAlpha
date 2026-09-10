@@ -6,7 +6,7 @@ session pass the IDENTICAL cached summary string into create_agent — the hot
 path never re-resolves or recomputes, keeping the prompt-cache prefix warm.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -33,7 +33,12 @@ async def test_session_summary_passed_to_create_agent():
     fake_agent = MagicMock()
     fake_agent.create_agent = MagicMock(return_value="GRAPH")
 
-    with patch("ptc_agent.agent.graph.PTCAgent", return_value=fake_agent):
+    with patch(
+        "ptc_agent.agent.graph.PTCAgent", return_value=fake_agent
+    ), patch(
+        "ptc_agent.agent.graph.fetch_user_data_counts",
+        new=AsyncMock(return_value=None),
+    ):
         await build_ptc_graph_with_session(session=session, config=config)
 
     kwargs = fake_agent.create_agent.call_args.kwargs
@@ -57,7 +62,12 @@ async def test_two_turns_pass_identical_cached_summary():
 
     fake_agent.create_agent = MagicMock(side_effect=capture)
 
-    with patch("ptc_agent.agent.graph.PTCAgent", return_value=fake_agent):
+    with patch(
+        "ptc_agent.agent.graph.PTCAgent", return_value=fake_agent
+    ), patch(
+        "ptc_agent.agent.graph.fetch_user_data_counts",
+        new=AsyncMock(return_value=None),
+    ):
         await build_ptc_graph_with_session(session=session, config=config)
         await build_ptc_graph_with_session(session=session, config=config)
 

@@ -28,6 +28,16 @@ def _make_server(name: str = "test", env: dict | None = None, enabled: bool = Tr
     )
 
 
+def _make_http_server(name: str = "remote", headers: dict | None = None) -> MCPServerConfig:
+    return MCPServerConfig(
+        name=name,
+        transport="http",
+        url="https://mcp.example.test/mcp",
+        headers=headers or {},
+        enabled=True,
+    )
+
+
 def _make_tool_message(content: str, tool_call_id: str = "call_1") -> ToolMessage:
     return ToolMessage(content=content, tool_call_id=tool_call_id)
 
@@ -43,14 +53,14 @@ class TestSecretDiscovery:
     """Verify that secrets are correctly discovered from MCP config."""
 
     def test_resolves_placeholder_secrets(self):
-        server = _make_server(env={"PLATFORM_SECRET_API_KEY": "${PLATFORM_SECRET_API_KEY}"})
+        server = _make_server(env={"FMP_API_KEY": "${FMP_API_KEY}"})
         with (
-            patch.dict(os.environ, {"PLATFORM_SECRET_API_KEY": "platform_secret_12345"}, clear=False),
+            patch.dict(os.environ, {"FMP_API_KEY": "fmp_secret_12345"}, clear=False),
             patch(_GNC, side_effect=_disable_github),
         ):
             mw = LeakDetectionMiddleware(mcp_servers=[server])
         assert len(mw._secrets) == 1
-        assert mw._secrets[0][0] == "PLATFORM_SECRET_API_KEY"
+        assert mw._secrets[0][0] == "FMP_API_KEY"
 
     def test_skips_short_values(self):
         """Values shorter than 8 chars are ignored to avoid false positives."""
@@ -107,6 +117,56 @@ class TestSecretDiscovery:
             mw = LeakDetectionMiddleware(mcp_servers=[s1, s2])
         assert len(mw._secrets) == 2
 
+    def test_credential_headers_are_tracked(self):
+        """An inline header credential redacts from tool output the same way an
+        env literal does — a vendor echoing the request back must not hand the
+        model the bearer."""
+        server = _make_http_server(headers={
+            "Authorization": "Bearer inline_bearer_123",
+            "X-Api-Key": "inline_apikey_456",
+        })
+        with patch(_GNC, side_effect=_disable_github):
+            mw = LeakDetectionMiddleware(mcp_servers=[server])
+        assert sorted(v for _, v in mw._secrets) == [
+            "Bearer inline_bearer_123", "inline_apikey_456",
+        ]
+
+    def test_protocol_headers_are_not_secrets(self):
+        """Tool output quotes "application/json" constantly; masking it would
+        punch holes in every result the model reads."""
+        server = _make_http_server(headers={
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        })
+        with patch(_GNC, side_effect=_disable_github):
+            mw = LeakDetectionMiddleware(mcp_servers=[server])
+        assert mw._secrets == []
+
+    def test_header_vault_refs_are_skipped(self):
+        """${vault:NAME} resolves in-sandbox; the vault lane covers its value."""
+        server = _make_http_server(headers={"Authorization": "${vault:RH_TOKEN}"})
+        with patch(_GNC, side_effect=_disable_github):
+            mw = LeakDetectionMiddleware(mcp_servers=[server])
+        assert mw._secrets == []
+
+    def test_arg_credentials_are_tracked_but_paths_are_not(self):
+        """A credential passed as a CLI flag redacts like an env literal; the
+        path and URL arguments beside it must stay quotable in tool output."""
+        server = MCPServerConfig(
+            name="stdio",
+            command="npx",
+            args=[
+                "--token=inline_argtok_123",
+                "--out",
+                "/workspace/data/long_output_file.csv",
+            ],
+            env={},
+            enabled=True,
+        )
+        with patch(_GNC, side_effect=_disable_github):
+            mw = LeakDetectionMiddleware(mcp_servers=[server])
+        assert mw._secrets == [("stdio:token", "inline_argtok_123")]
+
     def test_github_token_from_config(self):
         """GitHub token is discovered via get_nested_config."""
         def _enable_github(key, default):
@@ -162,19 +222,19 @@ class TestScan:
         return mw
 
     def test_redacts_single_secret(self):
-        mw = self._make_mw({"PLATFORM_SECRET_API_KEY": "platform_secret_12345"})
-        result = mw._scan("API key is platform_secret_12345 here")
-        assert result == "API key is [REDACTED:PLATFORM_SECRET_API_KEY] here"
+        mw = self._make_mw({"FMP_API_KEY": "fmp_secret_12345"})
+        result = mw._scan("API key is fmp_secret_12345 here")
+        assert result == "API key is [REDACTED:FMP_API_KEY] here"
 
     def test_redacts_multiple_secrets(self):
         mw = self._make_mw({
-            "PLATFORM_SECRET_API_KEY": "platform_secret_12345",
+            "FMP_API_KEY": "fmp_secret_12345",
             "GITHUB_TOKEN": "ghp_abcdef1234567",
         })
-        result = mw._scan("keys: platform_secret_12345 and ghp_abcdef1234567")
-        assert "[REDACTED:PLATFORM_SECRET_API_KEY]" in result
+        result = mw._scan("keys: fmp_secret_12345 and ghp_abcdef1234567")
+        assert "[REDACTED:FMP_API_KEY]" in result
         assert "[REDACTED:GITHUB_TOKEN]" in result
-        assert "platform_secret_12345" not in result
+        assert "fmp_secret_12345" not in result
         assert "ghp_abcdef1234567" not in result
 
     def test_redacts_repeated_occurrences(self):

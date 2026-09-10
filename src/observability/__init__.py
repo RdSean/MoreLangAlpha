@@ -57,6 +57,10 @@ from .metrics import (
     workspace_cold_start_duration_ms,
     workspace_created,
     workspace_fs_bytes,
+    ws_connection_duration_seconds,
+    ws_connections_active,
+    ws_disconnects,
+    ws_messages_sent,
 )
 
 __all__ = [
@@ -92,6 +96,10 @@ __all__ = [
     "memo_uploaded",
     "automation_executions",
     "sse_reconnects",
+    "ws_connections_active",
+    "ws_connection_duration_seconds",
+    "ws_messages_sent",
+    "ws_disconnects",
     "hot_path_first_chunk_duration_ms",
     "chat_turn_phase_duration_ms",
     "replay_bytes_distribution",

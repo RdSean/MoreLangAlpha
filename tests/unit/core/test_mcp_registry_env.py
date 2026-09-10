@@ -73,17 +73,17 @@ class TestPrepareEnvSafety:
     def test_declared_env_vars_are_expanded(self):
         """Declared env vars with ${VAR} placeholders are resolved."""
         connector = self._make_connector(
-            env={"RESEARCH_API_KEY": "${RESEARCH_API_KEY}"}
+            env={"FMP_API_KEY": "${FMP_API_KEY}"}
         )
         fake_environ = {
             "PATH": "/usr/bin",
-            "RESEARCH_API_KEY": "research_real_key_value",
+            "FMP_API_KEY": "fmp_real_key_value",
         }
         with patch.dict("os.environ", fake_environ, clear=True):
             result = connector._prepare_env()
 
         assert result["PATH"] == "/usr/bin"
-        assert result["RESEARCH_API_KEY"] == "research_real_key_value"
+        assert result["FMP_API_KEY"] == "fmp_real_key_value"
 
     def test_literal_env_values_pass_through(self):
         """Literal (non-placeholder) env values are included as-is."""
@@ -149,6 +149,36 @@ class TestPrepareEnvSafety:
             result = connector._prepare_env()
 
         assert result == {"PATH": "/usr/bin"}
+
+
+class TestTransportCredentials:
+    """Configured headers must reach every remote transport, not just http."""
+
+    @pytest.mark.asyncio
+    async def test_sse_transport_gets_the_resolved_headers(self):
+        """An authenticated SSE server 401s without them."""
+        config = MCPServerConfig(
+            name="sse-server",
+            transport="sse",
+            url="https://mcp.example.com/sse",
+            headers={"Authorization": "Bearer ${SSE_TOKEN}"},
+        )
+        connector = MCPServerConnector(config)
+        captured: dict = {}
+
+        def _fake_sse_client(url, headers=None, **kwargs):
+            captured["url"] = url
+            captured["headers"] = headers
+            raise RuntimeError("stop after transport construction")
+
+        with patch.dict("os.environ", {"SSE_TOKEN": "tok_abc"}), patch(
+            "ptc_agent.core.mcp_registry.sse_client", _fake_sse_client
+        ), pytest.raises(RuntimeError, match="stop after"):
+            async with connector:
+                pass
+
+        assert captured["url"] == "https://mcp.example.com/sse"
+        assert captured["headers"] == {"Authorization": "Bearer tok_abc"}
 
 
 class TestFreezeAndGlobalRegistry:
@@ -339,12 +369,12 @@ class TestFreezeAndGlobalRegistry:
         assert registry.connectors == {}
 
     @pytest.mark.asyncio
-    async def test_call_tool_raises_when_frozen(self):
-        """A frozen registry has no live sessions; call_tool must fail loud
-        instead of dispatching to a connector with session=None."""
+    async def test_freezing_leaves_no_execution_surface(self):
+        """A frozen registry keeps schemas and drops sessions — and there is no
+        host-side execution path that could dispatch to one anyway."""
         registry = self._make_registry_with_servers({"alpha": ["a1"]})
         registry.connectors["alpha"].__aexit__ = AsyncMock(return_value=None)
         await registry.freeze()
 
-        with pytest.raises(RuntimeError, match="frozen"):
-            await registry.call_tool("alpha", "a1", {})
+        assert not hasattr(registry, "call_tool")
+        assert registry.connectors["alpha"].session is None

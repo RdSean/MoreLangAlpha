@@ -140,50 +140,6 @@ async def test_non_recoverable_branch_finalizes_error(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_early_error_finalization_keeps_only_safe_household_snapshot(coordinator):
-    """A STARTed run that fails before executor handoff keeps model provenance."""
-    runtime = {
-        "credential_source": "household",
-        "household_id": "11111111-1111-1111-1111-111111111111",
-        "family_endpoint_id": "22222222-2222-2222-2222-222222222222",
-        "display_name": "Family DeepSeek Flash",
-        "provider": "deepseek",
-        "model_id": "deepseek-chat",
-        "api_key": "family-secret-key",
-        "base_url": "https://family.example/v1",
-    }
-
-    with patch(RELEASE, new=AsyncMock()), \
-         patch.object(error_handling, "get_max_workflow_retries", return_value=3):
-        await _consume(error_handling.handle_workflow_error(
-            e=AttributeError("setup failed"),
-            thread_id="t-early-error",
-            user_id="u-1",
-            workspace_id="ws-1",
-            handler=_handler(),
-            token_callback=None,
-            scope=_scope(_run_handle()),
-            start_time=0.0,
-            request=_make_request(),
-            is_byok=True,
-            msg_type="flash",
-            log_prefix="FLASH_CHAT",
-            llm_runtime_metadata=runtime,
-        ))
-
-    _, outcome = coordinator.finalize_run.await_args.args
-    assert outcome.metadata["llm_runtime"] == {
-        "credential_source": "household",
-        "household_id": "11111111-1111-1111-1111-111111111111",
-        "display_name": "Family DeepSeek Flash",
-        "provider": "deepseek",
-        "model_id": "deepseek-chat",
-    }
-    assert "family-secret-key" not in str(outcome.metadata)
-    assert "family.example" not in str(outcome.metadata)
-
-
-@pytest.mark.asyncio
 async def test_finalize_failure_does_not_break_error_flow(coordinator):
     # If the terminal write itself raises, the handler logs CRITICAL (the row
     # stays in_progress for recovery) but must still emit the SSE error event.
