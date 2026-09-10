@@ -273,6 +273,15 @@ commit.
 
 ## Task 4: Retire the local-only tests whose subject moved upstream
 
+**Status: DONE (as part of Task 3/5).** The full list of 113 local-only test
+paths is now product surface (education, documents, channels, household,
+family, speech/ASR, local auth, the `046`–`059` migration chain) plus PDF
+fixtures; no local-only test still asserts a subject that moved upstream. The
+only retirements in this pass were the two finance-guard assertions
+(`test_generic_user_preferences.py`, and the `trigger_type` clause in
+`test_generic_router_registration.py`), both because this branch restores the
+finance surface before removing it by hand.
+
 **Files:** the non-product entries from:
 
 ```bash
@@ -307,6 +316,12 @@ the commit message.
 
 ## Task 5: Drive the three suites to green
 
+**Status: DONE.** `uv run pytest tests/unit -q -p no:randomly` →
+**7491 passed, 1 xfailed** (middleware 766, server 3806, the rest llms/config/
+core/utils/ptc_agent/tools/migrations/observability). `ruff check src/` clean.
+The classification of every failure that was fixed along the way is in the
+`160d1e1c` commit message and the CHANGELOG entry above it.
+
 **Step 1:** `uv run pytest tests/unit/middleware -q` — run in slices
 (`tests/unit/middleware/*.py`, then `compaction/`, then `skills/`), because the
 whole directory outruns the command window.
@@ -320,7 +335,15 @@ or merge gap (port), and record the classification in the commit.
 
 ---
 
-## Task 6: Land the deferred workspace-file blob persistence (`056` renumbered)
+## Task 6: Land the deferred workspace-file blob persistence (`058`)
+
+**Status: MIGRATION DONE.** The persistence/blob modules had already been swept
+into `df740f00`, so the missing piece was the schema. `058_workspace_file_blobs`
+and `059_direct_tools` now port upstream's `039`/`040` onto the local chain and
+`scripts/ops/{_db,backfill_workspace_file_blobs,report_orphan_blobs}.py` came
+along with them. Upgrade/downgrade/upgrade verified on the isolated database.
+Still to do: a real upload/read/restore against the isolated MinIO (folded into
+Task 7's end-to-end run).
 
 **Files (currently untracked on purpose):**
 `src/server/services/persistence/{_rows,backup,blobs,resolve,restore,transfer}.py`,

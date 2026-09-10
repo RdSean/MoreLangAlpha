@@ -360,11 +360,28 @@ Verified: `tests/unit/config` 245, `tests/unit/core`+observability+ci 552,
    and `create_agent` still take no `direct_mcp=`, so every MCP tool reaches
    the model as a sandbox wrapper. Flash still cannot run MCP tools at all
    until that lands.
-2. `056_workspace_file_blobs` stays deferred; the numbers `056` and `057` are
-   now taken by `mcp_tool_binding` and `brokerage_capabilities`. Workspace file
-   bytes are still inline in PostgreSQL; the seven untracked persistence/blob
-   modules must be wired as one unit (read/write, backup, restore, backfill, GC).
-3. Connector/OAuth consent end-to-end still needs a live OAuth connection, but
+2. **Migration renumbering.** The local chain owns `035`–`045`, so upstream's
+   post-fork migrations land after it rather than under their upstream numbers:
+
+   | upstream | local | note |
+   |---|---|---|
+   | `035_jsonb_deep_merge` | `054_jsonb_deep_merge` | |
+   | `036_brokerage_capabilities` | `057_brokerage_capabilities` | |
+   | `038_tool_denylist` | `055_tool_denylist` | |
+   | `039_workspace_file_blobs` | `058_workspace_file_blobs` | `workspace_file_blobs` registry, the `blob_sha256`/`pack_sha256`/`kind`/`symlink_target`/`pack_offset` columns, `workspaces.files_restore_incomplete_at`, partial indexes |
+   | `040_direct_tools` | `059_direct_tools` | `sandbox_egress_grants.tool_direct_only` + `mcp_config_version` bump |
+   | `041_tool_binding` | `056_mcp_tool_binding` | |
+   | `037_free_webull_name` | **skipped on purpose** | one-shot data repair for user MCP servers already sitting on the `webull` name; it builds on upstream's `030`/`032`, which this chain never ran. No row here holds such a name; port it as `060` if that ever changes. |
+
+   Verified on the isolated stack (`15432`): `057 → 058 → 059`, then
+   `059 → 057 → 059`; afterwards `workspace_files` and `sandbox_egress_grants`
+   carry the new columns and indexes.
+3. Workspace file bytes now travel through content-addressed object storage:
+   the persistence layer (`backup`/`restore`/`_rows`/`blobs`/`resolve`) writes
+   `blob_sha256` pointers and `WorkspaceFileGCService` reaps condemned rows.
+   `scripts/ops/` carries the companions — `backfill_workspace_file_blobs.py`
+   (both directions), `report_orphan_blobs.py`, and the shared `_db.py`.
+4. Connector/OAuth consent end-to-end still needs a live OAuth connection, but
    host-side egress now works. The machine's Clash Verge profile was switched
    from fake-IP to real-IP DNS with TUN on, so `pin_public_url` resolves and
    dials public addresses again — the earlier failure was the guard rejecting
@@ -373,13 +390,13 @@ Verified: `tests/unit/config` 245, `tests/unit/core`+observability+ci 552,
    moomoo's `/.well-known/oauth-protected-resource` and
    `/.well-known/oauth-authorization-server` both answer 200, and plugin plus
    brokerage icon routes return real images.
-4. `channel-gateway` (WeChat iLink worker) is not part of the host launcher
+5. `channel-gateway` (WeChat iLink worker) is not part of the host launcher
    above; start it separately (`python -m src.server.services.channels.worker`)
    when testing channel behaviour.
-5. Financial capability removal stays a later, dependency-ordered pass
+6. Financial capability removal stays a later, dependency-ordered pass
    (`bundle manifest → backend APIs → MCP servers/tools → Skills → frontend →
    migrations/data`), after the platform baseline is green.
-6. Local test-infra divergences worth revisiting: `web/src/test/setup.ts`
+7. Local test-infra divergences worth revisiting: `web/src/test/setup.ts`
    installs a hand-rolled `TestStorage` that is not a real `Storage` instance,
    so `connectReturn.test.ts`'s `vi.spyOn(Storage.prototype, …)` case cannot
    intercept it. The catalog command denylist (`bash`/`sh`/`curl`/`rm`) also

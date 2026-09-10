@@ -976,3 +976,14 @@
 - 退役两个与“先整体迁回金融、后续再定点移除”冲突的本地守卫测试：`server/database/test_generic_user_preferences.py`（断言偏好表不得出现 risk/investment 列）；`test_generic_router_registration.py` 的 trigger_type 断言放宽为“通用触发器必须在”。
 - 修正单测污染：`test_preferences_validation.py` 改为 patch `LLM.get_model_config()` 而不是 `ModelConfig`（后者会把 MagicMock 写进类级单例，污染同进程后续用例）；`test_llm_constructor_boundary.py` 为 `llm/household.py` 的 `create_llm_from_custom` 补白名单说明。
 - 验证：`uv run pytest tests/unit -q -p no:randomly` 全绿 **7486 passed, 1 xfailed**；`ruff check src/` 通过。
+## 2026-09-10
+
+### 迁移链补齐工作区文件 Blob 与 Direct-Tools 表结构
+
+- 本地迁移链独占 `035`–`045`，远端的后续迁移按顺序落到链尾：新增 `058_workspace_file_blobs`（对应远端 `039`）与 `059_direct_tools`（对应远端 `040`），`down_revision` 依次接 `057_brokerage_capabilities` → `058` → `059`。
+- `058` 建 `workspace_file_blobs` 内容寻址登记表，给 `workspace_files` 加 `blob_sha256`/`kind`/`symlink_target`/`pack_sha256`/`pack_offset`，给 `workspaces` 加 `files_restore_incomplete_at`，并建 condemn/live 两个部分索引；热表只取一次 ACCESS EXCLUSIVE，VALIDATE 与 CREATE INDEX CONCURRENTLY 放到 autocommit 块；降级在仍有 blob 指针或未完成恢复的库上直接拒绝。
+- `059` 给 `sandbox_egress_grants` 加 `tool_direct_only`，并递增有连接的 workspace 的 `mcp_config_version` 触发重新解析。
+- 迁移后运行时才真正可用：合并进来的 `persistence/{_rows,backup,blobs,resolve,restore}` 会写 `blob_sha256` 指针，`WorkspaceFileGCService` 负责回收；一并迁回 `scripts/ops/_db.py`、`backfill_workspace_file_blobs.py`（正反向回填）与 `report_orphan_blobs.py`，并把脚本里对旧编号 `039` 的引用改为 `058`。
+- 远端 `037_free_webull_name` 有意跳过：它依赖本链从未执行过的远端 `030`/`032`，且只是把存量用户 MCP 行从 `webull` 改名的一次性数据修复；本地无此类数据，将来需要时再作为 `060` 补。
+- 新增 `tests/unit/migrations/test_workspace_file_blobs_migration.py`、`test_direct_tools_migration.py`；在隔离库（15432）完成 `057 → 058 → 059` 与 `059 → 057 → 059` 往返验证，并确认新列与新索引落库。
+- 验证：`uv run pytest tests/unit -q -p no:randomly` → **7491 passed, 1 xfailed**；`ruff check src/ scripts/ops/` 通过。
