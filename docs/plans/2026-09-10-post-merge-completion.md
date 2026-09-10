@@ -37,6 +37,21 @@ billing provenance + first failures cleared).
 
 ## Task 1: Re-apply the managed-textbook integration points
 
+**Status: DONE** (commits `04af068b`, `0173d1ca`). `tests/unit/ptc_agent`
+763 passed, 1 xfailed/xpassed; ruff clean on the touched files. What landed:
+`PTCSandbox.setup_managed_textbook_job`, `Session.initialize_managed_textbook`,
+`build_ptc_graph_with_session(managed_policy=...)`, `PTCAgent.create_agent`'s
+`managed_policy` parameter and state nulling, the managed Bash factory arguments
+(`command_validator`, `fixed_working_dir`), the managed Write validator, the
+fixed `textbook-chapter-worker` registry, the managed skill-registry filter, and
+gating for every ambient tool (`AskUserQuestion`, `RunWorkflow`, finance, web,
+crawl). The retired finance-package test is deleted.
+
+Gotcha for the next reader: `tools` is assembled in several places, so gating
+only the construction sites is not enough — the appends
+(`tools.extend(finance_tools)`, `ask_user_middleware.tools`,
+`run_workflow_tool`) each need the `managed_policy is None` guard too.
+
 **Why:** nine `tests/unit/ptc_agent` failures are all "the local education feature
 extended a platform class and the extension was dropped".
 

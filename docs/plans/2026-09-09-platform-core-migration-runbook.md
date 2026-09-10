@@ -348,6 +348,11 @@ Verified: `tests/unit/config` 245, `tests/unit/core`+observability+ci 552,
 
 ## Remaining work
 
+> The task-by-task plan for finishing the merge lives in
+> `docs/plans/2026-09-10-post-merge-completion.md`. Task 1 (managed-textbook
+> hooks) is done; the plan file carries the status of each task, so read it
+> before starting the next one — it is the durable context for this work.
+
 1. Direct MCP tools are ported but not yet wired. The modules now exist
    (`ptc_agent/agent/middleware/direct_mcp.py`, `egress/direct_tools.py`,
    `egress/flash_binding.py`, `egress/grant_resync.py`) and

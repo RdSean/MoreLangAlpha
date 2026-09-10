@@ -945,3 +945,12 @@
 - 补齐平台缺失模块 `ptc_agent/core/mcp_schema.py`，`MCPToolInfo` 改由它提供并在 registry 重导出，工具文档恢复 enum/默认值/可空类型等 schema 事实。
 - 退役与当前策略冲突的“彻底无金融”守卫测试（工具边界、启动服务、迁移链、路由注册的源码断言），它们守的是本地已主动放弃的状态；未来按依赖顺序移除金融时再从历史恢复。
 - 验证：各单测分组全部通过（config 245、core/observability/ci 552、llms/tools/utils 1240、middleware 484、ptc_agent 707、server/services 1208、server/app+handlers 1413、server/database+models+utils 765、其余根级 125）。
+## 2026-09-10
+
+### 平台核心合并后的教育线回补
+
+- 回补托管教材（家庭教育）在平台类上的全部扩展点：`PTCSandbox.setup_managed_textbook_job`、`Session.initialize_managed_textbook`、`build_ptc_graph_with_session(managed_policy=...)` 及其身份/存储清空分支、`PTCAgent.create_agent` 的 `managed_policy` 参数与受限工具装配。
+- 托管 Bash 恢复 `command_validator` 与 `fixed_working_dir`（命令必须落在冻结的作业根内）；文件 Write 工具恢复写前校验钩子；托管子代理恢复固定注册表 `textbook-chapter-worker`。
+- 托管模式不再携带环境工具：`AskUserQuestion`、`RunWorkflow`、金融工具、Web/Site-crawl 一律按 `managed_policy` 关闭；技能注册表按 `allowed_skill_names` 过滤。
+- 退役与当前策略冲突的本地测试 `test_generic_sandbox_packages.py`（断言跳过退役金融包，而本分支保留金融）。
+- 验证：`tests/unit/ptc_agent` 763 passed、1 xfailed/xpassed；相关文件 ruff 通过。
