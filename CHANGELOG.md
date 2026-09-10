@@ -927,3 +927,11 @@
 - 接入远端 `tool_binding`、`egress_grants`、`relay_jwt`、工具错误格式化实现，并补入 direct MCP 运行时模块（middleware、direct_tools、flash_binding、grant_resync）；这些模块已就位但尚未接到图形与 Flash 构建入口。
 - 前端合并远端 `plugins`、`mcp`、`vault` 三个文案命名空间，Plugins/连接器页面不再出现未翻译 key；本地金融用语守卫改为排除刻意保留的券商能力分组文案。
 - 验证：MCP catalog/workspace/model 三组测试由 58 个失败变为 `264 passed`；前端 Plugins、hooks 与 locales 共 `359 passed`（1 个失败源自本地 `TestStorage` 测试替身）；后端单测收集 `7195/7203`，无导入错误；实跑接口 `/api/v1/mcp/servers`、`/builtin-servers`、`/brokerages`、`/api/v1/plugins`、`/api/v1/skills` 均返回 200，启动仍注册 10 个 MCP server / 61 个工具。
+## 2026-09-10
+
+### 修复对话一发送即报错、会话重开为空
+
+- `serialize_context_metadata` 补齐 `extra_commands` / `allowed_skills` 参数并透传给 `detect_slash_commands`。PTC 与 Flash 两条请求链都会传入这两个参数，旧签名会让每一轮在落库前就抛 `TypeError`，界面显示错误、会话重开后看不到任何内容。
+- 该函数在 START 事务之前执行，所以失败的那一轮既没有写入 `conversation_queries` 也没有 `conversation_responses`；线程行与前缀标题已写，因此表现成“标题在、内容空”。修复后新对话正常落库并可回放。
+- 增加回归测试覆盖别名与有效技能集的透传；同时修正 workspace status 测试桩缺少 `skills_signature` 参数的问题。
+- 验证：以真实配置调用 PTC/Flash 两条 `serialize_context_metadata` 路径均通过；用 API 实跑一轮 Flash 对话产生 `message_chunk`/`run_end` 且无错误，`conversation_queries` 与 `conversation_responses` 均写入，`GET /threads/{id}`、`/messages/replay`、`/turns` 均返回该轮内容；`tests/unit/server/handlers` 677 项全部通过。

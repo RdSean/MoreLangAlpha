@@ -226,6 +226,8 @@ def serialize_context_metadata(
     query_metadata: dict,
     user_input: str,
     mode: str,
+    extra_commands: dict[str, str] | None = None,
+    allowed_skills: set[str] | None = None,
 ) -> None:
     """Serialize additional_context into lightweight persistence metadata.
 
@@ -250,7 +252,12 @@ def serialize_context_metadata(
 
     # Detect slash commands from message text when additional_context is absent
     if not request.hitl_response and "additional_context" not in query_metadata:
-        _, early_detected = detect_slash_commands(user_input, mode=mode)
+        _, early_detected = detect_slash_commands(
+            user_input,
+            mode=mode,
+            extra_commands=extra_commands,
+            allowed_skills=allowed_skills,
+        )
         if early_detected:
             query_metadata["additional_context"] = [
                 {"type": "skills", "name": s.name} for s in early_detected

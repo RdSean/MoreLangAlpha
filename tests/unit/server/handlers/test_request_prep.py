@@ -1514,6 +1514,46 @@ class TestSerializeContextMetadata:
 
         assert "additional_context" not in metadata
 
+    def test_slash_fallback_receives_user_aliases_and_allowed_skills(self):
+        """The caller's user-tier aliases and effective skill set reach the
+        fallback detector.
+
+        Regression: both run generators pass ``extra_commands`` and
+        ``allowed_skills`` unconditionally, so a signature without them aborts
+        every turn before the START transaction persists anything — the thread
+        then reads back empty. The kwargs must be accepted and forwarded.
+        """
+        from src.server.handlers.chat.request_prep import serialize_context_metadata
+
+        req = self._make_request(additional_context=None)
+        metadata = {}
+        skill = MagicMock()
+        skill.name = "weekly-digest"
+        skills = [skill]
+
+        with patch(
+            f"{PREP}.detect_slash_commands",
+            return_value=("digest please", skills),
+        ) as mock_detect:
+            serialize_context_metadata(
+                req,
+                metadata,
+                "/digest digest please",
+                mode="ptc",
+                extra_commands={"digest": "weekly-digest"},
+                allowed_skills={"weekly-digest"},
+            )
+
+        mock_detect.assert_called_once_with(
+            "/digest digest please",
+            mode="ptc",
+            extra_commands={"digest": "weekly-digest"},
+            allowed_skills={"weekly-digest"},
+        )
+        assert metadata["additional_context"] == [
+            {"type": "skills", "name": "weekly-digest"}
+        ]
+
     def test_hitl_response_skips_slash_commands(self):
         from src.server.handlers.chat.request_prep import serialize_context_metadata
 
