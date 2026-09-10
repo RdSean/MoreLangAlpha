@@ -171,7 +171,6 @@ class TestLoadFromDictOptionalSections:
         data = _full_config_dict(skills={
             "enabled": False,
             "user_skills_dir": "/custom/skills",
-            "project_skills_dir": "my-skills",
             "sandbox_skills_base": "/sandbox/skills",
         })
         config = load_from_dict(data)
@@ -246,7 +245,7 @@ class TestLoadFromDictMCP:
         data = _full_config_dict()
         data["mcp"]["servers"] = [
             {"name": "tavily", "command": "npx", "args": ["-y", "tavily-mcp"]},
-            {"name": "research", "command": "python", "args": ["server.py"], "enabled": False},
+            {"name": "finance", "command": "python", "args": ["server.py"], "enabled": False},
         ]
         config = load_from_dict(data)
         assert len(config.mcp.servers) == 2
