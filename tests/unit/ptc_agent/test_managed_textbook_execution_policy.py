@@ -1,8 +1,9 @@
 """Execution-boundary contracts for managed textbook PTC runs."""
+from types import SimpleNamespace
 
 from importlib import import_module
 from importlib.util import find_spec
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -273,8 +274,11 @@ def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypat
         return FakeAgent()
 
     monkeypatch.setattr(agent_module, "create_agent", fake_create_agent)
-    monkeypatch.setattr(agent_module, "get_skill_registry", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(agent_module.PTCAgent, "_build_model_resilience_middleware", lambda _self: [])
+    # Upstream renamed the registry entry point; the managed filter runs over
+    # whatever this returns.
+    monkeypatch.setattr(
+        agent_module, "build_effective_skill_registry", lambda *_args, **_kwargs: {}
+    )
     monkeypatch.setattr(agent_module, "resolve_compaction_client", lambda _config: None)
     compiled_subagents: list[dict[str, object]] = []
 
@@ -297,22 +301,43 @@ def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypat
 
     class Config:
         llm = None
-        skills = type("Skills", (), {"enabled": True, "sandbox_skills_base": "/home/workspace/.agents/skills"})()
+        skills = type(
+            "Skills",
+            (),
+            {
+                "enabled": True,
+                "sandbox_skills_base": "/home/workspace/.agents/skills",
+                "local_skill_dirs_with_sandbox": staticmethod(lambda: []),
+            },
+        )()
         filesystem = type("Filesystem", (), {
             "working_directory": policy.filesystem_root,
             "denied_directories": [],
         })()
         mcp = type("MCP", (), {"servers": [], "tool_exposure_mode": "summary"})()
-        compaction = type("Compaction", (), {"model_dump": lambda self: {}})()
+        compaction = type(
+            "Compaction",
+            (),
+            {"model_dump": lambda self: {}, "profile": None},
+        )()
         background_auto_wait = False
         search_api = "tavily"
         search_depth = "standard"
         input_modalities = None
+        # Upstream's turn model reads the resolved prompt-guidance level.
+        prompt_guidance = None
+        # Upstream's skill registry reads the per-account disable set.
+        disabled_skills = frozenset()
+        user_skills = ()
+        user_skill_dir = None
+        workspace_skill_dir = None
         subagents = type("Subagents", (), {"enabled": [], "definitions": {}})()
         feature_enabled = staticmethod(lambda _key: False)
 
         def get_llm_client(self):
-            return object()
+            # Upstream stamps call metadata onto the client, so the fake needs
+            # a metadata slot rather than a bare object().
+            return SimpleNamespace(metadata={})
 
         def client_for_role(self, *_args, **_kwargs):
             return None

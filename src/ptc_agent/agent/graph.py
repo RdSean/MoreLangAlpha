@@ -218,6 +218,7 @@ async def build_ptc_graph_with_session(
     namespace_owner: Any | None = None,
     disable_subagents: bool = False,
     direct_mcp: Any | None = None,
+    managed_policy: "ManagedExecutionPolicy | None" = None,
 ) -> Any:
     """Build a BackgroundSubagentOrchestrator from a pre-acquired session (WorkspaceManager path)."""
     workspace_id = session.conversation_id
@@ -227,6 +228,21 @@ async def build_ptc_graph_with_session(
         raise RuntimeError(
             f"Session for workspace {workspace_id} is not properly initialized"
         )
+
+    if managed_policy is not None:
+        # Managed executions have no user-owned runtime state. Enforce this at
+        # the graph boundary as well as in PTCAgent so internal callers cannot
+        # accidentally mount memory, a Vault-derived URL callback, or a parent
+        # identity onto the service-owned run.
+        user_id = None
+        store = None
+        on_signed_url = None
+        # The guard only fences service-created worker checkpoint namespaces; it
+        # carries no parent identity or capability. Keep it when this managed
+        # policy explicitly permits its fixed worker set.
+        namespace_owner = namespace_owner if managed_policy.allow_subagents else None
+        plan_mode = False
+        disable_subagents = not managed_policy.allow_subagents
 
     if user_id:
         (

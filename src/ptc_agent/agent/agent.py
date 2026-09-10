@@ -451,6 +451,7 @@ class PTCAgent:
         tool_summary: str | None = None,
         disable_subagents: bool = False,
         direct_mcp: DirectToolSet | None = None,
+        managed_policy: "ManagedExecutionPolicy | None" = None,
     ) -> Any:
         """Create a deepagent with PTC pattern capabilities.
 
@@ -472,6 +473,22 @@ class PTCAgent:
         Returns:
             Configured BackgroundSubagentOrchestrator wrapping the deepagent.
         """
+        if managed_policy is not None:
+            # The managed graph is service-owned rather than a variant of a
+            # parent's chat. Defend this lower boundary too because PTCAgent is
+            # also used directly by internal runners.
+            disable_subagents = not managed_policy.allow_subagents
+            plan_mode = False
+            # A WriterGuard is a service-owned checkpoint lease, not an
+            # inherited parent capability. Fixed managed workers need it to
+            # write their task namespaces through the root's fenced saver.
+            namespace_owner = namespace_owner if managed_policy.allow_subagents else None
+            store = None
+            user_id = None
+            user_profile = None
+            on_signed_url = None
+            vault_secrets = None
+
         turn = turn_model(self.config, llm, self.llm, flash=False)
 
         # Freeze current time for this request (refreshes on each new query)
@@ -482,7 +499,14 @@ class PTCAgent:
         # Compute short thread ID for thread-scoped storage
         short_thread_id = thread_id[:8] if thread_id else ""
 
-        backend = SandboxBackend(sandbox, operation_callback=operation_callback)
+        if managed_policy is not None:
+            backend = SandboxBackend(
+                sandbox,
+                root_dir=managed_policy.filesystem_root,
+                operation_callback=operation_callback,
+            )
+        else:
+            backend = SandboxBackend(sandbox, operation_callback=operation_callback)
 
         # Memory is opt-in: disabled entirely when identity is missing rather
         # than falling back to a shared namespace that would cross-pollinate
@@ -513,24 +537,48 @@ class PTCAgent:
             )
         )
 
-        # Create the execute_code tool for MCP invocation
-        execute_code_tool = create_execute_code_tool(
-            backend, mcp_registry, thread_id=short_thread_id
-        )
+        if managed_policy is None:
+            # Create the execute_code tool for MCP invocation
+            execute_code_tool = create_execute_code_tool(
+                backend, mcp_registry, thread_id=short_thread_id
+            )
 
-        # Create the Bash tool for shell command execution
-        bash_tool = create_execute_bash_tool(backend, thread_id=short_thread_id)
-        bash_output_tool = create_bash_output_tool(backend)
+            # Create the Bash tool for shell command execution
+            bash_tool = create_execute_bash_tool(backend, thread_id=short_thread_id)
+            bash_output_tool = create_bash_output_tool(backend)
 
-        # Create the preview URL tool for sandbox service previews
-        workspace_id = getattr(session, "conversation_id", "") if session else ""
-        preview_url_tool = create_preview_url_tool(backend, workspace_id=workspace_id, on_signed_url=on_signed_url)
+            # Create the preview URL tool for sandbox service previews
+            workspace_id = getattr(session, "conversation_id", "") if session else ""
+            preview_url_tool = create_preview_url_tool(
+                backend, workspace_id=workspace_id, on_signed_url=on_signed_url
+            )
 
-        # Create the show widget tool for inline HTML visualizations
-        show_widget_tool = create_show_widget_tool(backend)
+            # Create the show widget tool for inline HTML visualizations
+            show_widget_tool = create_show_widget_tool(backend)
 
-        # Start with base tools
-        tools: list[Any] = [execute_code_tool, bash_tool, bash_output_tool, preview_url_tool, show_widget_tool, TodoWrite]
+            # Start with base tools
+            tools: list[Any] = [
+                execute_code_tool,
+                bash_tool,
+                bash_output_tool,
+                preview_url_tool,
+                show_widget_tool,
+                TodoWrite,
+            ]
+        else:
+            # A managed teaching job gets a confined Bash and TodoWrite and
+            # nothing else: no code execution, no preview URLs, no widgets.
+            from ptc_agent.agent.managed_execution import validate_managed_bash_command
+
+            bash_tool = create_execute_bash_tool(
+                backend,
+                thread_id=short_thread_id,
+                command_validator=lambda command: validate_managed_bash_command(
+                    command, managed_policy
+                ),
+                fixed_working_dir=managed_policy.filesystem_root,
+            )
+            tools = [bash_tool, TodoWrite]
 
         # Create custom filesystem tools (override deepagents middleware tools).
         # `filesystem_backend` is the composite when a store is wired; otherwise
@@ -549,21 +597,23 @@ class PTCAgent:
         ]
         tools.extend(filesystem_tools)
 
-        web_search_tool = get_web_search_tool(
-            max_search_results=10,
-            time_range=None,
-            verbose=False,
-            provider=self.config.search_api,
-            depth=self.config.search_depth,
-        )
-        tools.append(web_search_tool)
-        tools.append(web_fetch_tool)
+        web_search_tool = None
+        if managed_policy is None or managed_policy.enable_web:
+            web_search_tool = get_web_search_tool(
+                max_search_results=10,
+                time_range=None,
+                verbose=False,
+                provider=self.config.search_api,
+                depth=self.config.search_depth,
+            )
+            tools.append(web_search_tool)
+            tools.append(web_fetch_tool)
 
         # Site-crawl tools (PTC-only): experimental opt-in feature, further
         # tier-gated at resolve time. The factory returns [] when the crawl
         # provider's API key is unset.
         crawl_tools: list[Any] = []
-        if self.config.feature_enabled("site_crawl"):
+        if managed_policy is None and self.config.feature_enabled("site_crawl"):
             crawl_tools = create_crawl_tools(filesystem_backend)
             tools.extend(crawl_tools)
 
@@ -642,6 +692,14 @@ class PTCAgent:
             user_skill_dir=self.config.user_skill_dir,
             workspace_skill_dir=self.config.workspace_skill_dir,
         )
+        if managed_policy is not None:
+            # A managed teaching job may load only the Skill contracts the
+            # education service staged for it, whatever else the account has.
+            skill_registry = {
+                name: definition
+                for name, definition in skill_registry.items()
+                if name in managed_policy.allowed_skill_names
+            }
         # RunWorkflow is skill-gated: the run-workflow skill hides the tool from
         # model requests until the agent reads its SKILL.md. Drop the skill on
         # any build that registers no tool for it to gate.
@@ -713,12 +771,16 @@ class PTCAgent:
                 else None
             ),
         )
+        # A managed job builds no ambient tools, so each set degrades to empty
+        # rather than naming a local that was never bound.
         subagent_tool_sets: dict[str, list[Any]] = {
-            "execute_code": [execute_code_tool],
+            "execute_code": [execute_code_tool] if managed_policy is None else [],
             "bash": [bash_tool],
             "filesystem": list(filesystem_tools) if filesystem_tools else [],
-            "web_search": [web_search_tool, web_fetch_tool],
-            "finance": finance_tools,
+            "web_search": (
+                [web_search_tool, web_fetch_tool] if web_search_tool is not None else []
+            ),
+            "finance": [] if managed_policy is not None else finance_tools,
             "think": [think_tool],
             "todo": [TodoWrite],
         }

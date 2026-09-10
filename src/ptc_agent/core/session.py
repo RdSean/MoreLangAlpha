@@ -252,6 +252,35 @@ class Session:
 
         logger.debug("Session initialized", conversation_id=self.conversation_id)
 
+    async def initialize_managed_textbook(self, policy) -> None:
+        """Create the intentionally minimal runtime for a managed teaching job.
+
+        This bypasses the normal session bootstrap entirely: no inherited
+        process-global MCP registry, no connection attempts, no workspace asset
+        hydration and no standard sandbox setup. The caller supplies a stripped
+        CoreConfig and later stages the two approved Skill contracts itself.
+        """
+        if self._initialized:
+            raise RuntimeError("Managed session is already initialized")
+
+        self.mcp_registry = MCPRegistry(self.config)
+        self._builtin_mcp_registry = self.mcp_registry
+        self._owns_mcp_registry = True
+        self.sandbox = PTCSandbox(self.config, self.mcp_registry)
+        try:
+            await self.sandbox.setup_managed_textbook_job(policy)
+        except Exception:
+            self.mcp_registry = None
+            self._builtin_mcp_registry = None
+            self._owns_mcp_registry = False
+            self.sandbox = None
+            raise
+        self._initialized = True
+        logger.debug(
+            "Managed textbook session initialized",
+            conversation_id=self.conversation_id,
+        )
+
     async def initialize_lazy(
         self,
         sandbox_id: str,

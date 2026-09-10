@@ -407,6 +407,37 @@ class PTCSandbox:
         logger.info("Sandbox workspace ready", sandbox_id=self.sandbox_id)
         return snapshot_name
 
+    async def setup_managed_textbook_job(self, policy: Any) -> None:
+        """Create a service-owned sandbox without the normal workspace spine.
+
+        Managed textbook generation receives a CoreConfig already reduced to one
+        job root. It deliberately does not create standard workspace folders,
+        upload internal packages, bind platform secrets, install MCP packages,
+        start MCP servers, or sync user resources. The education service stages
+        its frozen inputs and the two allowed Skill files afterwards.
+        """
+        root = policy.filesystem_root
+        if self.config.filesystem.working_directory != root:
+            raise ValueError("Managed sandbox config must use the policy filesystem root")
+
+        self.runtime = await self._runtime_call(
+            self.provider.create,
+            env_vars=None,
+            platform_secret_bindings=None,
+            mcp_packages=[],
+            retry_policy=RetryPolicy.SAFE,
+            allow_reconnect=False,
+        )
+        assert self.runtime is not None
+        self.sandbox_id = self.runtime.id
+        self._work_dir = root
+        await self._runtime_call(
+            self.runtime.exec,
+            f"mkdir -p {shlex.quote(root)}",
+            retry_policy=RetryPolicy.SAFE,
+        )
+        logger.info("Managed textbook sandbox ready", sandbox_id=self.sandbox_id)
+
     async def setup_tools_and_mcp(
         self,
         snapshot_name: str | None,
