@@ -216,3 +216,84 @@ current backend image does not contain the local branch's `argon2` dependency.
   untracked persistence helpers remain excluded from commits.
 - Focused verification: `171 passed` across sandbox MCP sync, WorkspaceManager
   MCP, Skills commands and chat request preparation.
+
+## Host development mode (2026-09-10)
+
+The application can run on the host against the isolated infra containers. The
+Compose service names in `.env` do not resolve from the host, so the launcher
+overrides the four connection values:
+
+```bash
+# backend (host, port 18000)
+DB_HOST=127.0.0.1 DB_PORT=15432 \
+REDIS_URL='redis://:redis@127.0.0.1:16379/0' \
+STORAGE_ENDPOINT_URL='http://127.0.0.1:19000' \
+SERVER_BASE_URL='http://localhost:18000' \
+PDF_RENDER_INTERNAL_BASE='http://127.0.0.1:18000' \
+uv run python server.py --reload --host 0.0.0.0 --port 18000
+
+# frontend (host, port 15177 — 5177 belongs to the wechat-ilink-bot worktree)
+VITE_PROXY_BACKEND='http://localhost:18000' pnpm dev --host 0.0.0.0 --port 15177
+```
+
+`REDIS_URL` stays commented in `.env`: the Compose default resolves it to the
+`redis` service, which is what the containerized backend needs.
+
+## Capability slice checkpoint (2026-09-10)
+
+The bundled plugins previously restored in `plugins/` were not runnable on
+their own — they import the shared `mcp_servers/` helpers and the financial data
+layer. Restored from `origin/main`:
+
+- `mcp_servers/_browser.py`, `_envelope.py`, `_extract.py`, `_schemas.py`,
+  `_yf_common.py`, `AGENT_CONTRACT.md`
+- `src/data_client/` (fmp, ginlix_data, tickertick, yfinance providers)
+- `src/market_protocol/` (required by `src/data_client`)
+- `src/server/services/brokerage_tool_overlays.py` (required by
+  `mcp_tool_split.build_direct_entries`)
+
+Two MCP 2.x compatibility gaps were fixed at the same time:
+
+- `mcp_servers/_bootstrap.py` now exports the `MCPServer` shim (mcp 2.x
+  `mcp.server.mcpserver` with the 1.x `fastmcp.FastMCP` fallback) instead of only
+  inserting the repo root on `sys.path`.
+- `MCPRegistry._discover_tools` reads `tool.input_schema` (mcp 2.x) with an
+  `inputSchema` fallback.
+
+The local `scrapling` stdio server is disabled in `agent_config.yaml`: the
+pinned `scrapling==0.4.7` CLI imports `mcp.server.fastmcp`, which mcp 2.0
+removed. The bundled `alternative_data` `scrape` server drives the same
+scrapling tiers through `mcp_servers/_browser.py`.
+
+Verified on the host stack: 10 MCP servers and 61 tools registered at startup
+with no connection failures; `/health` returns 200 and the frontend serves 200
+on `15177`. Database is at `055_tool_denylist (head)`.
+
+## Remaining work
+
+1. Direct MCP tool path is only half wired. `session.direct_mcp_tools` is
+   populated, but the consumers are missing: `src/server/services/egress/direct_tools.py`,
+   `src/server/services/egress/flash_binding.py`, and
+   `src/ptc_agent/agent/middleware/direct_mcp.py`, plus the `direct_mcp=`
+   parameter on `build_ptc_graph_with_session` / `create_agent`. Until then every
+   MCP tool reaches the model as a sandbox wrapper and per-call consent is not
+   re-read.
+2. Reconcile the legacy MCP catalog/server route tests with the platform
+   contract (`ResolvedMCP` construction, tool counts, applied-version
+   surfacing). The current run reports 58 failures, all in
+   `tests/unit/server/app/test_mcp_catalog.py`,
+   `tests/unit/server/app/test_mcp_servers.py` and
+   `tests/unit/server/models/test_mcp_server_models.py`, plus the deliberate
+   literal-header round-trip change.
+3. `056_workspace_file_blobs` stays deferred. Workspace file bytes are still
+   inline in PostgreSQL; the seven untracked persistence/blob modules must be
+   wired as one unit (read/write, backup, restore, backfill, GC).
+4. Connector/OAuth consent end-to-end: verify brokerage capability groups,
+   egress grants and the tools endpoint against a live OAuth connection once
+   the direct path lands.
+5. `channel-gateway` (WeChat iLink worker) is not part of the host launcher
+   above; start it separately (`python -m src.server.services.channels.worker`)
+   when testing channel behaviour.
+6. Financial capability removal stays a later, dependency-ordered pass
+   (`bundle manifest → backend APIs → MCP servers/tools → Skills → frontend →
+   migrations/data`), after the platform baseline is green.

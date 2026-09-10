@@ -67,8 +67,11 @@ mcp:
 
     # Scrapling web scraping MCP server
     # Provides get, bulk_get, fetch, bulk_fetch, stealthy_fetch, bulk_stealthy_fetch
+    # Disabled on mcp 2.x: the pinned scrapling CLI imports ``mcp.server.fastmcp``,
+    # which mcp 2.0 removed. The bundled alternative_data ``scrape`` server drives
+    # the same scrapling tiers through mcp_servers/_browser.py, so nothing is lost.
     - name: "scrapling"
-      enabled: true
+      enabled: false
       description: "Web scraping with anti-bot bypass, CSS selection, and markdown extraction"
       instruction: "Use for scraping web pages. Choose extraction_type='markdown' for readable content. Use 'get' for fast HTTP requests, 'fetch' for JS-rendered pages, 'stealthy_fetch' for Cloudflare-protected sites. Bulk variants accept multiple URLs for parallel scraping."
       tool_exposure_mode: "summary"

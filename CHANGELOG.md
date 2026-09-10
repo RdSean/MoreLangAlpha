@@ -906,3 +906,13 @@
 - MCP resolve 接入 connector binding plan、OAuth egress grant/JWT 同步，以及 direct-call 与 sandbox wrapper 的统一 schema 分流；无 OAuth 的旧会话继续使用原有兼容路径。
 - sandbox 增加 relay 凭据原子发布和 token manifest 上传能力；`056_workspace_file_blobs` 仍延期，未接入数据库文件存储主链。
 - 验证：sandbox MCP sync、WorkspaceManager MCP、Skills command、chat request preparation 共 `171 passed`。
+## 2026-09-10
+
+### 能力切片补齐与 MCP 2.x 运行时兼容
+
+- 补回 bundled 插件运行所需的共享实现：`mcp_servers` 下的浏览器/信封/抽取/schema/yfinance 辅助模块、`src/data_client`、`src/market_protocol`，以及 `brokerage_tool_overlays`；此前只迁入 `plugins/` 时这些服务器无法启动。
+- `mcp_servers/_bootstrap.py` 重新导出 `MCPServer`（mcp 2.x 优先、1.x FastMCP 回退），使内置 MCP server 文件同时可在新镜像与旧 sandbox 中运行。
+- `MCPRegistry` 工具发现改为读取 mcp 2.x 的 `input_schema` 并保留 `inputSchema` 回退，修复工具 schema 全部丢失的问题。
+- 本地 `scrapling` stdio server 因 `scrapling==0.4.7` 仍依赖已被 mcp 2.0 移除的 `mcp.server.fastmcp` 而关闭；同等的抓取能力由 bundled `alternative_data/scrape` 服务器经 `mcp_servers/_browser.py` 提供。
+- 宿主开发模式启动说明与端口/连接参数写入迁移 runbook；后端 `18000`、前端 `15177`，基础设施复用隔离 Compose 栈的 `15432/16379/19000`。
+- 验证：宿主栈启动后注册 10 个 MCP server、61 个工具且无连接失败；`/health` 与前端均返回 200；数据库位于 `055_tool_denylist (head)`；相关聚焦测试 `54 passed`。

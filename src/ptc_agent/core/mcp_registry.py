@@ -422,7 +422,13 @@ class MCPServerConnector:
                 tool_info = MCPToolInfo(
                     name=tool.name,
                     description=tool.description or "",
-                    input_schema=tool.inputSchema or {},
+                    # mcp 2.x renamed the field to ``input_schema``; the
+                    # attribute form is gone, so read it either way.
+                    input_schema=(
+                        getattr(tool, "input_schema", None)
+                        or getattr(tool, "inputSchema", None)
+                        or {}
+                    ),
                     server_name=self.config.name,
                 )
                 self.tools.append(tool_info)
