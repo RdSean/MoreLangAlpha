@@ -9,7 +9,7 @@ This module creates a PTC agent that:
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from langchain.agents import create_agent
@@ -100,6 +100,7 @@ from ptc_agent.agent.prompts import (
 )
 from ptc_agent.agent.subagents import (
     SubagentCompiler,
+    SubagentDefinition,
     SubagentRegistry,
     create_subagents,
 )
@@ -145,8 +146,39 @@ except ImportError:
 
 logger = structlog.get_logger(__name__)
 
+if TYPE_CHECKING:
+    from ptc_agent.agent.managed_execution import ManagedExecutionPolicy
+
 
 DEFAULT_MAX_CONCURRENT_TASK_UNITS = 3
+
+#: The only worker a managed teaching job may delegate to. It inherits the
+#: managed sandbox and is confined to the fixed asset contract, so it never
+#: reaches web, MCP, Vault, user data or paths outside the job root.
+_MANAGED_TEXTBOOK_SUBAGENTS = {
+    "textbook-chapter-worker": SubagentDefinition(
+        name="textbook-chapter-worker",
+        description=(
+            "Delegate one frozen textbook chapter or coverage check. The worker inherits "
+            "the managed textbook sandbox and can only inspect or write the fixed asset contract."
+        ),
+        mode="ptc",
+        role_prompt=(
+            "Work only on the assigned frozen textbook unit. Read the staged managed contract "
+            "before writing a fixed v2 asset. Do not access web, MCP, Vault, user data, or paths "
+            "outside the managed task root. Report concise results to the parent root."
+        ),
+        tools=["filesystem", "bash", "todo"],
+        max_iterations=30,
+        stateful=True,
+        sections={
+            "workspace_paths": False,
+            "tool_guide": False,
+            "data_processing": False,
+            "visualizations": False,
+        },
+    )
+}
 
 
 @dataclass(frozen=True)
@@ -584,9 +616,17 @@ class PTCAgent:
         # `filesystem_backend` is the composite when a store is wired; otherwise
         # it's the plain sandbox backend. Tools see a uniform rich-method
         # surface either way.
+        write_validator = None
+        if managed_policy is not None:
+            from ptc_agent.agent.managed_execution import validate_managed_textbook_write
+
+            def write_validator(path: str, content: str) -> str | None:
+                return validate_managed_textbook_write(path, content, managed_policy)
+
         read_file, write_file, edit_file = create_filesystem_tools(
             filesystem_backend,
             operation_callback=operation_callback,
+            write_validator=write_validator,
         )
         filesystem_tools = [
             read_file,  # overrides middleware read_file
@@ -628,10 +668,18 @@ class PTCAgent:
         ]
         if self.config.feature_enabled("market_watch"):
             finance_tools.append(watch_market)  # Market watch start/stop (live price injection)
-        tools.extend(finance_tools)
+        if managed_policy is None:
+            # A managed teaching job reaches no external data surface.
+            tools.extend(finance_tools)
 
         if subagent_names is None:
-            subagent_names = self.config.subagents.enabled
+            subagent_names = (
+                # A managed job gets exactly its fixed worker set, never the
+                # deployment's enabled subagents.
+                ["textbook-chapter-worker"]
+                if managed_policy is not None and managed_policy.allow_subagents
+                else self.config.subagents.enabled
+            )
 
         # --- Build shared middleware (for both main agent and subagents) ---
         shared_middleware: list[Any] = []
@@ -758,18 +806,27 @@ class PTCAgent:
                 main_only_middleware.append(plan_middleware)
                 tools.extend(plan_middleware.tools)
 
-        ask_user_middleware = AskUserMiddleware()
-        main_only_middleware.append(ask_user_middleware)
-        tools.extend(ask_user_middleware.tools)
+        if managed_policy is None:
+            # Managed teaching runs are non-interactive by contract: no
+            # AskUserQuestion, nothing that waits on a person.
+            ask_user_middleware = AskUserMiddleware()
+            main_only_middleware.append(ask_user_middleware)
+            tools.extend(ask_user_middleware.tools)
 
         from ptc_agent.agent.tools import think_tool
 
-        subagent_registry = SubagentRegistry(
-            user_definitions=(
-                self.config.subagents.definitions
-                if self.config.subagents.definitions
-                else None
-            ),
+        subagent_registry = (
+            # A managed job gets its fixed worker set and nothing the account
+            # happens to have configured.
+            SubagentRegistry(builtins=_MANAGED_TEXTBOOK_SUBAGENTS)
+            if managed_policy is not None
+            else SubagentRegistry(
+                user_definitions=(
+                    self.config.subagents.definitions
+                    if self.config.subagents.definitions
+                    else None
+                ),
+            )
         )
         # A managed job builds no ambient tools, so each set degrades to empty
         # rather than naming a local that was never bound.
@@ -985,7 +1042,8 @@ class PTCAgent:
                 user_id=user_id,
                 prebuilt_workflows=get_prebuilt_workflows(),
             )
-            tools.append(run_workflow_tool)
+            if managed_policy is None:
+                tools.append(run_workflow_tool)
 
         # Main agent middleware (includes SubAgentMiddleware + main_only)
         # Ordering matters for prompt caching:

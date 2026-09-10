@@ -2,13 +2,16 @@
 
 import asyncio
 import logging
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from ptc_agent.agent.agent import PTCAgent
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.session import Session
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from ptc_agent.agent.managed_execution import ManagedExecutionPolicy
 
 
 _USER_PROFILE_TTL = 86400  # 24h — freshness via explicit invalidation
