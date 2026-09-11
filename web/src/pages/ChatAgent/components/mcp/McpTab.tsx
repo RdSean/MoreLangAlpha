@@ -100,7 +100,7 @@ export function McpTab({ workspaceId, onOpenVaultTab }: McpTabProps) {
   const { data: vaultSecrets } = useWorkspaceVaultSecrets(workspaceId);
   const createSecretMutation = useCreateWorkspaceVaultSecret(workspaceId);
   const secretNames = useMemo(
-    () => (vaultSecrets ?? []).map((s: { name: string }) => s.name),
+    () => (vaultSecrets ?? []).map((s) => s.name),
     [vaultSecrets],
   );
 

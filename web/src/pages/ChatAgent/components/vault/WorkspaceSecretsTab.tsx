@@ -47,7 +47,7 @@ export function WorkspaceSecretsTab({
       // workspace must not carry over and silently target the new one.
       key={workspaceId}
       title={t('vault.workspace.title')}
-      secrets={secrets.map((s: { workspace_vault_secret_id: string; name: string; description?: string | null; masked_value: string }) => ({
+      secrets={secrets.map((s) => ({
         id: s.workspace_vault_secret_id,
         name: s.name,
         description: s.description,

@@ -471,3 +471,32 @@ per-model tuning therefore applies whenever the composer has no value of its
 own for that model, and a composer choice still outranks it (which is the
 documented top rung). Porting it means a 3-way merge across that whole cluster
 on top of the family-model menu logic it already carries, so it is its own task.
+
+### Plugins frontend (2026-09-11)
+
+Reviewed because the earlier integration landed incrementally: the surface was
+already ~92% byte-identical to upstream (`pages/Plugins` 71/81 files identical,
+no local-only files, and the `plugins`/`mcp`/`vault` locale namespaces are
+identical), so it was completed as a delta rather than a replacement.
+
+Pulled from upstream: six `pages/Plugins` files, `hooks/useMcpServers`,
+`ChatAgent/components/mcp/McpTab`, `ChatAgent/components/vault/WorkspaceSecretsTab`,
+`ChatAgent/utils/api/{mcp,vault}`. Line-by-line review found **no local product
+logic** in any of them — the only local deltas were two type annotations that
+existed because this branch's `api/vault.ts` still returned untyped data, and
+upstream's typed version removes the need for them.
+
+Added upstream-only: `pages/Plugins/{components/ToolAccess.tsx,hooks/useFlashWorkspace.ts}`
+plus two tests, `ChatAgent/components/mcp/{ArgsTable,DirectToolDetail,DirectToolMark,JsonTree,useDirectToolVendor}`,
+`ChatAgent/utils/directTools.ts`, and three upstream test files for this surface.
+
+What that restores: Flash as a scope target (only on rows with direct tools —
+Flash has no sandbox), per-tool call-path switches backed by
+`useSetMcpServerBinding` / `setMcpCatalogServerBinding`, and the direct-tool
+detail views. The backend for all three (`has_direct_tools`, migration `059`)
+already shipped with the platform core, so the UI was the missing half.
+
+Result: `pages/Plugins` 81/81 and the supporting surface 46/46 byte-identical to
+upstream, nothing missing. `components/ui/segmented-control.tsx` came with the
+pull but has no importer here (upstream uses it in `UserInfoTab`, a product
+screen out of scope), so it was left out.

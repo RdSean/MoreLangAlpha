@@ -1026,3 +1026,14 @@
 - 本地产品面照旧保留：家庭（household）模型菜单与 `handleModelSelection`、`displayModel` 只读标识、`TokenizerStatusAlert`、以及本地刻意移除的图表捕获 props；市场观察（market watch）开关没有恢复，因为本分支的 composer 与发送链路里都没有它的落点。
 - 配套：`chat.modelSelector` 补 `effortHint`/`defaultBadge`/`speed*` 6 个 key；本地 `chat-input.familyModel.test.tsx` 的 `useAllModels` 桩补上 `metadata`/`systemDefaults`（`useEffectiveTuning` 要读），否则渲染即崩。
 - 验证：`pnpm typecheck` 通过；`pnpm vitest run` **230 files / 2227 tests 全绿**；`pnpm lint` 0 error；`pnpm build` + critical-path 检查通过。
+## 2026-09-11
+
+### Plugins 模块前端补齐到远端一致
+
+- 审查结论：Plugins 面本来就有 ~92% 与远端逐字节相同（`pages/Plugins` 81 个文件里 71 个一致、本地无任何独有文件；i18n 的 `plugins`/`mcp`/`vault` 三个命名空间与远端完全相同），所以不做整体替换，只补 delta。
+- 取远端（11 个）：`pages/Plugins` 下 `BrokerageDetailParts`/`BrokerageRow`/`McpCatalogRow`/`ScopeControl`/`ServerDetail`/`hooks/useWorkspaceOptions`，配套的 `hooks/useMcpServers`、`ChatAgent/components/mcp/McpTab`、`ChatAgent/components/vault/WorkspaceSecretsTab`、`ChatAgent/utils/api/{mcp,vault}`。逐行核对确认这些文件相对远端**没有本地产品逻辑**，唯一两处本地差异是 `McpTab`/`WorkspaceSecretsTab` 里为旧版未定型 `api/vault.ts` 加的类型注解——取上游的 `WorkspaceVaultSecret[]` 之后两处注解已不再需要。
+- 补齐远端独有（10 个）：`pages/Plugins/components/ToolAccess.tsx`、`pages/Plugins/hooks/useFlashWorkspace.ts` 与两个测试；`ChatAgent/components/mcp/{ArgsTable,DirectToolDetail,DirectToolMark,JsonTree,useDirectToolVendor}`、`ChatAgent/utils/directTools.ts`；以及 plugins 面三个上游测试 `useBuiltinMcpServerTools`/`useVaultInvalidation`/`chatInputModelMenu`。
+- 由此恢复的界面能力：**Flash 作为作用域目标**（只对 `has_direct_tools` 的行出现，Flash 无沙盒、只能装直连工具）、**逐工具调用路径开关**（`ToolAccess` + `useSetMcpServerBinding` + `setMcpCatalogServerBinding`，按工具定位 422 文案）、**直连工具详情视图**。这些能力对应的后端（`has_direct_tools`、`059_direct_tools`）合并不久前已经就位，此前是前端用不出来。
+- `chat.modelSelector` 文案对齐远端：`reasoningEffort` "Reasoning"→"Effort"、`effortXhigh` "X-High"→"Extra High"，补 `effortNone`/`effortMinimal`/`effortMax`，删除已被远端 `speed*` 取代且本地无引用的 `fastMode*` 四个 key。
+- `components/ui/segmented-control.tsx` 取自远端后发现本仓库无任何引用（它只服务于上游的 `UserInfoTab`，属产品前端，不在本次范围），未纳入。
+- 验证：plugins 面与远端达**完全一致**（`pages/Plugins` 81/81 逐字节相同，配套面 46/46，无缺失文件）；`pnpm typecheck` 通过；`pnpm vitest run` **235 files / 2263 tests 全绿**；`pnpm lint` 0 error；`pnpm build` + critical-path 检查通过。
