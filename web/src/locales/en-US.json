@@ -770,6 +770,34 @@
       },
       "settings": {
         "doneButton": "Done"
+      },
+      "homeworkCalendar": {
+        "title": "Homework",
+        "description": "What has been assigned, and where each task stands.",
+        "thisWeek": "This period",
+        "previousWeek": "Previous period",
+        "nextWeek": "Next period",
+        "openTask": "Open {{title}} in the homework page",
+        "overdueBadge": "overdue",
+        "empty": "No homework here",
+        "emptyHint": "Nothing was assigned in this period.",
+        "bucket_past": "Earlier",
+        "bucket_today": "Today",
+        "bucket_tomorrow": "Tomorrow",
+        "bucket_thisWeek": "This week",
+        "bucket_nextWeek": "Next week",
+        "bucket_later": "Later",
+        "stat_today": "today",
+        "stat_week": "this week",
+        "stat_overdue": "overdue",
+        "stat_completed": "done",
+        "settings": {
+          "window": "Range",
+          "window_1w": "1 week",
+          "window_2w": "2 weeks",
+          "window_1m": "1 month",
+          "showCompleted": "Show completed tasks"
+        }
       }
     }
   },

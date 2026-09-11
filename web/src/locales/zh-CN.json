@@ -770,6 +770,34 @@
       },
       "settings": {
         "doneButton": "完成"
+      },
+      "homeworkCalendar": {
+        "title": "作业日历",
+        "description": "近期布置了哪些作业，以及每项的状态。",
+        "thisWeek": "当前周期",
+        "previousWeek": "上一个周期",
+        "nextWeek": "下一个周期",
+        "openTask": "在作业页打开「{{title}}」",
+        "overdueBadge": "逾期",
+        "empty": "暂无作业",
+        "emptyHint": "这个周期内没有布置作业。",
+        "bucket_past": "更早",
+        "bucket_today": "今天",
+        "bucket_tomorrow": "明天",
+        "bucket_thisWeek": "本周",
+        "bucket_nextWeek": "下周",
+        "bucket_later": "更晚",
+        "stat_today": "今日",
+        "stat_week": "本周",
+        "stat_overdue": "逾期",
+        "stat_completed": "已完成",
+        "settings": {
+          "window": "范围",
+          "window_1w": "一周",
+          "window_2w": "两周",
+          "window_1m": "一个月",
+          "showCompleted": "显示已完成"
+        }
       }
     }
   },

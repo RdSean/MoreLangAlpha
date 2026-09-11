@@ -2,6 +2,17 @@
 
 ## 2026-09-11
 
+### 作业日历组件
+
+- 新增 `education.homeworkCalendar` 组件（`definitions/HomeworkCalendarWidget.tsx`），数据源是既有的 `GET /api/v1/education/tasks/calendar`：家长默认拿到全屋视角，学生由后端自动收窄到本人，因此前端不需要区分账户类型，只按 house 加载。
+- 分桶为「更早 / 今天 / 明天 / 本周 / 下周 / 更晚」，桶内按 `due_at` 从近到远排序；逾期行红色标记，已完成行置灰划线并打勾；每行显示科目色点、标题、孩子姓名与截止时间，点击跳转 `/education`。
+- 顶部统计条直接使用接口返回的 `stats`（今日 / 本周 / 逾期 / 已完成），逾期数大于 0 时标红。
+- 周期范围可回看：窗口按 `today → today+len-1` 前向展开（默认 `2w`），‹ 按钮把同长度窗口整体前移一个周期，因此「看前一周」只需按一次；回看窗口时会隐藏统计条（那是「当前状态」摘要，套在历史窗口上会误导），并回退到 0 时恢复。offset 只是组件内 `useState`，不落库，刷新后总是回到当前周期。回看最多 8 个周期，避免长按把 query key 无限撑开。
+- 日期一律用本地日期字符串（`toLocaleDateString('en-CA')`）而不是 `toISOString()`：后者按 UTC 切日，会让「今天到期」的作业掉进昨天或明天的桶。
+- 复用框架能力：注册了上下文导出器，家长可以把整份清单或单条作业通过纸夹附加到对话；配置走 `HomeworkCalendarConfigSchema`（`window` / `showCompleted`）。
+- 测试 14 项，先写测试后实现（初次运行因模块不存在失败）。其中三处最初失败源于测试夹具本身：`calendar()` 未把日期写回任务，导致所有任务都落进「今天」桶——夹具已改为以日期为准。
+- 验证：`pnpm typecheck` 通过；`src/pages/Dashboard`、`src/locales`、`src/__tests__` 共 12 个文件 105 项测试通过；`pnpm lint` 0 error / 56 warning（与基线一致）。
+
 ### 迁回响应式栅格
 
 - 迁回 `framework/DashboardGrid.tsx` 与其测试。栅格由 `react-grid-layout` 的 `ResponsiveGridLayout` 驱动，`lg`/`md` 两个断点各 12 列，行高 8px；它负责布局对账（`reconcileLayouts`）、自动补位、以及把每个单元格包在 `WidgetFrame` 里。
