@@ -2,6 +2,16 @@
 
 ## 2026-09-11
 
+### 迁回组件外框、上下文快照与相关文案
+
+- 迁回 `framework/contextSnapshot.ts`、`framework/WidgetFrame.tsx`（含 `.css`）、`components/RowAttachButton.tsx`（含 `.css`）及其 8 项测试。组件外框提供拖拽把手、设置菜单、复制、删除，以及把组件（或单行）作为上下文附加到对话的纸夹按钮。
+- `contextSnapshot.ts` 原先在此文件里声明 `WidgetContextSnapshot`，本分支已把它移到 `@/types/widgetContext`（对话输入、ContextBus、消息载荷都从这里取）。因此改为从该处导入并 `export type` 再导出，保持上游路径的可用性。
+- `WidgetFrame` 中 `definition.source === 'tradingview'` 的分支已删除：本分支不注册任何 TradingView widget，该判断没有可达输入。纸夹按钮现在只由「该组件是否注册了上下文导出器」决定。
+- 文案：从中英 catalog 合并 `dashboard.widgets` 的框架级子树（`common` / `frame` / `addDialog` / `presetsDialog` / `settings` / `shell` 的自有子集），以及四个保留组件的子树；不含任何 TradingView 或证券类 key。
+- 重写三条带有金融语义的文案：`conversation.placeholder`（中英）、`addDialog.category.personalLabel` / `personalBlurb`（中英），改为作业与文档语境的表述。
+- 更新 `src/locales/__tests__/genericSurface.test.ts` 这条本地守卫：它原本断言 dashboard 命名空间只有 `overview`、且依赖里不能出现 `react-grid-layout`。现在改为「dashboard = overview + widgets」，并新增一条断言逐个点名 27 个金融组件的文案子树必须不存在；`react-grid-layout` 从禁用依赖列表中移除（纯布局库），`lightweight-charts` 与 `recharts` 仍在禁用之列。金融措辞检查保留并继续通过。
+- 验证：`pnpm typecheck` 通过；`src/locales`、`src/pages/Dashboard`、`src/__tests__` 共 10 个文件 90 项测试通过。金融措辞断言在重写文案前确实失败（命中 watchlist / portfolio / 自选股 / 投资组合 / 持仓 / 财报），改后通过。
+
 ### 迁回 Dashboard 组件框架的纯逻辑层
 
 - 从 `origin/main` 迁回 `web/src/pages/Dashboard/widgets/`：`types.ts`、`WidgetRegistry`、`ids`、`gridConstants`、`reconcile`、`configSchemas`、`snapshotSerializers`、`migrations`，以及 `reconcile` / `snapshotSerializers` / `migrations` 三套测试。63 项测试通过。

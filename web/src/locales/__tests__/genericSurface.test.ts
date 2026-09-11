@@ -13,9 +13,32 @@ const e2eMockSource = readFileSync(
 );
 
 describe('generic workspace locale boundary', () => {
-  it('keeps only the workspace overview in the dashboard namespace', () => {
-    expect(Object.keys(enUS.dashboard)).toEqual(['overview']);
-    expect(Object.keys(zhCN.dashboard)).toEqual(['overview']);
+  it('keeps the workspace overview and the widget canvas in the dashboard namespace', () => {
+    // The dashboard is two surfaces: the classic workspace overview, and the
+    // widget canvas restored from upstream. Nothing else belongs in the
+    // namespace — a `dashboard.market*` block would mean a finance widget
+    // crept back in.
+    expect(Object.keys(enUS.dashboard)).toEqual(['overview', 'widgets']);
+    expect(Object.keys(zhCN.dashboard)).toEqual(['overview', 'widgets']);
+  });
+
+  it('keeps the canvas free of finance widget copy', () => {
+    // The layout framework came back; the finance widgets it used to host did
+    // not. A locale key for one of those widgets is the earliest sign that one
+    // is being re-registered, so assert the subtrees are gone by name.
+    const retiredWidgetLocales = [
+      'marketsOverview', 'newsFeed', 'earningsCalendar', 'watchlist',
+      'portfolio', 'portfolioWatchlist', 'insightBrief', 'miniChartGrid',
+      'chart', 'holdings', 'tickerTape', 'stockHeatmap', 'cryptoHeatmap',
+      'forexHeatmap', 'etfHeatmap', 'economicEvents', 'economicMap',
+      'technicals', 'movers', 'symbolSpotlight', 'singleTicker', 'symbolInfo',
+      'companyProfile', 'companyFinancials', 'stockScreener',
+      'cryptoScreener', 'topStories',
+    ];
+    for (const key of retiredWidgetLocales) {
+      expect(enUS.dashboard.widgets).not.toHaveProperty(key);
+      expect(zhCN.dashboard.widgets).not.toHaveProperty(key);
+    }
   });
 
   it('does not ship retired market or onboarding locale namespaces', () => {
@@ -42,8 +65,11 @@ describe('generic workspace locale boundary', () => {
   });
 
   it('does not retain retired financial packages or E2E response fixtures', () => {
+    // `react-grid-layout` is deliberately NOT in this list: it is a pure
+    // layout library that the restored dashboard canvas needs, with no market
+    // data behind it. The charting libraries stay out.
     expect(Object.keys(packageJson.dependencies)).not.toEqual(
-      expect.arrayContaining(['lightweight-charts', 'react-grid-layout', 'recharts']),
+      expect.arrayContaining(['lightweight-charts', 'recharts']),
     );
     expect(e2eMockSource).not.toMatch(
       /market-data|watchlist|portfolio|calendar\/earnings|sampleNewsArticle|sampleIndexSnapshot/i,
