@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { CalendarCheck, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { SubjectIcon } from '@/components/icons/SubjectIcon';
 import { useEducationMembers, useEducationTaskCalendar } from '@/pages/Education/queries';
 import type { EducationCalendarTask, EducationMember } from '@/pages/Education/types';
 import { registerWidget } from '../framework/WidgetRegistry';
@@ -131,10 +132,14 @@ function TaskRow({ task, instanceId, childName, onOpen }: TaskRowProps) {
       aria-label={t('dashboard.widgets.homeworkCalendar.openTask', { title: task.title })}
       className="row-attach-host group relative flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <span
-        aria-hidden="true"
-        className="size-2 flex-shrink-0 rounded-full"
-        style={{ backgroundColor: task.subject_color ?? 'var(--color-border-muted)' }}
+      {/* 20px is the floor for this artwork: it is 1024-unit art whose tones
+          carry the shape, and below ~20px the dark silhouette swallows the
+          detail into a blob. */}
+      <SubjectIcon
+        subject={task.subject_code}
+        color={task.subject_color ?? 'var(--color-text-tertiary)'}
+        size={20}
+        className="shrink-0"
       />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span

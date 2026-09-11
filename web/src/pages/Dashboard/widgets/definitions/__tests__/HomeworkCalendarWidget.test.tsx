@@ -185,6 +185,30 @@ describe('HomeworkCalendarWidget', () => {
     expect(screen.getByTestId('homework-task')).toHaveAttribute('data-overdue', 'true');
   });
 
+  it("draws the subject's own icon, tinted with the subject colour", () => {
+    state.calendar = calendar([
+      ['2026-09-11', [task({ subject_code: 'math', subject_color: '#277DA1' })]],
+    ]);
+    renderWidget();
+
+    const icon = screen.getByTestId('homework-task').querySelector('svg[data-icon="数学"]') as
+      | SVGElement
+      | null;
+    expect(icon).not.toBeNull();
+    expect(icon!.style.color).toBe('rgb(39, 125, 161)');
+  });
+
+  it('falls back to a generic icon for a subject the batch does not cover', () => {
+    state.calendar = calendar([
+      ['2026-09-11', [task({ subject_code: 'calligraphy-extended' })]],
+    ]);
+    renderWidget();
+
+    expect(
+      screen.getByTestId('homework-task').querySelector('svg[data-icon]')?.getAttribute('data-icon'),
+    ).toBe('书本');
+  });
+
   it('hides completed tasks unless showCompleted is set', () => {
     state.calendar = calendar([
       [

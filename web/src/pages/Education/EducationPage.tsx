@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/contexts/AuthContext';
+import { SubjectIcon } from '@/components/icons/SubjectIcon';
 import { createRequestKeyTracker } from '@/pages/ChatAgent/hooks/utils/requestKey';
 import { deleteEducationAsset, uploadEducationAsset } from './api';
 import { useEducationHomeworkDictionaries, useEducationMembers, useEducationTaskMutations, useEducationTasks, useLearningAssignments } from './queries';
@@ -163,7 +164,17 @@ function ChoiceGroup({
             borderColor: selected ? (color ?? 'var(--color-text-primary)') : 'var(--color-border-default)',
             ...(selected ? { backgroundColor: color ?? 'var(--color-text-primary)', color: '#fff' } : {}),
           }}
-        >{color && <span className="mr-2 size-2.5 rounded-full border" aria-hidden="true" style={{ backgroundColor: selected ? '#fff' : color, borderColor: selected ? 'rgba(255,255,255,0.85)' : color }} />}{option.label}</Button>;
+        >{color && <SubjectIcon
+          // The subject group is the only one that passes `colorForOption`,
+          // and its option values are the dictionary's subject codes — so the
+          // icon can be resolved from `option.value` directly. On a selected
+          // button the icon sits on the subject's own colour, so it goes white
+          // there and takes the subject colour otherwise.
+          subject={option.value}
+          color={selected ? '#fff' : color}
+          size={22}
+          className="mr-2"
+        />}{option.label}</Button>;
       })}
     </div>
   </fieldset>;
