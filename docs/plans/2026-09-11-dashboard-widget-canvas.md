@@ -57,6 +57,61 @@ pnpm typecheck && pnpm lint
 
 ---
 
+## Outcome (recorded 2026-09-11, after the work landed)
+
+All ten tasks shipped, plus two pieces of scope that arrived after the plan was
+written. Landed as, oldest first:
+
+| Commit | What |
+|---|---|
+| `84b53a3b` | this plan and its design doc |
+| `f9812a91` | Task 0 — demo homework seeding |
+| `0a69b465` | Task 1 — `react-grid-layout@2.2.3` |
+| `b4d0767d` | Task 2 — framework core |
+| `04c524db` | Task 3 — frame, context snapshots, framework locale copy |
+| `f8369b3f` | Task 4 — the grid |
+| `daec1e45` | Task 5 — the homework calendar widget |
+| `f40d8c35` | Tasks 6 + 7 + 8 — canvas shell, router, gallery, presets, surviving widgets |
+| `6e60bab0` | *added scope* — education two-tone icon set on subject surfaces |
+| `d7452f7b` | *added scope* — period switch on the widget face + month view |
+
+**Where the plan and the result differ, and why:**
+
+- **Tasks 6, 7 and 8 landed as one commit.** The presets reference
+  `agent.conversation` / `threads.recent` / `workspace.picker` /
+  `automations.list`, so the canvas cannot be committed before those widgets
+  register without shipping a preset full of blank cells. Splitting them would
+  have left the guard in Task 8 red between commits.
+- **Task 9 was folded into Tasks 3, 5 and 8** rather than done at the end:
+  `keys.test.ts` fails as soon as a `t('…')` key is written, so each surface
+  had to bring its own catalog entries.
+- **`initConfig` lost its context parameter** instead of gaining a slimmed
+  context. Its only upstream readers were the finance widgets, and an empty
+  seam is worse than no seam. See `widgets/types.ts` for the note.
+- **Deliberately not done:** the classic `Dashboard.tsx` was not ported (it
+  renders the finance cards); `WorkspaceOverview` is the classic branch. The
+  finance widget definitions, `lib/bars`, `lib/quotes` and their deps stay out.
+- **Added after the fact, not in the plan:** the icon set (`6e60bab0`) and the
+  month view plus on-face period switch (`d7452f7b`). The latter also answered
+  a plan defect — the period switch was originally reachable only from the
+  edit-mode settings dialog, which is too deep for a control used that often.
+
+**Verified state:** web suite 248 files / 2419 tests passing; `typecheck`
+clean; lint 0 errors / 56 warnings (unchanged baseline); build passes with the
+critical path at 351.8 kB gz against a 450 kB ceiling.
+
+**Still open, on purpose:**
+
+1. User-level (non-bundled) MCP connector end-to-end — see the post-merge plan.
+2. MinIO object cross-check for workspace file blobs — same.
+3. The ~400-file product frontend gap under `web/src` (Dashboard classic,
+   ChatAgent, MarketView, Onboarding, Login, `lib/bars`, `lib/quotes`).
+4. The finance removal pass; `docs/plans/core-merge-*.txt` remain the index for
+   it, and the widget registry guard added here
+   (`widgets/__tests__/noFinanceWidgets.test.ts`) is its tripwire.
+
+---
+
 ## Task 0: Seed demo homework data
 
 Independent of the whole frontend plan — it can be built and run first, and it
