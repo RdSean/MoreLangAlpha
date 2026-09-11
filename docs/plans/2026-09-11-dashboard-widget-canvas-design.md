@@ -74,6 +74,11 @@ A new definition, `education.homeworkCalendar`, modelled on
 
 - Buckets `today / tomorrow / this week / next week / later`, sorted
   nearest-due-first, so the top of the widget is always the most urgent task.
+- A range stepper in the widget header: `‹ 1 week back`, `This week`, `1 week
+  forward`. The window size stays in widget config (`1w | 2w | 1m`); the
+  *offset* is ephemeral component state, so a fresh page load always opens on
+  the current window. The backend allows arbitrarily old `start_date` (only the
+  future end is bounded, at 12 months), so looking back needs no API change.
 - A stat strip at the top reads the API's own `stats` payload: today, this
   week, overdue, completed.
 - Each row shows a subject colour dot, the title, the child's name (mapped from
@@ -86,6 +91,23 @@ A new definition, `education.homeworkCalendar`, modelled on
 - It registers a context exporter, so the framework's existing "+ add to
   conversation" button lets a parent drop the outstanding list straight into
   chat.
+
+### Phase 2b — demo homework data
+
+The local debug database has one household (`lei lee` / `henry`, Asia/Tokyo)
+and zero tasks, so the widget would render its empty state and prove nothing.
+`scripts/ops/seed_homework_demo.py` inserts a realistic spread instead.
+
+It drives the real service layer (`create_task`), not raw SQL, so the rows obey
+the same validation the app does: valid subject/type pairs from the
+dictionaries, a grade-bearing student, and recurrence materialised through the
+normal path. Because the calendar materialises lazily over whatever window is
+queried, a handful of recurring rules started ~2 weeks ago fill the previous
+week, this week and the next window automatically.
+
+It is idempotent (every rule carries a `demo-seed:*` idempotency key) and
+prints what it created. Completion is applied through `check_in_task` for the
+student, so `completed_at` and the submission row stay consistent.
 
 ### Phase 3 — presets
 
