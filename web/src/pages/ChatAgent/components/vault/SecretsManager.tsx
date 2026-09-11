@@ -60,6 +60,8 @@ export interface SecretsManagerProps {
   onReveal: (name: string) => Promise<string>;
   /** Scope-specific trailing content (e.g. the workspace usage/security card). */
   footer?: React.ReactNode;
+  /** Header affordance explaining what the page is for (see SecretsUsageTips). */
+  tips?: React.ReactNode;
 }
 
 export function SecretsManager({
@@ -78,6 +80,7 @@ export function SecretsManager({
   onDelete,
   onReveal,
   footer,
+  tips,
 }: SecretsManagerProps) {
   const { t } = useTranslation();
 
@@ -203,6 +206,7 @@ export function SecretsManager({
   return (
     <div className="flex flex-col gap-4">
       <ListHeader icon={KeyRound} title={title} count={secrets.length} max={maxSecrets}>
+        {tips}
         {secrets.length < maxSecrets && (
           <button
             type="button"

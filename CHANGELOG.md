@@ -1037,3 +1037,13 @@
 - `chat.modelSelector` 文案对齐远端：`reasoningEffort` "Reasoning"→"Effort"、`effortXhigh` "X-High"→"Extra High"，补 `effortNone`/`effortMinimal`/`effortMax`，删除已被远端 `speed*` 取代且本地无引用的 `fastMode*` 四个 key。
 - `components/ui/segmented-control.tsx` 取自远端后发现本仓库无任何引用（它只服务于上游的 `UserInfoTab`，属产品前端，不在本次范围），未纳入。
 - 验证：plugins 面与远端达**完全一致**（`pages/Plugins` 81/81 逐字节相同，配套面 46/46，无缺失文件）；`pnpm typecheck` 通过；`pnpm vitest run` **235 files / 2263 tests 全绿**；`pnpm lint` 0 error；`pnpm build` + critical-path 检查通过。
+## 2026-09-11
+
+### 密钥页补充面向用户的用法说明（中英 i18n）
+
+- 界面层（简约）：`plugins.secrets.scopeHint` 改成一句话的白话说明——集中存放服务器与助手要用的密钥密码、所有工作区都能取用、工作区内存了同名值就在该工作区优先。
+- 详细文案（tips）：新增 `SecretsUsageTips`（`components/vault/SecretsUsageTips.tsx`），在列表头放一个带 ⓘ 的「使用提示 / Tips」按钮，点开是 Radix `Popover`,分四段讲清楚:这些密钥干什么用(不会直接交给模型,只在需要时读取)、三种会用到它的场景(装插件时向导索要 / 配连接时不粘明文只按名字引用 / 助手执行任务时运行时读取)、放账号层还是工作区(含同名覆盖规则)、以及几条说明(打码与显示值、卸载插件不删除密钥、家庭学生账号看不到)。
+- 文案刻意不出现技术词:不提 MCP、不提 `${vault:NAME}`、不提 pgcrypto,只讲"密钥/密码、连接、助手、工作区"。`plugins.secrets.tips.*` 共 18 个 key,en-US / zh-CN 同步补齐;场景用显式字面 key 而非模板拼接,保证仓库的 locale 一致性检查能覆盖到。
+- `SecretsManager` 新增可选 `tips` 插槽(渲染在列表头的操作区),Plugins → Secrets 传入;工作区「密钥库」页保持不变(它本来就有自己的用法/安全卡片)。
+- 新增 `__tests__/SecretsUsageTips.test.tsx`,钉住"默认收起、点击后三个场景与两段说明都在",避免 key 改名后静默渲染成空白面板。
+- 验证：`pnpm typecheck` 通过；`pnpm vitest run` **236 files / 2265 tests 全绿**（含 locale 键位一致性）；`pnpm lint` 0 error；`pnpm build` + critical-path 检查通过。

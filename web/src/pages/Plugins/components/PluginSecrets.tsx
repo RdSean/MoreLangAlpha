@@ -7,6 +7,7 @@ import {
   useDeleteUserVaultSecret,
 } from '@/hooks/useUserVault';
 import { SecretsManager } from '@/pages/ChatAgent/components/vault/SecretsManager';
+import { SecretsUsageTips } from '@/pages/ChatAgent/components/vault/SecretsUsageTips';
 import { revealUserVaultSecret } from '@/pages/ChatAgent/utils/api';
 
 /**
@@ -41,6 +42,7 @@ export function PluginSecrets() {
       loading={isLoading}
       loadError={loadError ? (loadError as { message?: string })?.message || t('vault.loadFailed') : null}
       hint={t('plugins.secrets.scopeHint')}
+      tips={<SecretsUsageTips />}
       emptyText={t('plugins.secrets.empty')}
       onCreate={(body) => createMutation.mutateAsync(body)}
       onUpdate={(name, body) => updateMutation.mutateAsync({ name, body })}
