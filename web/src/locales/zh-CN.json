@@ -658,8 +658,6 @@
         "empty": "暂无自动化任务",
         "emptyCta": "创建第一个 →",
         "trigger": {
-          "price": "价格",
-          "priceSymbol": "价格 · {{symbol}}",
           "once": "单次",
           "cron": "定时",
           "auto": "自动"
@@ -692,7 +690,7 @@
       },
       "recentThreads": {
         "title": "近期对话",
-        "description": "最近的研究对话。",
+        "description": "最近的对话。",
         "header": "近期对话",
         "viewAll": "查看全部",
         "bucket_today": "今日",
@@ -753,7 +751,12 @@
       },
       "presetsDialog": {
         "description": "为家庭作业场景整理的布局。选一个开始，之后可以随意拖动和更换组件。原有布局会被保留，可以恢复。",
-        "tailoredBadge": "为家庭作业场景定制"
+        "tailoredBadge": "为家庭作业场景定制",
+        "eyebrow": "仪表板布局",
+        "title": "从预设开始",
+        "popularBadge": "最常用",
+        "bestWhen": "适合：{{bestFor}}",
+        "useLayout": "使用此布局 →"
       },
       "shell": {
         "addWidget": "添加组件",
@@ -798,7 +801,34 @@
           "window_1m": "一个月",
           "showCompleted": "显示已完成"
         }
+      },
+      "presets": {
+        "family-desk": {
+          "name": "家庭工作台",
+          "tag": "默认",
+          "description": "右侧是作业日历，左侧是最近在做的事。日常使用的主界面。",
+          "bestFor": "工作日的晚上",
+          "pill1": "作业常驻",
+          "pill2": "最近对话",
+          "pill3": "自动化"
+        },
+        "homework-focus": {
+          "name": "作业专注",
+          "tag": "宽幅日历",
+          "description": "整宽的作业日历，下方是工作台，适合一次规划一整周。",
+          "bestFor": "制定计划时",
+          "pill1": "大日历",
+          "pill2": "含已完成",
+          "pill3": "快速开始"
+        }
       }
+    },
+    "layoutToggle": {
+      "groupAria": "仪表板布局",
+      "classic": "经典",
+      "custom": "画布",
+      "editLayout": "编辑布局",
+      "exitEditLayout": "退出编辑"
     }
   },
   "workspace": {

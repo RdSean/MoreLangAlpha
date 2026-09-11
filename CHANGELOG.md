@@ -2,6 +2,20 @@
 
 ## 2026-09-11
 
+### 画布落地：Dashboard 切换、组件画廊与保留组件
+
+- `/dashboard` 现在是双模式：`classic` 是既有的 `WorkspaceOverview`（新增可选 `layoutToggle`，在页头渲染切换控件），`custom` 是新的组件画布 `DashboardCustom`。默认仍是 classic，只有用户主动切换或被种下预设后才进画布，因此本次改动不会打乱任何人已有的界面。
+- `DashboardRouter` 沿用上游三条规则，每条都对应一个真实缺陷：移动端恒为 classic 且不显示切换；无 prefs / prefs 损坏时回落 classic；`isLoading` 期间拒绝写入，且切换时重读最新缓存再组装 payload。最后一条尤其重要——服务端整体替换 dashboard 键，用渲染期快照回放会把跨标签页的修改覆盖掉（本地 ModelTab 之前就栽在这类问题上）。
+- 画布外壳 `DashboardCustom`：栅格 + 工具栏（添加组件 / 预设 / 编辑布局 / 重置）+ 组件设置弹窗 + 重置确认。**未**带来上游的市场 websocket provider、四个金融对话框与浮动聊天卡。
+- 迁回组件画廊 `AddWidgetDialog`、预设面板 `PresetsDialog`、缩略图与设置原子组件（`EnumField` / `SettingsDoneButton`）。缩略图由上游 712 行（三十个金融 widget 的手绘图形）重写为约 240 行：只保留四种组件族的示意图形，缩略图的重点是布局形状而不是装饰。画廊的 `markets` / `intel` 分类与 TradingView 徽标随之删除。
+- 自写 `presets.ts`：`family-desk`（默认，作业日历在右栏 + 工作台 + 近期对话 + 工作区 + 自动化）与 `homework-focus`（整宽作业日历）。沿用上游的 `PresetId` / `PresetMeta` / `PRESETS_META` / `getPreset` 形状，因此 prefs 层、画廊、缩略图无需改动；`useDashboardPrefs` 的首次切换与「重置」默认预设同步改为 `family-desk`。
+- 迁回四个不依赖金融数据的组件：`automations.list`、`agent.conversation`、`workspace.picker`、`threads.recent`，以及 `ConversationWidget` 依赖的 `Dashboard/hooks/useChatInput.ts`。
+- 本地适配：`AutomationsWidget` 删去 `trigger_type === 'price'` 分支（本分支 `Automation` 类型只有 `cron | once`），并移除 `automations.trigger.price` / `priceSymbol` 两条文案；`recentThreads.description` 去掉「研究」措辞。
+- 上游 CSS/TSX 引用 `var(--color-focus-ring)`，本分支主题没有声明该 token（本地用 Tailwind `ring-ring`），会导致 `tokenRefs` 守卫失败，5 处改为已声明的 `--color-accent-primary`。
+- 新增两条守卫：`widgets/__tests__/noFinanceWidgets.test.ts` 断言注册表里没有任何已弃金融组件、没有 `tv.*`、分类只剩 `personal | agent | workspace`；`presets.test.ts` 断言**每个预设引用的每个组件类型都已注册**（这正是本次迁移最容易踩的坑：预设引用了未注册的组件会渲染出一个空洞且不报错）、预设默认配置满足各自 schema、每个组件在每个断点都有布局位、单元格不越界、id 唯一。
+- 「先看失败」验证：把预设里的 `threads.recent` 改成 `threads.recentt`，守卫立即失败并指名 `preset family-desk references unregistered threads.recentt`（1 failed | 5 passed），恢复后通过。
+- 验证：`pnpm typecheck` 通过；前端全量 `pnpm vitest run` **247 文件 / 2392 项全部通过**（基线 237 / 2271）；`pnpm lint` 0 error / 56 warning（与基线一致）；`pnpm build` 通过，关键路径 351.6 kB gz（上限 450）。
+
 ### 作业日历组件
 
 - 新增 `education.homeworkCalendar` 组件（`definitions/HomeworkCalendarWidget.tsx`），数据源是既有的 `GET /api/v1/education/tasks/calendar`：家长默认拿到全屋视角，学生由后端自动收窄到本人，因此前端不需要区分账户类型，只按 house 加载。

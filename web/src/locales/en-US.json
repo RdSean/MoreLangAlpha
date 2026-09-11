@@ -658,8 +658,6 @@
         "empty": "No automations yet",
         "emptyCta": "Create your first →",
         "trigger": {
-          "price": "price",
-          "priceSymbol": "price · {{symbol}}",
           "once": "once",
           "cron": "cron",
           "auto": "auto"
@@ -692,7 +690,7 @@
       },
       "recentThreads": {
         "title": "Recent Threads",
-        "description": "Latest research conversations.",
+        "description": "Latest conversations.",
         "header": "Recent Threads",
         "viewAll": "View all",
         "bucket_today": "Today",
@@ -753,7 +751,12 @@
       },
       "presetsDialog": {
         "description": "Curated layouts for the way your household works. Pick one to start, then rearrange and swap widgets freely. Your existing layout is saved and can be restored.",
-        "tailoredBadge": "built for family homework"
+        "tailoredBadge": "built for family homework",
+        "eyebrow": "Dashboard layouts",
+        "title": "Start with a preset",
+        "popularBadge": "most popular",
+        "bestWhen": "Best when: {{bestFor}}",
+        "useLayout": "Use this layout →"
       },
       "shell": {
         "addWidget": "Add widget",
@@ -798,7 +801,34 @@
           "window_1m": "1 month",
           "showCompleted": "Show completed tasks"
         }
+      },
+      "presets": {
+        "family-desk": {
+          "name": "Family desk",
+          "tag": "default",
+          "description": "Homework on the right, what you were last working on on the left. The everyday landing spot.",
+          "bestFor": "weekday evenings",
+          "pill1": "homework visible",
+          "pill2": "recent chats",
+          "pill3": "automations"
+        },
+        "homework-focus": {
+          "name": "Homework focus",
+          "tag": "wide calendar",
+          "description": "The full-width homework calendar with the workbench underneath, for planning a whole week at once.",
+          "bestFor": "planning sessions",
+          "pill1": "big calendar",
+          "pill2": "includes done",
+          "pill3": "quick start"
+        }
       }
+    },
+    "layoutToggle": {
+      "groupAria": "Dashboard layout",
+      "classic": "Classic",
+      "custom": "Canvas",
+      "editLayout": "Edit layout",
+      "exitEditLayout": "Exit edit layout"
     }
   },
   "workspace": {

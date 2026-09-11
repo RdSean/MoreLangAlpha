@@ -15,11 +15,11 @@ const e2eMockSource = readFileSync(
 describe('generic workspace locale boundary', () => {
   it('keeps the workspace overview and the widget canvas in the dashboard namespace', () => {
     // The dashboard is two surfaces: the classic workspace overview, and the
-    // widget canvas restored from upstream. Nothing else belongs in the
-    // namespace — a `dashboard.market*` block would mean a finance widget
-    // crept back in.
-    expect(Object.keys(enUS.dashboard)).toEqual(['overview', 'widgets']);
-    expect(Object.keys(zhCN.dashboard)).toEqual(['overview', 'widgets']);
+    // widget canvas restored from upstream, plus the control that switches
+    // between them. Nothing else belongs in the namespace — a
+    // `dashboard.market*` block would mean a finance widget crept back in.
+    expect(Object.keys(enUS.dashboard)).toEqual(['overview', 'widgets', 'layoutToggle']);
+    expect(Object.keys(zhCN.dashboard)).toEqual(['overview', 'widgets', 'layoutToggle']);
   });
 
   it('keeps the canvas free of finance widget copy', () => {

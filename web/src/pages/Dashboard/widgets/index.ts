@@ -5,5 +5,9 @@
 // the finance-free set.
 
 import './definitions/HomeworkCalendarWidget';
+import './definitions/AutomationsWidget';
+import './definitions/ConversationWidget';
+import './definitions/WorkspacePickerWidget';
+import './definitions/RecentThreadsWidget';
 
 export { listWidgets, listWidgetsByCategory, getWidget } from './framework/WidgetRegistry';

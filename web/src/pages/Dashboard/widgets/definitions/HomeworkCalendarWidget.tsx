@@ -10,7 +10,9 @@ import { useWidgetContextExport } from '../framework/contextSnapshot';
 import { serializeRowsToMarkdown, wrapWidgetContext } from '../framework/snapshotSerializers';
 import { HomeworkCalendarConfigSchema } from '../framework/configSchemas';
 import { RowAttachButton } from '../../components/RowAttachButton';
-import type { WidgetRenderProps } from '../types';
+import { EnumField } from '../framework/settings/EnumField';
+import { SettingsDoneButton } from '../framework/settings/SettingsDoneButton';
+import type { WidgetRenderProps, WidgetSettingsProps } from '../types';
 
 type HomeworkCalendarConfig = {
   window?: '1w' | '2w' | '1m';
@@ -481,6 +483,40 @@ function HomeworkCalendarWidget({ instance }: WidgetRenderProps<HomeworkCalendar
   );
 }
 
+function HomeworkCalendarSettings({
+  config,
+  onChange,
+  onClose,
+}: WidgetSettingsProps<HomeworkCalendarConfig>) {
+  const { t } = useTranslation();
+  const showCompleted = config.showCompleted ?? false;
+  return (
+    <div className="flex flex-col gap-4">
+      <EnumField
+        label={t('dashboard.widgets.homeworkCalendar.settings.window')}
+        value={config.window ?? '2w'}
+        onChange={(next) => onChange({ window: next as HomeworkCalendarConfig['window'] })}
+        options={[
+          { value: '1w', label: t('dashboard.widgets.homeworkCalendar.settings.window_1w') },
+          { value: '2w', label: t('dashboard.widgets.homeworkCalendar.settings.window_2w') },
+          { value: '1m', label: t('dashboard.widgets.homeworkCalendar.settings.window_1m') },
+        ]}
+      />
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={showCompleted}
+          onChange={(event) => onChange({ showCompleted: event.target.checked })}
+        />
+        <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          {t('dashboard.widgets.homeworkCalendar.settings.showCompleted')}
+        </span>
+      </label>
+      <SettingsDoneButton onClick={onClose} />
+    </div>
+  );
+}
+
 registerWidget<HomeworkCalendarConfig>({
   type: 'education.homeworkCalendar',
   titleKey: 'dashboard.widgets.homeworkCalendar.title',
@@ -492,6 +528,7 @@ registerWidget<HomeworkCalendarConfig>({
   configSchema: HomeworkCalendarConfigSchema,
   defaultSize: { w: 4, h: 26 },
   minSize: { w: 3, h: 15 },
+  settingsComponent: HomeworkCalendarSettings,
 });
 
 export default HomeworkCalendarWidget;
