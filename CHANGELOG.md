@@ -1047,3 +1047,12 @@
 - `SecretsManager` 新增可选 `tips` 插槽(渲染在列表头的操作区),Plugins → Secrets 传入;工作区「密钥库」页保持不变(它本来就有自己的用法/安全卡片)。
 - 新增 `__tests__/SecretsUsageTips.test.tsx`,钉住"默认收起、点击后三个场景与两段说明都在",避免 key 改名后静默渲染成空白面板。
 - 验证：`pnpm typecheck` 通过；`pnpm vitest run` **236 files / 2265 tests 全绿**（含 locale 键位一致性）；`pnpm lint` 0 error；`pnpm build` + critical-path 检查通过。
+## 2026-09-11
+
+### 斜杠菜单:教育 Skill 置顶 + 取消截断改为滚动
+
+- 起因:用户在工作区对话里打 `/` 找不到 `book-to-skill` / `the-knowledge-guy`。排查确认后端没问题(两个工作区、`mode=ptc` 都返回这两个,`mode=flash` 按设计不返回),问题在菜单:裸 `/` 时列表是"3 个系统命令 + 前 7 个 skill",而这两个 skill 排在注册表末尾,永远进不了 `.slice(0, 10)` 的截断。
+- 置顶:`chat-input.helpers.tsx` 新增模块私有的 `FEATURED_SLASH_COMMANDS`(两个教育 skill),`slashRank` 排序改为"先看匹配质量(前缀 > 子串),再看档位(置顶 > 系统命令 > 其余 skill)"。这样裸 `/` 以这两个开头,而 `/d` 仍然把 `/dcf-model`(前缀)排在仅含字母 d 的置顶命令之前——匹配质量优先这一点没有被破坏。
+- 取消截断:去掉 `.slice(0, 10)`,所有匹配都渲染;菜单高度由 `.mention-autocomplete` 自己限制(从固定 `240px` 改为 `min(340px, 45vh)`,保留 `overflow-y: auto` 并加 `overscroll-behavior: contain`),键盘上下选中的项仍会自动滚入视野。
+- 新增两条测试:裸 `/` 时置顶命令排在任何系统命令之前;列表尾部的 skill 依然在(不再被截断)。原有排序断言(系统命令优先于 skill、前缀优先于子串)全部保留通过。
+- 验证：`pnpm typecheck` 通过；`pnpm vitest run` **236 files / 2267 tests 全绿**；`pnpm lint` 0 error 且告警数未增加(56,与改动前一致)；`pnpm build` + critical-path 检查通过。

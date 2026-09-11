@@ -101,8 +101,12 @@
   background-color: var(--color-bg-elevated);
   border: 1px solid var(--color-border-muted);
   border-radius: 8px;
-  max-height: 240px;
+  /* The full list is rendered (the menu no longer truncates), so the panel is
+     what keeps it in view: a generous fixed cap for a short list, and a
+     viewport-relative one so a long list never runs off a small screen. */
+  max-height: min(340px, 45vh);
   overflow-y: auto;
+  overscroll-behavior: contain;
   z-index: 100;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
 }

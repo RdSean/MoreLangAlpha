@@ -4,10 +4,12 @@
  *     uniformly to skills and builtins — so a command never surfaces just because
  *     the query appears in its description text.
  *  2. Ranking: prefix (char-by-char from the start) matches rank ABOVE
- *     substring-only matches; within a tier, system/service commands
- *     (/compact, /offload, /subagent) rank above skills.
+ *     substring-only matches; within a tier, featured commands come first,
+ *     then system/service commands (/compact, /offload, /subagent), then the
+ *     rest of the skills.
  *  3. Action commands are deferred to send — selecting one inserts a pill and
  *     does NOT fire onAction; the dispatch happens when the user sends.
+ *  4. The menu renders every match; the panel scrolls rather than truncating.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, screen, waitFor, act } from '@testing-library/react';
@@ -24,6 +26,9 @@ vi.mock('@/pages/ChatAgent/utils/api', () => ({
           { name: 'Comps Analysis', command: 'comps-analysis', description: 'Comparable company analysis' },
           { name: 'DCF Model', command: 'dcf-model', description: 'DCF valuation' },
           { name: 'The Knowledge Guy', command: 'the-knowledge-guy', description: 'Book learning guidance' },
+          // Sits past the old 10-row cutoff on purpose: a bare "/" has to reach
+          // it now that the panel scrolls instead of truncating.
+          { name: 'Zeppelin Study', command: 'zeppelin-study', description: 'Last in the registry' },
         ],
   )),
   getModelMetadata: vi.fn().mockResolvedValue({}),
@@ -125,6 +130,32 @@ describe('ChatInput — slash command menu', () => {
     typeSlash('/the');
 
     await waitFor(() => expect(menuNames()).not.toContain('/the-knowledge-guy'));
+  });
+
+  it('opens a bare slash with the featured commands, ahead of the system ones', async () => {
+    renderInput({ mode: 'ptc' });
+    typeSlash('/');
+
+    await waitFor(() => expect(menuNames()).toContain('/zeppelin-study'));
+
+    const names = menuNames();
+    expect(names.indexOf('/the-knowledge-guy')).toBeLessThan(names.indexOf('/subagent'));
+    expect(names.indexOf('/the-knowledge-guy')).toBeLessThan(names.indexOf('/comps-analysis'));
+  });
+
+  it('keeps every match instead of truncating to the first ten', async () => {
+    renderInput({ mode: 'ptc' });
+    typeSlash('/');
+
+    // Four skills + three system commands here; the point is that the tail of
+    // the list survives, which a .slice(0, 10) would not have hidden at this
+    // size but the real 30-skill menu did.
+    await waitFor(() => expect(menuNames()).toContain('/zeppelin-study'));
+
+    const names = menuNames();
+    expect(names).toContain('/zeppelin-study');
+    expect(names).toContain('/comps-analysis');
+    expect(names).toContain('/dcf-model');
   });
 
   it('defers /compact to send: selecting adds a pill (no onAction), sending dispatches it', async () => {

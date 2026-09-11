@@ -61,11 +61,15 @@ export function useSlashCommands({
       // /subagent) outrank skills. So `/d` puts /dcf-model (prefix) above
       // /offload (a system command matching "d" only mid-word), while `/comp`
       // puts /compact above /comps-analysis (both prefix → system wins). Combined
-      // score (lower = earlier): prefix+system 0, prefix+skill 1, substr+system
-      // 2, substr+skill 3. Array.sort is stable, preserving within-tier order;
-      // sort before slice so a high-rank match never falls off the top-10.
+      // score (lower = earlier): prefix+featured 0, prefix+system 1,
+      // prefix+skill 2, then the substring tiers. Array.sort is stable, so
+      // within a tier the order is the one the API returned.
+      //
+      // No truncation: the panel caps its own height and scrolls (see
+      // .mention-autocomplete), so every match stays reachable. A top-N list
+      // was how a skill added late — the two book-learning ones, at the end of
+      // the registry — could never be found by typing a bare "/".
       .sort((a, b) => slashRank(a, q) - slashRank(b, q))
-      .slice(0, 10);
   }, [skills, open, query, slashCommands, t]);
 
   useEffect(() => {
