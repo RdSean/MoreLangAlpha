@@ -1017,3 +1017,12 @@
 - 顺带修掉三处先前遗留的前端红灯：`--color-identity-0..7-*` 与 `--color-bg-card-hover` 令牌未声明（MCP 的 IdentityTile/McpPrimitives 从早前阶段就已在用）；导航测试未同步 `/plugins` 入口；退役与“先迁回金融、后定点移除”冲突的 `financeSurfaceBoundary.test.ts`。
 - 验证：`pnpm typecheck` 通过；`pnpm vitest run` **230 files / 2227 tests 全绿**（基线为 3 failed/2173 passed）；`pnpm lint` 0 error；后端 `uv run pytest tests/unit -q -p no:randomly` → **7547 passed, 1 xfailed**。
 - 尚未迁移：composer（`chat-input.tsx` 与其 modelMenu/parts/toolbar 一簇）。它仍是本地版：effort/fast_mode 存 localStorage 且按请求级发送，所以未在 composer 里显式选择时，后端会应用新持久化的账号/模型档；选定后仍以请求级覆盖。这一簇本地另有家庭模型菜单逻辑，需要单独一次 3-way 合并。
+## 2026-09-11
+
+### composer 调参接线迁回上游
+
+- `components/ui/chat-input.tsx` 一簇改按上游形态：effort / fast_mode 不再存 localStorage 并按请求发送，而是 `useEffectiveTuning(selectedModel)` 解析（请求 > 模型 profile > 账号默认），发送时带上 `resolvedEffort` / `resolvedFastMode`；模型菜单改用 `useModelProfileWriter`，在下拉里改档位就是写 `model_preference.profiles[<model>]`。上游的一次性迁移 shim 保留：本机 `localStorage` 里已有的 `reasoning_effort:<model>` / `fast_mode:<model>` 会写入对应模型 profile 后清掉。
+- 同簇一起对齐：`chat-input.modelMenu.tsx`（`TriggerBody` 兼收上游的 `effortLabel` 与本地的 `modelLabels`/`emptyLabel`）、`chat-input.useSlashCommands.ts`（`workspaceId` 作用域）、`chat-input.useVoiceInput.ts`、`chat-input.css`、`dropdown-menu.tsx`（`variant="setting"` 行样式）、以及缺失的 `lib/inputModality.ts`（下拉按指针/键盘区分）。
+- 本地产品面照旧保留：家庭（household）模型菜单与 `handleModelSelection`、`displayModel` 只读标识、`TokenizerStatusAlert`、以及本地刻意移除的图表捕获 props；市场观察（market watch）开关没有恢复，因为本分支的 composer 与发送链路里都没有它的落点。
+- 配套：`chat.modelSelector` 补 `effortHint`/`defaultBadge`/`speed*` 6 个 key；本地 `chat-input.familyModel.test.tsx` 的 `useAllModels` 桩补上 `metadata`/`systemDefaults`（`useEffectiveTuning` 要读），否则渲染即崩。
+- 验证：`pnpm typecheck` 通过；`pnpm vitest run` **230 files / 2227 tests 全绿**；`pnpm lint` 0 error；`pnpm build` + critical-path 检查通过。

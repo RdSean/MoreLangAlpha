@@ -15,7 +15,13 @@ vi.mock('@/hooks/usePreferences', () => ({
 }));
 
 vi.mock('@/hooks/useAllModels', () => ({
-  useAllModels: () => ({ validModelNames: new Set<string>() }),
+  // The composer resolves its tuning through useEffectiveTuning, which reads
+  // the catalog metadata and the deployment's pinned guidance.
+  useAllModels: () => ({
+    validModelNames: new Set<string>(),
+    metadata: {},
+    systemDefaults: {},
+  }),
 }));
 
 vi.mock('@/lib/modelCapabilities', () => ({ supportsXhighEffort: () => false }));

@@ -952,6 +952,12 @@
     "compactBusy": "当前轮次还在流式输出中，请等结束后再压缩。",
     "offloadBusy": "当前轮次还在流式输出中，请等结束后再转存。",
     "modelSelector": {
+    "effortHint": "强度越高越细致，但速度更慢。",
+    "defaultBadge": "默认",
+    "speed": "速度",
+    "speedStandard": "标准",
+    "speedFast": "快速",
+    "speedFastHint": "消耗 2 倍积分，优先服务层级",
       "manageModels": "管理模型",
       "moreModels": "更多模型",
       "configureModels": "配置模型 →",

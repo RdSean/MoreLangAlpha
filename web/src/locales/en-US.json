@@ -953,6 +953,12 @@
     "compactBusy": "Can only compact when the current turn has finished streaming.",
     "offloadBusy": "Can only offload when the current turn has finished streaming.",
     "modelSelector": {
+    "effortHint": "Higher effort is more thorough but slower.",
+    "defaultBadge": "Default",
+    "speed": "Speed",
+    "speedStandard": "Standard",
+    "speedFast": "Fast",
+    "speedFastHint": "2× credit usage, priority service tier",
       "manageModels": "Manage models",
       "moreModels": "More models",
       "configureModels": "Configure models →",
