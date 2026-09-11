@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, FileText, Loader2, Maximize2, Minimize2, X } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import Markdown from '@/pages/ChatAgent/components/Markdown';
@@ -15,6 +16,15 @@ import '../../ChatAgent/components/FilePanel.css';
 const PreviewViewer = lazy(() => import('@/pages/ChatAgent/components/viewers/PreviewViewer'));
 type PreviewTab = 'source' | 'parsed';
 type SourceViewMode = 'continuous' | 'single';
+
+/** The two halves of the file, in the order the strip shows them. */
+const PREVIEW_TABS = [
+  { id: 'source', labelKey: 'documents.preview.sourceTab' },
+  { id: 'parsed', labelKey: 'documents.preview.parsedTab' },
+] as const;
+
+/** Same spring the other segmented controls in the app use (AnimatedTabs). */
+const TAB_SPRING = { type: 'spring', bounce: 0.2, duration: 0.6 } as const;
 
 interface DocumentPreviewDrawerProps {
   open: boolean;
@@ -48,6 +58,13 @@ export default function DocumentPreviewDrawer({
   const [isDragging, setIsDragging] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const drawerRef = useRef<HTMLElement>(null);
+
+  // Animate the sliding pill only when the tab actually changed: the drawer
+  // also moves (a resize drag, a fullscreen toggle), and re-running the spring
+  // for those would read as the pill sliding on its own.
+  const prevTabRef = useRef(tab);
+  const tabChanged = prevTabRef.current !== tab;
+  useEffect(() => { prevTabRef.current = tab; }, [tab]);
 
   const latestCompletedJobId = useMemo(
     () => (jobs.data ?? []).find((job) => job.status === 'completed')?.job_id,
@@ -191,12 +208,30 @@ export default function DocumentPreviewDrawer({
           </div>
         </header>
         <div className="documents-preview-tabs documents-preview-segmented" role="tablist" aria-label={t('documents.preview.tabsLabel')}>
-          <button type="button" role="tab" aria-selected={tab === 'source'} onClick={() => setTab('source')}>
-            {t('documents.preview.sourceTab')}
-          </button>
-          <button type="button" role="tab" aria-selected={tab === 'parsed'} onClick={() => setTab('parsed')}>
-            {t('documents.preview.parsedTab')}
-          </button>
+          {PREVIEW_TABS.map(({ id, labelKey }) => {
+            const active = tab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className="documents-preview-tab"
+                onClick={() => setTab(id)}
+              >
+                {/* One pill, carried between the two buttons by layoutId — the
+                    same trick the app's other segmented controls use. */}
+                {active && (
+                  <motion.span
+                    layoutId="documents-preview-tab"
+                    className="documents-preview-tab-pill"
+                    transition={tabChanged ? TAB_SPRING : { duration: 0 }}
+                  />
+                )}
+                <span className="documents-preview-tab-label">{t(labelKey)}</span>
+              </button>
+            );
+          })}
         </div>
         <div className="documents-preview-body">
           <div className="documents-preview-content file-panel-content">

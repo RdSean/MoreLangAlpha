@@ -87,6 +87,32 @@
   box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
 }
 
+/* The original/parsed strip paints its active state with a pill that slides
+   between the two buttons (framer-motion layoutId), so the button itself stays
+   transparent and only the label rides above it. The rule above is unchanged
+   and still styles the continuous/single-page switch, which has no pill. */
+.documents-preview-tabs .documents-preview-tab {
+  position: relative;
+}
+
+.documents-preview-tabs button[aria-selected='true'].documents-preview-tab {
+  background: transparent;
+  box-shadow: none;
+}
+
+.documents-preview-tab-pill {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  background: var(--color-bg-page);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+
+.documents-preview-tab-label {
+  position: relative;
+  z-index: 1;
+}
+
 .documents-preview-body { position: relative; min-height: 0; flex: 1; overflow: hidden; }
 .documents-preview-content { min-height: 0; }
 .documents-preview-content > .documents-preview-state { position: absolute; inset: 0; }

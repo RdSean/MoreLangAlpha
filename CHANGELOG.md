@@ -1065,3 +1065,12 @@
 - 修二（兜底）：`DocumentPreviewDrawer` 用 `DocumentErrorBoundary` 包住 viewer（与 FilePanel 一致的既有做法），viewer 抛错时降级为「原始文件无法加载」的提示，而不是把整个应用拖白。
 - 回归测试两条，且都验证过"没有修复时会失败"：`viewers/__tests__/PdfViewer.test.tsx`（用真实的 transfer 语义 detach 掉传进去的 buffer，断言调用方的 buffer 未受损、重挂载后仍可用）与 `DocumentPreviewDrawer.test.tsx` 的新用例（viewer 抛错时抽屉仍挂载并显示提示）。
 - 验证：`pnpm typecheck` 通过；`pnpm vitest run` **237 files / 2270 tests 全绿**；`pnpm lint` 0 error（告警数 56 未变）；`pnpm build` + critical-path 通过。
+## 2026-09-11
+
+### 文档预览「原始文件 / 解析文件」切换加滑动动画
+
+- 用仓库既有的动画方案:framer-motion 的 `layoutId` 共享布局(与 `components/ui/animated-tabs.tsx` 同一个手法,Automations 表单、SourcesPanel、RightPanel 都在用这类滑动药丸),全站已由 `App.tsx` 的 `<MotionConfig reducedMotion="user">` 统一处理"减少动态效果"偏好,无需另行判断。
+- 保留原有语义与外观:两个按钮仍是 `role="tab"` + `aria-selected`(测试与无障碍契约不变),选中态的底色不再由按钮自己画,改由唯一的 `motion.span` 药丸承载,切换时它在两个位置之间**滑过去**;`.documents-preview-mode-switch`(连续/单页)共用那条 CSS 规则,保持不变。
+- 药丸只在"标签真的变了"时走 spring:抽屉本身也会移动(拖拽改宽、进全屏),否则会被读成药丸自己在滑。这一点沿用 `AnimatedTabs` 里同样的 `valueChanged` 判断。
+- 新增用例:任意时刻只有一个药丸,且它属于当前选中的那个标签。
+- 验证：`pnpm typecheck` 通过；`pnpm vitest run` **237 files / 2271 tests 全绿**；`pnpm lint` 0 error（56 告警未变）；`pnpm build` + critical-path 通过。

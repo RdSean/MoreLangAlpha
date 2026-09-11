@@ -53,6 +53,22 @@ describe('DocumentPreviewDrawer', () => {
     expect(fetchArtifactText).toHaveBeenCalledWith('art-1');
   });
 
+  it('carries one sliding pill between the two file tabs', async () => {
+    // The pill is what animates; exactly one exists, and the tab it belongs to
+    // is the selected one. `layoutId` is what makes it travel (see AnimatedTabs).
+    const user = userEvent.setup();
+    const { container } = render(<DocumentPreviewDrawer open documentId="doc-1" onOpenChange={vi.fn()} />);
+
+    const pills = () => container.querySelectorAll('.documents-preview-tab-pill');
+    expect(pills()).toHaveLength(1);
+    expect(screen.getByRole('tab', { name: 'Original file' }).contains(pills()[0])).toBe(true);
+
+    await user.click(screen.getByRole('tab', { name: 'Parsed file' }));
+
+    expect(pills()).toHaveLength(1);
+    expect(screen.getByRole('tab', { name: 'Parsed file' }).contains(pills()[0])).toBe(true);
+  });
+
   it('shows an empty state and parser action when no Markdown artifact exists', async () => {
     useDocumentArtifacts.mockReturnValue({ data: [] });
     const onOpenParser = vi.fn();
