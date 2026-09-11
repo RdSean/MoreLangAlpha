@@ -44,11 +44,19 @@ export default function PdfViewer({ data, viewMode = 'single', pageNumber: contr
   const zoomIn = () => setZoomIndex((i) => Math.min(ZOOM_STEPS.length - 1, i + 1));
   const zoomOut = () => setZoomIndex((i) => Math.max(0, i - 1));
 
-  // Memoize once — pdf.js transfers the buffer to its web worker which detaches it,
-  // so re-creating Uint8Array on subsequent renders would fail.
+  // pdf.js posts the bytes to its worker as a transferable — `sendWithPromise(
+  // "GetDocRequest", params, [data.buffer])` in pdf.mjs — which DETACHES the
+  // buffer it was handed. Callers keep their own copy for as long as the viewer
+  // is on screen (the documents drawer refetches only when the document or the
+  // drawer changes, so switching tabs back to the original file remounts this
+  // component with the same buffer), so pdf.js gets a COPY and theirs survives.
+  // A view — `new Uint8Array(data)` — would be detached along with it, and the
+  // next mount would fail to load a zero-byte buffer.
   const fileData = useMemo(() => {
     if (!data) return null;
-    const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+    // Both branches copy: ArrayBuffer.prototype.slice makes a new buffer, and
+    // the Uint8Array constructor copies when handed another typed array.
+    const bytes = data instanceof ArrayBuffer ? new Uint8Array(data.slice(0)) : new Uint8Array(data);
     return { data: bytes };
   }, [data]);
 

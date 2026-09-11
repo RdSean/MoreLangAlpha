@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, FileText, Loader2, Maximize2, Minimize2, X }
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import Markdown from '@/pages/ChatAgent/components/Markdown';
+import DocumentErrorBoundary from '@/pages/ChatAgent/components/viewers/DocumentErrorBoundary';
 import { fetchArtifactText, documentSourceUrl } from '../api';
 import { useDocument, useDocumentArtifacts, useDocumentJobs } from '../hooks';
 import type { Artifact } from '../types';
@@ -224,24 +225,32 @@ export default function DocumentPreviewDrawer({
                       </div>
                     </div>
                     <div className="documents-preview-source-viewer">
-                      <Suspense fallback={<PreviewLoading />}>
-                        <PreviewViewer
-                          url={sourcePreviewUrl}
-                          port={0}
-                          title={filename}
-                          loading={false}
-                          error={false}
-                          onClose={() => onOpenChange(false)}
-                          isDragging={isDragging}
-                          reloadToken={sourcePage}
-                          documentData={isPdfSource ? source : undefined}
-                          documentViewMode={sourceViewMode}
-                          documentPage={sourcePage}
-                          onDocumentPageChange={setSourcePage}
-                          onDocumentPageCount={setSourcePageCount}
-                          sandbox={isPdfSource ? null : undefined}
-                        />
-                      </Suspense>
+                      {/* A viewer that throws must not take the page down with it:
+                          without this boundary the throw reaches the root and
+                          leaves a blank document (the chat's FilePanel has done
+                          this for the same reason since forever). */}
+                      <DocumentErrorBoundary
+                        fallback={<PreviewEmpty message={t('documents.preview.sourceError')} />}
+                      >
+                        <Suspense fallback={<PreviewLoading />}>
+                          <PreviewViewer
+                            url={sourcePreviewUrl}
+                            port={0}
+                            title={filename}
+                            loading={false}
+                            error={false}
+                            onClose={() => onOpenChange(false)}
+                            isDragging={isDragging}
+                            reloadToken={sourcePage}
+                            documentData={isPdfSource ? source : undefined}
+                            documentViewMode={sourceViewMode}
+                            documentPage={sourcePage}
+                            onDocumentPageChange={setSourcePage}
+                            onDocumentPageCount={setSourcePageCount}
+                            sandbox={isPdfSource ? null : undefined}
+                          />
+                        </Suspense>
+                      </DocumentErrorBoundary>
                     </div>
                   </div>
                 )

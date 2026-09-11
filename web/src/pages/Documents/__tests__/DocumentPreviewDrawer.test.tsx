@@ -6,6 +6,9 @@ const fetchArtifactText = vi.fn();
 const useDocument = vi.fn();
 const useDocumentJobs = vi.fn();
 const useDocumentArtifacts = vi.fn();
+// A viewer can fail on data it cannot read (a buffer pdf.js already detached,
+// a malformed file). The drawer has to survive that.
+const previewViewerState = vi.hoisted(() => ({ shouldThrow: false }));
 
 vi.mock('../hooks', () => ({
   useDocument: (...args: unknown[]) => useDocument(...args),
@@ -19,9 +22,12 @@ vi.mock('../api', () => ({
 vi.mock('@/pages/ChatAgent/components/Markdown', () => ({ default: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock('@/pages/ChatAgent/components/viewers/PdfViewer', () => ({ default: () => <div data-testid="pdf-viewer">PDF viewer</div> }));
 vi.mock('@/pages/ChatAgent/components/viewers/PreviewViewer', () => ({
-  default: ({ documentData, documentViewMode }: { documentData?: ArrayBuffer; documentViewMode?: string }) => (
-    <div data-testid="preview-viewer" data-has-document-data={String(Boolean(documentData))} data-document-mode={documentViewMode}>Preview viewer</div>
-  ),
+  default: ({ documentData, documentViewMode }: { documentData?: ArrayBuffer; documentViewMode?: string }) => {
+    if (previewViewerState.shouldThrow) throw new Error('detached ArrayBuffer');
+    return (
+      <div data-testid="preview-viewer" data-has-document-data={String(Boolean(documentData))} data-document-mode={documentViewMode}>Preview viewer</div>
+    );
+  },
 }));
 
 import DocumentPreviewDrawer from '../components/DocumentPreviewDrawer';
@@ -29,6 +35,7 @@ import DocumentPreviewDrawer from '../components/DocumentPreviewDrawer';
 describe('DocumentPreviewDrawer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    previewViewerState.shouldThrow = false;
     useDocument.mockReturnValue({ data: { original_filename: 'lesson.pdf', parse_status: 'completed' } });
     useDocumentJobs.mockReturnValue({ data: [{ job_id: 'job-1', status: 'completed' }] });
     useDocumentArtifacts.mockReturnValue({ data: [{ artifact_id: 'art-1', producer_job_id: 'job-1', artifact_kind: 'primary_document', format: 'markdown', media_type: 'text/markdown' }] });
@@ -72,5 +79,20 @@ describe('DocumentPreviewDrawer', () => {
 
     await user.click(screen.getByRole('button', { name: 'View full screen' }));
     expect(screen.getByRole('button', { name: 'Exit full screen' })).toBeInTheDocument();
+  });
+
+  it('contains a viewer failure instead of blanking the page', async () => {
+    // Regression: a render-phase throw from the viewer used to escape the
+    // drawer entirely — the app unmounted and the user got a blank page, which
+    // is what a remount with a pdf.js-detached buffer produced.
+    previewViewerState.shouldThrow = true;
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<DocumentPreviewDrawer open documentId="doc-1" onOpenChange={vi.fn()} />);
+
+    expect(await screen.findByText('The original file could not be loaded.')).toBeInTheDocument();
+    // The drawer is still mounted — the failure stayed local to the viewer.
+    expect(screen.getByRole('tab', { name: 'Original file' })).toBeInTheDocument();
+    spy.mockRestore();
   });
 });

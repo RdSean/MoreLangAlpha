@@ -1056,3 +1056,12 @@
 - 取消截断:去掉 `.slice(0, 10)`,所有匹配都渲染;菜单高度由 `.mention-autocomplete` 自己限制(从固定 `240px` 改为 `min(340px, 45vh)`,保留 `overflow-y: auto` 并加 `overscroll-behavior: contain`),键盘上下选中的项仍会自动滚入视野。
 - 新增两条测试:裸 `/` 时置顶命令排在任何系统命令之前;列表尾部的 skill 依然在(不再被截断)。原有排序断言(系统命令优先于 skill、前缀优先于子串)全部保留通过。
 - 验证：`pnpm typecheck` 通过；`pnpm vitest run` **236 files / 2267 tests 全绿**；`pnpm lint` 0 error 且告警数未增加(56,与改动前一致)；`pnpm build` + critical-path 检查通过。
+## 2026-09-11
+
+### 修复文档预览切回「原始文件」时整页空白
+
+- 根因（有依赖源码作证，不是猜的）：pdf.js 把文档字节**当 transferable 交给 worker**——`pdf.mjs:14158` 的 `sendWithPromise("GetDocRequest", docParams, data ? [data.buffer] : null)`，`react-pdf` 的 `Document.js:128` 只是原样转发调用方的 `Uint8Array`。而 `PdfViewer` 里 `new Uint8Array(data)` **只是同一块 buffer 的视图**，于是抽屉 state 持有的 `source` 在首次渲染后就被 detach。切到「解析文件」会卸载 viewer,切回「原始文件」重新挂载时把这块已 detach 的 buffer 再交给 pdf.js → 加载失败 → `onLoadError` → `setError` → 渲染期 `throw error`;而 `DocumentErrorBoundary` 此前**只包在 ChatAgent 的 FilePanel**，文档抽屉没有,异常直冲根节点 → 整个页面被卸载成空白。
+- 修一（根因）：`PdfViewer` 交给 pdf.js 的永远是**副本**（`ArrayBuffer` 走 `data.slice(0)`，`Uint8Array` 走 `new Uint8Array(data)`），调用方持有的那块 buffer 不再被拿走，重挂载即可正常工作。这条对 FilePanel 的 PDF 预览同样有效。
+- 修二（兜底）：`DocumentPreviewDrawer` 用 `DocumentErrorBoundary` 包住 viewer（与 FilePanel 一致的既有做法），viewer 抛错时降级为「原始文件无法加载」的提示，而不是把整个应用拖白。
+- 回归测试两条，且都验证过"没有修复时会失败"：`viewers/__tests__/PdfViewer.test.tsx`（用真实的 transfer 语义 detach 掉传进去的 buffer，断言调用方的 buffer 未受损、重挂载后仍可用）与 `DocumentPreviewDrawer.test.tsx` 的新用例（viewer 抛错时抽屉仍挂载并显示提示）。
+- 验证：`pnpm typecheck` 通过；`pnpm vitest run` **237 files / 2270 tests 全绿**；`pnpm lint` 0 error（告警数 56 未变）；`pnpm build` + critical-path 通过。
