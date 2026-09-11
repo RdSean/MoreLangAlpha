@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import { useState } from 'react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import en from '@/locales/en-US.json';
@@ -32,7 +33,11 @@ import type { WidgetInstance } from '../../types';
 const T = en.dashboard.widgets.homeworkCalendar;
 const COMMON = en.dashboard.widgets.common;
 
-type HwConfig = { window?: '1w' | '2w' | '1m'; showCompleted?: boolean };
+type HwConfig = {
+  window?: '1w' | '2w' | '1m';
+  showCompleted?: boolean;
+  view?: 'list' | 'month';
+};
 
 function makeInstance(config: HwConfig = {}): WidgetInstance<HwConfig> {
   return { id: 'hw-1', type: 'education.homeworkCalendar', config };
@@ -95,10 +100,29 @@ function LocationProbe() {
   return <output data-testid="location">{location.pathname}</output>;
 }
 
-function renderWidget(config: HwConfig = {}) {
+/**
+ * Renders the widget the way the canvas does: the parent owns the config, and
+ * an `updateConfig` patch comes back as a new `instance`. `useDashboardPrefs`
+ * applies patches optimistically, so switching view or range re-renders the
+ * widget immediately — the harness has to do the same or the switches look
+ * inert.
+ */
+function renderWidget(
+  config: HwConfig = {},
+  onUpdateConfig?: (patch: Partial<HwConfig>) => void,
+) {
+  function Harness() {
+    const [current, setCurrent] = useState<HwConfig>(config);
+    const apply = (patch: Partial<HwConfig>) => {
+      onUpdateConfig?.(patch);
+      setCurrent((previous) => ({ ...previous, ...patch }));
+    };
+    return <HomeworkCalendarWidget instance={makeInstance(current)} updateConfig={apply} />;
+  }
+
   return render(
     <MemoryRouter initialEntries={['/dashboard']} future={{ v7_startTransition: true }}>
-      <HomeworkCalendarWidget instance={makeInstance(config)} updateConfig={() => {}} />
+      <Harness />
       <LocationProbe />
     </MemoryRouter>,
   );
@@ -316,6 +340,200 @@ describe('HomeworkCalendarWidget', () => {
       start_date: '2026-09-11',
       end_date: '2026-09-17',
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Period switcher — on the widget face, not buried in the settings dialog
+  // ---------------------------------------------------------------------------
+  it('re-queries with the chosen range when the period control is used', () => {
+    state.calendar = calendar([['2026-09-11', [task()]]]);
+    renderWidget({ window: '2w' });
+    expect(state.calls.at(-1)).toMatchObject({
+      start_date: '2026-09-11',
+      end_date: '2026-09-24',
+    });
+
+    fireEvent.click(screen.getByTestId('homework-range-1w'));
+    expect(state.calls.at(-1)).toMatchObject({
+      start_date: '2026-09-11',
+      end_date: '2026-09-17',
+    });
+
+    fireEvent.click(screen.getByTestId('homework-range-1m'));
+    expect(state.calls.at(-1)).toMatchObject({
+      start_date: '2026-09-11',
+      end_date: '2026-10-11',
+    });
+  });
+
+  it('persists the chosen range through updateConfig', () => {
+    state.calendar = calendar([['2026-09-11', [task()]]]);
+    const updateConfig = vi.fn();
+    renderWidget({ window: '2w' }, updateConfig);
+
+    fireEvent.click(screen.getByTestId('homework-range-1w'));
+    expect(updateConfig).toHaveBeenCalledWith({ window: '1w' });
+  });
+
+  it('marks the active period control as selected', () => {
+    state.calendar = calendar([['2026-09-11', [task()]]]);
+    renderWidget({ window: '1w' });
+    expect(screen.getByTestId('homework-range-1w')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('homework-range-2w')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Month view
+  // ---------------------------------------------------------------------------
+
+  /** Every date cell in the month grid, in grid order. */
+  function dayCells(): HTMLElement[] {
+    return screen.getAllByTestId('homework-day');
+  }
+
+  it('switches to the month grid and back', () => {
+    state.calendar = calendar([['2026-09-11', [task()]]]);
+    const updateConfig = vi.fn();
+    renderWidget({ view: 'list' }, updateConfig);
+    expect(screen.queryByTestId('homework-month-grid')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('homework-view-month'));
+    expect(screen.getByTestId('homework-month-grid')).toBeInTheDocument();
+    expect(updateConfig).toHaveBeenCalledWith({ view: 'month' });
+  });
+
+  it('renders every day of the displayed month', () => {
+    state.calendar = calendar([['2026-09-11', [task()]]]);
+    renderWidget({ view: 'month' });
+
+    // September has 30 days.
+    const cells = dayCells().filter((cell) => cell.getAttribute('data-in-month') === 'true');
+    expect(cells).toHaveLength(30);
+    expect(cells[0]).toHaveAttribute('data-date', '2026-09-01');
+    expect(cells[29]).toHaveAttribute('data-date', '2026-09-30');
+  });
+
+  it('requests the whole displayed month', () => {
+    state.calendar = calendar([['2026-09-11', [task()]]]);
+    renderWidget({ view: 'month' });
+    expect(state.calls.at(-1)).toMatchObject({
+      start_date: '2026-09-01',
+      end_date: '2026-09-30',
+    });
+  });
+
+  it('starts on today and lists that day when a date is clicked', () => {
+    state.calendar = calendar([
+      ['2026-09-11', [task({ task_id: 't-today', title: '今天的作业' })]],
+      ['2026-09-15', [task({ task_id: 't-later', title: '十五号的作业' })]],
+    ]);
+    renderWidget({ view: 'month' });
+
+    // Default selection is today, so today's work is already listed below.
+    let listed = screen.getAllByTestId('homework-day-task');
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toHaveAttribute('data-task-id', 't-today');
+
+    const fifteenth = dayCells().find((cell) => cell.getAttribute('data-date') === '2026-09-15')!;
+    fireEvent.click(fifteenth);
+
+    listed = screen.getAllByTestId('homework-day-task');
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toHaveAttribute('data-task-id', 't-later');
+    expect(fifteenth).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('shows an empty state for a day with no homework', () => {
+    state.calendar = calendar([['2026-09-11', [task()]]]);
+    renderWidget({ view: 'month' });
+
+    const empty = dayCells().find((cell) => cell.getAttribute('data-date') === '2026-09-20')!;
+    fireEvent.click(empty);
+    expect(screen.getByTestId('homework-day-empty')).toBeInTheDocument();
+    expect(screen.queryAllByTestId('homework-day-task')).toHaveLength(0);
+  });
+
+  it('marks a day that holds overdue work', () => {
+    state.calendar = calendar([
+      ['2026-09-09', [task({ task_id: 't-over', is_overdue: true })]],
+    ]);
+    renderWidget({ view: 'month' });
+
+    const ninth = dayCells().find((cell) => cell.getAttribute('data-date') === '2026-09-09')!;
+    expect(ninth).toHaveAttribute('data-overdue', 'true');
+    const clean = dayCells().find((cell) => cell.getAttribute('data-date') === '2026-09-10')!;
+    expect(clean).toHaveAttribute('data-overdue', 'false');
+  });
+
+  it('shows one dot per subject on a day, capped with a remainder count', () => {
+    state.calendar = calendar([
+      [
+        '2026-09-14',
+        [
+          task({ task_id: 'a', subject_code: 'chinese', subject_color: '#D95D39' }),
+          task({ task_id: 'b', subject_code: 'math', subject_color: '#277DA1' }),
+          task({ task_id: 'c', subject_code: 'english', subject_color: '#6A994E' }),
+          task({ task_id: 'd', subject_code: 'biology', subject_color: '#2A9D8F' }),
+        ],
+      ],
+    ]);
+    renderWidget({ view: 'month' });
+
+    const cell = dayCells().find((c) => c.getAttribute('data-date') === '2026-09-14')!;
+    expect(cell.querySelectorAll('[data-dot]')).toHaveLength(3);
+    expect(cell.textContent).toContain('+1');
+  });
+
+  it('navigates to the neighbouring month and selects its first day', () => {
+    state.calendar = calendar([['2026-09-11', [task()]]]);
+    renderWidget({ view: 'month' });
+
+    fireEvent.click(screen.getByTestId('homework-prev'));
+    expect(state.calls.at(-1)).toMatchObject({
+      start_date: '2026-08-01',
+      end_date: '2026-08-31',
+    });
+    expect(dayCells().find((c) => c.getAttribute('aria-pressed') === 'true')).toHaveAttribute(
+      'data-date',
+      '2026-08-01',
+    );
+  });
+
+  it('hides the stats strip off the current month and offers a way back', () => {
+    state.calendar = calendar([['2026-09-11', [task()]]], {
+      today_count: 2,
+      week_count: 8,
+      overdue_count: 3,
+      completed_count: 21,
+    });
+    renderWidget({ view: 'month' });
+
+    expect(screen.getByTestId('homework-stats')).toBeInTheDocument();
+    expect(screen.queryByTestId('homework-back-to-month')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('homework-prev'));
+    expect(screen.queryByTestId('homework-stats')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('homework-back-to-month'));
+    expect(screen.getByTestId('homework-stats')).toBeInTheDocument();
+    expect(state.calls.at(-1)).toMatchObject({
+      start_date: '2026-09-01',
+      end_date: '2026-09-30',
+    });
+  });
+
+  it('filters completed work out of the month grid too', () => {
+    state.calendar = calendar([
+      [
+        '2026-09-11',
+        [
+          task({ task_id: 'open' }),
+          task({ task_id: 'done', status: 'completed', is_completed: true }),
+        ],
+      ],
+    ]);
+    renderWidget({ view: 'month', showCompleted: false });
+    expect(screen.getAllByTestId('homework-day-task')).toHaveLength(1);
   });
 
   it('groups tasks dated before today into their own bucket when looking back', () => {

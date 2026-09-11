@@ -799,8 +799,18 @@
           "window_1w": "一周",
           "window_2w": "两周",
           "window_1m": "一个月",
+          "defaultView": "默认视图",
           "showCompleted": "显示已完成"
-        }
+        },
+        "view_list": "列表",
+        "view_month": "月历",
+        "range_1w": "1周",
+        "range_2w": "2周",
+        "range_1m": "1月",
+        "backToThisMonth": "回到本月",
+        "dayEmpty": "这一天没有到期作业",
+        "previousPeriod": "上一个周期",
+        "nextPeriod": "下一个周期"
       },
       "presets": {
         "family-desk": {

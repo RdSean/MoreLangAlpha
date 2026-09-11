@@ -799,8 +799,18 @@
           "window_1w": "1 week",
           "window_2w": "2 weeks",
           "window_1m": "1 month",
+          "defaultView": "Opening view",
           "showCompleted": "Show completed tasks"
-        }
+        },
+        "view_list": "List",
+        "view_month": "Month",
+        "range_1w": "1w",
+        "range_2w": "2w",
+        "range_1m": "1m",
+        "backToThisMonth": "This month",
+        "dayEmpty": "Nothing due this day",
+        "previousPeriod": "Previous period",
+        "nextPeriod": "Next period"
       },
       "presets": {
         "family-desk": {

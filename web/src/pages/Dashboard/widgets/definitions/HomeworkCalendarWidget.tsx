@@ -1,7 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { CalendarCheck, Check, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  CalendarCheck,
+  CalendarDays,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  List,
+} from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { SubjectIcon } from '@/components/icons/SubjectIcon';
 import { useEducationMembers, useEducationTaskCalendar } from '@/pages/Education/queries';
@@ -15,23 +22,29 @@ import { EnumField } from '../framework/settings/EnumField';
 import { SettingsDoneButton } from '../framework/settings/SettingsDoneButton';
 import type { WidgetRenderProps, WidgetSettingsProps } from '../types';
 
+type HomeworkCalendarWindow = '1w' | '2w' | '1m';
+type HomeworkCalendarView = 'list' | 'month';
+
 type HomeworkCalendarConfig = {
-  window?: '1w' | '2w' | '1m';
+  window?: HomeworkCalendarWindow;
   showCompleted?: boolean;
+  view?: HomeworkCalendarView;
 };
 
 /** Window length in days. Also the step size of the range stepper. */
-const WINDOW_DAYS: Record<NonNullable<HomeworkCalendarConfig['window']>, number> = {
+const WINDOW_DAYS: Record<HomeworkCalendarWindow, number> = {
   '1w': 7,
   '2w': 14,
   '1m': 31,
 };
 
+const WINDOW_OPTIONS: HomeworkCalendarWindow[] = ['1w', '2w', '1m'];
+
 /**
- * How many windows back the stepper may go. The API bounds the range (`end -
- * start < 62` days) and how far ahead the end may be, but puts no floor on how
- * old the start may be, so this is purely a guard against a held key spinning
- * the query key forever.
+ * How many windows back the list stepper may go. The API bounds the range
+ * (`end - start < 62` days) and how far ahead the end may be, but puts no floor
+ * on how old the start may be, so this is purely a guard against a held key
+ * spinning the query key forever.
  */
 const MAX_LOOKBACK_WINDOWS = 8;
 
@@ -48,6 +61,12 @@ const BUCKET_KEY: Record<BucketKey, string> = {
 
 const BUCKET_ORDER: BucketKey[] = ['past', 'today', 'tomorrow', 'week', 'next', 'later'];
 
+const WINDOW_LABEL_KEY: Record<HomeworkCalendarWindow, string> = {
+  '1w': 'dashboard.widgets.homeworkCalendar.range_1w',
+  '2w': 'dashboard.widgets.homeworkCalendar.range_2w',
+  '1m': 'dashboard.widgets.homeworkCalendar.range_1m',
+};
+
 /** Local-date YYYY-MM-DD. `toISOString()` would emit UTC, which crosses the
  *  day boundary for anyone east or west of it — a task due "today" would
  *  silently land in yesterday's or tomorrow's bucket. */
@@ -59,6 +78,18 @@ function shiftDays(base: Date, days: number): Date {
   const next = new Date(base);
   next.setDate(next.getDate() + days);
   return next;
+}
+
+function startOfMonth(base: Date): Date {
+  return new Date(base.getFullYear(), base.getMonth(), 1);
+}
+
+function endOfMonth(base: Date): Date {
+  return new Date(base.getFullYear(), base.getMonth() + 1, 0);
+}
+
+function isSameMonth(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
 }
 
 /** Whole days between two local YYYY-MM-DD strings, ignoring DST wobble. */
@@ -88,6 +119,17 @@ function memberName(members: EducationMember[], studentId: string): string | nul
   return members.find((member) => member.user_id === studentId)?.name ?? null;
 }
 
+/**
+ * The week starts on Monday, matching how the backend derives its week window
+ * (`isoweekday`), so the widget's "this week" and the grid's columns agree.
+ */
+function weekdayHeaders(locale: string): string[] {
+  // 2024-01-01 is a Monday; walk forward so the formatter supplies the names.
+  const monday = new Date(2024, 0, 1);
+  const format = new Intl.DateTimeFormat(locale, { weekday: 'narrow' });
+  return Array.from({ length: 7 }, (_, index) => format.format(shiftDays(monday, index)));
+}
+
 function serializeTasksToMarkdown(
   tasks: EducationCalendarTask[],
   nameFor: (id: string) => string | null,
@@ -115,16 +157,17 @@ interface TaskRowProps {
   instanceId: string;
   childName: string | null;
   onOpen: () => void;
+  testId: string;
 }
 
-function TaskRow({ task, instanceId, childName, onOpen }: TaskRowProps) {
+function TaskRow({ task, instanceId, childName, onOpen, testId }: TaskRowProps) {
   const { t } = useTranslation();
   const clock = dueClock(task.due_at);
 
   return (
     <button
       type="button"
-      data-testid="homework-task"
+      data-testid={testId}
       data-task-id={task.task_id}
       data-overdue={task.is_overdue ? 'true' : 'false'}
       data-completed={task.is_completed ? 'true' : 'false'}
@@ -227,6 +270,7 @@ function BucketSection({
             instanceId={instanceId}
             childName={nameFor(task.assigned_student_id)}
             onOpen={onOpen}
+            testId="homework-task"
           />
         ))}
       </div>
@@ -258,27 +302,164 @@ function StatChip({ stat, value }: { stat: string; value: number }) {
   );
 }
 
-function HomeworkCalendarWidget({ instance }: WidgetRenderProps<HomeworkCalendarConfig>) {
+/** Distinct subject colours for a day, capped, with a remainder count. */
+function dayDots(tasks: EducationCalendarTask[]): { colors: string[]; extra: number } {
+  const seen = new Set<string>();
+  const colors: string[] = [];
+  for (const task of tasks) {
+    const key = task.subject_code ?? `__${task.task_id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (colors.length < 3) colors.push(task.subject_color ?? 'var(--color-text-tertiary)');
+  }
+  return { colors, extra: Math.max(0, seen.size - 3) };
+}
+
+function MonthGrid({
+  cursor,
+  today,
+  locale,
+  selectedDate,
+  tasksByDate,
+  onSelect,
+}: {
+  cursor: Date;
+  today: Date;
+  locale: string;
+  selectedDate: string;
+  tasksByDate: Map<string, EducationCalendarTask[]>;
+  onSelect: (date: string) => void;
+}) {
   const { t } = useTranslation();
+  const headers = useMemo(() => weekdayHeaders(locale), [locale]);
+  const monthStart = startOfMonth(cursor);
+  // Monday-first, so a Monday has zero leading blanks.
+  const leadingBlanks = (monthStart.getDay() + 6) % 7;
+  const dayCount = endOfMonth(cursor).getDate();
+  const todayStr = localDateStr(today);
+  const dateFormat = useMemo(
+    () => new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' }),
+    [locale],
+  );
+
+  return (
+    <div data-testid="homework-month-grid" className="flex flex-col gap-0.5">
+      <div className="grid grid-cols-7 gap-0.5">
+        {headers.map((label, index) => (
+          <span
+            key={index}
+            aria-hidden="true"
+            className="py-0.5 text-center text-[0.5625rem] font-semibold uppercase tracking-wider"
+            style={{ color: 'var(--color-text-tertiary)' }}
+          >
+            {label}
+          </span>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-0.5">
+        {Array.from({ length: leadingBlanks }, (_, index) => (
+          <span key={`blank-${index}`} aria-hidden="true" />
+        ))}
+        {Array.from({ length: dayCount }, (_, index) => {
+          const day = index + 1;
+          const date = new Date(cursor.getFullYear(), cursor.getMonth(), day);
+          const dateStr = localDateStr(date);
+          const dayTasks = tasksByDate.get(dateStr) ?? [];
+          const { colors, extra } = dayDots(dayTasks);
+          const isToday = dateStr === todayStr;
+          const selected = dateStr === selectedDate;
+          const overdue = dayTasks.some((task) => task.is_overdue);
+          return (
+            <button
+              key={dateStr}
+              type="button"
+              data-testid="homework-day"
+              data-date={dateStr}
+              data-in-month="true"
+              data-overdue={overdue ? 'true' : 'false'}
+              aria-pressed={selected}
+              aria-label={`${dateFormat.format(date)} · ${dayTasks.length}`}
+              onClick={() => onSelect(dateStr)}
+              className="flex aspect-square flex-col items-center justify-center gap-0.5 rounded-md border transition-colors hover:bg-[var(--color-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              style={{
+                borderColor: isToday && !selected ? 'var(--color-accent-primary)' : 'transparent',
+                backgroundColor: selected ? 'var(--color-bg-subtle)' : 'transparent',
+              }}
+            >
+              <span
+                className="dashboard-mono text-[0.6875rem] leading-none tabular-nums"
+                style={{
+                  color: overdue
+                    ? 'var(--color-loss)'
+                    : isToday
+                      ? 'var(--color-accent-primary)'
+                      : 'var(--color-text-primary)',
+                  fontWeight: isToday || selected ? 600 : 400,
+                }}
+              >
+                {day}
+              </span>
+              <span className="flex h-1.5 items-center gap-0.5">
+                {colors.map((color, dotIndex) => (
+                  <span
+                    key={dotIndex}
+                    data-dot="true"
+                    className="size-1 rounded-full"
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+                {extra > 0 ? (
+                  <span
+                    className="text-[0.5rem] leading-none"
+                    style={{ color: 'var(--color-text-tertiary)' }}
+                  >
+                    +{extra}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {dayCount === 0 ? <span>{t('dashboard.widgets.common.loading')}</span> : null}
+    </div>
+  );
+}
+
+function HomeworkCalendarWidget({ instance, updateConfig }: WidgetRenderProps<HomeworkCalendarConfig>) {
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { member } = useAuth();
   const [offset, setOffset] = useState(0);
 
-  const windowDays = WINDOW_DAYS[instance.config.window ?? '2w'];
+  const windowSize = instance.config.window ?? '2w';
+  const windowDays = WINDOW_DAYS[windowSize];
   const showCompleted = instance.config.showCompleted ?? false;
+  const view: HomeworkCalendarView = instance.config.view ?? 'list';
 
-  // The window starts at today and runs forward, so the default view answers
-  // "what is coming up". Stepping back shifts the same-length window into the
-  // past, which is what the previous-week control is for.
   const today = useMemo(() => new Date(), []);
   const todayStr = localDateStr(today);
+  const [monthCursor, setMonthCursor] = useState(() => startOfMonth(today));
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+
+  // Range depends on the view: the list looks forward from today and can be
+  // stepped back, the month grid always asks for exactly the month on screen.
   const range = useMemo(() => {
+    if (view === 'month') {
+      return {
+        start_date: localDateStr(startOfMonth(monthCursor)),
+        end_date: localDateStr(endOfMonth(monthCursor)),
+      };
+    }
+    // The window starts at today and runs forward, so the default view answers
+    // "what is coming up". Stepping back shifts the same-length window into the
+    // past, which is what the previous-period control is for.
     const start = shiftDays(today, -offset * windowDays);
     return {
       start_date: localDateStr(start),
       end_date: localDateStr(shiftDays(start, windowDays - 1)),
     };
-  }, [today, offset, windowDays]);
+  }, [view, monthCursor, today, offset, windowDays]);
 
   const { data, isLoading } = useEducationTaskCalendar(range);
   // Students cannot read the household member list; asking would 403. The
@@ -315,6 +496,24 @@ function HomeworkCalendarWidget({ instance }: WidgetRenderProps<HomeworkCalendar
     return buckets;
   }, [tasks, todayStr]);
 
+  const tasksByDate = useMemo(() => {
+    const map = new Map<string, EducationCalendarTask[]>();
+    for (const task of tasks) {
+      const list = map.get(task.occurrence_date);
+      if (list) list.push(task);
+      else map.set(task.occurrence_date, [task]);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => {
+        const byDue = a.due_at.localeCompare(b.due_at);
+        return byDue !== 0 ? byDue : a.task_id.localeCompare(b.task_id);
+      });
+    }
+    return map;
+  }, [tasks]);
+
+  const selectedTasks = view === 'month' ? (tasksByDate.get(selectedDate) ?? []) : [];
+
   useWidgetContextExport(instance.id, {
     full: () => {
       const sections: string[] = [];
@@ -342,6 +541,7 @@ function HomeworkCalendarWidget({ instance }: WidgetRenderProps<HomeworkCalendar
             start_date: range.start_date,
             end_date: range.end_date,
             count: tasks.length,
+            view,
             show_completed: String(showCompleted),
           },
           body,
@@ -349,6 +549,7 @@ function HomeworkCalendarWidget({ instance }: WidgetRenderProps<HomeworkCalendar
         data: {
           start_date: range.start_date,
           end_date: range.end_date,
+          view,
           stats: data?.stats ?? null,
           tasks,
         },
@@ -379,54 +580,171 @@ function HomeworkCalendarWidget({ instance }: WidgetRenderProps<HomeworkCalendar
 
   const openEducation = () => navigate('/education');
 
+  const onCurrentPeriod = view === 'month' ? isSameMonth(monthCursor, today) : offset === 0;
+  const monthLabel = useMemo(
+    () => new Intl.DateTimeFormat(i18n.language, { year: 'numeric', month: 'long' }).format(monthCursor),
+    [i18n.language, monthCursor],
+  );
+
+  const goPrevious = () => {
+    if (view === 'month') {
+      const previous = new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1);
+      setMonthCursor(previous);
+      setSelectedDate(isSameMonth(previous, today) ? todayStr : localDateStr(previous));
+      return;
+    }
+    setOffset((current) => Math.min(current + 1, MAX_LOOKBACK_WINDOWS));
+  };
+
+  const goNext = () => {
+    if (view === 'month') {
+      const next = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1);
+      setMonthCursor(next);
+      setSelectedDate(isSameMonth(next, today) ? todayStr : localDateStr(next));
+      return;
+    }
+    setOffset((current) => Math.max(current - 1, 0));
+  };
+
+  const goToCurrentMonth = () => {
+    setMonthCursor(startOfMonth(today));
+    setSelectedDate(todayStr);
+  };
+
   return (
     <div className="dashboard-glass-card flex h-full flex-col p-5" data-testid="homework-widget">
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div className="min-w-0">
+      <div className="mb-2 flex flex-col gap-1.5">
+        <div className="flex items-start justify-between gap-2">
           <div
-            className="text-[0.5938rem] font-semibold uppercase tracking-[0.16em]"
+            className="truncate text-[0.5938rem] font-semibold uppercase tracking-[0.16em]"
             style={{ color: 'var(--color-text-tertiary)' }}
           >
             {t('dashboard.widgets.homeworkCalendar.title')}
           </div>
           <div
-            className="dashboard-mono mt-0.5 text-[0.6563rem] tabular-nums"
-            style={{ color: 'var(--color-text-tertiary)' }}
+            role="group"
+            aria-label={t('dashboard.widgets.homeworkCalendar.title')}
+            className="flex flex-shrink-0 items-center gap-0.5 rounded-md border p-0.5"
+            style={{ borderColor: 'var(--color-border-muted)' }}
           >
-            {offset === 0
-              ? t('dashboard.widgets.homeworkCalendar.thisWeek')
-              : `${range.start_date} → ${range.end_date}`}
+            {(
+              [
+                { value: 'list' as const, icon: List, key: 'view_list', testId: 'homework-view-list' },
+                {
+                  value: 'month' as const,
+                  icon: CalendarDays,
+                  key: 'view_month',
+                  testId: 'homework-view-month',
+                },
+              ]
+            ).map(({ value, icon: Icon, key, testId }) => {
+              const active = view === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  data-testid={testId}
+                  aria-pressed={active}
+                  title={t(`dashboard.widgets.homeworkCalendar.${key}`)}
+                  onClick={() => updateConfig({ view: value })}
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[0.625rem] transition-colors"
+                  style={{
+                    backgroundColor: active ? 'var(--color-bg-elevated)' : 'transparent',
+                    color: active ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
+                    fontWeight: active ? 600 : 400,
+                  }}
+                >
+                  <Icon size={11} aria-hidden="true" />
+                  {t(`dashboard.widgets.homeworkCalendar.${key}`)}
+                </button>
+              );
+            })}
           </div>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-0.5">
-          <button
-            type="button"
-            data-testid="homework-prev"
-            onClick={() => setOffset((current) => Math.min(current + 1, MAX_LOOKBACK_WINDOWS))}
-            disabled={offset >= MAX_LOOKBACK_WINDOWS}
-            title={t('dashboard.widgets.homeworkCalendar.previousWeek')}
-            aria-label={t('dashboard.widgets.homeworkCalendar.previousWeek')}
-            className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-bg-hover)] disabled:opacity-40"
-          >
-            <ChevronLeft className="size-3.5" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            data-testid="homework-next"
-            onClick={() => setOffset((current) => Math.max(current - 1, 0))}
-            disabled={offset === 0}
-            title={t('dashboard.widgets.homeworkCalendar.nextWeek')}
-            aria-label={t('dashboard.widgets.homeworkCalendar.nextWeek')}
-            className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-bg-hover)] disabled:opacity-40"
-          >
-            <ChevronRight className="size-3.5" aria-hidden="true" />
-          </button>
+
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {view === 'list' ? (
+              <div
+                role="group"
+                aria-label={t('dashboard.widgets.homeworkCalendar.settings.window')}
+                className="flex items-center gap-0.5"
+              >
+                {WINDOW_OPTIONS.map((option) => {
+                  const active = windowSize === option;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      data-testid={`homework-range-${option}`}
+                      aria-pressed={active}
+                      onClick={() => updateConfig({ window: option })}
+                      className="rounded px-1.5 py-0.5 text-[0.625rem] tabular-nums transition-colors"
+                      style={{
+                        backgroundColor: active ? 'var(--color-bg-subtle)' : 'transparent',
+                        color: active ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
+                        fontWeight: active ? 600 : 400,
+                      }}
+                    >
+                      {t(WINDOW_LABEL_KEY[option])}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <>
+                <span
+                  className="dashboard-mono truncate text-[0.6875rem] tabular-nums"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {monthLabel}
+                </span>
+                {!onCurrentPeriod ? (
+                  <button
+                    type="button"
+                    data-testid="homework-back-to-month"
+                    onClick={goToCurrentMonth}
+                    className="rounded px-1.5 py-0.5 text-[0.625rem] transition-colors hover:bg-[var(--color-bg-hover)]"
+                    style={{ color: 'var(--color-accent-primary)' }}
+                  >
+                    {t('dashboard.widgets.homeworkCalendar.backToThisMonth')}
+                  </button>
+                ) : null}
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              data-testid="homework-prev"
+              onClick={goPrevious}
+              disabled={view === 'list' && offset >= MAX_LOOKBACK_WINDOWS}
+              title={t('dashboard.widgets.homeworkCalendar.previousPeriod')}
+              aria-label={t('dashboard.widgets.homeworkCalendar.previousPeriod')}
+              className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-bg-hover)] disabled:opacity-40"
+            >
+              <ChevronLeft className="size-3.5" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              data-testid="homework-next"
+              onClick={goNext}
+              disabled={view === 'list' && offset === 0}
+              title={t('dashboard.widgets.homeworkCalendar.nextPeriod')}
+              aria-label={t('dashboard.widgets.homeworkCalendar.nextPeriod')}
+              className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-bg-hover)] disabled:opacity-40"
+            >
+              <ChevronRight className="size-3.5" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </div>
 
       {/* The strip summarises where the household stands *right now*, so it is
-          hidden while browsing a past window rather than mislabelled. */}
-      {data && offset === 0 ? (
+          hidden while browsing anything other than the current period — a past
+          window or another month — rather than being mislabelled. */}
+      {data && onCurrentPeriod ? (
         <div
           data-testid="homework-stats"
           className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-b pb-2"
@@ -445,6 +763,39 @@ function HomeworkCalendarWidget({ instance }: WidgetRenderProps<HomeworkCalendar
             <span className="text-[0.6875rem]" style={{ color: 'var(--color-text-tertiary)' }}>
               {t('dashboard.widgets.common.loading')}
             </span>
+          </div>
+        ) : view === 'month' ? (
+          <div className="flex flex-col gap-3">
+            <MonthGrid
+              cursor={monthCursor}
+              today={today}
+              locale={i18n.language}
+              selectedDate={selectedDate}
+              tasksByDate={tasksByDate}
+              onSelect={setSelectedDate}
+            />
+            <div className="flex flex-col gap-1" data-testid="homework-day-list">
+              {selectedTasks.length === 0 ? (
+                <p
+                  data-testid="homework-day-empty"
+                  className="py-3 text-center text-[0.6875rem]"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                >
+                  {t('dashboard.widgets.homeworkCalendar.dayEmpty')}
+                </p>
+              ) : (
+                selectedTasks.map((task) => (
+                  <TaskRow
+                    key={task.task_id}
+                    task={task}
+                    instanceId={instance.id}
+                    childName={nameFor(task.assigned_student_id)}
+                    onOpen={openEducation}
+                    testId="homework-day-task"
+                  />
+                ))
+              )}
+            </div>
           </div>
         ) : tasks.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
@@ -500,11 +851,20 @@ function HomeworkCalendarSettings({
       <EnumField
         label={t('dashboard.widgets.homeworkCalendar.settings.window')}
         value={config.window ?? '2w'}
-        onChange={(next) => onChange({ window: next as HomeworkCalendarConfig['window'] })}
+        onChange={(next) => onChange({ window: next as HomeworkCalendarWindow })}
         options={[
           { value: '1w', label: t('dashboard.widgets.homeworkCalendar.settings.window_1w') },
           { value: '2w', label: t('dashboard.widgets.homeworkCalendar.settings.window_2w') },
           { value: '1m', label: t('dashboard.widgets.homeworkCalendar.settings.window_1m') },
+        ]}
+      />
+      <EnumField
+        label={t('dashboard.widgets.homeworkCalendar.settings.defaultView')}
+        value={config.view ?? 'list'}
+        onChange={(next) => onChange({ view: next as HomeworkCalendarView })}
+        options={[
+          { value: 'list', label: t('dashboard.widgets.homeworkCalendar.view_list') },
+          { value: 'month', label: t('dashboard.widgets.homeworkCalendar.view_month') },
         ]}
       />
       <label className="flex items-center gap-2">
@@ -529,10 +889,12 @@ registerWidget<HomeworkCalendarConfig>({
   category: 'personal',
   icon: CalendarCheck,
   component: HomeworkCalendarWidget,
-  defaultConfig: { window: '2w', showCompleted: false },
+  defaultConfig: { window: '2w', showCompleted: false, view: 'list' },
   configSchema: HomeworkCalendarConfigSchema,
   defaultSize: { w: 4, h: 26 },
-  minSize: { w: 3, h: 15 },
+  // The month grid needs roughly six rows of cells plus a day list, so the
+  // frame's floor is higher than a plain list would need.
+  minSize: { w: 3, h: 20 },
   settingsComponent: HomeworkCalendarSettings,
 });
 

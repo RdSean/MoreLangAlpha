@@ -39,7 +39,9 @@ export const RecentThreadsConfigSchema = z.object({
 export const ConversationConfigSchema = z.object({}).catch({});
 
 export const HOMEWORK_CALENDAR_WINDOWS = ['1w', '2w', '1m'] as const;
+export const HOMEWORK_CALENDAR_VIEWS = ['list', 'month'] as const;
 export const HomeworkCalendarConfigSchema = z.object({
   window: z.enum(HOMEWORK_CALENDAR_WINDOWS).optional().catch('2w'),
   showCompleted: z.boolean().optional().catch(false),
+  view: z.enum(HOMEWORK_CALENDAR_VIEWS).optional().catch('list'),
 });
