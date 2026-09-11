@@ -2,6 +2,12 @@
 
 ## 2026-09-11
 
+### 恢复 Dashboard 布局系统所需的栅格依赖
+
+- 新增 `react-grid-layout@2.2.3`（锁定版本）。它是纯布局库，peer 依赖只有 `react` / `react-dom`，与之前移除的金融图表依赖（`lightweight-charts`、`recharts`）无关，因此不与 `37fef0e9` 的裁剪冲突。
+- 选择该版本是因为上游同一个 lockfile 就是 2.2.3，`ResponsiveGridLayout`、`useContainerWidth` 与 `css/styles.css` 的 API 面已被上游验证可用。
+- 已验证：`package.json` 只增加这一条依赖；`pnpm build` 通过，关键路径 345.6 kB gz（上限 450 kB）。
+
 ### Dashboard 作业日历的演示数据
 
 - 新增 `scripts/ops/seed_homework_demo.py`：为本地调试库的家庭插入一批真实的作业数据，让作业日历组件有内容可渲染。
