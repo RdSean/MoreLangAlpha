@@ -2,6 +2,17 @@
 
 ## 2026-09-11
 
+### 迁回 Dashboard 组件框架的纯逻辑层
+
+- 从 `origin/main` 迁回 `web/src/pages/Dashboard/widgets/`：`types.ts`、`WidgetRegistry`、`ids`、`gridConstants`、`reconcile`、`configSchemas`、`snapshotSerializers`、`migrations`，以及 `reconcile` / `snapshotSerializers` / `migrations` 三套测试。63 项测试通过。
+- 与上游的三处有意偏差，均因金融组件不在本分支：
+  - `types.ts` 的 `initConfig` 由 `(ctx: DashboardDataContextValue) => C` 改为 `() => C`，并删去 `source?: 'tradingview'`；`WidgetCategory` 收窄为 `personal | agent | workspace`。上下文类型原本只被 `MiniChartGridWidget` / `TickerTapeWidget` 使用，两者都不迁回，保留空壳接缝反而增加无谓耦合。
+  - 删除上游的 `framework/defaults.ts`（只有 `DEFAULT_BLUE_CHIPS = ['NVDA', ...]` 一个金融常量，唯一读者是上游的 `presets.ts`，本分支将自写预设）。
+  - `configSchemas.ts` 只保留本分支实际注册的四个 schema（Automations / WorkspacePicker / RecentThreads / Conversation），并预先加入 `HomeworkCalendarConfigSchema`；上游另外 26 个 TradingView 与证券 schema 随之删除。
+- 上游把 `sanitizeConfig` 的恢复行为（逐字段 `.catch()`、整配置回退、无 schema 透传、非法数组项丢弃而非复制出重复默认值）挂在 TradingView 的 schema 上测试。这些 widget 不迁回，因此改用测试内注册的 fixture widget 覆盖同样的行为，测试语义从「某个 widget 的 schema」回到「框架的恢复逻辑」。
+- 已用「先看失败」验证测试有效：去掉 `fixture.bounded` 的 `maxSize` 后，`clamps stored w/h` 立即失败（1 failed | 10 passed），恢复后通过。
+- 验证：`pnpm typecheck` 通过；`pnpm lint` 0 error / 56 warning（与基线一致）；`src/__tests__` 与 `src/locales` 共 16 项通过，金融依赖边界与 dashboard 边界守卫仍为绿。
+
 ### 恢复 Dashboard 布局系统所需的栅格依赖
 
 - 新增 `react-grid-layout@2.2.3`（锁定版本）。它是纯布局库，peer 依赖只有 `react` / `react-dom`，与之前移除的金融图表依赖（`lightweight-charts`、`recharts`）无关，因此不与 `37fef0e9` 的裁剪冲突。
