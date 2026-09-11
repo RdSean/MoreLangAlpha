@@ -406,7 +406,17 @@ upstream has is missing here — `tests/unit` is green (7494 passed, 1 xfailed),
 `ruff check src/ migrations/ scripts/ops/` is clean, and PTC + Docker sandbox
 run end to end.
 
-**Deliberately out of scope: the product frontend.** 437 files under
+**Model tuning: ported (2026-09-11).** The Settings-side tuning surface —
+`lib/modelTuning`, `lib/modelPreferences`, `hooks/useModelProfile`, the four
+`components/model/*` tuning widgets, the upstream `ModelTab`/`ModelTierConfig`/
+setup steps, the shared fixture contract and both locales — is in. It also fixed
+a real bug: the local tab wrote model keys into `other_preference` while the
+merged server moves them to `model_preference` on write only, so a save followed
+by a reload showed defaults. Frontend suite: 230 files / 2227 tests green.
+The composer cluster (`components/ui/chat-input*`) is the remaining piece and is
+its own task — see the runbook.
+
+**Out of scope: the rest of the product frontend.** ~400 files under
 `web/src/` that upstream has are absent here, and this branch keeps the local
 UI: they are `pages/{Dashboard,ChatAgent,MarketView,Onboarding,Login}` (the
 local product's own screens), the finance chart stack (`lib/bars`,

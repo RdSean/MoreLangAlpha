@@ -53,6 +53,9 @@ describe('generic application routes', () => {
       '/documents',
       '/automations',
       '/education',
+      // Added by the platform-core merge: the Plugins/MCP/Skills/Vault
+      // configuration surface has its own entry.
+      '/plugins',
     ]);
   });
 

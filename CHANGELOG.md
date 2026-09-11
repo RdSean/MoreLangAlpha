@@ -1005,3 +1005,15 @@
 - `test_generic_router_registration.py` 中的本地守卫 `test_default_api_has_no_finance_or_market_routes` 改为 `test_finance_routes_are_registered`：当前断言这些路由**必须**在册，移除金融时再翻转回原来的断言（与源码包守卫同一处理方式）。
 - 实跑验证（宿主后端 18000）：`/api/v1/users/me/watchlists`、`/api/v1/users/me/portfolio`、`/api/v1/market-data/market-status`、`/api/v1/news`、`/api/v1/insights/today`、`/api/v1/calendar/earnings` 均返回 200；`/api/v1/sec-proxy/document` 返回 502（上游 SEC 代理按预期转发失败）。
 - 验证：`uv run pytest tests/unit -q -p no:randomly` → **7494 passed, 1 xfailed**；`ruff check src/` 通过。
+## 2026-09-11
+
+### 前端迁回上游模型调参（账号默认 + 逐模型覆盖）
+
+- 新增上游的调参基础层：`web/src/lib/modelTuning.ts`（`resolveTuning`/`resolveEffort`/`TUNE` 词汇表，与服务端 `resolve_turn_tuning` 同一条优先级）、`web/src/lib/modelPreferences.ts`（`modelPrefs`/`modelProfile`/`MODEL_PREF_KEYS`/`splitPreferenceWrite`，决定每个 key 写进 `model_preference` 还是 `other_preference`）、`web/src/hooks/useModelProfile.ts`（`writeProfile`/`clearProfile`/`writeAccountDefault` + `useEffectiveTuning`）。
+- 新增调参界面组件：`components/model/{AccountTuningDefaults,PerModelMatrix,CompactionProfilePicker,FallbackModelsPicker}.tsx`；`Settings/panels/ModelTab.tsx` 换成上游版本（simple/advanced 两档、`Defaults` 与 `per-model` 两个区块、每个控件各自 patch 并按列路由写回），并保留本地独有的 `TokenizerStatusAlert`。`ModelTierConfig.tsx` 与 `Setup/steps/DefaultsStep.tsx`、`ModelPickStep.tsx` 回到上游形态（fallback/compaction 选择器从 tier config 抽出，安装向导的下拉折叠区改用它）。
+- 关键修正：本地 Model tab 过去把所有模型 key 写进 `other_preference`，而合并后的后端只在写入方向把它们改道到 `model_preference`（读回不镜像），所以**存过一次、切走再回来会显示默认值**。现在读写都按 `MODEL_PREF_KEYS` 分列，`starred_models` / `search_provider` / `search_depth` 仍留在 `other_preference`。
+- `useUpdatePreferences` 换成上游版本（乐观合并预测 + `PREFERENCE_MUTATION_KEY` 保存态），只把 `updatePreferences` 的导入指向本地的 `@/api/user`；`useAllModels` / `useFilteredModels` 回到上游（`ModelMetadataEntry` 补回 `reasoning_efforts`/`reasoning_effort_default`/`prompt_guidance`/`compaction_profile`，`systemDefaults.prompt_guidance` 恢复）。
+- 补齐契约与文案：迁回 `tests/fixtures/tuning_precedence.json`（前后端共用优先级表）与 `tests/fixtures/reasoning_clamp.json`，以及后端 `tests/unit/llms/test_tuning_precedence.py`、`test_reasoning_efforts_manifest.py`；`settings.modelTuning` 32 个 key 与 `settings.fallbackModels*`/`removeModel` 补进 en-US/zh-CN。
+- 顺带修掉三处先前遗留的前端红灯：`--color-identity-0..7-*` 与 `--color-bg-card-hover` 令牌未声明（MCP 的 IdentityTile/McpPrimitives 从早前阶段就已在用）；导航测试未同步 `/plugins` 入口；退役与“先迁回金融、后定点移除”冲突的 `financeSurfaceBoundary.test.ts`。
+- 验证：`pnpm typecheck` 通过；`pnpm vitest run` **230 files / 2227 tests 全绿**（基线为 3 failed/2173 passed）；`pnpm lint` 0 error；后端 `uv run pytest tests/unit -q -p no:randomly` → **7547 passed, 1 xfailed**。
+- 尚未迁移：composer（`chat-input.tsx` 与其 modelMenu/parts/toolbar 一簇）。它仍是本地版：effort/fast_mode 存 localStorage 且按请求级发送，所以未在 composer 里显式选择时，后端会应用新持久化的账号/模型档；选定后仍以请求级覆盖。这一簇本地另有家庭模型菜单逻辑，需要单独一次 3-way 合并。

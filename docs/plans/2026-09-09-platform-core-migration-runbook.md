@@ -446,17 +446,28 @@ nine upstream routers were unregistered even though their modules were present:
 from 250 — and the guard test that asserted their absence now asserts their
 presence until the removal pass flips it back.
 
-### Open decision: the product frontend
+### The product frontend
 
-`web/src` is 437 files behind upstream and this branch keeps it that way. Those
-files are the upstream product screens (Dashboard, ChatAgent, MarketView,
-Onboarding, Login), the finance chart stack (`lib/bars`, `lib/quotes`), the
-Supabase auth client (this branch runs first-party local sessions instead), and
-the upstream model-tuning widgets that the local `Settings/panels/ModelTab.tsx`
-replaces. The configuration surfaces this migration was about — Plugins, MCP,
-Skills, Vault — were ported in the earlier phase and are in place.
+`web/src` is still ~400 files behind upstream, and most of that gap is the
+upstream product screens (Dashboard, ChatAgent, MarketView, Onboarding, Login),
+the finance chart stack (`lib/bars`, `lib/quotes`) and the Supabase auth client
+(this branch runs first-party local sessions instead). Those replace the local
+product rather than restore a capability, so they remain out of scope.
 
-Merging the rest would replace the local UI rather than restore a missing
-capability, so it is a product decision, not a merge step. If the upstream
-model-tuning widgets are wanted, port them one at a time onto the local
-`ModelTab` rather than taking `web/src` wholesale.
+**Model tuning is done** (2026-09-11): the whole Settings-side surface came over
+— `lib/modelTuning`, `lib/modelPreferences`, `hooks/useModelProfile`,
+`components/model/{AccountTuningDefaults,PerModelMatrix,CompactionProfilePicker,FallbackModelsPicker}`,
+the upstream `ModelTab`/`ModelTierConfig`/setup steps, the shared
+`tests/fixtures/{tuning_precedence,reasoning_clamp}.json` contract and both
+locales. This also fixed a real bug: the local tab wrote every model key into
+`other_preference` while the merged server re-routes those keys into
+`model_preference` on write only, so a save followed by a reload showed
+defaults.
+
+**Still local: the composer cluster** — `components/ui/chat-input.tsx` plus its
+`modelMenu`/`parts`/`toolbar`/`types` siblings. It keeps reasoning effort and
+fast mode in `localStorage` and sends them per turn; the persisted account- and
+per-model tuning therefore applies whenever the composer has no value of its
+own for that model, and a composer choice still outranks it (which is the
+documented top rung). Porting it means a 3-way merge across that whole cluster
+on top of the family-model menu logic it already carries, so it is its own task.
