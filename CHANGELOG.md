@@ -2,6 +2,14 @@
 
 ## 2026-09-11
 
+### 迁回响应式栅格
+
+- 迁回 `framework/DashboardGrid.tsx` 与其测试。栅格由 `react-grid-layout` 的 `ResponsiveGridLayout` 驱动，`lg`/`md` 两个断点各 12 列，行高 8px；它负责布局对账（`reconcileLayouts`）、自动补位、以及把每个单元格包在 `WidgetFrame` 里。
+- 保留上游的 `WidgetErrorBoundary`：单个组件渲染报错时只显示该格子的错误提示，不会把整个画布带崩。
+- 保留 fit-to-content 的高度锁：宽度拖拽时 RGL 会回报过期的 `onLayoutChange` 高度，栅格会沿用上一次内容测得的高度，避免组件内容被拉伸或截断。
+- 测试适配：上游该用例把 fixture widget 注册为 `intel` 分类，本分支的 `WidgetCategory` 已收窄为 `personal | agent | workspace`，因此改为 `personal`。
+- 验证：`pnpm typecheck` 通过；`src/pages/Dashboard`、`src/locales`、`src/__tests__` 共 11 个文件 91 项测试通过。
+
 ### 迁回组件外框、上下文快照与相关文案
 
 - 迁回 `framework/contextSnapshot.ts`、`framework/WidgetFrame.tsx`（含 `.css`）、`components/RowAttachButton.tsx`（含 `.css`）及其 8 项测试。组件外框提供拖拽把手、设置菜单、复制、删除，以及把组件（或单行）作为上下文附加到对话的纸夹按钮。
