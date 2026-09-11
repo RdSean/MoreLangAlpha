@@ -106,14 +106,7 @@ git commit -m "fix: re-apply managed-textbook hooks on the upstream runtime"
 
 ## Task 2: Re-home the household LLM resolution on the upstream split
 
-**Status: IN PROGRESS.** Done so far: `src/server/services/llm/household.py`
-exists with `get_household_context`, `_student_household_context`,
-`_household_runtime_metadata`, `_raise_no_model_available`,
-`resolve_household_llm_client` (plan A: owner's credential, client stamped
-`billing_type="byok"` + `credential_source="household"` + household ids) and
-`resolve_student_household_config` (the sealed student runtime path).
-
-**Status: DONE** (as landed, slightly wider than sketched below). What landed:
+**Status: DONE** (commit `ee0f6604`, slightly wider than sketched below). What landed:
 the three upstream files taken verbatim; the household early-return inside
 upstream's `resolve_llm_config` right after the BYOK self-resolution; the local
 **platform model profile** hooks re-applied onto upstream `clients.py`
