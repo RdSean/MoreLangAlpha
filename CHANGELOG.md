@@ -2,6 +2,17 @@
 
 ## 2026-09-12
 
+### Agent artifact 契约：第三步（artifact 信封 + 工具入参）
+
+- 新增 `src/tools/homework/schemas.py`：`HomeworkScheduleArgs`（工具入参）与 `HomeworkScheduleArtifact`（返回信封）。信封**复用** `EducationCalendarDayResponse` / `EducationCalendarStatsResponse` 而不是重新声明——这份复用正是让 chat 卡片与仪表盘 widget 描述同一个 payload 的原因，也让一份生成契约同时覆盖两者。
+- 入参设计照顾你补的要求：`window` 覆盖常见问法（`today` / `tomorrow` / `this_week` / `next_week` / `last_week` / `2w` / `1m`，默认 `2w`），另有显式 `start_date` + `end_date` 覆盖任意时段；两者都给时**显式日期优先**（模型既然算出了日期就是有意的）。周语义按家庭时区、沿用后端既有 `isoweekday` 约定，避免工具与仪表盘对"一周从哪天开始"产生分歧。
+- 校验：起止必须成对、`end >= start`、跨度 < 62 天（与日历 API 的上限一致，让模型拿到可读消息而不是下游 400）。
+- 信封 `type` 是 `Literal["homework_schedule"]`，因此生成物里是 `const` 而不是自由字符串，前端据此分发。`student_names` 与 `timezone` 由工具解析后**嵌进 payload**——chat 产物无法二次请求，而仪表盘 widget 是另外调接口拿成员列表的；这就是两个组件必须是副本而非共享组件的原因。
+- 契约扩展到两份：新增 `web/src/contracts/homework-schedule.schema.json` 与生成物 `homeworkSchedule.generated.ts`（2524 字节，**零 `z.any()`**，`student_names` 正确生成 `z.record(z.string(), z.string())`，`type` 生成 `z.literal(...)`）。
+- 前端新增 `web/src/contracts/homeworkSchedule.ts` 与 8 项测试：真实 artifact 通过；缺少卡片必需字段（含 `timezone`/`stats`/`days`）失败；`student_names` 形状错误失败；未知多余键接受；**并且交叉验证两份契约对同一批嵌入模型一致**——用日历契约解析 artifact 里的 task、再用 artifact 契约解析日历里的 task，都通过。这条是"复用是真的、不是巧合"的证据。
+- fixture 是从真实服务产出、用 `model_dump(mode="json")` 序列化后落盘；家庭/学生 UUID 与孩子姓名一并替换为稳定假值（`Student 1`），日期、时刻、标题、可空性保持原样。
+- 验证：后端 `tests/unit/contracts` + `tests/unit/tools/homework` 共 16 项通过；前端 `src/contracts` 18 项通过；`pnpm typecheck` 通过；`pnpm lint` 0 error / 56 warning；`ruff check` 通过。
+
 ### Agent artifact 契约：第二步（前端校验器 + 生成器换型）
 
 **这一轮推翻了设计里"不用第三方生成器"的结论，原因是被实测推翻的。** 三个候选在真实 schema 上的表现：

@@ -35,6 +35,11 @@ export const CONTRACTS = [
     output: 'src/contracts/generated/educationCalendar.generated.ts',
     exportName: 'educationTaskCalendarSchema',
   },
+  {
+    input: 'src/contracts/homework-schedule.schema.json',
+    output: 'src/contracts/generated/homeworkSchedule.generated.ts',
+    exportName: 'homeworkScheduleArtifactSchema',
+  },
 ];
 
 const BANNER = `/**

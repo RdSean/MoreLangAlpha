@@ -1,0 +1,277 @@
+{
+  "$defs": {
+    "EducationCalendarDayResponse": {
+      "properties": {
+        "completed_count": {
+          "title": "Completed Count",
+          "type": "integer"
+        },
+        "date": {
+          "title": "Date",
+          "type": "string"
+        },
+        "overdue_count": {
+          "title": "Overdue Count",
+          "type": "integer"
+        },
+        "task_count": {
+          "title": "Task Count",
+          "type": "integer"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/EducationCalendarTaskResponse"
+          },
+          "title": "Tasks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "date",
+        "task_count",
+        "completed_count",
+        "overdue_count",
+        "tasks"
+      ],
+      "title": "EducationCalendarDayResponse",
+      "type": "object"
+    },
+    "EducationCalendarStatsResponse": {
+      "properties": {
+        "completed_count": {
+          "title": "Completed Count",
+          "type": "integer"
+        },
+        "overdue_count": {
+          "title": "Overdue Count",
+          "type": "integer"
+        },
+        "today_count": {
+          "title": "Today Count",
+          "type": "integer"
+        },
+        "week_count": {
+          "title": "Week Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "today_count",
+        "week_count",
+        "overdue_count",
+        "completed_count"
+      ],
+      "title": "EducationCalendarStatsResponse",
+      "type": "object"
+    },
+    "EducationCalendarTaskResponse": {
+      "properties": {
+        "assigned_student_id": {
+          "title": "Assigned Student Id",
+          "type": "string"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "due_at": {
+          "title": "Due At",
+          "type": "string"
+        },
+        "grade_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grade Code"
+        },
+        "household_id": {
+          "title": "Household Id",
+          "type": "string"
+        },
+        "is_completed": {
+          "title": "Is Completed",
+          "type": "boolean"
+        },
+        "is_overdue": {
+          "title": "Is Overdue",
+          "type": "boolean"
+        },
+        "occurrence_date": {
+          "title": "Occurrence Date",
+          "type": "string"
+        },
+        "practice_source_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Practice Source Code"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "subject_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject Code"
+        },
+        "subject_color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject Color"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "task_rule_id": {
+          "title": "Task Rule Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "type_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type Code"
+        }
+      },
+      "required": [
+        "task_id",
+        "task_rule_id",
+        "household_id",
+        "assigned_student_id",
+        "occurrence_date",
+        "due_at",
+        "title",
+        "description",
+        "status",
+        "is_completed",
+        "is_overdue"
+      ],
+      "title": "EducationCalendarTaskResponse",
+      "type": "object"
+    }
+  },
+  "description": "The payload the chat card renders.\n\nIt reuses the calendar API's own day, task and stats models rather than\nrestating them, so the artifact and the dashboard widget describe the same\npayload — one generated contract covers both.\n\nIt is deliberately self-contained: ``student_names`` and ``timezone`` are\nresolved by the tool because a chat artifact cannot make a second request,\nwhereas the dashboard widget fetches the member list separately. That\ndifference is the reason the two components are copies rather than one\nshared component.",
+  "properties": {
+    "days": {
+      "items": {
+        "$ref": "#/$defs/EducationCalendarDayResponse"
+      },
+      "title": "Days",
+      "type": "array"
+    },
+    "end_date": {
+      "title": "End Date",
+      "type": "string"
+    },
+    "start_date": {
+      "title": "Start Date",
+      "type": "string"
+    },
+    "stats": {
+      "$ref": "#/$defs/EducationCalendarStatsResponse"
+    },
+    "student_names": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "assigned_student_id to display name, for the ids present in days.",
+      "title": "Student Names",
+      "type": "object"
+    },
+    "timezone": {
+      "description": "Household timezone, for rendering times.",
+      "title": "Timezone",
+      "type": "string"
+    },
+    "type": {
+      "const": "homework_schedule",
+      "default": "homework_schedule",
+      "title": "Type",
+      "type": "string"
+    },
+    "window": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The named period that produced this range, when one was used.",
+      "title": "Window"
+    }
+  },
+  "required": [
+    "start_date",
+    "end_date",
+    "timezone",
+    "stats",
+    "days"
+  ],
+  "title": "HomeworkScheduleArtifact",
+  "type": "object"
+}
