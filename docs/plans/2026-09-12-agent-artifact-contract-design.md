@@ -79,13 +79,17 @@ src/server/app/education/models.py            ← source of truth (already exist
         + src/tools/homework/schemas.py       ← artifact envelope + tool args
                 ↓ scripts/contracts/export_schemas.py   (new)
 web/src/contracts/education-calendar.schema.json        ← committed, generated
-                ↓ z.fromJSONSchema()
-web/src/contracts/educationCalendar.ts       ← zod validator + z.infer types
+                ↓ web/scripts/generate-contracts.mjs    (new)
+web/src/contracts/generated/*.generated.ts   ← committed, generated zod source
+                ↓
+web/src/contracts/educationCalendar.ts       ← re-exports + z.infer types
 ```
 
-Drift is possible in exactly one place — the committed JSON against Pydantic —
-and one Python test regenerates and compares it. The frontend consumes the
-committed file, so it cannot drift structurally at all.
+Drift is possible in two places, and each has a test that regenerates and
+compares: the committed JSON against Pydantic
+(`tests/unit/contracts/test_generated_schemas_are_current.py`), and the
+committed zod against the JSON
+(`web/src/contracts/__tests__/generatedContracts.test.ts`).
 
 **`format` is stripped by the exporter.** We want the *structure* (types,
 required, arrays, nullability), not zod re-interpreting date semantics; the
@@ -93,11 +97,32 @@ frontend already handles date strings. Stripping `format` also removes the
 `Z`-only trap above. This is a deliberate, documented narrowing, not an
 oversight.
 
-**No third-party generator for now.** `json-schema-to-zod` generates real zod
-source (readable, hand-editable) at the cost of a dependency and a second
-generation step; it does not address the `format` trap, which is the actual
-problem. Revisit only when the artifact set grows into a union worth
-auto-converting. The drift guard is what makes that swap safe later.
+### 1a. Revision: the generator had to change, and here is the evidence
+
+The first draft used zod's own `z.fromJSONSchema` and no third-party generator.
+Implementation showed that cannot work, so the pipeline above is the revised
+one. The measurements, all taken on the real schema:
+
+| Candidate | Validation | TypeScript types | Notes |
+|---|---|---|---|
+| `z.fromJSONSchema` (zod built-in) | correct, `$ref`s resolved | **none** | declared as `fromJSONSchema(schema: JSONSchema): ZodType` — no generic, so `z.infer` is `unknown` and `.shape` does not exist. zod's own comment: "should be considered semi-experimental". |
+| `json-schema-to-zod` on the schema as exported | **none** | yes | emits `z.array(z.any())` for `days` and `z.any()` for `stats` — every `$ref` silently degrades, so the nested models validate nothing. That is the same "silently accepts anything" failure this whole design exists to remove. |
+| **`json-schema-to-zod` after inlining `$ref`s** | correct | yes | the chosen path. Inlining is ~20 lines in the generator; the model graph is a DAG, and `assertFullyResolved` fails the build if a `z.any()` ever reappears. |
+
+So the answer to "is a third-party library better?" turned out to be **yes, but
+only in combination**: the library provides typed zod, zod's own converter
+provides correct `$ref` handling, and neither does both. Inlining the refs lets
+the library see a schema it can compile faithfully.
+
+The cost is one **devDependency** (`json-schema-to-zod`, codegen only — it never
+enters the bundle) plus a second generated file. The benefit is that the
+contract now delivers both halves: real runtime validation *and* real
+TypeScript types (verified by probe: `EducationCalendarTask` reports 17
+required fields, so a missing or mistyped field is a compile error).
+
+`z.fromJSONSchema` remains a viable fallback if the dependency is ever unwanted
+— it validates correctly — but the contract would then be untyped, which is
+half the point.
 
 ### 2. The tool
 

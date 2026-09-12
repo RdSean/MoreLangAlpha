@@ -2,6 +2,26 @@
 
 ## 2026-09-12
 
+### Agent artifact 契约：第二步（前端校验器 + 生成器换型）
+
+**这一轮推翻了设计里"不用第三方生成器"的结论，原因是被实测推翻的。** 三个候选在真实 schema 上的表现：
+
+| 方案 | 校验 | TS 类型 |
+|---|---|---|
+| zod 自带 `z.fromJSONSchema` | 正确解析 `$ref`、校验正确 | **没有** |
+| `json-schema-to-zod` 直接吃导出物 | **没有**（每个 `$ref` 静默降级成 `z.any()`） | 有 |
+| **`json-schema-to-zod` + 先把 `$ref` 内联** | 正确 | 有 |
+
+- `z.fromJSONSchema` 的声明是 `fromJSONSchema(schema: JSONSchema): ZodType`——**没有泛型**，所以 `z.infer` 得到 `unknown`、`.shape` 不存在。它只给运行时校验，不给类型，而 zod 自己的注释写着 "should be considered semi-experimental"。也就是说你的直觉（不用 v4 新特性）是对的，但理由比我们原先想的更硬。
+- `json-schema-to-zod` 单独用更糟：它对 `days` 生成 `z.array(z.any())`、对 `stats` 生成 `z.any()`，**嵌套模型等于没校验**。那正是这套设计要消灭的"静默接受一切"。
+- 因此最终链路改为：Pydantic → JSON Schema（提交、已守卫）→ **内联 `$ref`** → `json-schema-to-zod` → 生成的 zod 源码（提交、已守卫）→ 包装模块用 `z.infer` 导出真实类型。内联约 20 行，模型图是 DAG；`assertFullyResolved` 会在 `z.any()` 再次出现时让构建失败。
+- 代价是一个 **devDependency**（`json-schema-to-zod@2.8.1`，仅代码生成期使用，不进 bundle）和第二个生成物。收益是契约两半齐了：真实运行时校验 **且** 真实 TS 类型——实测 `EducationCalendarTask` 报出 17 个必填字段，少字段/错类型都是编译错误。
+- 新增 `web/scripts/generate-contracts.mjs`（生成器，含 `$ref` 内联与 `z.any()` 断言）与 `web/src/contracts/__tests__/generatedContracts.test.ts`（重新生成并逐字比对，防生成物过期）。
+- 真实 wire fixture：从本地库经服务层取数，用 `model_dump(mode="json")` 序列化后落盘到 `web/src/contracts/__tests__/__fixtures__/education-calendar.wire.json`（12 项任务）。**家庭/任务 UUID 已替换为稳定假值**，日期、时刻、标题、可空性保持原样——那些才是契约关心的。
+- 前端契约测试 8 项：真实 payload 通过；缺必填项失败；类型错误失败且 issue path 指向出问题的任务；未知多余键**接受**（边界校验而非严格闸门）；嵌套 task 类型可单独使用；**`+09:00` 偏移被接受**（这正是剥离 `format` 的理由）以及**故意不校验日期语义**（这条取舍也钉死了）。
+- 「先看失败」验证：篡改生成的 `is_overdue` 为 `z.string()`，守卫立刻失败并指名文件；恢复后 10 项全通过。
+- 验证：前端全量 **248 文件 / 2429 项通过**（上次 2419）；`pnpm typecheck` 通过；`pnpm lint` 回到基线 0 error / 56 warning；生成器重复执行 `git diff` 为空（幂等）。
+
 ### Agent artifact 契约：第一步（生成物 + 漂移守卫）
 
 - 新增 `scripts/contracts/export_schemas.py`：以 Pydantic 为唯一来源，把 `EducationTaskCalendarResponse` 导出成 JSON Schema，写入并提交 `web/src/contracts/education-calendar.schema.json`（5507 字节，含 `$defs` 里三个嵌套模型）。
