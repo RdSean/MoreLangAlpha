@@ -21,6 +21,13 @@ TypeScript, zod 4.3.6 (`z.fromJSONSchema` — already a dependency), vitest, pnp
 The spike results (why `format` is stripped, why there is no union to solve) are
 recorded there; do not re-litigate them.
 
+**The pilot is additive.** Per the review decision, the generated contract is
+built beside the existing hand-written types: `Education/types.ts` is **not**
+touched, and the dashboard widget keeps its own declarations. Task 3 of the
+first draft (retro-fitting those types) is dropped. The question this pilot
+answers is "is the new pipeline self-sufficient?", and that is only readable on
+greenfield code.
+
 **Branch:** `feature/platform-core-migration` at
 `/Users/seanlee/.config/superpowers/worktrees/langalpha/platform-core-migration`.
 
@@ -235,52 +242,15 @@ git commit -m "feat(web): validate the education calendar payload from the gener
 
 ---
 
-## Task 3: Point the existing calendar types at the contract
+## Task 3: DROPPED — the pilot is additive
 
-Scope decision: replace **only** the calendar subset of
-`web/src/pages/Education/types.ts`. The rest of that file (tasks, textbooks,
-learning) stays hand-written for now.
+The first draft retro-fitted `Education/types.ts` onto the generated contract.
+The review decision was to build the new pipeline beside the old one instead, so
+that the pilot measures "does the pipeline work" and not "how painful is the
+migration". Numbers below are left unchanged rather than renumbering the plan.
 
-**Files:**
-
-- Modify: `web/src/pages/Education/types.ts`
-- Modify: `web/src/pages/Dashboard/widgets/definitions/HomeworkCalendarWidget.tsx`
-  (import path only)
-- Modify: `web/src/pages/Dashboard/widgets/definitions/__tests__/HomeworkCalendarWidget.test.tsx`
-  (fixture types, if the compiler asks)
-
-**Step 1: Delete the duplicated declarations**
-
-Remove `EducationCalendarTask`, `EducationTaskCalendarDay` and
-`EducationTaskCalendar`, and re-export from the contract module instead:
-
-```ts
-export type {
-  EducationTaskCalendar,
-  EducationCalendarTask,
-  EducationCalendarDay,
-} from '@/contracts/educationCalendar';
-```
-
-Keep `EducationTaskCalendarRequest` hand-written: it is a *request* shape the
-frontend builds, and the exporter only covers responses.
-
-**Step 2: Verify nothing broke**
-
-```bash
-cd web && pnpm typecheck && pnpm vitest run src/pages/Education src/pages/Dashboard
-```
-
-Expected: PASS with no test changes needed. If a test does need changing, stop
-and check whether the generated type is genuinely narrower than the hand-written
-one — that difference is information, not friction.
-
-**Step 3: Commit**
-
-```bash
-git add web/src/pages/Education/types.ts web/src/pages/Dashboard CHANGELOG.md
-git commit -m "refactor(web): derive the education calendar types from the contract"
-```
+The migration question is recorded as item 7 in the design doc's gap list, so it
+is not lost.
 
 ---
 

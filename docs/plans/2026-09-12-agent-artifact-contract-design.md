@@ -195,6 +195,64 @@ Managed teaching jobs must not get it: they are scoped to one chapter's
 materials, and the existing `managed_policy is None` guard is the precedent to
 follow.
 
+### 6. The pilot is additive
+
+Per the review decision, the new pipeline is built **beside** the existing
+hand-written types rather than retrofitted onto them. `Education/types.ts` is
+left alone; the dashboard widget keeps its own declarations; the generated
+contract is consumed only by the new chat card and the new tool.
+
+The point of that choice is to answer one question cleanly: **is this pipeline
+self-sufficient enough to be the standard flow for new tools?** Making it prove
+that on greenfield code is the right order. Retro-fitting the existing types
+would mix "does the pipeline work" together with "how painful is the
+migration", and the second question can only be answered well after the first.
+
+One consequence to be honest about: during the pilot the repository has two
+regimes. An older artifact type is still authored by hand while a newer one is
+generated. That is acceptable for one pilot and not acceptable indefinitely —
+see the gap list below.
+
+## What is still missing before this is the standard flow
+
+Written down now, while the pilot is fresh, so the answer to "can this be our
+process?" is evidence rather than impression. Each item is a real gap, not a
+nitpick:
+
+1. **Registration is still hand-written, twice.** A new artifact must be added
+   to `INLINE_ARTIFACT_TOOLS` *and* `INLINE_ARTIFACT_MAP`, and nothing fails if
+   only one is done. A registry — one table keyed by artifact type — would
+   collapse this and let a test assert "every artifact type the backend can emit
+   has a renderer".
+2. **Nothing forces a tool that returns an artifact to have a renderer.** Today
+   a missing card is a blank block discovered by eye. This is testable in the
+   same registry: enumerate artifact types from the Pydantic models, assert each
+   is either mapped or explicitly opted out.
+3. **The generator is manual.** A drift test makes a stale file fail the suite,
+   which is the important half, but there is no `make` target, no watch mode and
+   no pre-commit hook, so the loop is "run tests, read the error, re-run the
+   script".
+4. **Only responses are covered.** Request bodies the frontend *sends* are still
+   hand-written on both sides (`EducationTaskCalendarRequest` today). The
+   asymmetry is deliberate for the pilot and would need closing for a general
+   flow.
+5. **The union problem is deferred, not solved.** One artifact type has a
+   `Literal` discriminator; a codebase-wide union across artifact types does not
+   exist. If the registry in item 1 is built, that union becomes worth writing
+   down, and *then* the `z.fromJSONSchema` vs generator question is worth
+   re-opening on evidence.
+6. **Locale strings are still hand-written per component.** The card reuses
+   existing keys, but nothing derives them from the schema, so a new artifact
+   type still needs someone to remember both catalogs.
+7. **Two regimes during the transition.** Existing finance and web artifacts
+   keep their untyped `as Record<string, unknown>` reads. Until they are
+   migrated (or explicitly frozen), "we use schemas for tool payloads" is a
+   statement about new code only.
+
+Items 1 and 2 are the ones that would decide whether this becomes a *flow*
+rather than a *practice*; both are cheap once the pilot lands, and neither
+should be built before it does.
+
 ## Risks
 
 1. **Replay.** A chat card must render from stored history, not a live fetch.
