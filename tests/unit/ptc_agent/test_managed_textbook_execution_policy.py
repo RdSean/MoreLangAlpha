@@ -358,7 +358,18 @@ def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypat
 
     tool_names = {tool.name for tool in captured["tools"]}
     assert {"Bash", "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite"} <= tool_names
-    assert not {"ExecuteCode", "BashOutput", "PreviewURL", "ShowWidget", "WebSearch", "AskUserQuestion"} & tool_names
+    # A managed job is scoped to one chapter's materials, so it reaches no
+    # ambient surface at all — including the household homework tool, which
+    # would otherwise let it read outside that scope.
+    assert not {
+        "ExecuteCode",
+        "BashOutput",
+        "PreviewURL",
+        "ShowWidget",
+        "WebSearch",
+        "AskUserQuestion",
+        "get_homework_schedule",
+    } & tool_names
     assert compiled_subagents[0]["enabled_names"] == ["textbook-chapter-worker"]
     assert compiled_subagents[0]["definition"] is not None
     background = next(

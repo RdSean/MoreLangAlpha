@@ -2,6 +2,17 @@
 
 ## 2026-09-12
 
+### Agent artifact 契约：第五步（PTC 与 Flash 双端暴露）
+
+- **PTC**：把原先内联在 `create_agent` 里的金融工具清单提成 `build_finance_tools(config)`，并新增 `build_domain_tools(config)` = 金融工具 + `get_homework_schedule`；managed 教学模式仍然只被**一处** `managed_policy is None` 挡住——这是故意的，一处守卫比两处更容易看住。managed 用例的排除集合已加上 `get_homework_schedule`。
+- **Flash**：`_build_tools` 追加该工具，并在**同一个 commit** 里改掉文件头的自述——它原本写着 "external tools only"，加了读库工具后那句话就不成立了。新措辞说明真实规则：外部工具 + 第一方家庭数据读取，仍然没有 sandbox、没有 MCP。
+- **一个必须记录的发现（也是这次真正的坑）**：`src/server/app/__init__.py` **在 import 时构造整个 FastAPI 应用**。而本工具的 schemas 要复用 `src/server/app/education/models.py` 里的日历模型——于是 import 一个数据模型会把全部 router 拖进 agent 的 import 图，其中某个 router 又反过来 import `ptc_agent.agent.agent`，形成硬循环。我一开始就在 `agent.py` 顶层 import 该工具，直接触发循环，managed 用例与工具导入双双报 `partially initialized module`。
+  - 采用的处置：在 `build_domain_tools` / Flash 的 `_build_tools` 里**局部 import**，并在注释里写明原因与真正的修法（让 `app/__init__.py` 不再以副作用构造 app），和既有 `SECRETARY_TOOLS` 的写法一致。这是绕过，不是修复。
+  - 这条已作为第 8 项记进设计文档的缺口清单：**共享数据模型不应该有能力构造一个 web server**，在更多工具依赖它之前值得修，但它属于平台改动、不属于本次契约试点。
+- 守住子代理边界：`finance` 这个 tool set 名字被 `subagents/builtins.py` 按名引用、被 `compiler.py` 用来设置 `finance_enabled`，所以**不能**把作业工具塞进金融清单（否则会静默扩大 analyst 子代理的可达范围）。因此分成两个函数，并加了一条测试明确断言"金融集合里没有作业工具、顶层集合里有"。
+- 测试：新增 `test_tool_exposure.py`（4 项：普通账户拿到作业工具、金融工具没被漏掉、market_watch 仍然按 feature 开关、金融集合未被扩宽）与 `test_flash_exposure.py`（2 项）。另外对 managed 守卫做了变异验证：把那一处 `managed_policy is None` 去掉，managed 用例立刻失败（1 failed | 10 passed），恢复后 11 项通过。
+- 验证：`tests/unit/ptc_agent` 全集 **763 passed / 1 xpassed**（含本次改动的 `agent.py`）；homework 相关 40 项通过；`ruff check` 通过。
+
 ### Agent artifact 契约：第四步（工具本体）
 
 - 新增 `get_homework_schedule`（`src/tools/homework/tools.py`），`response_format="content_and_artifact"`，返回「模型读的摘要」+「卡片渲染的 self-contained artifact」。

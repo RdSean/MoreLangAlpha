@@ -1,7 +1,14 @@
 """Flash Agent - Minimal agent without sandbox dependencies.
 
-Optimized for fast responses using external tools only (web search, market data,
-SEC filings). No code execution, no sandbox, no MCP tools.
+Optimized for fast responses using external tools (web search, market data, SEC
+filings) plus first-party household reads such as the homework schedule. No code
+execution, no sandbox, no MCP tools.
+
+The homework tool is the first non-"external" entry: it reads the household's
+own data rather than reaching out to a provider. That is still a read, still
+household-scoped by the service it delegates to, and it answers a question Flash
+is the natural landing place for — but it is why this docstring no longer says
+"external tools only".
 """
 
 from datetime import UTC, datetime
@@ -161,6 +168,14 @@ class FlashAgent:
         from src.tools.secretary import SECRETARY_TOOLS
 
         tools.extend(SECRETARY_TOOLS)
+
+        # First-party household reads. Imported lazily for the same reason
+        # `SECRETARY_TOOLS` is: the education models live under
+        # `src/server/app/`, whose package `__init__` builds the FastAPI app,
+        # and one of those routers imports this module back.
+        from src.tools.homework.tools import get_homework_schedule
+
+        tools.append(get_homework_schedule)
 
         return tools
 

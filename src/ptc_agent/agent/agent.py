@@ -181,6 +181,55 @@ _MANAGED_TEXTBOOK_SUBAGENTS = {
 }
 
 
+def build_finance_tools(config: AgentConfig) -> list[Any]:
+    """The market and filing tools.
+
+    Kept separate from `build_domain_tools` because this list is *also* the
+    ``finance`` tool set the built-in subagents declare by name
+    (`subagents/builtins.py`). Adding a household-read tool here would silently
+    widen what an analyst subagent can reach.
+    """
+    finance_tools: list[Any] = [
+        get_sec_filing,  # SEC filing extraction (10-K, 10-Q, 8-K)
+        get_quote,  # Real-time quotes (cheap — price freshness)
+        get_daily_prices,  # Stock OHLCV price data
+        get_company_overview,  # Company investment analysis (includes real-time quote)
+        get_market_overview,  # Single-day market snapshot (indices + US sectors)
+        get_options_chain,  # Options contracts chain with snapshot pricing
+        screen_stocks,  # Stock screener with filters
+    ]
+    if config.feature_enabled("market_watch"):
+        finance_tools.append(watch_market)  # Market watch start/stop (live price injection)
+    return finance_tools
+
+
+def build_domain_tools(config: AgentConfig) -> list[Any]:
+    """First-party tools an ordinary account gets, and a managed job gets none of.
+
+    Named rather than built inline so the set can be asserted directly: what an
+    ordinary account sees, and that feature gating still applies inside it.
+
+    A managed teaching job is scoped to one chapter's materials, so
+    `PTCAgent.create_agent` puts this whole set behind a single
+    `managed_policy is None` guard — the homework tool included, since it would
+    otherwise read outside that scope.
+
+    The homework tool is imported here rather than at module scope, and that is
+    not cosmetic. Its schemas reuse the education Pydantic models, which live
+    under `src/server/app/` — and `src/server/app/__init__.py` *builds the whole
+    FastAPI application on import*. Reaching those models therefore pulls the
+    routers back in, one of which imports this module: a cycle. Same workaround,
+    same reason, as the lazy `SECRETARY_TOOLS` import in `flash/agent.py`.
+
+    The real fix is to stop `src/server/app/__init__.py` from constructing the
+    app as an import side effect; that is a platform change, deliberately not
+    part of this pilot, and recorded in the design doc's gap list instead.
+    """
+    from src.tools.homework.tools import get_homework_schedule
+
+    return [*build_finance_tools(config), get_homework_schedule]
+
+
 @dataclass(frozen=True)
 class _IdentityGates:
     """Which identity-derived surfaces a build gets.
@@ -657,20 +706,10 @@ class PTCAgent:
             crawl_tools = create_crawl_tools(filesystem_backend)
             tools.extend(crawl_tools)
 
-        finance_tools = [
-            get_sec_filing,  # SEC filing extraction (10-K, 10-Q, 8-K)
-            get_quote,  # Real-time quotes (cheap — price freshness)
-            get_daily_prices,  # Stock OHLCV price data
-            get_company_overview,  # Company investment analysis (includes real-time quote)
-            get_market_overview,  # Single-day market snapshot (indices + US sectors)
-            get_options_chain,  # Options contracts chain with snapshot pricing
-            screen_stocks,  # Stock screener with filters
-        ]
-        if self.config.feature_enabled("market_watch"):
-            finance_tools.append(watch_market)  # Market watch start/stop (live price injection)
         if managed_policy is None:
-            # A managed teaching job reaches no external data surface.
-            tools.extend(finance_tools)
+            # A managed teaching job reaches no domain surface at all, so the
+            # whole first-party set is behind this one guard.
+            tools.extend(build_domain_tools(self.config))
 
         if subagent_names is None:
             subagent_names = (
@@ -837,7 +876,10 @@ class PTCAgent:
             "web_search": (
                 [web_search_tool, web_fetch_tool] if web_search_tool is not None else []
             ),
-            "finance": [] if managed_policy is not None else finance_tools,
+            # The pre-existing finance set, deliberately without the homework
+            # tool: built-in subagents declare this set by name, so widening it
+            # would hand one of them a household read it never asked for.
+            "finance": [] if managed_policy is not None else build_finance_tools(self.config),
             "think": [think_tool],
             "todo": [TodoWrite],
         }

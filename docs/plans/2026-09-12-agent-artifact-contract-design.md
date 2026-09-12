@@ -273,6 +273,16 @@ nitpick:
    keep their untyped `as Record<string, unknown>` reads. Until they are
    migrated (or explicitly frozen), "we use schemas for tool payloads" is a
    statement about new code only.
+8. **Importing an education model builds the whole FastAPI app.** Found while
+   wiring the tool up: `src/server/app/__init__.py` constructs the application
+   at import time, so reaching `src/server/app/education/models.py` — which the
+   tool's schemas do, to reuse the calendar models — drags every router into
+   the agent's import graph. One router imports `ptc_agent.agent.agent` back,
+   so a module-scope import of the tool in `agent.py` is a hard cycle. Worked
+   around with a documented lazy import (same as `SECRETARY_TOOLS`), but the
+   layering is the actual defect: a shared data model should not be able to
+   construct a web server. Worth fixing before more tools depend on it; out of
+   scope here because it is a platform change, not a contract one.
 
 Items 1 and 2 are the ones that would decide whether this becomes a *flow*
 rather than a *practice*; both are cheap once the pilot lands, and neither
