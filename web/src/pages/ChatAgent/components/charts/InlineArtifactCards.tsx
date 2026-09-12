@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { InlineAutomationCard } from './InlineAutomationCards';
+import InlineHomeworkCard from './InlineHomeworkCard';
 import { InlinePreviewCard } from './InlinePreviewCard';
 
 export const INLINE_ARTIFACT_TOOLS = new Set([
   'check_automations',
   'create_automation',
   'GetPreviewUrl',
+  'get_homework_schedule',
 ]);
 
 /** Build a Google favicon service URL for a web result. */
@@ -48,4 +50,5 @@ export const INLINE_ARTIFACT_MAP: Record<
 > = {
   automations: InlineAutomationCard,
   preview_url: InlinePreviewCard,
+  homework_schedule: InlineHomeworkCard,
 };

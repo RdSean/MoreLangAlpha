@@ -2,6 +2,16 @@
 
 ## 2026-09-12
 
+### Agent artifact 契约：第六步（chat 卡片 + 注册 + 回放验证）
+
+- 新增 `InlineHomeworkCard`（`web/src/pages/ChatAgent/components/charts/`）：按约定**复制**仪表盘 widget 的渲染，而不是抽公共组件——差异是结构性的：widget 是自取数、受 config 驱动的容器，而会话里的卡片必须渲染 payload，并在从存储事件回放时逐字重现。两者靠**契约**保持一致（同一份 Pydantic 生成的类型），而不是靠共享组件。
+- 卡片作为叶子节点必须成立的两点：孩子姓名取自 payload 的 `student_names`（没有成员列表可拉）；分组按**日期**而不是 widget 的"今天/明天"相对桶——因为工具可以回答"上周的作业"，而"明天"对上周没有意义。今天/明天仍显示为中文相对标签，其余显示具体日期。
+- 渲染前用生成的 zod 校验：**不通过就显示一行提示，而不是在会话里抛错**——这是"有契约"的实际收益。测试里专门做了变异验证：把校验分支短路掉后，两条用例立刻失败（2 failed），恢复后 11 项通过。
+- 11 项卡片测试：渲染真实 artifact、按日期分组且升序、姓名来自 payload、**在没有任何 QueryClientProvider 的情况下也能渲染**（若有取数 hook 会抛错，这条隐式守住"叶子"性质）、逾期标记、未知科目回落到「书本」图标、契约不通过显示提示、完全不是作业 artifact 也显示提示、未知多余键忽略、空结果空态、点击透传给详情面板。
+- 注册：`INLINE_ARTIFACT_TOOLS` 加 `get_homework_schedule`，`INLINE_ARTIFACT_MAP` 加 `homework_schedule`，并新增 4 项注册表测试（每个 artifact type 都有组件、认得作业工具、discriminator 映射到位、既有条目没被挤掉）。这套映射目前仍是纯字符串约定，所以这条断言是"便宜的那一半修复"。
+- **回放 blocker 已验证通过**（这是设计里那条"若不过就停下来"的项）：新增 `tests/unit/server/services/history/test_tool_artifact_replay.py` 两项——带 artifact 的 `ToolMessage` 经 `messages_to_history_events` → `history_events_to_sse` 后，`tool_call_result` 事件里仍带着完整 artifact；而没有 artifact 的工具不会被凭空塞一个。顺带说明：projector 里那套 `_ARTIFACT_FROM_TOOL_MESSAGE` 派生的是**另一个**通道（widget/preview/chart 的 `artifact` SSE 事件），既有测试只覆盖了那一支，卡片读的这支此前没人钉过。
+- 验证：前端 `src/pages/ChatAgent/components/charts` + `src/contracts` 共 33 项通过；`tests/unit/server/services/history` 168 项通过；`pnpm typecheck` 通过；`pnpm lint` 0 error / 56 warning；`ruff check` 通过。
+
 ### Agent artifact 契约：第五步（PTC 与 Flash 双端暴露）
 
 - **PTC**：把原先内联在 `create_agent` 里的金融工具清单提成 `build_finance_tools(config)`，并新增 `build_domain_tools(config)` = 金融工具 + `get_homework_schedule`；managed 教学模式仍然只被**一处** `managed_policy is None` 挡住——这是故意的，一处守卫比两处更容易看住。managed 用例的排除集合已加上 `get_homework_schedule`。

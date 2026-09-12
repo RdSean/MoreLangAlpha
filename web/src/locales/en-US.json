@@ -810,7 +810,8 @@
         "backToThisMonth": "This month",
         "dayEmpty": "Nothing due this day",
         "previousPeriod": "Previous period",
-        "nextPeriod": "Next period"
+        "nextPeriod": "Next period",
+        "unavailable": "This homework schedule could not be read."
       },
       "presets": {
         "family-desk": {

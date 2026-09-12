@@ -810,7 +810,8 @@
         "backToThisMonth": "回到本月",
         "dayEmpty": "这一天没有到期作业",
         "previousPeriod": "上一个周期",
-        "nextPeriod": "下一个周期"
+        "nextPeriod": "下一个周期",
+        "unavailable": "这份作业日程无法读取。"
       },
       "presets": {
         "family-desk": {
