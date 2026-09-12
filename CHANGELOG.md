@@ -2,6 +2,18 @@
 
 ## 2026-09-12
 
+### Agent artifact 契约：第四步（工具本体）
+
+- 新增 `get_homework_schedule`（`src/tools/homework/tools.py`），`response_format="content_and_artifact"`，返回「模型读的摘要」+「卡片渲染的 self-contained artifact」。
+- **不含任何自有查询**：时段解析完就交给既有的 `get_task_calendar`——它已经负责解析调用者的家庭、并把学生收窄到本人。再写一份 scope 逻辑，正是两个界面开始对不上的起点。
+- 时段解析：`today` / `tomorrow` / `this_week` / `next_week` / `last_week` 按 ISO 周（周一起始）计算，与日历 API 自己的"本周"统计口径一致；`2w` / `1m` 从今天向前 14 / 31 天；显式 `start_date`+`end_date` 优先。全部在**家庭时区**里算今天——测试里专门用 `2026-09-16T23:30Z` 验证：在东京已经是 17 号，用 UTC 会把"今天"算错一天。
+- artifact 由 `HomeworkScheduleArtifact` 生成后 `model_dump(mode="json")` 输出，所以「工具校验的形状」就是「前端校验的形状」。孩子的姓名与家庭时区一并嵌入（卡片无法二次请求）。
+- content 摘要上限 40 条（`MAX_CONTENT_TASKS`），超出写明 `(N more not listed; see the schedule card)`——**上限只加在文字上，artifact 仍然带全量**，因为那是卡片要渲染的东西。空结果明确写 "No homework is due in this period."。
+- 工具签名同时暴露 `window` / `start_date` / `end_date`，让模型既能答"今天有什么作业"，也能答"上周/下周的"。
+- 19 项工具测试：7 个 window 的精确日期（含跨周边界）、显式区间优先、时区影响"今天"、以调用者身份请求 service、缺 user_id 报错、`student_names` 只含学生、artifact 通过契约模型往返、content 含区间与计数与孩子姓名、40 条上限与余数、空结果文案。
+- 「先看失败」验证：实现前该文件因 `ModuleNotFoundError: src.tools.homework.tools` 收集失败；实现后再做变异测试——把 `last_week` 改成 `+7 天`，对应用例立刻失败（1 failed | 31 passed），恢复后 32 项通过。
+- 验证：`tests/unit/tools/homework` 32 项 + `tests/unit/contracts` 3 项全通过；`ruff check` 与 `ruff format --check` 通过。
+
 ### Agent artifact 契约：第三步（artifact 信封 + 工具入参）
 
 - 新增 `src/tools/homework/schemas.py`：`HomeworkScheduleArgs`（工具入参）与 `HomeworkScheduleArtifact`（返回信封）。信封**复用** `EducationCalendarDayResponse` / `EducationCalendarStatsResponse` 而不是重新声明——这份复用正是让 chat 卡片与仪表盘 widget 描述同一个 payload 的原因，也让一份生成契约同时覆盖两者。
