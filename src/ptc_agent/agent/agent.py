@@ -128,6 +128,7 @@ from src.tools.market_data.tool import (
     screen_stocks,
 )
 from src.tools.market_watch import watch_market
+from src.tools.homework.tools import get_homework_schedule
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.mcp_registry import MCPRegistry
 from ptc_agent.core.sandbox import PTCSandbox
@@ -213,20 +214,7 @@ def build_domain_tools(config: AgentConfig) -> list[Any]:
     `PTCAgent.create_agent` puts this whole set behind a single
     `managed_policy is None` guard — the homework tool included, since it would
     otherwise read outside that scope.
-
-    The homework tool is imported here rather than at module scope, and that is
-    not cosmetic. Its schemas reuse the education Pydantic models, which live
-    under `src/server/app/` — and `src/server/app/__init__.py` *builds the whole
-    FastAPI application on import*. Reaching those models therefore pulls the
-    routers back in, one of which imports this module: a cycle. Same workaround,
-    same reason, as the lazy `SECRETARY_TOOLS` import in `flash/agent.py`.
-
-    The real fix is to stop `src/server/app/__init__.py` from constructing the
-    app as an import side effect; that is a platform change, deliberately not
-    part of this pilot, and recorded in the design doc's gap list instead.
     """
-    from src.tools.homework.tools import get_homework_schedule
-
     return [*build_finance_tools(config), get_homework_schedule]
 
 

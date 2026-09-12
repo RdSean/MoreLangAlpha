@@ -2,6 +2,14 @@
 
 ## 2026-09-12
 
+### 缺口 8 修复：`src/server/app` 不再在 import 时构造应用
+
+- `src/server/app/__init__.py` 原先在模块顶层执行 `from src.server.app.setup import app`，于是 **import 该包下任何东西**——一个 Pydantic 模型、一个 router、一个 helper——都会构造整个 FastAPI 应用（340 条路由 + 全部中间件 + lifespan 资源）。两个实际后果：任何只需要数据模型的模块都被拖进整个 web 层（`src/tools/homework/schemas.py` 复用教育模型，而某个 router 又反向 import `ptc_agent.agent.agent`，于是模块级 import 构成硬循环）；以及不需要应用的测试和脚本也要为构造它付出代价。
+- 改为 PEP 562 的惰性属性：`app` 在首次访问时解析，其余名字一律抛 `AttributeError`（这样 `from src.server.app import setup` 仍会正常回落到子模块导入）。`from src.server.app import app` 与 uvicorn 的 `src.server.app:app` 两种写法都保持不变。
+- **顺手拆掉之前为绕过它而加的两处局部 import**（`build_domain_tools` 与 Flash 的 `_build_tools`），改回正常的模块级 import——这是"修复生效"的证据，而不是继续留着 workaround。
+- 修复前后对照实测：修复前 `import src.server.app.education.models` 后 `src.server.app.setup` 已在 `sys.modules` 中；修复后为 **False**。同时验证四条路径：`from src.server.app import app`（FastAPI，340 routes）、`from src.server.app import setup`、`uvicorn.importer.import_from_string('src.server.app:app')`、以及实际重启 `server.py` 后 `Application startup complete` 且 `/api/v1/users/me` 返回 401（无 cookie 的预期结果），日志无 error/traceback。
+- 验证：后端全量 `tests/unit` **7590 passed / 8 deselected**（其中 1 项 xpass 是既有非确定性用例 `test_delta_channel_ordering.py::test_fan_out_reconstruction_preserves_live_order` 自身 ~50/50 的翻转，其 xfail 说明里写明了，与本次改动无关）；`ruff check` 通过。
+
 ### Agent artifact 契约：第七步（端到端验证 + 配方落盘）
 
 - **真实链路跑通**：重启后端（18000，接 15432/16379/19000）后，在 Flash 会话里问「最近我有哪些作业要做」，模型调用了 `get_homework_schedule`，卡片在会话里正常渲染——顶部区间、统计条（2 今日 / 8 本周 / 4 逾期 / 12 已完成，逾期标红）、按日期分组（今天 / 明天 / 9月14日周一 …）、科目双色图标、孩子姓名与截止时间齐全。

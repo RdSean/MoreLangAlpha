@@ -60,6 +60,7 @@ from ptc_agent.agent.turn import build_model_resilience_middleware, turn_model
 from src.tools.web.search import get_web_search_tool
 from src.tools.web.fetch import web_fetch_tool
 from src.tools.sec.tool import get_sec_filing
+from src.tools.homework.tools import get_homework_schedule
 from src.tools.market_data.tool import (
     get_daily_prices,
     get_company_overview,
@@ -169,12 +170,7 @@ class FlashAgent:
 
         tools.extend(SECRETARY_TOOLS)
 
-        # First-party household reads. Imported lazily for the same reason
-        # `SECRETARY_TOOLS` is: the education models live under
-        # `src/server/app/`, whose package `__init__` builds the FastAPI app,
-        # and one of those routers imports this module back.
-        from src.tools.homework.tools import get_homework_schedule
-
+        # First-party household reads.
         tools.append(get_homework_schedule)
 
         return tools
