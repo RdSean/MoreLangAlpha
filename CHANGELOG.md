@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-12
+
+### Agent artifact 契约：第一步（生成物 + 漂移守卫）
+
+- 新增 `scripts/contracts/export_schemas.py`：以 Pydantic 为唯一来源，把 `EducationTaskCalendarResponse` 导出成 JSON Schema，写入并提交 `web/src/contracts/education-calendar.schema.json`（5507 字节，含 `$defs` 里三个嵌套模型）。
+- 新增 `tests/unit/contracts/test_generated_schemas_are_current.py`（3 项）：重新生成并与提交物逐字比对；断言每个 `OUTPUTS` 条目都有对应文件；断言生成物里**没有任何 `format` 关键字**。
+- **剥离 `format` 是刻意的**：zod 由 JSON Schema 生成的 `date-time` 校验器只接受 `Z` 后缀，`2026-09-13T19:00:00+09:00` 这种合法值会被拒。当前只是碰巧通过，因为 Pydantic v2 会把 tz-aware 时间归一化成 UTC 再输出 `Z`。所以契约只保留结构（类型、必填、数组、可空），日期语义交给前端，并用一条测试把这条决定钉住——将来有人想"恢复保真度"必须和失败的测试正面辩论。
+- 输出使用 `sort_keys=True` 的确定性序列化：重复执行生成器后 `git diff` 为空（已验证），提交物只会因真实变化而变动。
+- 「先看失败」验证：篡改提交物里 `today_count.type` 为 `string`，测试立即失败并指名文件（`... is stale — re-run ...`，1 failed | 2 passed）；恢复后 3 项通过。
+- 本轮为**增量**试点：不动 `Education/types.ts` 与仪表盘 widget 的类型，新管线只服务新的工具与卡片。设计文档中另附「离成为标准流程还缺什么」的 7 条清单（其中注册仍手写两处、以及没有强制"产出 artifact 的工具必须有渲染器"这两条最关键）。
+
 ## 2026-09-11
 
 ### 作业日历：周期切换提到台面 + 月历视图
