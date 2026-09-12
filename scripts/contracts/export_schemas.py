@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pydantic
 
@@ -52,6 +52,38 @@ OUTPUTS: dict[str, type[pydantic.BaseModel]] = {
     "web/src/contracts/education-calendar.schema.json": EducationTaskCalendarResponse,
     "web/src/contracts/homework-schedule.schema.json": HomeworkScheduleArtifact,
 }
+
+ARTIFACT_INDEX_PATH = "web/src/contracts/artifact-types.json"
+"""Where the list of artifact discriminators is published.
+
+The frontend dispatches on an artifact's `type` literal, so the set of values
+the backend can emit is exactly the set the client must be able to handle. This
+index is what lets a test say so, instead of the coverage living in someone's
+head: `web/src/pages/ChatAgent/components/charts/__tests__/artifactIdCoverage.test.ts`.
+"""
+
+
+def _artifact_types() -> list[str]:
+    """Discriminator values declared on the exported models.
+
+    Convention: an artifact envelope names its `type` with a `Literal`, which is
+    what lands as a `const` in the schema and what the frontend switches on.
+    Anything without such a field is a payload, not an artifact.
+    """
+    found: set[str] = set()
+    for model in OUTPUTS.values():
+        field = model.model_fields.get("type")
+        if field is None:
+            continue
+        found.update(value for value in get_args(field.annotation) if isinstance(value, str))
+    return sorted(found)
+
+
+def build_outputs() -> dict[str, dict[str, Any]]:
+    """Every committed artifact: the schemas plus the artifact-type index."""
+    outputs: dict[str, dict[str, Any]] = dict(build_schemas())
+    outputs[ARTIFACT_INDEX_PATH] = {"artifact_types": _artifact_types()}
+    return outputs
 
 
 def _strip_format(node: Any) -> Any:
@@ -83,7 +115,7 @@ def _serialize(schema: dict[str, Any]) -> str:
 
 
 def main() -> None:
-    for relative_path, schema in build_schemas().items():
+    for relative_path, schema in build_outputs().items():
         target = REPO_ROOT / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(_serialize(schema), encoding="utf-8")

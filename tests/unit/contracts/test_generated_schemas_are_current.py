@@ -15,13 +15,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.contracts.export_schemas import OUTPUTS, build_schemas
+from scripts.contracts.export_schemas import (
+    ARTIFACT_INDEX_PATH,
+    OUTPUTS,
+    build_outputs,
+    build_schemas,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_committed_schemas_match_generated() -> None:
-    for relative_path, schema in build_schemas().items():
+    for relative_path, schema in build_outputs().items():
         on_disk = json.loads((REPO_ROOT / relative_path).read_text())
         assert on_disk == schema, (
             f"{relative_path} is stale — re-run "
@@ -32,6 +37,18 @@ def test_committed_schemas_match_generated() -> None:
 def test_every_declared_output_is_covered() -> None:
     # Catches adding a model to OUTPUTS and forgetting to emit its file.
     assert set(build_schemas()) == set(OUTPUTS)
+
+
+def test_the_artifact_index_lists_every_discriminator() -> None:
+    """The client dispatches on these, so the list has to be complete.
+
+    `artifactIdCoverage.test.ts` on the frontend consumes this file and fails
+    when a type the backend can emit has neither a renderer nor an explicit
+    opt-out — which is the gap that used to be closed by remembering to update
+    two hand-written maps.
+    """
+    index = build_outputs()[ARTIFACT_INDEX_PATH]
+    assert index["artifact_types"] == ["homework_schedule"]
 
 
 def test_no_format_keyword_survives() -> None:

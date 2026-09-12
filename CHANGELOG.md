@@ -2,6 +2,15 @@
 
 ## 2026-09-12
 
+### 缺口 1/2/3 修复：artifact 注册收敛为一张表并被强制覆盖
+
+- **缺口 1（注册手写两处）**：新增 `web/src/pages/ChatAgent/components/charts/artifactRegistry.ts` 作为唯一注册表（`artifactType` + 该 artifact 内联渲染所对应的工具名 + 组件），`INLINE_ARTIFACT_MAP` 与 `INLINE_ARTIFACT_TOOLS` 都由它派生，`InlineArtifactCards.tsx` 只做转出以保持既有引用不变。新增测试断言两条派生结果与表一致——这才是"加一张卡只改一处"的实质，而不是靠人记得改两个地方。
+- **缺口 2（没有强制"能产出的 artifact 必须有渲染器"）**：导出器现在额外产出 `web/src/contracts/artifact-types.json`（扫描导出模型上 `type` 字段的 `Literal` 值），并纳入既有漂移守卫；前端新增 `artifactIdCoverage.test.ts`：后端能产出的每个 type 必须有渲染器，或在 `ARTIFACT_TYPES_WITHOUT_INLINE_CARD` 里带**理由**明确豁免；另有两条反向断言——豁免项若已获得卡片即为过期（必须删）、每条豁免必须写明理由。
+- 「先看失败」验证：往 `artifact-types.json` 里塞一个新 type（模拟后端新增 artifact）后，覆盖测试立刻失败并指名：`homework_summary — add a card to artifactRegistry.ts, or record why it has none`（1 failed）；恢复后 21 项通过。
+- **缺口 3（生成器手跑）**：新增 `make contracts`，一条命令跑完两跳，`.PHONY` 已登记；实测幂等（重复执行 `git diff` 为空）。
+- 验证：后端全量 `tests/unit` **7591 passed / 8 deselected / 1 xfailed**（上一轮 7590，+1 为新增的 artifact index 用例）；前端全量 **248 文件 / 2458 项通过**（上一轮 2452，+6）；`pnpm typecheck` 通过；`pnpm lint` 0 error / **55** warning（比基线少 1，因为收敛后 `InlineArtifactCards.tsx` 不再需要直接引入 React）；`ruff check` 通过。
+- 设计文档的缺口清单已更新：1、2、3、8 标记为已修复（3 为部分修复：有了一键命令，但不会自动触发——过期仍会让测试失败）；剩余 4（只覆盖响应不覆盖请求）、5（跨 artifact 联合类型）、6（locale 字符串手写）、7（过渡期新旧两套）属于**广度**而非机制，且都不阻塞"用这套方式新增一个工具"。
+
 ### 缺口 8 修复：`src/server/app` 不再在 import 时构造应用
 
 - `src/server/app/__init__.py` 原先在模块顶层执行 `from src.server.app.setup import app`，于是 **import 该包下任何东西**——一个 Pydantic 模型、一个 router、一个 helper——都会构造整个 FastAPI 应用（340 条路由 + 全部中间件 + lifespan 资源）。两个实际后果：任何只需要数据模型的模块都被拖进整个 web 层（`src/tools/homework/schemas.py` 复用教育模型，而某个 router 又反向 import `ptc_agent.agent.agent`，于是模块级 import 构成硬循环）；以及不需要应用的测试和脚本也要为构造它付出代价。

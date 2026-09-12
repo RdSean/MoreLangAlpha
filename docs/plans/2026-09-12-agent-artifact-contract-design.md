@@ -240,23 +240,24 @@ see the gap list below.
 
 ## What is still missing before this is the standard flow
 
-Written down now, while the pilot is fresh, so the answer to "can this be our
-process?" is evidence rather than impression. Each item is a real gap, not a
-nitpick:
+Written down while the pilot was fresh; **items 1, 2, 3 and 8 have since been
+fixed** (see the status line on each). What remains is listed below with its
+reason for waiting.
 
-1. **Registration is still hand-written, twice.** A new artifact must be added
-   to `INLINE_ARTIFACT_TOOLS` *and* `INLINE_ARTIFACT_MAP`, and nothing fails if
-   only one is done. A registry — one table keyed by artifact type — would
-   collapse this and let a test assert "every artifact type the backend can emit
-   has a renderer".
-2. **Nothing forces a tool that returns an artifact to have a renderer.** Today
-   a missing card is a blank block discovered by eye. This is testable in the
-   same registry: enumerate artifact types from the Pydantic models, assert each
-   is either mapped or explicitly opted out.
-3. **The generator is manual.** A drift test makes a stale file fail the suite,
-   which is the important half, but there is no `make` target, no watch mode and
-   no pre-commit hook, so the loop is "run tests, read the error, re-run the
-   script".
+1. ~~**Registration is still hand-written, twice.**~~ **Fixed.**
+   `web/src/pages/ChatAgent/components/charts/artifactRegistry.ts` is now the
+   single table; `INLINE_ARTIFACT_TOOLS` and `INLINE_ARTIFACT_MAP` are derived
+   from it, and a test asserts both derivations match the table.
+2. ~~**Nothing forces a tool that returns an artifact to have a renderer.**~~
+   **Fixed.** The exporter publishes every `type` discriminator it finds on the
+   exported models to `web/src/contracts/artifact-types.json`, and
+   `__tests__/artifactIdCoverage.test.ts` fails when one has neither a renderer
+   nor a recorded `ARTIFACT_TYPES_WITHOUT_INLINE_CARD` entry with a reason.
+   Verified by simulating a new backend type: the test fails naming it.
+3. ~~**The generator is manual.**~~ **Partly fixed.** `make contracts` runs both
+   hops. Still manual in the sense that nothing runs it for you — but a stale
+   artifact fails the suite, so the loop is "run the tests, read which file is
+   stale, run the target".
 4. **Only responses are covered.** Request bodies the frontend *sends* are still
    hand-written on both sides (`EducationTaskCalendarRequest` today). The
    asymmetry is deliberate for the pilot and would need closing for a general
@@ -273,20 +274,17 @@ nitpick:
    keep their untyped `as Record<string, unknown>` reads. Until they are
    migrated (or explicitly frozen), "we use schemas for tool payloads" is a
    statement about new code only.
-8. **Importing an education model builds the whole FastAPI app.** Found while
-   wiring the tool up: `src/server/app/__init__.py` constructs the application
-   at import time, so reaching `src/server/app/education/models.py` — which the
-   tool's schemas do, to reuse the calendar models — drags every router into
-   the agent's import graph. One router imports `ptc_agent.agent.agent` back,
-   so a module-scope import of the tool in `agent.py` is a hard cycle. Worked
-   around with a documented lazy import (same as `SECRETARY_TOOLS`), but the
-   layering is the actual defect: a shared data model should not be able to
-   construct a web server. Worth fixing before more tools depend on it; out of
-   scope here because it is a platform change, not a contract one.
+8. ~~**Importing an education model builds the whole FastAPI app.**~~
+   **Fixed.** `src/server/app/__init__.py` now resolves `app` lazily (PEP 562)
+   instead of constructing it at import time, so importing a data model no
+   longer pulls in 340 routes and every router. The two lazy-import workarounds
+   it had forced are gone, which is the evidence the fix landed rather than
+   moved.
 
-Items 1 and 2 are the ones that would decide whether this becomes a *flow*
-rather than a *practice*; both are cheap once the pilot lands, and neither
-should be built before it does.
+With 1, 2, 3 and 8 closed, the remaining list is about *breadth* rather than
+mechanics: request shapes (4), a real cross-artifact union (5), derived locale
+strings (6), and migrating the artifacts that predate the contract (7). None of
+them blocks a new tool from being built this way today.
 
 ## The recipe (written after the pilot ran end to end)
 

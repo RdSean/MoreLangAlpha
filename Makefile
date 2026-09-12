@@ -1,4 +1,4 @@
-.PHONY: help configup down clean dev dev-web dev-gateway install test test-sandbox test-web test-all lint setup-db migrate
+.PHONY: help configup down clean dev dev-web dev-gateway install test test-sandbox test-web test-all contracts lint setup-db migrate
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -62,6 +62,19 @@ test-web: ## Run frontend unit tests
 
 test-all: test test-web ## Run all tests (backend + frontend)
 	$(MAKE) test-sandbox PROVIDER=memory
+
+# ---------------------------------------------------------------------------
+# Contracts
+# ---------------------------------------------------------------------------
+# Regenerate the cross-boundary payload contracts after changing a Pydantic
+# model that a tool returns. Two hops, both committed, both drift-guarded:
+#   Pydantic            -> web/src/contracts/*.schema.json      (export_schemas.py)
+#   committed schema    -> web/src/contracts/generated/*.ts     (generate-contracts.mjs)
+# Skipping this is not silent: tests/unit/contracts and
+# web/src/contracts/__tests__/generatedContracts.test.ts fail until it is run.
+contracts: ## Regenerate the frontend contracts from their Pydantic models
+	uv run python scripts/contracts/export_schemas.py
+	cd web && node scripts/generate-contracts.mjs
 
 # ---------------------------------------------------------------------------
 # Linting
