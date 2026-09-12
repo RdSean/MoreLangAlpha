@@ -288,6 +288,45 @@ Items 1 and 2 are the ones that would decide whether this becomes a *flow*
 rather than a *practice*; both are cheap once the pilot lands, and neither
 should be built before it does.
 
+## The recipe (written after the pilot ran end to end)
+
+What a future tool author actually does, in order. Every step is enforced by a
+test that fails if it is skipped — that is the difference between this and a
+convention nobody follows.
+
+1. **Declare the payload shapes in Pydantic**, in the tool's own
+   `schemas.py`. Reuse existing models for shared pieces rather than restating
+   them; that reuse is what makes two surfaces describe the same thing.
+2. **Register the model in `scripts/contracts/export_schemas.py` `OUTPUTS`.**
+   Adding the entry is the whole act of publishing a contract, and
+   `tests/unit/contracts` fails until the emitted file exists and matches.
+3. **Run `uv run python scripts/contracts/export_schemas.py`.** It writes
+   `web/src/contracts/<name>.schema.json`, stripping `format`.
+4. **Register the schema in `web/scripts/generate-contracts.mjs` `CONTRACTS`**
+   and run `node scripts/generate-contracts.mjs`. It writes the zod module,
+   inlining `$ref`s first and refusing to emit if any `z.any()` survives.
+5. **Re-export it from a hand-written `web/src/contracts/<name>.ts`**, deriving
+   the types with `z.infer`. That file is where the explanation lives; the
+   generated ones stay untouched.
+6. **Return `(content, artifact)` from the tool**, with the artifact produced
+   by the Pydantic model and dumped with `mode="json"`, so what the tool
+   validates is what the frontend validates.
+7. **Validate before rendering, and render a notice when it fails** — never
+   throw inside the transcript.
+8. **Register the artifact type**: the tool name in `INLINE_ARTIFACT_TOOLS`,
+   the discriminator in `INLINE_ARTIFACT_MAP`. This is the one step with no
+   structural enforcement yet (gap 1).
+
+What the pilot proved along the way, and what it did not:
+
+- **Proved:** the chain is self-sufficient for a new artifact. A payload change
+  fails a drift test rather than one of the two sides; the card renders from a
+  payload with no fetch; the artifact survives a real thread reload (three
+  cards, 53 rows, still present after a full page reload).
+- **Not proved:** that this scales to *many* artifact types. One type with a
+  `Literal` discriminator is not a union, and the registration step above is
+  still manual twice over.
+
 ## Risks
 
 1. **Replay.** A chat card must render from stored history, not a live fetch.
