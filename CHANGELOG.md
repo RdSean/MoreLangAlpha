@@ -38,6 +38,7 @@
 - 组件里注明了它与服务端 Pydantic 模型（`providers/datalab_options.py`）是**手写对齐**的，两者可能漂移一两个版本；服务端对未知键宽容，所以不会互相弄坏。真正的"请求形状契约化"是之前 artifact 契约工作里指出的缺口，这里刻意留作后续，不半做。
 - 文案 9 组中英双语新增（键为字面量，`keys.test.ts` 会强制两侧齐全）；其中图片提取一项的提示直说"图片暂不支持预览，保持关闭可避免 markdown 产生无法显示的引用"。
 - 测试 8 项（`DatalabOptionsFields.test.tsx`）：初始不发送任何字段；改模式后只发 `{"mode":"accurate"}`；改回默认后该键消失；解析范围透传；`toParserOptions` 丢弃 `undefined` 而不是发 null；面板对 `datalab-online` 出现、对本地解析器不出现；默认折叠但内容仍可被辅助技术找到。
+- 说明（事后记录）：本次提交顺带带入了工作区中一处**先前就存在的、属于使用者自己的未提交改动**——`HomeworkCalendarWidget.tsx` 的默认宽度由 4 改为 2（`defaultSize` / `minSize`）。该改动与本步无关，仅因提交时按目录 `git add web/src` 一并纳入；保留原样（是使用者有意的调整），在此更正归属记录。
 - 验证：`src/pages/Documents` + `src/locales` 共 54 项通过；`pnpm typecheck` 通过；`pnpm lint` 0 error / 55 warning（与基线一致）。
 
 ### Datalab 在线解析器：第九步（usage 接口）
