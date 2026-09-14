@@ -19,6 +19,18 @@
 - 这两条测试是先加依赖后写的，所以首次运行即通过、没有"先失败"的过程。为确认断言并非空转，做了变异验证：把子进程里的导入改成不存在的模块后立即失败（`ModuleNotFoundError`，1 failed | 1 passed），恢复后 2 项通过。
 - 验证：该文件 2 项通过。
 
+### Datalab 在线解析器：第五步（provider 本体）
+
+- 新增 `DatalabExtractor`（`src/server/documents/providers/datalab.py`，`parser_id="datalab-online"`），实现既有的**同步** `DocumentParser` 协议，调用 `client.convert()`；可用性由 `get_datalab_config()` 决定，未配置时 descriptor 的 `reason` 直接写明要设置 `ENABLE_DATALAB_DOCUMENT_PARSER` 与 `DATALAB_API_KEY`，而不是让选择器只显示"不可用"。
+- `datalab_sdk` **在函数内导入**（`_client` / `_convert_options`），因此没启用该解析器的部署仍然能构建 provider 注册表——与 `AnydocExtractor` 对待自身可选依赖的方式一致。
+- **两个来自官方文档警告的行为各有独立测试**：请求"完成"但 `success=False` 时必须抛错且**不写出任何文件**（否则会把空文档当成功发布）；`metadata.failed_pages` 非空仍算成功，只产出 warning——因为一页读不出来就让整份任务失败，会丢掉已经成功解析的部分。
+- 元数据里带一个**约定形状**的 `usage` 子对象（`provider_id` / `pages` / `list_cost_cents` / `final_cost_cents`），供执行器在产物发布后落库；用约定子对象而不是散落的 provider 私有字段，是为了让"用量"这件事只有一种形状。
+- 轮询预算从配置透传到调用（`max_polls=540`）并**单测断言**——否则一次重构把预算写死在超时之上，会让计费工作变成孤儿而没有任何测试失败。
+- 已存但非法的参数（旧版本向导写的）不会让任务失败，降级到默认值继续解析。
+- 金额在 `_as_int` 里一次性转成整数分（SDK 可能给 int/float/Decimal），数据库层不再处理浮点。
+- 测试 13 项。这批是先写实现后写测试，所以首次运行即通过；为确认断言非空转，做了变异验证：去掉 `if not result.success` 这条检查后，专门那一条立刻失败（1 failed | 12 passed），恢复后 13 项通过。
+- 验证：`tests/unit/server/documents` 共 **125 项通过**；`ruff check` 与 `ruff format` 通过。
+
 ### Datalab 在线解析器：第四步（每次转换的参数模型）
 
 - 新增 `DatalabConversionOptions`（`src/server/documents/providers/datalab_options.py`），字段覆盖 mode / paginate / page_range / max_pages / skip_cache / 图片提取与描述 / token 精简 markdown / extras，`output_format` 固定为字面量 `markdown`——用字面量而不是省略该字段，是为了让"只支持 markdown"这条约束出现在模型里，而不只藏在 provider 实现里。
