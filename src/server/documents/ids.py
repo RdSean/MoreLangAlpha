@@ -15,6 +15,7 @@ PublicIdKind = Literal[
     "job",
     "artifact",
     "tag",
+    "usage",
 ]
 
 _PREFIXES: dict[PublicIdKind, str] = {
@@ -24,6 +25,7 @@ _PREFIXES: dict[PublicIdKind, str] = {
     "job": "job",
     "artifact": "art",
     "tag": "tag",
+    "usage": "use",
 }
 _BASE62 = string.digits + string.ascii_uppercase + string.ascii_lowercase
 _SUFFIX_LENGTH = 12

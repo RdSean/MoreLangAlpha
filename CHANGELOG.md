@@ -19,6 +19,18 @@
 - 这两条测试是先加依赖后写的，所以首次运行即通过、没有"先失败"的过程。为确认断言并非空转，做了变异验证：把子进程里的导入改成不存在的模块后立即失败（`ModuleNotFoundError`，1 failed | 1 passed），恢复后 2 项通过。
 - 验证：该文件 2 项通过。
 
+### Datalab 在线解析器：第三步（每次转换的用量落库）
+
+- 新增迁移 `061_document_usage_records`（`down_revision = 060_restore_finance_schema`）与 `document_usage_records` 表：`job_id`（FK 到 `document_parse_jobs`）、`owner_user_id`（FK 到 `users`）、`provider_id`、`pages`、`list_cost_cents`、`final_cost_cents`、`created_at`。
+- **`UNIQUE (job_id)` 是关键**：解析任务会重试（`document_parse_jobs.attempt_count` 就是为此存在的），按 job 去重 + 写入端 upsert，才能保证一条记录描述的是**任务**而不是某次尝试——否则同一次转换会在 Usage 页面上被计两次，把花费显示得比实际更高。`ON CONFLICT` 时不动 `created_at`，记录保留第一次产生花费的那一天。
+- **按 `owner_user_id` 归属**：页面展示的是"**本账号**的文档花了多少"，而不是整个部署的支出——后者在多家庭共用的部署上会泄漏其他家庭的活动量。
+- 金额全程整数分（cents），不经过浮点；`aggregate_usage` 按天聚合 `pages` / `cost_cents` / `conversions`，无活动的日期**不补零**（由页面自己画轴，稀疏序列才是诚实的输入）。读取窗口上限 `MAX_WINDOW_DAYS = 31`（页面上最长是 30 天），更宽或倒置的窗口直接 `ValueError`。
+- `documents/ids.py` 增加 `usage` 前缀（`use-`），与既有的 `doc-`/`job-`/`art-` 等保持一致。
+- 测试 8 项（`tests/unit/server/database/test_document_usage.py`），沿用本包既有的 mock 游标风格断言 SQL 与参数：插入带上报费用；**重试改写而非新增**（断言 `ON CONFLICT (job_id) DO UPDATE` 存在、且更新块不重新赋值 `record_id`）；读取按 owner 收窄；窗口边界参数；超长/倒置窗口被拒；按天分桶；空窗口返回空序列而非报错。先写测试后实现（初次收集即失败）。其中一条断言最初写错（`RETURNING record_id` 也含该名字），已改为针对赋值语句 `record_id =`，属于修正断言精度而不是放宽。
+- **迁移已在本地调试库上实际执行并验证往返**：`upgrade head` → 确认列与索引（`document_usage_records_pkey` / `_job_id_key` / `idx_document_usage_owner_created`）→ `downgrade -1` → `upgrade head` → 表仍在。当前 alembic head 为 `061_document_usage_records`。
+- **mock 测不出 SQL 语法错**，所以另外拿真实库跑了两条语句：`aggregate_usage` 正常执行（返回空）；`record_usage` 的 INSERT 能解析并按预期触发外键违反（`ForeignKeyViolation`）——这两件事一起证明了语句合法且约束真的生效。
+- 验证：该文件 8 项通过；`ruff check` 通过。
+
 ## 2026-09-12
 
 ### 缺口 1/2/3 修复：artifact 注册收敛为一张表并被强制覆盖
