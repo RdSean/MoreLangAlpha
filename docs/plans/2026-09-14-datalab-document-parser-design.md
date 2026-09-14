@@ -226,6 +226,46 @@ supports them) plus rewriting references to artifact URLs is a real feature —
 it needs both a publication path and a preview that can resolve it — so it is
 recorded as a follow-up rather than smuggled into this change.
 
+### D9a — Where the images go once we do keep them
+
+Settled 2026-09-14 in review: the document library's own object store, not a
+workspace and not a sandbox. Worth stating plainly because the question assumed
+otherwise — **that is already how documents work**:
+
+| | Workspace files | Document library |
+|---|---|---|
+| Key prefix | `blobs/{user_id}/{sha256}` (`database/blob_keys.py:15`) | `documents/{document_id}/artifacts/{job_id}/{relative_path}` (`executor.py:261`), source at `documents/{document_id}/source` |
+| Reachable from | a workspace, via the sandbox | anywhere, via an authenticated HTTP endpoint |
+
+So "knowledge-base data lives in MinIO rather than being bound to a sandbox" is
+not a change to argue for; it is the existing shape. Extracted images are just
+more artifacts under the same prefix, each with its own `artifact_id`, and they
+are served through the same owner-checked
+`/api/v1/document-artifacts/{artifact_id}/download` as the markdown.
+
+Two consequences that follow, and are the reason this is a piece of work rather
+than a flag:
+
+1. **Keep the markdown faithful.** Do not bake absolute URLs into the stored
+   document — that ties the record to one deployment's hostname and turns every
+   stored reference into something that can leak. Store the markdown exactly as
+   Datalab produced it (relative references and all) and resolve those
+   references **at render time**. The preview already fetches the job's artifact
+   list (`useDocumentArtifacts`), so a `relative_path -> artifact_id` map is
+   available client-side and no API change is needed.
+2. **Image policy is not optional.** `_DEFAULT_MAX_ARTIFACTS = 256` and a
+   bundle-wide byte cap (`executor.py:256`) both apply. A scanned document can
+   plausibly exceed the count, and images counted into the same byte budget
+   would fail jobs that currently succeed with "Parser artifact bundle is too
+   large". So images need their own caps (count, per-image minimum size, total)
+   and to be excluded from — or given a separate budget within — the markdown
+   bundle cap.
+
+Also non-negotiable: image artifacts must never be exposed as public bucket
+URLs. These are family documents, often children's scanned homework; the
+authenticated endpoint is the only correct reader, and the correct
+`media_type` per image is what makes `<img>` render once it does.
+
 ## Open questions
 
 None blocking. Two decisions are settled: retire `ocr-document` (D5), keep
