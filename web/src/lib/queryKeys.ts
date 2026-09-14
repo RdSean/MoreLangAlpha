@@ -185,6 +185,10 @@ export const queryKeys = {
   settings: {
     all: ['settings'],
     channels: { all: ['settings', 'channels'], wechat: () => ['settings', 'channels', 'wechat'] },
+    documents: {
+      all: ['settings', 'documents'],
+      usage: (range: string) => [...queryKeys.settings.documents.all, 'usage', range],
+    },
     family: {
       all: ['settings', 'family'],
       children: () => [...queryKeys.settings.family.all, 'children'],

@@ -603,6 +603,21 @@
         "label": "宽松",
         "description": "最大化上下文。适合 1M 上下文模型。"
       }
+    },
+    "usage": {
+      "tab": "用量",
+      "title": "用量",
+      "subtitle": "这个账号在文档转换上的花费。",
+      "pages": "已解析页数",
+      "conversions_other": "{{count}} 次转换",
+      "cost": "花费",
+      "costHint": "依据每次转换上报的用量统计。",
+      "breakdown": "每日明细",
+      "rangeLabel": "时间范围",
+      "range_7d": "7 天",
+      "range_14d": "14 天",
+      "range_30d": "30 天",
+      "empty": "这段时间内没有转换过文档。"
     }
   },
   "dashboard": {

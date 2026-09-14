@@ -1,6 +1,8 @@
 import { api } from '@/api/client';
 import type {
   Artifact,
+  DocumentUsage,
+  UsageRange,
   CreateParseJobInput,
   CreateParseJobResult,
   DatasetFilters,
@@ -277,4 +279,18 @@ function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
 
 function isAbort(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+}
+
+/**
+ * What this account's document conversions have cost, by day.
+ *
+ * Totalled by the server: summing the buckets here would give two
+ * implementations of "total spend", and the header would eventually disagree
+ * with the chart.
+ */
+export async function getDocumentUsage(range: UsageRange): Promise<DocumentUsage> {
+  const { data } = await api.get<DocumentUsage>('/api/v1/document-usage', {
+    params: { range },
+  });
+  return data;
 }

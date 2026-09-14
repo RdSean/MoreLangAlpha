@@ -603,6 +603,22 @@
         "label": "Relaxed",
         "description": "Maximum context. Best for 1M-context models."
       }
+    },
+    "usage": {
+      "tab": "Usage",
+      "title": "Usage",
+      "subtitle": "What document conversion has cost this account.",
+      "pages": "Pages processed",
+      "conversions_one": "{{count}} conversion",
+      "conversions_other": "{{count}} conversions",
+      "cost": "Spend",
+      "costHint": "Based on what each conversion reported.",
+      "breakdown": "Daily breakdown",
+      "rangeLabel": "Range",
+      "range_7d": "7d",
+      "range_14d": "14d",
+      "range_30d": "30d",
+      "empty": "No documents have been converted in this period."
     }
   },
   "dashboard": {

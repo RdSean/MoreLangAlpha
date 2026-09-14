@@ -115,6 +115,28 @@ export function toParserOptions(options: DatalabOptions): Record<string, JsonVal
   ) as Record<string, JsonValue>;
 }
 
+export type UsageRange = '7d' | '14d' | '30d';
+
+export interface DocumentUsageDay {
+  day: string;
+  pages: number;
+  cost_cents: number;
+  conversions: number;
+}
+
+export interface DocumentUsageTotals {
+  pages: number;
+  cost_cents: number;
+  conversions: number;
+}
+
+/** What the account's document conversions have cost, by day. */
+export interface DocumentUsage {
+  range: UsageRange;
+  totals: DocumentUsageTotals;
+  days: DocumentUsageDay[];
+}
+
 export interface ParseJob {
   job_id: string;
   document_id: string;

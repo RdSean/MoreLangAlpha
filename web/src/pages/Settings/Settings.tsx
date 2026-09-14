@@ -12,6 +12,7 @@ import { ExperimentsTab } from './panels/ExperimentsTab';
 import { FamilyAccountsTab } from './panels/FamilyAccountsTab';
 import { FamilyChildConversations } from './panels/FamilyChildConversations';
 import { ChannelsTab } from './panels/ChannelsTab';
+import UsageTab from './panels/UsageTab';
 import { useFamilyChildren } from './queries';
 import './Settings.css';
 
@@ -100,6 +101,18 @@ function Settings() {
           </button>
           {!isStudent && <button
             type="button"
+            onClick={() => handleTabChange('usage')}
+            className="px-4 py-2 text-sm font-medium whitespace-nowrap flex-shrink-0"
+            style={{
+              color: activeTab === 'usage' ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
+              borderBottom: activeTab === 'usage' ? '2px solid var(--color-accent-primary)' : '2px solid transparent',
+            }}
+          >
+            {t('settings.usage.tab')}
+          </button>}
+
+          {!isStudent && <button
+            type="button"
             onClick={() => handleTabChange('model')}
             className="px-4 py-2 text-sm font-medium whitespace-nowrap flex-shrink-0"
             style={{
@@ -151,6 +164,8 @@ function Settings() {
           {!isLoading && activeTab === 'experiments' && <ExperimentsTab />}
 
           {!isLoading && activeTab === 'channels' && <ChannelsTab />}
+
+          {!isLoading && activeTab === 'usage' && !isStudent && <UsageTab />}
 
           {!isLoading && activeTab === 'family' && !isParent && <FamilyAccountsTab onOpenChild={openChild} />}
 
