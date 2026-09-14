@@ -133,8 +133,8 @@ The provider declares support for `text_based`, `mixed`, `scanned`,
 Recommended-parser policy (proposed): keep **local AnyDoc for `text_based`** —
 it is free and fast — and recommend **Datalab for everything else**, which is
 exactly the gap the unavailable `ocr-document` placeholder was marking. That
-placeholder should then be retired (or its `reason` rewritten) rather than left
-sitting next to a parser that now does its job. **Please confirm** retiring it.
+placeholder is **retired** (confirmed 2026-09-14): leaving an permanently
+unavailable entry next to a parser that now does its job misleads the picker.
 
 ### D6 — Per-request options as a Pydantic model
 
@@ -157,13 +157,12 @@ settings the pipeline used (`balanced`, `paginate=True`):
 `output_format` is proposed as **fixed to markdown**: the document library's
 primary artifact is `format="gfm"`, `media_type="text/markdown"`, and every
 existing provider produces exactly one markdown file. Exposing HTML/JSON would
-mean widening the artifact model, which is a separate piece of work. **Please
-confirm** keeping it fixed for now.
+mean widening the artifact model, which is a separate piece of work.
+**Confirmed fixed for now** (2026-09-14).
 
-Datalab also returns extracted images as a base64 dict. We propose **not**
-persisting them initially (no existing provider does, and the bundle/publication
-path is sized for a markdown file), while leaving `images` an obvious later
-addition.
+Datalab also returns extracted images — see the image-handling section below,
+which is a decision rather than a detail because the default option would
+produce markdown we cannot render.
 
 ### D7 — Deployment configuration
 
@@ -191,24 +190,54 @@ Two constraints worth recording:
 - **Where the per-conversion usage lands** is still open: the artifact metadata
   path already exists, but a small dedicated table is cleaner to aggregate. This
   is the first task of the plan, not an implementation detail to improvise.
-- **The local branch has no charting library.** `recharts` and
-  `lightweight-charts` were removed in `37fef0e9`, and a test asserts they stay
-  out. The bar chart is therefore hand-rolled SVG — the same approach already
-  used for the widget preset thumbnails — or the dependency decision gets
-  revisited deliberately.
+- **`recharts` comes back** (confirmed 2026-09-14) rather than the chart being
+  hand-rolled in SVG. This is the second time a dependency guard has to be
+  amended on purpose: `web/src/locales/__tests__/genericSurface.test.ts:67`
+  asserts `lightweight-charts` and `recharts` are absent, and that assertion was
+  written when the finance surface was removed in `37fef0e9`. The guard is doing
+  its job — it forces this to be a decision rather than an accident — so it gets
+  a third entry in its comment explaining that Recharts is now here for the
+  Usage page's bar chart and carries no market data. `lightweight-charts` stays
+  out (that one only ever drew price candles).
+
+### D9 — Images: there is no URL, so the default extraction is off
+
+The question was where extracted images live. The answer, from the docs: **they
+have no address.** `result.images` is `{filename: base64_data}` — the bytes come
+back inside the response, not behind a URL. `save_output(..., save_images=True)`
+will write a `document_images/` directory next to `document.md`, which is where
+the markdown's relative references come from.
+
+That collides with how this codebase serves documents:
+
+- the preview fetches an artifact **by id**
+  (`documentDownloadUrl` → `/api/v1/document-artifacts/{id}/download`), and
+- the shared `Markdown` component does **no relative-path rewriting**.
+
+So markdown containing `![](document_images/foo.png)` resolves against the app's
+own route and 404s. And note the trap: `disable_image_extraction` defaults to
+**`false`**, i.e. images are extracted **by default** — so the naive call
+produces a document whose every image reference is broken, and it would look
+like our bug rather than a configuration choice.
+
+Decision: **default `disable_image_extraction=True`**, labelled honestly in the
+advanced panel. Persisting images as additional artifacts (the bundle already
+supports them) plus rewriting references to artifact URLs is a real feature —
+it needs both a publication path and a preview that can resolve it — so it is
+recorded as a follow-up rather than smuggled into this change.
 
 ## Open questions
 
-1. **Provenance of the reference screenshot.** The Usage screen was described as
-   existing in the remote code, but its strings ("Track your credit
-   consumption", "Usage breakdown", "Permanent credits", "Token/Infra/BYOK
-   Credits") appear in **no branch or commit** of this repository after a fresh
-   fetch (`origin/main` = `ddeba2a5`, 2026-09-13), and in no other checkout under
-   `~/DevelopCode`. If it lives in a repo that is reachable, porting beats
-   re-implementing; if it is the deployed product rather than a public repo, the
-   screenshot is enough and this design proceeds from the layout alone.
-2. Retire the `ocr-document` placeholder (D5)?
-3. Keep `output_format` fixed to markdown for now (D6)?
+None blocking. Two decisions are settled: retire `ocr-document` (D5), keep
+`output_format` fixed to markdown for now (D6).
+
+The reference screenshot's provenance was left unresolved on purpose: its
+strings ("Track your credit consumption", "Usage breakdown", "Permanent
+credits", "Token/Infra/BYOK Credits") appear in **no branch or commit** of this
+repository after a fresh fetch (`origin/main` = `ddeba2a5`, 2026-09-13) and in no
+other checkout under `~/DevelopCode`. Rather than keep hunting, the layout is
+treated as the specification and re-implemented in our own components with our
+own units (pages and cents, not credits).
 
 ## Risks
 
@@ -227,6 +256,7 @@ Two constraints worth recording:
 ## Out of scope
 
 - The pipeline-based (multi-step) variant, and therefore `DATALAB_PIPELINE_ID`.
-- Persisting extracted images.
+- Persisting extracted images (D9), which needs both a publication path and a
+  preview that can resolve artifact URLs.
 - Importing the screenshot's credit-based model: there is no balance API, and our
   unit of account is pages and cents.
