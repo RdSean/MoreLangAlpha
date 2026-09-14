@@ -35,9 +35,7 @@ class DocumentProviderRegistry:
         for inspector in inspectors:
             descriptor = inspector.descriptor
             if descriptor.inspector_id in inspector_ids:
-                raise ValueError(
-                    f"Duplicate inspector ID: {descriptor.inspector_id}"
-                )
+                raise ValueError(f"Duplicate inspector ID: {descriptor.inspector_id}")
             inspector_ids.add(descriptor.inspector_id)
 
             for document_format in descriptor.supported_formats:
@@ -101,11 +99,7 @@ class DocumentProviderRegistry:
         classification: str,
     ) -> DocumentParser:
         descriptor = next(
-            (
-                item
-                for item in self._parser_descriptors
-                if item.parser_id == parser_id
-            ),
+            (item for item in self._parser_descriptors if item.parser_id == parser_id),
             None,
         )
         if descriptor is None or not descriptor.available:
@@ -135,25 +129,17 @@ class DocumentProviderRegistry:
 
 def build_default_provider_registry() -> DocumentProviderRegistry:
     from src.server.documents.providers.anydoc import AnydocExtractor
+    from src.server.documents.providers.datalab import DatalabExtractor
     from src.server.documents.providers.legacy_pdf import LegacyPdfExtractor
     from src.server.documents.providers.pdf_inspector import PdfInspectorDetector
 
     return DocumentProviderRegistry(
         inspectors=(PdfInspectorDetector(),),
-        parsers=(AnydocExtractor(), LegacyPdfExtractor()),
-        unavailable_parsers=(
-            ParserDescriptor(
-                parser_id="ocr-document",
-                display_name="OCR Document",
-                version=None,
-                supported_formats=frozenset({"pdf"}),
-                supported_classifications=frozenset(
-                    {"mixed", "scanned", "image_based", "unknown"}
-                ),
-                available=False,
-                reason="OCR parser is not configured yet.",
-            ),
-        ),
+        # Datalab replaces the `ocr-document` placeholder that used to sit here
+        # permanently unavailable: it reads the scanned and image-only pages the
+        # local parsers cannot, so advertising a second, never-configured OCR
+        # entry beside it would only mislead the picker.
+        parsers=(AnydocExtractor(), LegacyPdfExtractor(), DatalabExtractor()),
     )
 
 
@@ -161,18 +147,21 @@ def _recommended_parser_id(
     classification: str,
     descriptors: list[ParserDescriptor],
 ) -> str | None:
-    preferred_id = "anydoc-local" if classification == "text_based" else "legacy-pdf-text"
     available_ids = {
         descriptor.parser_id for descriptor in descriptors if descriptor.available
     }
-    if preferred_id in available_ids:
-        return preferred_id
+    # Text-based documents stay on the local parser: it is free and fast, and
+    # sending them to a paid API by default would spend money to save nothing.
+    if classification == "text_based" and "anydoc-local" in available_ids:
+        return "anydoc-local"
+    # Everything else — scans, images, mixed, unknown — is exactly what the
+    # local parsers cannot read, so the hosted one is the default when it is
+    # configured. When it is not, the legacy extractor still gets a document
+    # out (with its quality warning), which beats offering no default at all.
+    if "datalab-online" in available_ids:
+        return "datalab-online"
     return next(
-        (
-            descriptor.parser_id
-            for descriptor in descriptors
-            if descriptor.available
-        ),
+        (descriptor.parser_id for descriptor in descriptors if descriptor.available),
         None,
     )
 

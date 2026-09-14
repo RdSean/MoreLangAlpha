@@ -19,6 +19,15 @@
 - 这两条测试是先加依赖后写的，所以首次运行即通过、没有"先失败"的过程。为确认断言并非空转，做了变异验证：把子进程里的导入改成不存在的模块后立即失败（`ModuleNotFoundError`，1 failed | 1 passed），恢复后 2 项通过。
 - 验证：该文件 2 项通过。
 
+### Datalab 在线解析器：第七步（注册并退役 OCR 占位）
+
+- `build_default_provider_registry()` 现在注册三个解析器：`anydoc-local`、`legacy-pdf-text`、`datalab-online`；**同时删掉了 `ocr-document` 占位**。理由是它一直以 `available=False` 挂在选择器里，而 datalab 正好提供了它所指的那项能力——留着一个永远不可用、且职责已被覆盖的条目，读起来像"坏了"而不是"没有"。
+- 推荐策略改为：`text_based` 仍推荐 `anydoc-local`（免费且快，默认送付费 API 等于花钱省不到东西）；其余分类（scanned / image_based / mixed / unknown）**在 datalab 可用时推荐它**，这正是本地解析器读不了的场景。datalab 未配置时**回落到 legacy**，而不是让选择器没有默认值。
+- 更新既有的 `test_recommendations.py`（它原先钉的是"scanned 推荐 legacy、列表里有 ocr-document"的旧组成）：矩阵期望改为新组成，并把"ocr-document 可见但不可用"那条改写成"占位已退役"。
+- 新增 9 项测试（`test_registry.py`）：datalab 对**全部分类**都被列进可选；占位已消失；`text_based` 仍推荐本地；其余分类不再推荐 legacy；以及**直接对策略函数**驱动三组显式 descriptor 的确定性用例（本地优先、本地缺失时用 datalab、无 datalab 时回落到 legacy、scanned 下 datalab 优先于 legacy）。先写测试后实现（初次 3 条断言失败）。
+- 过程中修正了一处**测试夹具失真**：我给 `anydoc-local` 声明了全部五种分类，导致"无 datalab 时回落"那条被它接管；而真实注册表是**先按分类过滤**再交给策略函数的。夹具已改为与真实声明一致（anydoc 只声明 `text_based`），并加注释说明为何必须一致。
+- 验证：`tests/unit/server/documents` 共 **137 项通过**；`ruff check` 与 `ruff format` 通过。
+
 ### Datalab 在线解析器：第六步（执行器落库用量）
 
 - **插入的一步**（原计划里没有）：设计上 provider 与执行器分工要清楚——provider 保持**纯函数**（只解析、只在元数据里声明用量），由**执行器**在产物发布成功后写库。这样"用量"这件事只有一种形状，也不需要往 `ParseRequest` 里塞 owner。
