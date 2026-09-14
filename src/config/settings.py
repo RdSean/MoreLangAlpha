@@ -58,13 +58,28 @@ class DocumentParsingConfig:
     parse_timeout_seconds: int
 
 
+@dataclass(frozen=True, slots=True)
+class DatalabConfig:
+    """Credentials and budgets for Datalab's hosted document conversion."""
+
+    api_key: str = field(repr=False)
+    mode: str
+    poll_budget_seconds: int
+    parse_timeout_seconds: int
+    # Reserved: ``client.convert()`` takes no pipeline, so this is empty unless a
+    # deployment is already staging one for the future multi-step path.
+    pipeline_id: str = ""
+
+
 def background_dispatch_requires_token() -> bool:
     """True when auth is enabled but no INTERNAL_SERVICE_TOKEN is configured.
 
     Internal background dispatch is rejected with 403 in that state, so callers
     must not fire one. In oss mode the self-dispatch is trusted without a token.
     """
-    return HOST_MODE != "oss" and not os.environ.get("INTERNAL_SERVICE_TOKEN", "").strip()
+    return (
+        HOST_MODE != "oss" and not os.environ.get("INTERNAL_SERVICE_TOKEN", "").strip()
+    )
 
 
 # =============================================================================
@@ -310,11 +325,15 @@ def _env_pool_size(env_var: str, default: int, ceiling: int = 500) -> int:
     try:
         parsed = int(raw)
     except ValueError:
-        logger.warning("%s=%r is not an integer; using default=%d", env_var, raw, default)
+        logger.warning(
+            "%s=%r is not an integer; using default=%d", env_var, raw, default
+        )
         return default
     if 1 <= parsed <= ceiling:
         return parsed
-    logger.warning("%s=%d outside [1, %d]; using default=%d", env_var, parsed, ceiling, default)
+    logger.warning(
+        "%s=%d outside [1, %d]; using default=%d", env_var, parsed, ceiling, default
+    )
     return default
 
 
@@ -472,7 +491,9 @@ def is_intermediate_storage_enabled() -> bool:
 
 
 def get_max_stored_messages_per_agent() -> int:
-    return get_infrastructure_config().background_execution.max_stored_messages_per_agent
+    return (
+        get_infrastructure_config().background_execution.max_stored_messages_per_agent
+    )
 
 
 def get_subagent_collector_timeout() -> float:
@@ -494,12 +515,16 @@ def get_subagent_task_max_wait() -> int:
 
 def get_in_memory_event_tail_max_events() -> int:
     """Max captured-event records held in the per-subagent in-memory hot tail."""
-    return get_infrastructure_config().background_execution.in_memory_event_tail_max_events
+    return (
+        get_infrastructure_config().background_execution.in_memory_event_tail_max_events
+    )
 
 
 def is_subagent_event_redis_spill_enabled() -> bool:
     """Kill-switch for the per-event Redis spill of subagent captured events."""
-    return get_infrastructure_config().background_execution.spill_subagent_events_to_redis
+    return (
+        get_infrastructure_config().background_execution.spill_subagent_events_to_redis
+    )
 
 
 def get_sse_drain_timeout() -> float:
@@ -568,9 +593,7 @@ def get_nested_config(
     return value
 
 
-def get_config(
-    key: str, default: Any = None, config_path: Optional[Any] = None
-) -> Any:
+def get_config(key: str, default: Any = None, config_path: Optional[Any] = None) -> Any:
     """Top-level config lookup; kept for backward compatibility."""
     return get_nested_config(key, default)
 
@@ -649,6 +672,42 @@ def get_document_parsing_config() -> DocumentParsingConfig:
         max_upload_bytes=env.DOCUMENT_MAX_UPLOAD_BYTES,
         sync_wait_seconds=env.DOCUMENT_SYNC_WAIT_SECONDS,
         parse_timeout_seconds=env.DOCUMENT_PARSE_TIMEOUT_SECONDS,
+    )
+
+
+def get_datalab_config() -> DatalabConfig | None:
+    """Return the Datalab configuration only when it is actually usable.
+
+    Same shape as ``get_volcengine_asr_config``: a deployment that has not
+    configured the integration gets ``None``, so the document parser reports
+    itself unavailable in the picker instead of failing part-way through a job.
+
+    Two conditions beyond "is it switched on and keyed":
+
+    - the poll budget must expire **before** our own subprocess timeout. If our
+      timeout fires first, Datalab carries on working — and billing — for a
+      result nobody is left to collect, so a budget that is not strictly smaller
+      is treated as a misconfiguration rather than silently accepted.
+    """
+    if not env.DATALAB_DOCUMENT_PARSER_ENABLED:
+        return None
+    if not env.DATALAB_API_KEY:
+        return None
+    if env.DATALAB_POLL_BUDGET_SECONDS >= env.DOCUMENT_PARSE_TIMEOUT_SECONDS:
+        logger.warning(
+            "Datalab is enabled but DATALAB_POLL_BUDGET_SECONDS (%s) is not "
+            "below DOCUMENT_PARSE_TIMEOUT_SECONDS (%s); treating the parser as "
+            "unavailable to avoid orphaned billable work.",
+            env.DATALAB_POLL_BUDGET_SECONDS,
+            env.DOCUMENT_PARSE_TIMEOUT_SECONDS,
+        )
+        return None
+    return DatalabConfig(
+        api_key=env.DATALAB_API_KEY,
+        mode=env.DATALAB_CONVERSION_MODE,
+        poll_budget_seconds=env.DATALAB_POLL_BUDGET_SECONDS,
+        parse_timeout_seconds=env.DOCUMENT_PARSE_TIMEOUT_SECONDS,
+        pipeline_id=env.DATALAB_PIPELINE_ID,
     )
 
 

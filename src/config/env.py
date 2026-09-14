@@ -13,7 +13,9 @@ def _positive_int(name: str, default: int) -> int:
     try:
         value = int(raw_value)
     except ValueError as exc:
-        raise ValueError(f"{name} must be a positive integer, got {raw_value!r}") from exc
+        raise ValueError(
+            f"{name} must be a positive integer, got {raw_value!r}"
+        ) from exc
     if value <= 0:
         raise ValueError(f"{name} must be a positive integer, got {raw_value!r}")
     return value
@@ -35,15 +37,39 @@ AUTH_COOKIE_SECURE: bool = os.getenv("AUTH_COOKIE_SECURE", "false").strip().lowe
 }
 
 # Education attachments stay private and are served by short-lived signed URLs.
-EDUCATION_ASSET_MAX_BYTES: int = int(os.getenv("EDUCATION_ASSET_MAX_BYTES", str(10 * 1024 * 1024)))
+EDUCATION_ASSET_MAX_BYTES: int = int(
+    os.getenv("EDUCATION_ASSET_MAX_BYTES", str(10 * 1024 * 1024))
+)
 EDUCATION_ASSET_DOWNLOAD_TTL_SECONDS: int = int(
     os.getenv("EDUCATION_ASSET_DOWNLOAD_TTL_SECONDS", "300")
 )
 
 # Document ingestion and parser execution limits.
-DOCUMENT_MAX_UPLOAD_BYTES: int = _positive_int("DOCUMENT_MAX_UPLOAD_BYTES", 50 * 1024 * 1024)
+DOCUMENT_MAX_UPLOAD_BYTES: int = _positive_int(
+    "DOCUMENT_MAX_UPLOAD_BYTES", 50 * 1024 * 1024
+)
 DOCUMENT_SYNC_WAIT_SECONDS: int = _positive_int("DOCUMENT_SYNC_WAIT_SECONDS", 30)
-DOCUMENT_PARSE_TIMEOUT_SECONDS: int = _positive_int("DOCUMENT_PARSE_TIMEOUT_SECONDS", 600)
+DOCUMENT_PARSE_TIMEOUT_SECONDS: int = _positive_int(
+    "DOCUMENT_PARSE_TIMEOUT_SECONDS", 600
+)
+
+# Datalab's hosted document conversion. Off unless both the switch and a key are
+# present — ``get_datalab_config`` re-checks that pair and returns None when the
+# parser would be unusable, so the provider's availability is reported honestly
+# rather than failing part-way through a job.
+#
+# ``DATALAB_PIPELINE_ID`` is read but not required: this integration calls
+# ``client.convert()``, which takes no pipeline. The variable stays for the
+# future multi-step pipeline path (convert → extract/segment).
+DATALAB_DOCUMENT_PARSER_ENABLED: bool = os.getenv(
+    "ENABLE_DATALAB_DOCUMENT_PARSER", "false"
+).strip().lower() in {"1", "true", "yes"}
+DATALAB_API_KEY: str = os.getenv("DATALAB_API_KEY", "").strip()
+DATALAB_PIPELINE_ID: str = os.getenv("DATALAB_PIPELINE_ID", "").strip()
+DATALAB_CONVERSION_MODE: str = os.getenv("DATALAB_CONVERSION_MODE", "balanced").strip()
+# Kept under DOCUMENT_PARSE_TIMEOUT_SECONDS: if our subprocess is killed first,
+# Datalab keeps working and billing for a result nobody will collect.
+DATALAB_POLL_BUDGET_SECONDS: int = _positive_int("DATALAB_POLL_BUDGET_SECONDS", 540)
 
 # Quota / auth enforcement service URL
 AUTH_SERVICE_URL: str = os.getenv("AUTH_SERVICE_URL", "")
@@ -95,7 +121,9 @@ MCP_CLIENT_METADATA_URL: str = os.getenv("MCP_CLIENT_METADATA_URL", "")
 # Internal base URL the server-side PDF renderer (headless Chromium) loads
 # workspace HTML from. Must be the server's own loopback listen address so
 # Chromium fetches bytes from this process, not the public ingress.
-PDF_RENDER_INTERNAL_BASE: str = os.getenv("PDF_RENDER_INTERNAL_BASE", "http://127.0.0.1:8000")
+PDF_RENDER_INTERNAL_BASE: str = os.getenv(
+    "PDF_RENDER_INTERNAL_BASE", "http://127.0.0.1:8000"
+)
 
 # Shared HS256 secret authenticating sandboxes to the egress relay
 # (/v1/egress/*). Empty disables the relay — OAuth-connected MCP servers
@@ -114,7 +142,9 @@ EGRESS_RELAY_BASE_URL: str = os.getenv("EGRESS_RELAY_BASE_URL", "")
 # Where THIS process reaches its own egress relay for directly bound MCP
 # tools. Loopback on purpose: the host-side call takes the same route, policy
 # and audit as a sandbox call, without leaving the box.
-EGRESS_RELAY_LOOPBACK_URL: str = os.getenv("EGRESS_RELAY_LOOPBACK_URL", "http://127.0.0.1:8000")
+EGRESS_RELAY_LOOPBACK_URL: str = os.getenv(
+    "EGRESS_RELAY_LOOPBACK_URL", "http://127.0.0.1:8000"
+)
 
 # Credit conversion rate (USD → credits).  Override with USD_TO_CREDITS_RATE env var.
 USD_TO_CREDITS_RATE: int = int(os.getenv("USD_TO_CREDITS_RATE", "1000"))
@@ -135,4 +165,6 @@ VOLCENGINE_ASR_WS_URL: str = os.getenv(
 # Host IP for local LLM providers (Ollama, LM Studio, vLLM).
 # In Docker, "localhost" means the container — use host.docker.internal to reach the host.
 _IN_DOCKER: bool = os.path.exists("/.dockerenv")
-HOST_IP: str = os.getenv("HOST_IP", "host.docker.internal" if _IN_DOCKER else "localhost")
+HOST_IP: str = os.getenv(
+    "HOST_IP", "host.docker.internal" if _IN_DOCKER else "localhost"
+)

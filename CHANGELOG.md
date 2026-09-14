@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-09-14
+
+### Datalab 在线解析器：第一步（部署配置）
+
+- 新增 `DatalabConfig` 与 `get_datalab_config()`（`src/config/settings.py`），沿用 `get_volcengine_asr_config()` 的既有约定：**缺必要值即返回 `None`**，让 provider 的可用性如实上报，而不是在任务跑到一半时才报认证失败。`api_key` 用 `field(repr=False)`，避免密钥出现在日志里。
+- 新增 env 常量（`src/config/env.py`）：`ENABLE_DATALAB_DOCUMENT_PARSER`、`DATALAB_API_KEY`、`DATALAB_CONVERSION_MODE`（默认 `balanced`，与原先 pipeline 一致）、`DATALAB_POLL_BUDGET_SECONDS`（默认 540）。布尔值按 `AUTH_COOKIE_SECURE` 的既有写法内联解析，没有引入新的 `_flag` 助手。
+- **`DATALAB_PIPELINE_ID` 读入但不要求**——本集成走 `client.convert()`，不经过 pipeline；该变量留给将来的多步流水线（convert → extract/segment），注释里写明了。
+- **超时次序被当作配置正确性来校验**：若 `DATALAB_POLL_BUDGET_SECONDS >= DOCUMENT_PARSE_TIMEOUT_SECONDS`，`get_datalab_config()` 记一条 warning 并返回 `None`（即视为未配置）。理由是设计文档 D3 那条——我们的子进程先被杀时，datalab 仍在继续执行**并继续计费**，而结果已无人收取。
+- `.env.example` 的 Datalab 段落补齐了 API key、mode、轮询预算三项，每项一句说明；并注明 pipeline id 为预留。（该段落原有的 `DATALAB_API_KEY` 一行来自工作区中未提交的用户改动，随本次一并提交。）
+- 测试 9 项（`tests/unit/config/test_datalab_config.py`）：全空 → None；开关关闭 → None；启用但无 key → None；**有 key 无 pipeline id → 仍然配置成功**；取值透传；默认 mode 为 balanced；轮询预算严格小于超时（按**性质**断言而非两个字面量，覆盖三组取值）；预算 ≥ 超时 → None；`repr` 不含密钥。先写测试后实现（初次运行 9 项全部失败）。
+- 验证：`tests/unit/config` 共 **260 项通过**；`ruff check` 与 `ruff format --check` 通过。
+
 ## 2026-09-12
 
 ### 缺口 1/2/3 修复：artifact 注册收敛为一张表并被强制覆盖
