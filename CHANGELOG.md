@@ -19,6 +19,15 @@
 - 这两条测试是先加依赖后写的，所以首次运行即通过、没有"先失败"的过程。为确认断言并非空转，做了变异验证：把子进程里的导入改成不存在的模块后立即失败（`ModuleNotFoundError`，1 failed | 1 passed），恢复后 2 项通过。
 - 验证：该文件 2 项通过。
 
+### Datalab 在线解析器：第十二步（真实调用，以及它暴露的一个 bug）
+
+- **真实链路跑通**：用 `tests/fixtures/documents/scanned.pdf`（扫描件）走完整 API——上传 → 解析检查（分类为 `scanned`，且 **推荐 `datalab-online`、`legacy-pdf-text` 不推荐**，正是本次实现的策略）→ 建立解析任务 → 完成 → 取回 markdown 产物（937 字符，内容是 OCR 出来的题目 "# SCANNED MATHEMATICS WORKSHEET / Exercise 01: Solve 3x + 0 = 9"）。**这正是本地解析器读不了、加托管解析器要解决的那类文档。**
+- **真实调用抓到一个单测抓不到的 bug**：`claim_next_job` 的 claim 查询把 `documents.owner_user_id` 选进了 CTE，却**漏在 `RETURNING` 投影里**，于是执行器拿到空字符串，写用量时触发 `document_usage_records_owner_user_id_fkey` 外键违反（被 `_record_usage` 按设计吞掉并记 warning，所以**解析成功、只有记账丢了**）。修复为在 `RETURNING` 中补上 `candidate.owner_user_id`；复跑同一链路后用量行正确落库（`provider_id=datalab-online, pages=1`）。
+- 同时**加强断言**：原来只断言 `"documents.owner_user_id" in sql`，命中的是 CTE 而不是返回值——和我之前在用量表那里犯过的 `RETURNING record_id` 属同一类"断言打偏"。现在同时断言 `candidate.owner_user_id`，即投影本身。
+- 实测确认**这不是我的映射写错**：直接调 SDK 拿到原始响应为 `cost_breakdown = {"final_cost_cents": 0}`（**没有 `list_cost_cents` 键**），`parse_quality_score = None`，`page_count = 1`。也就是说该账号（免费额度）下这次转换服务端确实计 0 分，用量页面会显示"页数 > 0、金额 $0.00"，这是**准确**而非坏掉。免费额度耗尽后同一字段才会出现非零值。
+- 次要观察：直连 SDK 的脚本偶发 `Cannot connect to host www.datalab.to:443`（同一次运行的前一次成功、后一次成功），看起来是出站网络的瞬时抖动，与代码无关；后端进程内的调用两次都成功。
+- 验证：`tests/unit/server/database/test_document_jobs.py` + `tests/unit/server/documents` 共 146 项通过；`ruff check` 通过。
+
 ### Datalab 在线解析器：第十一步（Usage 页面）
 
 - 新增 `UsageTab`（Settings 的第五个 tab，`!isStudent` 时显示，与 model tab 同样的做法）：两张指标卡（已解析页数 / 花费）与逐日柱状图，带 7d/14d/30d 切换。

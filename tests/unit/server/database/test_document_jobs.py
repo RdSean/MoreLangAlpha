@@ -78,8 +78,14 @@ async def test_claim_selects_queued_or_expired_job_with_skip_locked(
     assert "candidate.source_storage_key" in sql
     assert "candidate.inspection_summary" in sql
     # The owner rides along so a provider's reported usage can be attributed
-    # without the executor going back to the documents table.
+    # without the executor going back to the documents table — and it has to
+    # survive into the *returned* row, which is where the first version of this
+    # went wrong: the column was selected into the CTE but omitted from the
+    # RETURNING list, so the executor saw an empty string and the usage insert
+    # failed its foreign key. A real conversion caught it; this assertion is
+    # written against the projection so it would catch it next time.
     assert "documents.owner_user_id" in sql
+    assert "candidate.owner_user_id" in sql
     assert "attempt_count = attempt_count + 1" in sql
     assert "status_version = status_version + 1" in sql
     assert params == ("worker-1", 60)

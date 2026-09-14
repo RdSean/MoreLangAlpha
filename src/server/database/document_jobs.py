@@ -162,6 +162,7 @@ async def claim_next_job(
                 FROM candidate
                 WHERE document_parse_jobs.job_id = candidate.job_id
                 RETURNING document_parse_jobs.*,
+                          candidate.owner_user_id,
                           candidate.source_storage_key,
                           candidate.source_size_bytes,
                           candidate.original_filename,
