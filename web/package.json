@@ -49,6 +49,7 @@
     "react-router-dom": "^6.21.0",
     "react-syntax-highlighter": "^16.1.0",
     "react-to-print": "^3.2.0",
+    "recharts": "^3.10.1",
     "rehype-katex": "^7.0.1",
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",

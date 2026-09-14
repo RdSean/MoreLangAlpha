@@ -65,12 +65,17 @@ describe('generic workspace locale boundary', () => {
   });
 
   it('does not retain retired financial packages or E2E response fixtures', () => {
-    // `react-grid-layout` is deliberately NOT in this list: it is a pure
-    // layout library that the restored dashboard canvas needs, with no market
-    // data behind it. The charting libraries stay out.
-    expect(Object.keys(packageJson.dependencies)).not.toEqual(
-      expect.arrayContaining(['lightweight-charts', 'recharts']),
-    );
+    // Checked one package at a time, and that is a fix rather than a style
+    // choice. The previous form was
+    //   expect(deps).not.toEqual(expect.arrayContaining(['lightweight-charts', 'recharts']))
+    // which only fails when *every* listed package is present — so it happily
+    // permitted any subset, and nobody noticed until `recharts` was added back
+    // and the guard still passed.
+    //
+    // What is deliberately allowed now: `react-grid-layout` (a pure layout
+    // library the dashboard canvas needs) and `recharts` (the Usage page's bar
+    // chart). Neither carries market data.
+    expect(Object.keys(packageJson.dependencies)).not.toContain('lightweight-charts');
     expect(e2eMockSource).not.toMatch(
       /market-data|watchlist|portfolio|calendar\/earnings|sampleNewsArticle|sampleIndexSnapshot/i,
     );

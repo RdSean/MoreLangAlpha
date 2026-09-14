@@ -19,6 +19,17 @@
 - 这两条测试是先加依赖后写的，所以首次运行即通过、没有"先失败"的过程。为确认断言并非空转，做了变异验证：把子进程里的导入改成不存在的模块后立即失败（`ModuleNotFoundError`，1 failed | 1 passed），恢复后 2 项通过。
 - 验证：该文件 2 项通过。
 
+### Datalab 在线解析器：第八步（引入 recharts，并修好一条形同虚设的守卫）
+
+- 加入 `recharts@3.10.1`，用于 Usage 页面的柱状图（此前设计里提过手写 SVG，改为按你的决定引入图表库）。
+- **顺带发现并修复了一条失效的守卫**：`src/locales/__tests__/genericSurface.test.ts` 里那条"不得残留已退役金融依赖"的断言原本写成
+  `expect(deps).not.toEqual(expect.arrayContaining(['lightweight-charts', 'recharts']))`——
+  `arrayContaining` 要求**列出的包全部存在**才匹配，所以 `.not` 只在**两个都在**时才失败；只要缺一个（例如只装了 recharts），断言就通过。
+  - 实证：装上 recharts、**在修订守卫之前**跑那条测试，结果是 **5 passed**（本该失败）。也就是说这条守卫从写下起就允许任意子集，我之前为 `react-grid-layout` 修订它时也没察觉。
+  - 改为逐个包检查（`not.toContain('lightweight-charts')`），并保留 `lightweight-charts` 在禁用名单里——它只画过价格 K 线。`react-grid-layout` 与 `recharts` 明确允许，注释里写明各自用途且都不带行情数据。
+- 「先看失败」验证：修订后的写法下，把 `recharts` 临时当作禁用包，测试立刻失败并指名（`expected [...] to not include 'recharts'`）；恢复后 5 项通过。
+- 验证：该文件 5 项通过。
+
 ### Datalab 在线解析器：第七步（注册并退役 OCR 占位）
 
 - `build_default_provider_registry()` 现在注册三个解析器：`anydoc-local`、`legacy-pdf-text`、`datalab-online`；**同时删掉了 `ocr-document` 占位**。理由是它一直以 `available=False` 挂在选择器里，而 datalab 正好提供了它所指的那项能力——留着一个永远不可用、且职责已被覆盖的条目，读起来像"坏了"而不是"没有"。
