@@ -51,6 +51,10 @@ dependencies = [
     "pypdf>=4.0.0",
     "pdf-inspector==1.17.0",
     "firecrawl-anydoc==0.2.4",
+    # Hosted fallback for documents the local parsers cannot read.
+    # Pinned like the ones above: a provider whose response shape we
+    # parse should not move under us on a routine upgrade.
+    "datalab-python-sdk==0.5.0",
     "youtube-transcript-api>=1.0.0",
     "playwright",
     "fastapi>=0.110.0",

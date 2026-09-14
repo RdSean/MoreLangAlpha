@@ -12,6 +12,13 @@
 - 测试 9 项（`tests/unit/config/test_datalab_config.py`）：全空 → None；开关关闭 → None；启用但无 key → None；**有 key 无 pipeline id → 仍然配置成功**；取值透传；默认 mode 为 balanced；轮询预算严格小于超时（按**性质**断言而非两个字面量，覆盖三组取值）；预算 ≥ 超时 → None；`repr` 不含密钥。先写测试后实现（初次运行 9 项全部失败）。
 - 验证：`tests/unit/config` 共 **260 项通过**；`ruff check` 与 `ruff format --check` 通过。
 
+### Datalab 在线解析器：第二步（SDK 依赖）
+
+- 加入 `datalab-python-sdk`（解析后为 **0.5.0**），按仓库对同类 provider 的既有做法**钉死版本**，并挪到 `firecrawl-anydoc` 旁边（`uv add` 默认追加到依赖列表末尾，与文档解析相关依赖分开了）。
+- 两条测试（`tests/unit/server/documents/providers/test_datalab_sdk_import.py`）断言的是**子解释器能否导入**，而不是当前进程能否导入——文档解析跑在 `SpawnProcessRunner` 的独立子进程里，只在父进程可导入的依赖会在生产炸、而测试完全看不见。第二条同时确认 `AsyncDatalabClient` / `ConvertOptions` 存在，顺带把"我们钉的是新一代 SDK、不是旧的 `datalab` 包"记录在案。
+- 这两条测试是先加依赖后写的，所以首次运行即通过、没有"先失败"的过程。为确认断言并非空转，做了变异验证：把子进程里的导入改成不存在的模块后立即失败（`ModuleNotFoundError`，1 failed | 1 passed），恢复后 2 项通过。
+- 验证：该文件 2 项通过。
+
 ## 2026-09-12
 
 ### 缺口 1/2/3 修复：artifact 注册收敛为一张表并被强制覆盖
