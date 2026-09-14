@@ -1,7 +1,11 @@
 import { AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
-import type { ParserOption } from '../../types';
+import DatalabOptionsFields from '../DatalabOptionsFields';
+import type { DatalabOptions, ParserOption } from '../../types';
+
+/** The parser whose options this step can expose. */
+const DATALAB_PARSER_ID = 'datalab-online';
 
 interface MethodStepProps {
   options: ParserOption[];
@@ -9,6 +13,8 @@ interface MethodStepProps {
   pending: boolean;
   error?: string;
   onSelect: (parserId: string) => void;
+  datalabOptions: DatalabOptions;
+  onDatalabOptionsChange: (next: DatalabOptions) => void;
   onBack: () => void;
   onStart: () => void;
 }
@@ -19,11 +25,16 @@ export default function MethodStep({
   pending,
   error,
   onSelect,
+  datalabOptions,
+  onDatalabOptionsChange,
   onBack,
   onStart,
 }: MethodStepProps) {
   const { t } = useTranslation();
   const selected = options.find((option) => option.parser_id === selectedParserId);
+  // Only the hosted parser takes options. Showing empty controls for the local
+  // ones would suggest they can be tuned when they cannot.
+  const showsAdvanced = selectedParserId === DATALAB_PARSER_ID;
 
   return (
     <div className="documents-wizard-step">
@@ -62,6 +73,10 @@ export default function MethodStep({
           </label>
         ))}
       </fieldset>
+
+      {showsAdvanced && (
+        <DatalabOptionsFields value={datalabOptions} onChange={onDatalabOptionsChange} />
+      )}
 
       {error && <p className="documents-wizard-error" role="alert">{error}</p>}
       <div className="documents-wizard-actions documents-wizard-actions--split">

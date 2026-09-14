@@ -78,6 +78,43 @@ export interface InspectionOutcome {
   parser_options: ParserOption[];
 }
 
+export type DatalabMode = 'fast' | 'balanced' | 'accurate';
+
+/**
+ * Advanced knobs for the hosted Datalab parser, sent as the parse job's
+ * `parser_options`.
+ *
+ * Every field is optional and only present when the user moved it off its
+ * default, so the server's defaults stay authoritative for anything untouched.
+ * The server validates the same shape with a Pydantic model and ignores
+ * unknown keys.
+ */
+export interface DatalabOptions {
+  mode?: DatalabMode;
+  paginate?: boolean;
+  page_range?: string;
+  max_pages?: number;
+  skip_cache?: boolean;
+  disable_image_extraction?: boolean;
+  disable_image_captions?: boolean;
+  token_efficient_markdown?: boolean;
+  extras?: string;
+}
+
+/**
+ * Narrow the options to the wire shape.
+ *
+ * The create-job body takes `Record<string, JsonValue>`, which has no room for
+ * `undefined`; every optional field here may be absent *or* explicitly
+ * undefined. This drops the latter so what is sent is exactly the keys the user
+ * touched.
+ */
+export function toParserOptions(options: DatalabOptions): Record<string, JsonValue> {
+  return Object.fromEntries(
+    Object.entries(options).filter(([, value]) => value !== undefined),
+  ) as Record<string, JsonValue>;
+}
+
 export interface ParseJob {
   job_id: string;
   document_id: string;

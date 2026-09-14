@@ -891,10 +891,10 @@ registerWidget<HomeworkCalendarConfig>({
   component: HomeworkCalendarWidget,
   defaultConfig: { window: '2w', showCompleted: false, view: 'list' },
   configSchema: HomeworkCalendarConfigSchema,
-  defaultSize: { w: 4, h: 26 },
+  defaultSize: { w: 2, h: 26 },
   // The month grid needs roughly six rows of cells plus a day list, so the
   // frame's floor is higher than a plain list would need.
-  minSize: { w: 3, h: 20 },
+  minSize: { w: 2, h: 20 },
   settingsComponent: HomeworkCalendarSettings,
 });
 

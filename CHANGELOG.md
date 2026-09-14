@@ -19,6 +19,17 @@
 - 这两条测试是先加依赖后写的，所以首次运行即通过、没有"先失败"的过程。为确认断言并非空转，做了变异验证：把子进程里的导入改成不存在的模块后立即失败（`ModuleNotFoundError`，1 failed | 1 passed），恢复后 2 项通过。
 - 验证：该文件 2 项通过。
 
+### Datalab 在线解析器：第十步（向导高级选项面板）
+
+- 新增 `DatalabOptionsFields`（可展开的 `<details>`，默认折叠）：解析模式（fast/balanced/accurate）、解析范围、分页标记、为模型精简 markdown、图片提取。仅在选中的解析器是 `datalab-online` 时渲染——本地解析器没有参数，给它们显示空控件会暗示"可以调"。
+- **只发送用户改过的字段**：某控件回到默认值时该键被删除（`balanced` → 不发送 `mode`；勾回"分页" → 不发送 `paginate`）。这样将来服务端默认值变了，不会被一个早先加载的向导悄悄覆盖回去。
+- `types.ts` 新增 `DatalabOptions` 形状与 `toParserOptions()`：建 job 的请求体是 `Record<string, JsonValue>`，容不下 `undefined`，所以用一个显式的小函数把未设置的键滤掉，而不是在调用点硬转类型。
+- 向导把 `options: {}` 换成 `options: toParserOptions(datalabOptions)`——这一处原本是写死的空对象。
+- 组件里注明了它与服务端 Pydantic 模型（`providers/datalab_options.py`）是**手写对齐**的，两者可能漂移一两个版本；服务端对未知键宽容，所以不会互相弄坏。真正的"请求形状契约化"是之前 artifact 契约工作里指出的缺口，这里刻意留作后续，不半做。
+- 文案 9 组中英双语新增（键为字面量，`keys.test.ts` 会强制两侧齐全）；其中图片提取一项的提示直说"图片暂不支持预览，保持关闭可避免 markdown 产生无法显示的引用"。
+- 测试 8 项（`DatalabOptionsFields.test.tsx`）：初始不发送任何字段；改模式后只发 `{"mode":"accurate"}`；改回默认后该键消失；解析范围透传；`toParserOptions` 丢弃 `undefined` 而不是发 null；面板对 `datalab-online` 出现、对本地解析器不出现；默认折叠但内容仍可被辅助技术找到。
+- 验证：`src/pages/Documents` + `src/locales` 共 54 项通过；`pnpm typecheck` 通过；`pnpm lint` 0 error / 55 warning（与基线一致）。
+
 ### Datalab 在线解析器：第九步（usage 接口）
 
 - 新增 `GET /api/v1/document-usage?range=7d|14d|30d`（`src/server/app/documents.py`）：返回逐日桶（`pages` / `cost_cents` / `conversions`）与服务端算好的总计。

@@ -9,7 +9,14 @@ import {
   useDocumentMutations,
   useDocumentTags,
 } from '../hooks';
-import type { Artifact, DocumentSummary, InspectionOutcome, ParseJob } from '../types';
+import {
+  toParserOptions,
+  type Artifact,
+  type DatalabOptions,
+  type DocumentSummary,
+  type InspectionOutcome,
+  type ParseJob,
+} from '../types';
 import FileStep from './steps/FileStep';
 import InspectionStep from './steps/InspectionStep';
 import MethodStep from './steps/MethodStep';
@@ -44,6 +51,8 @@ export default function DocumentWizard({
   const [document, setDocument] = useState<DocumentSummary>();
   const [outcome, setOutcome] = useState<InspectionOutcome>();
   const [selectedParserId, setSelectedParserId] = useState('');
+  // Only holds what the user moved off its default; see DatalabOptionsFields.
+  const [datalabOptions, setDatalabOptions] = useState<DatalabOptions>({});
   const [job, setJob] = useState<ParseJob>();
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [markdown, setMarkdown] = useState<string>();
@@ -173,7 +182,7 @@ export default function DocumentWizard({
           inspection_id: outcome.inspection.inspection_id,
           parser_id: selectedParserId,
           mode: 'async',
-          options: {},
+          options: toParserOptions(datalabOptions),
         },
       });
       loadedJobRef.current = undefined;
@@ -244,6 +253,8 @@ export default function DocumentWizard({
             <MethodStep
               options={outcome.parser_options}
               selectedParserId={selectedParserId}
+              datalabOptions={datalabOptions}
+              onDatalabOptionsChange={setDatalabOptions}
               pending={mutations.createParseJob.isPending}
               error={error}
               onSelect={setSelectedParserId}

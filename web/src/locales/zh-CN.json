@@ -359,6 +359,19 @@
         "cancel": "无法取消解析任务。",
         "artifacts": "无法加载解析产物。",
         "preview": "无法加载 Markdown 预览，但仍可下载产物。"
+      },
+      "datalab": {
+        "advanced": "高级选项",
+        "mode": "解析模式",
+        "mode_fast": "快速",
+        "mode_balanced": "均衡",
+        "mode_accurate": "精确",
+        "pageRange": "解析范围",
+        "pageRangeHint": "例如 0-5,10。留空表示解析整份文档。",
+        "paginate": "添加分页标记",
+        "tokenEfficient": "为模型精简 markdown",
+        "imageExtraction": "提取图片",
+        "imageExtractionHint": "图片暂不支持预览，保持关闭可以让 markdown 不产生无法显示的引用。"
       }
     }
   },

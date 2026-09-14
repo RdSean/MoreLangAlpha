@@ -359,6 +359,19 @@
         "cancel": "The parsing job could not be cancelled.",
         "artifacts": "Artifacts could not be loaded.",
         "preview": "The Markdown preview could not be loaded. You can still download the artifact."
+      },
+      "datalab": {
+        "advanced": "Advanced options",
+        "mode": "Processing mode",
+        "mode_fast": "Fast",
+        "mode_balanced": "Balanced",
+        "mode_accurate": "Accurate",
+        "pageRange": "Page range",
+        "pageRangeHint": "For example 0-5,10. Leave blank for the whole document.",
+        "paginate": "Add page markers",
+        "tokenEfficient": "Compact markdown for models",
+        "imageExtraction": "Extract images",
+        "imageExtractionHint": "Images cannot be previewed yet, so leaving this off keeps the markdown complete."
       }
     }
   },
