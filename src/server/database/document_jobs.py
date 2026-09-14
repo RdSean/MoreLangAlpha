@@ -116,6 +116,7 @@ async def claim_next_job(
                 """
                 WITH candidate AS (
                     SELECT jobs.job_id,
+                           documents.owner_user_id,
                            documents.source_storage_key,
                            documents.source_size_bytes,
                            documents.original_filename,

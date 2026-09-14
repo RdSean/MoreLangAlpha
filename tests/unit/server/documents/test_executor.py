@@ -112,6 +112,23 @@ class _SymlinkParser(_Parser):
         )
 
 
+class _UsageParser(_Parser):
+    """A parser that declares what the parse cost, the way Datalab does."""
+
+    def __init__(self, usage: dict[str, object] | None) -> None:
+        super().__init__()
+        metadata = {"usage": usage} if usage is not None else None
+        self.specs = (
+            ArtifactSpec(
+                artifact_kind="primary_document",
+                format="gfm",
+                media_type="text/markdown",
+                relative_path="document.md",
+                metadata=metadata,
+            ),
+        )
+
+
 class _Runner:
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
@@ -127,6 +144,9 @@ class _Runner:
 def _job() -> dict[str, object]:
     return {
         "job_id": "job-A1b2C3d4E5f6",
+        # The claim query carries the owner so a provider's reported usage can
+        # be attributed without a second lookup.
+        "owner_user_id": "owner-1",
         "document_id": "doc-A1b2C3d4E5f6",
         "inspection_id": "ins-A1b2C3d4E5f6",
         "parser_id": "test-parser",
@@ -157,6 +177,7 @@ def _executor(
     *,
     runner: _Runner | None = None,
     ids: tuple[str, ...] = ("art-A1b2C3d4E5f6",),
+    usage_recorder=None,
 ) -> DocumentJobExecutor:
     artifact_ids = iter(ids)
     return DocumentJobExecutor(
@@ -168,6 +189,7 @@ def _executor(
         max_artifacts=10,
         max_bundle_bytes=1024,
         id_factory=lambda kind: next(artifact_ids),
+        **({"usage_recorder": usage_recorder} if usage_recorder else {}),
     )
 
 
@@ -193,12 +215,8 @@ async def test_executor_runs_all_stages_and_publishes_artifacts() -> None:
 @pytest.mark.asyncio
 async def test_executor_uses_unique_job_prefix_for_every_artifact() -> None:
     specs = (
-        ArtifactSpec(
-            "primary_document", "gfm", "text/markdown", "document.md"
-        ),
-        ArtifactSpec(
-            "embedded_image", "png", "image/png", "images/page-1.png"
-        ),
+        ArtifactSpec("primary_document", "gfm", "text/markdown", "document.md"),
+        ArtifactSpec("embedded_image", "png", "image/png", "images/page-1.png"),
     )
     repository = _Repository()
     store = _ObjectStore()
@@ -209,16 +227,11 @@ async def test_executor_uses_unique_job_prefix_for_every_artifact() -> None:
         ids=("art-A1b2C3d4E5f6", "art-G7h8I9j0K1l2"),
     )
 
-    await executor.execute(
-        ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1")
-    )
+    await executor.execute(ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1"))
 
     assert [key for key, _, _ in store.puts] == [
         "documents/doc-A1b2C3d4E5f6/artifacts/job-A1b2C3d4E5f6/document.md",
-        (
-            "documents/doc-A1b2C3d4E5f6/artifacts/"
-            "job-A1b2C3d4E5f6/images/page-1.png"
-        ),
+        ("documents/doc-A1b2C3d4E5f6/artifacts/job-A1b2C3d4E5f6/images/page-1.png"),
     ]
 
 
@@ -226,11 +239,7 @@ async def test_executor_uses_unique_job_prefix_for_every_artifact() -> None:
     "parser",
     [
         _Parser(
-            (
-                ArtifactSpec(
-                    "primary_document", "gfm", "text/markdown", "../escape.md"
-                ),
-            )
+            (ArtifactSpec("primary_document", "gfm", "text/markdown", "../escape.md"),)
         ),
         _Parser(
             (
@@ -261,9 +270,7 @@ async def test_executor_rejects_parent_absolute_and_symlink_outputs(
 @pytest.mark.asyncio
 async def test_partial_upload_failure_deletes_only_uploaded_job_keys() -> None:
     specs = (
-        ArtifactSpec(
-            "primary_document", "gfm", "text/markdown", "document.md"
-        ),
+        ArtifactSpec("primary_document", "gfm", "text/markdown", "document.md"),
         ArtifactSpec("structured_data", "json", "application/json", "data.json"),
     )
     repository = _Repository()
@@ -276,10 +283,7 @@ async def test_partial_upload_failure_deletes_only_uploaded_job_keys() -> None:
         ids=("art-A1b2C3d4E5f6", "art-G7h8I9j0K1l2"),
     ).execute(ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1"))
 
-    first_key = (
-        "documents/doc-A1b2C3d4E5f6/artifacts/"
-        "job-A1b2C3d4E5f6/document.md"
-    )
+    first_key = "documents/doc-A1b2C3d4E5f6/artifacts/job-A1b2C3d4E5f6/document.md"
     assert result is not None and result["status"] == "failed"
     assert store.deletes == [first_key]
     assert repository.published is None
@@ -330,9 +334,7 @@ async def test_executor_publishes_only_compact_wake_hints_after_db_updates() -> 
     executor = _executor(repository, _ObjectStore(), _Parser())
     executor.set_update_notifier(notify)
 
-    await executor.execute(
-        ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1")
-    )
+    await executor.execute(ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1"))
 
     assert hints == [
         ("job-A1b2C3d4E5f6", 2),
@@ -340,3 +342,97 @@ async def test_executor_publishes_only_compact_wake_hints_after_db_updates() -> 
         ("job-A1b2C3d4E5f6", 4),
         ("job-A1b2C3d4E5f6", 5),
     ]
+
+
+class TestUsageRecording:
+    """Where a provider's reported cost becomes a row."""
+
+    @pytest.mark.asyncio
+    async def test_records_usage_a_parser_declared(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        async def record(**kwargs: object) -> None:
+            calls.append(kwargs)
+
+        parser = _UsageParser(
+            {
+                "provider_id": "datalab-online",
+                "pages": 12,
+                "list_cost_cents": 24,
+                "final_cost_cents": 24,
+            }
+        )
+        executor = _executor(
+            _Repository(), _ObjectStore(), parser, usage_recorder=record
+        )
+
+        await executor.execute(
+            ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1")
+        )
+
+        assert calls == [
+            {
+                "job_id": "job-A1b2C3d4E5f6",
+                "owner_user_id": "owner-1",
+                "provider_id": "datalab-online",
+                "pages": 12,
+                "list_cost_cents": 24,
+                "final_cost_cents": 24,
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_local_parser_records_nothing(self) -> None:
+        """No declared usage, no row — the local parsers cost nothing."""
+        calls: list[dict[str, object]] = []
+
+        async def record(**kwargs: object) -> None:
+            calls.append(kwargs)
+
+        executor = _executor(
+            _Repository(), _ObjectStore(), _Parser(), usage_recorder=record
+        )
+        await executor.execute(
+            ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1")
+        )
+
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_bookkeeping_failure_does_not_fail_a_published_parse(self) -> None:
+        """The document is already stored; losing it over a cost row is worse."""
+        repository = _Repository()
+
+        async def explode(**kwargs: object) -> None:
+            raise RuntimeError("usage table is on fire")
+
+        parser = _UsageParser(
+            {"provider_id": "datalab-online", "pages": 1, "final_cost_cents": 2}
+        )
+        executor = _executor(repository, _ObjectStore(), parser, usage_recorder=explode)
+
+        result = await executor.execute(
+            ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1")
+        )
+
+        assert result is not None
+        assert repository.failed is None
+
+    @pytest.mark.asyncio
+    async def test_a_malformed_usage_blob_is_skipped(self) -> None:
+        """Missing required keys means "no usable declaration", not a crash."""
+        calls: list[dict[str, object]] = []
+
+        async def record(**kwargs: object) -> None:
+            calls.append(kwargs)
+
+        parser = _UsageParser({"pages": 3})
+        executor = _executor(
+            _Repository(), _ObjectStore(), parser, usage_recorder=record
+        )
+
+        await executor.execute(
+            ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1")
+        )
+
+        assert calls == []

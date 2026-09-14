@@ -19,6 +19,16 @@
 - 这两条测试是先加依赖后写的，所以首次运行即通过、没有"先失败"的过程。为确认断言并非空转，做了变异验证：把子进程里的导入改成不存在的模块后立即失败（`ModuleNotFoundError`，1 failed | 1 passed），恢复后 2 项通过。
 - 验证：该文件 2 项通过。
 
+### Datalab 在线解析器：第六步（执行器落库用量）
+
+- **插入的一步**（原计划里没有）：设计上 provider 与执行器分工要清楚——provider 保持**纯函数**（只解析、只在元数据里声明用量），由**执行器**在产物发布成功后写库。这样"用量"这件事只有一种形状，也不需要往 `ParseRequest` 里塞 owner。
+- 关键次序：**发布成功之后**才写用量。如果先写、而后 `_validate_bundle` 拒绝了产物，就会留下一条"这次转换花了钱"的记录，但文档其实什么都没产出——**把花费显示得比实际更高，比漏记更糟**。
+- 失败处理有明确方向：写用量失败只记 warning 并继续。此时文档已经发布，为一笔记账把成功的解析变成失败任务是更坏的结果；宁可少报。
+- 元数据里的 `usage` 必须在**所有产物**里被扫描到（不只看主产物），且缺 `provider_id` / `pages` / `final_cost_cents` 时**跳过而不抛异常**——形状不完整的声明等于"没有声明"。本地解析器不声明，因此不会产生任何记录（有测试）。
+- `document_parse_jobs` 的 claim 查询新增 `documents.owner_user_id`，让用量可以归属到人而无需二次查询；对应的既有 claim 测试也加了断言。
+- 测试：`test_executor.py` 新增 4 项（声明了用量则记录、字段与归属正确；本地解析器不记录；**记账失败不影响已发布的解析**；形状不完整的声明被跳过），`test_document_jobs.py` 新增一条列断言。执行器 `usage_recorder` 走依赖注入，与既有的 repository / object_store / process_runner 一致，测试不碰数据库。
+- 验证：`tests/unit/server/documents/test_executor.py` 13 项通过、`tests/unit/server/database/test_document_jobs.py` 9 项通过；`ruff check`（针对改动文件）通过。全树 `ruff check src tests` 另有 13 项报错，全部位于本次未触及的既有文件（仓库既定的 lint 范围是 `src/ migrations/ scripts/ops/`）。
+
 ### Datalab 在线解析器：第五步（provider 本体）
 
 - 新增 `DatalabExtractor`（`src/server/documents/providers/datalab.py`，`parser_id="datalab-online"`），实现既有的**同步** `DocumentParser` 协议，调用 `client.convert()`；可用性由 `get_datalab_config()` 决定，未配置时 descriptor 的 `reason` 直接写明要设置 `ENABLE_DATALAB_DOCUMENT_PARSER` 与 `DATALAB_API_KEY`，而不是让选择器只显示"不可用"。

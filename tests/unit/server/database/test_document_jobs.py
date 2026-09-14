@@ -77,6 +77,9 @@ async def test_claim_selects_queued_or_expired_job_with_skip_locked(
     assert "JOIN document_inspections" in sql
     assert "candidate.source_storage_key" in sql
     assert "candidate.inspection_summary" in sql
+    # The owner rides along so a provider's reported usage can be attributed
+    # without the executor going back to the documents table.
+    assert "documents.owner_user_id" in sql
     assert "attempt_count = attempt_count + 1" in sql
     assert "status_version = status_version + 1" in sql
     assert params == ("worker-1", 60)
@@ -261,8 +264,7 @@ async def test_publish_artifacts_and_completion_share_one_transaction(
         media_type="text/markdown",
         relative_path="document.md",
         storage_key=(
-            "documents/doc-A1b2C3d4E5f6/artifacts/"
-            "job-A1b2C3d4E5f6/document.md"
+            "documents/doc-A1b2C3d4E5f6/artifacts/job-A1b2C3d4E5f6/document.md"
         ),
         metadata={"backend": "anydoc"},
     )
@@ -282,7 +284,9 @@ async def test_publish_artifacts_and_completion_share_one_transaction(
     assert "FOR UPDATE" in fence_sql
     assert "cancellation_requested_at IS NULL" in fence_sql
     assert mock_cursor.executemany.await_count == 1
-    assert "INSERT INTO document_artifacts" in mock_cursor.executemany.await_args.args[0]
+    assert (
+        "INSERT INTO document_artifacts" in mock_cursor.executemany.await_args.args[0]
+    )
     assert "primary_artifact_id = %s" in complete_sql
     assert "status = 'completed'" in complete_sql
     assert "status_version = status_version + 1" in complete_sql
