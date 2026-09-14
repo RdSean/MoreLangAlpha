@@ -19,6 +19,16 @@
 - 这两条测试是先加依赖后写的，所以首次运行即通过、没有"先失败"的过程。为确认断言并非空转，做了变异验证：把子进程里的导入改成不存在的模块后立即失败（`ModuleNotFoundError`，1 failed | 1 passed），恢复后 2 项通过。
 - 验证：该文件 2 项通过。
 
+### Datalab 在线解析器：第四步（每次转换的参数模型）
+
+- 新增 `DatalabConversionOptions`（`src/server/documents/providers/datalab_options.py`），字段覆盖 mode / paginate / page_range / max_pages / skip_cache / 图片提取与描述 / token 精简 markdown / extras，`output_format` 固定为字面量 `markdown`——用字面量而不是省略该字段，是为了让"只支持 markdown"这条约束出现在模型里，而不只藏在 provider 实现里。
+- **默认值与原先的 pipeline 对齐**（`balanced` + `paginate=True`），这样从 pipeline 切到 `client.convert()` 不会悄悄改变解析产物。
+- **`disable_image_extraction` 默认为 True**（与 datalab 自身的默认相反）：datalab 默认会提取图片并以 base64 返回，markdown 里会留下按 URL 寻址的查看器无法解析的引用；在图片作为独立产物发布、且预览能定位它们之前，关掉是唯一能产出"我们真的渲染得出来"的文档的默认值。
+- 校验：未知 mode 拒绝；`page_range` 与 `max_pages` 互斥；`page_range` 必须是 `0-5,10,15-20` 形状；`max_pages` 必须为正。
+- `from_stored()` 处理"可能是旧版本客户端写的"存储值：空值→默认；已知键应用；**未知键忽略**（新客户端不该弄坏旧服务端）；非法值**整体回退到默认**——刻意做成 all-or-nothing，因为"半应用"才是最危险的：`mode` 生效而 `page_range` 被丢弃会解析出与用户所要求**不同的页面范围**，且没有任何地方会提示。
+- 测试 18 项，先写测试后实现（初次收集即失败）。
+- 验证：18 项通过；`ruff check` 通过。
+
 ### Datalab 在线解析器：第三步（每次转换的用量落库）
 
 - 新增迁移 `061_document_usage_records`（`down_revision = 060_restore_finance_schema`）与 `document_usage_records` 表：`job_id`（FK 到 `document_parse_jobs`）、`owner_user_id`（FK 到 `users`）、`provider_id`、`pages`、`list_cost_cents`、`final_cost_cents`、`created_at`。
