@@ -19,6 +19,15 @@
 - 这两条测试是先加依赖后写的，所以首次运行即通过、没有"先失败"的过程。为确认断言并非空转，做了变异验证：把子进程里的导入改成不存在的模块后立即失败（`ModuleNotFoundError`，1 failed | 1 passed），恢复后 2 项通过。
 - 验证：该文件 2 项通过。
 
+### Datalab 在线解析器：第九步（usage 接口）
+
+- 新增 `GET /api/v1/document-usage?range=7d|14d|30d`（`src/server/app/documents.py`）：返回逐日桶（`pages` / `cost_cents` / `conversions`）与服务端算好的总计。
+- **总计在服务端算**：若让页面自己把桶加起来，就会存在两份"总花费"的实现，最终头部数字和图会对不上。
+- 归属边界靠**查询层按 `owner_user_id` 收窄**，不是加角色门禁——调用者只看得到自己名下文档的花费，这才是真正的安全属性。学生账号因此得到的是**空序列而不是拒绝**（他名下没有文档），而 Settings 页面本身不会给学生显示该 tab（沿用 `activeTab === 'model' && !isStudent` 那套既有做法）。这一点与原计划里"拒绝学生"的写法不同，是我按仓库既有模式做的调整。
+- 窗口由 `range` 决定（`7d`/`14d`/`30d`），未知取值返回 **422** 而不是猜一个；空序列返回 200 + 零总计，不是 404。
+- 测试 6 项（`tests/unit/server/app/test_document_usage_api.py`，沿用该目录既有的 httpx + 依赖覆盖写法）：逐日桶与总计；**总计由服务端计算**；按调用者收窄；`range` 正确换算成窗口（含闭区间）；未知 range → 422；空序列 → 200 且零总计。先写测试后实现（初次 6 项全部 ERROR）。
+- 验证：该文件 6 项通过；`tests/unit/server/app` 共 **737 项通过**；`ruff check` 与 `ruff format` 通过。
+
 ### Datalab 在线解析器：第八步（引入 recharts，并修好一条形同虚设的守卫）
 
 - 加入 `recharts@3.10.1`，用于 Usage 页面的柱状图（此前设计里提过手写 SVG，改为按你的决定引入图表库）。

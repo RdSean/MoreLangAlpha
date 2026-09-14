@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from datetime import date, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -13,8 +14,10 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from starlette.background import BackgroundTask
+from pydantic import BaseModel
 
 from src.server.database.documents import DocumentListFilter
+from src.server.database.document_usage import aggregate_usage
 from src.server.documents.contracts import (
     DocumentDomainError,
     FileTooLargeError,
@@ -524,4 +527,61 @@ async def download_artifact(
         media_type=download.media_type,
         headers=headers,
         background=BackgroundTask(download.object_download.close),
+    )
+
+
+_USAGE_RANGES = {"7d": 7, "14d": 14, "30d": 30}
+"""The windows the Usage page offers. Anything else is a 422, not a guess."""
+
+
+class DocumentUsageTotals(BaseModel):
+    pages: int
+    cost_cents: int
+    conversions: int
+
+
+class DocumentUsageDay(BaseModel):
+    day: date
+    pages: int
+    cost_cents: int
+    conversions: int
+
+
+class DocumentUsageResponse(BaseModel):
+    range: str
+    totals: DocumentUsageTotals
+    days: list[DocumentUsageDay]
+
+
+@router.get("/document-usage", response_model=DocumentUsageResponse)
+async def get_document_usage(
+    user_id: CurrentUserId,
+    range: str = Query("7d"),
+) -> DocumentUsageResponse:
+    """What this account's document conversions have cost, by day.
+
+    Totalled here rather than in the page: two implementations of "total spend"
+    would eventually disagree, and the header would contradict the chart.
+    """
+    days_back = _USAGE_RANGES.get(range)
+    if days_back is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"range must be one of {', '.join(sorted(_USAGE_RANGES))}",
+        )
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=days_back - 1)
+    rows = await aggregate_usage(
+        owner_user_id=user_id, start_date=start_date, end_date=end_date
+    )
+    days = [DocumentUsageDay.model_validate(row) for row in rows]
+    return DocumentUsageResponse(
+        range=range,
+        totals=DocumentUsageTotals(
+            pages=sum(day.pages for day in days),
+            cost_cents=sum(day.cost_cents for day in days),
+            conversions=sum(day.conversions for day in days),
+        ),
+        days=days,
     )
