@@ -266,6 +266,42 @@ URLs. These are family documents, often children's scanned homework; the
 authenticated endpoint is the only correct reader, and the correct
 `media_type` per image is what makes `<img>` render once it does.
 
+## Measured against the real API (2026-09-15)
+
+Two kinds of run, both through the real job pipeline on the dev stack
+(`scanned.pdf`, 155 130 bytes, one page):
+
+| Run | Result | What it recorded |
+|---|---|---|
+| Valid key | `completed` in 8.3 s | 937 chars of Markdown, OCR'd from the scan |
+| Invalid key | `failed` in 4.2 s | `parser_unavailable`, no artifacts, no usage row |
+
+What the docs predicted versus what arrived:
+
+- **Cost is reported, but a free-tier request reports zero.** The provider
+  returns `cost_breakdown = {"final_cost_cents": 0}` with **no**
+  `list_cost_cents` key at all, and `parse_quality_score = None`. The Usage
+  page therefore showing "1 page, $0.00" is accurate rather than a parse bug —
+  which is exactly why the page plots pages as well as money.
+- **`page_count` is present** (1) and is what the usage row is built from, so
+  the page-based half of the record does not depend on the pricing fields.
+
+Two failure-path defects were found by these runs and fixed in the same task,
+because "fails with a readable error" is the requirement (Task 11 Step 2), not
+"fails":
+
+1. **The provider's own words did not survive the isolation boundary.**
+   `SpawnProcessRunner` turned every child exception into
+   `IsolatedProcessError("The isolated process failed")`, so a wrong key — or a
+   transient DNS failure, which one run also hit — reached the user as
+   "Document parsing failed". Domain errors now cross intact (code and safe
+   message), and everything else is summarised into the operator log instead.
+2. **The SDK's failures were never translated.** The SDK wraps transport
+   failures in `DatalabAPIError`, so a revoked key and an unreachable host were
+   indistinguishable. 401/403 is now named as a credential problem, poll
+   exhaustion as a timeout, and the rest as a conversion failure — with the
+   original exception chained for the log.
+
 ## Open questions
 
 None blocking. Two decisions are settled: retire `ocr-document` (D5), keep

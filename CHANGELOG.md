@@ -1,5 +1,18 @@
 # 变更日志
 
+## 2026-09-15
+
+### Datalab 在线解析器：真实链路验证，以及它暴露的失败路径缺陷
+
+- **两条路径都在真实链路上跑通**（`scanned.pdf`，155 130 字节，1 页）：正确密钥 → `completed`（8.3 秒，取回 937 字符 markdown）；故意写错的密钥 → `failed`（4.2 秒，`parser_unavailable`，**0 产物、0 用量行**，不是卡住、也不是把空文档当成功发布）。
+- **缺陷一：provider 写好的错误跨不出隔离边界。** `SpawnProcessRunner` 原本把子进程抛出的**任何**异常都压成 `IsolatedProcessError("The isolated process failed")`，于是 `DatalabExtractor` 精心构造的 `code` + `safe_message` 到不了用户，错密钥最终只显示一句"Document parsing failed"。现在 `DocumentDomainError` 以 `(code, safe_message)` 形式跨边界原样重建（类本身不参与反序列化——**稳定的是 code，不是类名**），其余异常改为回传一条**上限 400 字符**的摘要字符串，而不是被丢弃。
+- **缺陷二：SDK 的失败从未被翻译。** SDK 把**连接失败**也包装成 `DatalabAPIError`（`Request failed: ...`，没有 status code），所以"密钥被吊销"和"网络不通"原本无法区分。现在：401/403 → `parser_unavailable` 并**点名** `DATALAB_API_KEY`；轮询耗尽（`DatalabTimeoutError`）→ `parse_timeout`；其余 → `invalid_parser_output`。原异常一律 `from` 串联，日志里保留 provider 的原话。
+- 执行器补上**分级记账**：`DocumentDomainError` 属"已经能向调用方解释的结果"，记 info；其它异常说明是**没人解释过的失败**，记 warning 并带 traceback。两条路径都**不改**任务面向用户的消息——内部细节进日志，不进家长/学生的屏幕。
+- 实测收益：验证过程中确实撞到一次瞬时的 `Cannot connect to host www.datalab.to:443`（同一分钟内重试两次都成功，属出站网络抖动）。这类原因现在会**落到服务端日志**，而不是留下一句无迹可寻的失败。
+- 新增测试 7 项：`test_process_runner.py`（异常摘要被带上、摘要长度有界、**domain error 跨边界保持 code 与消息**）、`test_datalab.py::TestSdkFailures`（401 点名配置项、连接失败算转换失败、轮询耗尽算超时）、`test_executor.py`（不透明失败**记日志但不对用户展开**）。全部先写测试、确认失败后再实现。
+- 设计文档补 `Measured against the real API (2026-09-15)` 一节，记录实测与文档预期的差异：免费额度下 `cost_breakdown` 只有 `{"final_cost_cents": 0}`、**没有 `list_cost_cents` 键**，`parse_quality_score` 为 `None`，`page_count=1`——用量页显示"1 页 / $0.00"是**准确的**，这也正是该页同时画页数的原因。
+- 验证：后端 `tests/unit` **7666 项通过 / 8 deselected / 1 xfailed**；`ruff check src/ migrations/ scripts/ops/` 通过；前端 **256 文件 / 2471 项通过**，`pnpm lint` 0 error / 55 warning、`pnpm typecheck` 通过、`pnpm build` 关键路径 **353.4 kB gz（上限 450）**。
+
 ## 2026-09-14
 
 ### Datalab 在线解析器：第一步（部署配置）

@@ -23,9 +23,11 @@ from src.config.settings import DatalabConfig, get_datalab_config
 from src.server.documents.contracts import (
     ArtifactBundle,
     ArtifactSpec,
+    DocumentDomainError,
     InvalidParserOutputError,
     JsonValue,
     ParseRequest,
+    ParseTimeoutError,
     ParserDescriptor,
     ParserUnavailableError,
 )
@@ -93,6 +95,53 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
+def _sdk_error(error: Any) -> DocumentDomainError:
+    """Translate an SDK HTTP failure into something the job can report.
+
+    The SDK wraps every transport failure in ``DatalabAPIError`` — a revoked
+    key and an unreachable host arrive through the same exception, told apart
+    only by the status code. Letting them escape means the job ends at the
+    executor's generic "Document parsing failed", which is what a real run
+    with a deliberately invalid key produced: a failed job with no way to tell
+    a wrong credential from a network outage.
+    """
+    status = getattr(error, "status_code", None)
+    if status in {401, 403}:
+        return ParserUnavailableError(
+            f"Datalab rejected the configured credentials (HTTP {status}). "
+            "Check DATALAB_API_KEY."
+        )
+    return InvalidParserOutputError(
+        f"Datalab could not convert this document: {error}"
+    )
+
+
+def _convert(
+    client: Any,
+    config: DatalabConfig,
+    request: ParseRequest,
+    options: DatalabConversionOptions,
+) -> Any:
+    """Run the conversion with the SDK's failures mapped onto our own."""
+    from datalab_sdk.exceptions import DatalabAPIError, DatalabTimeoutError
+
+    try:
+        return client.convert(
+            str(request.source.source_path),
+            options=_convert_options(options),
+            max_polls=config.poll_budget_seconds,
+            poll_interval=1,
+        )
+    except DatalabTimeoutError as error:
+        # Poll exhaustion: the request outlived the budget we gave it, which is
+        # the same story as our own parse timeout and carries the same code.
+        raise ParseTimeoutError(
+            "Datalab did not finish converting this document in time."
+        ) from error
+    except DatalabAPIError as error:
+        raise _sdk_error(error) from error
+
+
 class DatalabExtractor:
     """Convert a document through Datalab's hosted API."""
 
@@ -126,12 +175,7 @@ class DatalabExtractor:
 
         options = DatalabConversionOptions.from_stored(request.options)
         client = _client(config)
-        result = client.convert(
-            str(request.source.source_path),
-            options=_convert_options(options),
-            max_polls=config.poll_budget_seconds,
-            poll_interval=1,
-        )
+        result = _convert(client, config, request, options)
 
         # Documented trap: a completed request can carry success=False without
         # raising. Checking before reading is the difference between a failed

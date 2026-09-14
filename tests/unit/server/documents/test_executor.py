@@ -9,7 +9,10 @@ from src.server.documents.contracts import (
     ParserDescriptor,
 )
 from src.server.documents.executor import ClaimedDocumentJob, DocumentJobExecutor
-from src.server.documents.process_runner import IsolatedProcessTimeoutError
+from src.server.documents.process_runner import (
+    IsolatedProcessError,
+    IsolatedProcessTimeoutError,
+)
 from src.server.documents.providers.registry import DocumentProviderRegistry
 
 
@@ -305,6 +308,37 @@ async def test_parser_timeout_fails_job_with_stable_error() -> None:
     assert repository.failed["error_code"] == "parse_timeout"
     assert repository.failed["error_message"] == "Document parsing timed out"
     assert runner.timeouts == [12]
+
+
+@pytest.mark.asyncio
+async def test_an_opaque_parser_failure_is_logged_but_not_shown(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The user gets the generic message; the operator gets the reason.
+
+    A parser child can die for reasons we cannot describe to a parent — a
+    revoked key, a provider outage. The job's message stays deliberately
+    vague, so the diagnosis has to reach the server log instead of the screen.
+    """
+    repository = _Repository()
+    runner = _Runner(
+        IsolatedProcessError(
+            "The isolated process failed: DatalabAPIError: Request failed: boom"
+        )
+    )
+
+    with caplog.at_level("WARNING", logger="src.server.documents.executor"):
+        result = await _executor(
+            repository,
+            _ObjectStore(),
+            _Parser(),
+            runner=runner,
+        ).execute(ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1"))
+
+    assert result is not None and result["status"] == "failed"
+    assert repository.failed["error_message"] == "Document parsing failed"
+    assert "job-A1b2C3d4E5f6" in caplog.text
+    assert "Request failed: boom" in caplog.text
 
 
 @pytest.mark.asyncio

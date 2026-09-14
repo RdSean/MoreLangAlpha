@@ -328,6 +328,25 @@ class DocumentJobExecutor:
         error: Exception,
     ) -> dict[str, Any] | None:
         error_code, error_message = _safe_error(error)
+        # A described failure is one the caller can act on and needs no log
+        # line. Anything else reached the executor unexplained — a parser child
+        # that died, an unwrapped provider error — and only the server log can
+        # carry the reason, because the job's message stays deliberately vague.
+        if isinstance(error, DocumentDomainError):
+            logger.info(
+                "Document job %s failed: %s (%s)",
+                claim.job_id,
+                error_message,
+                error_code,
+            )
+        else:
+            logger.warning(
+                "Document job %s failed (%s): %r",
+                claim.job_id,
+                error_code,
+                error,
+                exc_info=error,
+            )
         async with claim.lock:
             failed = await self._repository.fail_job(
                 job_id=claim.job_id,

@@ -10,6 +10,8 @@ from collections.abc import Callable
 from multiprocessing.process import BaseProcess
 from typing import Any
 
+from src.server.documents.contracts import DocumentDomainError
+
 
 class IsolatedProcessError(RuntimeError):
     """A stable error for child startup, crash, or invalid output."""
@@ -19,6 +21,30 @@ class IsolatedProcessTimeoutError(IsolatedProcessError):
     """Raised after the child is terminated at its deadline."""
 
 
+_ISOLATED_FAILURE = "The isolated process failed"
+
+# Long enough for an exception type and the provider's own words, short enough
+# that a runaway message cannot become the log line.
+_MAX_ERROR_SUMMARY_CHARS = 400
+
+
+def _summarise(error: BaseException) -> str:
+    """A bounded one-line description of what the child died of.
+
+    The child's exception is the only record of why a parser failed — it can be
+    a revoked credential, a provider outage, or our own bug — and the child
+    prints nothing of its own, so the summary is sent back rather than dropped.
+    The parent keeps it out of the job's user-facing message and logs it.
+    """
+    return f"{type(error).__name__}: {error}".strip()[:_MAX_ERROR_SUMMARY_CHARS]
+
+
+def _failed_message(detail: object) -> str:
+    if isinstance(detail, str) and detail:
+        return f"{_ISOLATED_FAILURE}: {detail}"
+    return _ISOLATED_FAILURE
+
+
 def _execute_child(
     result_queue: Any,
     target: Callable[..., object],
@@ -26,8 +52,13 @@ def _execute_child(
 ) -> None:
     try:
         result = target(*args)
-    except BaseException:
-        result_queue.put(("error", None))
+    except DocumentDomainError as error:
+        # A described failure keeps its code and safe message. The class itself
+        # is not pickled back: the code is the contract, and the parent rebuilds
+        # the error from it so ``_safe_error`` can still report the real reason.
+        result_queue.put(("domain_error", (error.code, error.safe_message)))
+    except BaseException as error:
+        result_queue.put(("error", _summarise(error)))
     else:
         result_queue.put(("ok", result))
 
@@ -86,7 +117,7 @@ class SpawnProcessRunner:
                 except queue.Empty:
                     if not process.is_alive():
                         await asyncio.to_thread(process.join)
-                        raise IsolatedProcessError("The isolated process failed")
+                        raise IsolatedProcessError(_ISOLATED_FAILURE)
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -97,10 +128,13 @@ class SpawnProcessRunner:
                 await _terminate_and_join(process)
                 raise IsolatedProcessTimeoutError("The isolated process timed out")
             if process.exitcode != 0:
-                raise IsolatedProcessError("The isolated process failed")
+                raise IsolatedProcessError(_ISOLATED_FAILURE)
 
+            if status == "domain_error":
+                code, message = payload
+                raise DocumentDomainError(message, code=code)
             if status != "ok":
-                raise IsolatedProcessError("The isolated process failed")
+                raise IsolatedProcessError(_failed_message(payload))
             return payload
         except BaseException:
             if started and process.is_alive():

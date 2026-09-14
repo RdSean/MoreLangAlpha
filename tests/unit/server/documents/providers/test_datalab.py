@@ -20,6 +20,7 @@ from src.server.documents.contracts import (
     InspectionResult,
     InvalidParserOutputError,
     ParseRequest,
+    ParseTimeoutError,
     ParserUnavailableError,
     SourceDocument,
 )
@@ -84,7 +85,10 @@ def stub_client(monkeypatch):
     class FakeClient:
         def convert(self, path: str, **kwargs: Any) -> Any:
             captured["calls"].append({"path": path, **kwargs})
-            return captured["result"]
+            result = captured["result"]
+            if isinstance(result, BaseException):
+                raise result
+            return result
 
     monkeypatch.setattr(datalab, "_client", lambda config: FakeClient())
     monkeypatch.setattr(datalab, "_convert_options", lambda options: options)
@@ -233,3 +237,54 @@ class TestFailureHandling:
         usage = (bundle.artifacts[0].metadata or {})["usage"]
         assert usage["pages"] == 0
         assert usage["final_cost_cents"] == 0
+
+
+class TestSdkFailures:
+    """What the caller is told when the SDK itself gives up.
+
+    The SDK wraps HTTP failures, including connection errors, in
+    ``DatalabAPIError`` and raises ``DatalabTimeoutError`` when polling runs
+    dry. Letting those escape makes the job end at the executor's generic
+    "Document parsing failed" with no way to tell a wrong key from a network
+    outage — a real run against a deliberately invalid key produced exactly
+    that, which is why these cases are pinned here rather than left to the
+    executor.
+    """
+
+    def test_rejected_credentials_name_the_missing_setting(
+        self, tmp_path: Path, stub_client
+    ) -> None:
+        from datalab_sdk.exceptions import DatalabAPIError
+
+        stub_client["result"] = DatalabAPIError("Unauthorized", status_code=401)
+
+        with pytest.raises(ParserUnavailableError) as error:
+            datalab.DatalabExtractor(config_loader=_config).parse(_request(tmp_path))
+
+        assert "DATALAB_API_KEY" in error.value.safe_message
+        assert "401" in error.value.safe_message
+        # The cause survives so the operator log keeps the provider's words.
+        assert isinstance(error.value.__cause__, DatalabAPIError)
+
+    def test_an_unreachable_api_is_a_conversion_failure_not_a_crash(
+        self, tmp_path: Path, stub_client
+    ) -> None:
+        from datalab_sdk.exceptions import DatalabAPIError
+
+        # The shape the SDK uses for a transport error: no status code at all.
+        stub_client["result"] = DatalabAPIError("Request failed: boom")
+
+        with pytest.raises(InvalidParserOutputError, match="Request failed: boom"):
+            datalab.DatalabExtractor(config_loader=_config).parse(_request(tmp_path))
+
+    def test_exhausted_polling_is_reported_as_a_timeout(
+        self, tmp_path: Path, stub_client
+    ) -> None:
+        from datalab_sdk.exceptions import DatalabTimeoutError
+
+        stub_client["result"] = DatalabTimeoutError("Polling timed out after 540 seconds")
+
+        with pytest.raises(ParseTimeoutError) as error:
+            datalab.DatalabExtractor(config_loader=_config).parse(_request(tmp_path))
+
+        assert error.value.code == "parse_timeout"
