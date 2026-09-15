@@ -56,7 +56,16 @@ class DatalabConversionOptions(BaseModel):
     we can actually render.
     """
 
-    disable_image_captions: bool = False
+    disable_image_captions: bool = True
+    """On by default, also unlike Datalab's own default.
+
+    A caption is model-written prose about a picture, placed next to the text
+    we are trying to extract from a scanned worksheet; it competes with that
+    text rather than helping it. The wizard exposes the switch, so asking for
+    captions is a deliberate choice rather than something that arrives with
+    every conversion.
+    """
+
     token_efficient_markdown: bool = False
     extras: str | None = None
 

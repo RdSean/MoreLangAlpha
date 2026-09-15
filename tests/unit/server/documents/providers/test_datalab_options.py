@@ -34,6 +34,16 @@ class TestDefaults:
         # in the model instead of only in the provider's implementation.
         assert DatalabConversionOptions().output_format == "markdown"
 
+    def test_image_captions_are_off_by_default(self) -> None:
+        """Datalab captions images by default; we ask it not to.
+
+        Captions are model-written prose about a picture, and the picture here
+        is usually a scanned worksheet — the caption competes with the text we
+        actually want, so the wizard ships the switch on. The flag is negative,
+        which is why the default is ``True`` and the checkbox reads "skip".
+        """
+        assert DatalabConversionOptions().disable_image_captions is True
+
 
 class TestValidation:
     def test_accepts_a_page_range(self) -> None:

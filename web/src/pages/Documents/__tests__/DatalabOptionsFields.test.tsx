@@ -72,6 +72,77 @@ describe('Datalab options panel', () => {
       paginate: false,
     });
   });
+
+  it('treats the image switch as extract, not as the wire flag', () => {
+    render(<Harness />);
+    const toggle = screen.getByLabelText(
+      /Extract images|提取图片/i,
+    ) as HTMLInputElement;
+
+    // The server disables image extraction by default. The checkbox used to be
+    // bound straight to the wire flag, so a fresh wizard showed "Extract
+    // images" ticked while every image was skipped, and ticking it on its own
+    // sent nothing.
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+    expect(screen.getByTestId('payload')).toHaveTextContent(
+      '{"disable_image_extraction":false}',
+    );
+
+    fireEvent.click(toggle);
+    expect(screen.getByTestId('payload')).toHaveTextContent('{}');
+  });
+
+  it('splits the panel into two rows of one kind of control', () => {
+    // The panel used to be a single ragged column of five mixed controls —
+    // checkbox, checkbox, select, text, checkbox — which is what made it look
+    // unstyled. Row one takes values, row two is switches, and neither row
+    // mixes the two.
+    render(<Harness />);
+    const fields = screen.getByTestId('datalab-options-fields');
+    const toggles = screen.getByTestId('datalab-options-toggles');
+
+    expect(
+      within(fields).getByLabelText(/Processing mode|解析模式/i),
+    ).toBeInTheDocument();
+    expect(within(fields).getByLabelText(/Page range|解析范围/i)).toBeInTheDocument();
+    expect(within(fields).queryAllByRole('checkbox')).toHaveLength(0);
+
+    expect(within(toggles).getAllByRole('checkbox')).toHaveLength(4);
+    expect(within(toggles).queryByRole('textbox')).not.toBeInTheDocument();
+  });
+
+  it('ships image captions off, and only sends the flag when switched on', () => {
+    render(<Harness />);
+    // By role: the tip button beside this switch borrows the label as the
+    // start of its own accessible name, so a text query matches two elements.
+    const toggle = screen.getByRole('checkbox', {
+      name: /Skip image captions|不生成图片标题/i,
+    }) as HTMLInputElement;
+
+    // Datalab generates captions by default and they can pull accuracy away
+    // from the surrounding text, so our default is the opposite of theirs —
+    // and the label is negative so a ticked box means what it says.
+    expect(toggle).toBeChecked();
+    expect(screen.getByTestId('payload')).toHaveTextContent('{}');
+
+    fireEvent.click(toggle);
+    expect(screen.getByTestId('payload')).toHaveTextContent(
+      '{"disable_image_captions":false}',
+    );
+  });
+
+  it('explains the caption default in a tip beside the switch', () => {
+    render(<Harness />);
+    const tip = screen.getByRole('button', {
+      name: /Skip image captions|不生成图片标题/i,
+    });
+
+    // The reason matters more than the flag: without it, "skip captions"
+    // reads like a lost feature rather than a deliberate default.
+    expect(tip).toHaveAccessibleName(/accuracy|精度/i);
+  });
 });
 
 describe('the wizard step', () => {

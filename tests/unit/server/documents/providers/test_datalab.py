@@ -25,6 +25,7 @@ from src.server.documents.contracts import (
     SourceDocument,
 )
 from src.server.documents.providers import datalab
+from src.server.documents.providers.datalab_options import DatalabConversionOptions
 
 
 def _config() -> DatalabConfig:
@@ -184,6 +185,50 @@ class TestSuccessfulConversion:
 
         assert stub_client["calls"][0]["options"].mode == "balanced"
         assert bundle.primary_relative_path == "document.md"
+
+    def test_asking_for_image_captions_reaches_the_client(
+        self, tmp_path: Path, stub_client
+    ) -> None:
+        """The wizard's "skip captions" switch is a negative flag.
+
+        Off by default, so the only value that ever travels is ``false`` — on
+        the request that asks for captions back.
+        """
+        request = _request(tmp_path, options={"disable_image_captions": False})
+        datalab.DatalabExtractor(config_loader=_config).parse(request)
+
+        assert stub_client["calls"][0]["options"].disable_image_captions is False
+
+
+class TestSdkOptionMapping:
+    """The hand-written bridge from our options model to the SDK's own object.
+
+    Every test above replaces the real ``_convert_options``, so nothing else
+    in this file would notice if a field stopped being forwarded or if a name
+    on either side changed — ``ConvertOptions(**fields)`` raises on an unknown
+    field, which would fail every conversion rather than one wizard toggle.
+    """
+
+    def test_a_real_sdk_options_object_carries_the_defaults(self) -> None:
+        from datalab_sdk import ConvertOptions
+
+        options = datalab._convert_options(DatalabConversionOptions())
+
+        assert isinstance(options, ConvertOptions)
+        # Ours, not the SDK's: Datalab extracts images *and* captions by
+        # default, and we ask for neither.
+        assert options.disable_image_extraction is True
+        assert options.disable_image_captions is True
+        assert options.paginate is True
+        assert options.mode == "balanced"
+
+    def test_asking_for_captions_reaches_the_sdk_object(self) -> None:
+        options = datalab._convert_options(
+            DatalabConversionOptions(disable_image_captions=False, page_range="0-5")
+        )
+
+        assert options.disable_image_captions is False
+        assert options.page_range == "0-5"
 
 
 class TestFailureHandling:

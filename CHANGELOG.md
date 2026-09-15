@@ -2,6 +2,15 @@
 
 ## 2026-09-15
 
+### 文档解析：Datalab 高级选项面板重做（两行对齐 + 新增图片标题开关）
+
+- **面板原来是"一列五行混排"**：三个复选框、一个下拉、一个文本框堆在一起，`documents-advanced-options` 这些类名**在 CSS 里根本不存在**，所以全靠浏览器默认样式渲染——提示文字跟在复选框后面同一行、控件高度各不相同。现在补上样式并重组为**按控件类型分行**：第一行是取值控件（解析模式 / 解析范围，标签在上、控件等宽对齐，范围提示下沉到控件下方），第二行是开关（2×2 等高等宽贴片，`grid-auto-rows: 1fr` 让两行高度一致）。行内 `repeat(2, minmax(0,1fr))` 而不是 `auto-fit`：按当前向导宽度，四个开关排成一行会把最后一个挤到第二行单独一个，正是这次要消掉的"参差感"。
+- **顺手修掉一个会误导用户的极性 bug**：`提取图片` 复选框直接绑到了线上的**否定字段** `disable_image_extraction`（默认 true），于是**默认状态下显示为"已勾选"，而服务端其实在跳过所有图片**；单独勾选它还什么都不发送。现在复选框绑定 `disable_image_extraction === false`，勾上才发 `false`。
+- **新增 `disable_image_captions` 开关**（默认关闭图片标题）：标签用否定式（`不生成图片标题`），与字段的否定语义一致、默认即勾选，避免再出现上面那类"标签与状态相反"的问题。旁边放了一个 info 图标 + Tooltip 说明原因：**图片标题由模型生成，可能反而干扰正文的识别精度**。Tooltip 按钮是 `<label>` 的**兄弟节点**而不是子节点——labelable 元素不能嵌在 `<label>` 里，且点它会顺带把复选框勾上。该字段后端模型（默认 `True`）与 `_convert_options` 透传本已存在，本次补齐前端入口与测试。
+- 顺带补了两条后端测试，把这条链路钉住：`DatalabConversionOptions().disable_image_captions is True`，以及 `_convert_options` 真的把该字段送进 SDK 的 `ConvertOptions`（此前所有 provider 测试都把 `_convert_options` 替换掉了，字段名写错也不会有测试发现）。
+- 新增前端测试 4 条：默认勾选且只在关闭时发送 `{"disable_image_captions":false}`、提示按钮的无障碍名称包含解释文案、面板确实分成"取值行 + 开关行"且互不混排、图片开关按"提取"语义而非线上标志位工作（先验证过：把极性改回去，该测试立即失败）。
+- 验证：前端 `pnpm vitest run` **256 文件 / 2475 项通过**（上一步 2471）；`pnpm lint` 0 error / 55 warning；`pnpm typecheck` 通过；`pnpm build` 关键路径 **353.6 kB gz**（上限 450）。后端 `tests/unit/server/documents/providers` **77 项通过**，`ruff check` 干净。前端改动在真实浏览器中确认：四块贴片等高对齐（74.3px）、提示可用、默认态正确。
+
 ### 前端：关掉 i18next 自带的 locize.com 广告
 
 - 前端控制台（以及用户浏览器控制台）每次加载都会打印一行 `🌐 i18next is made possible by ... locize.com`。这是 **i18next 包内硬编码的 `console.info`**（`node_modules/i18next/dist/cjs/i18next.js` 第 1781 行），触发条件是 `showSupportNotice !== false` 且未接入 locize 后端；**不涉及任何网络请求**（整个包里唯一的 `locize` URL 就是这条日志字符串）。
