@@ -2,6 +2,13 @@
 
 ## 2026-09-15
 
+### 修复：本地 MinIO 用户头像仍生成 AWS S3 地址
+
+- **现象**：头像上传能写入本地 MinIO，但数据库和接口返回的 `avatar_url` 仍指向 `https://{bucket}.s3.{region}.amazonaws.com/avatars/...`。
+- **根因**：上传客户端由 `STORAGE_ENDPOINT_URL` 指向 MinIO，公开 URL 却只读取 `STORAGE_PUBLIC_URL_BASE`；该变量未配置时，`get_public_url_base()` 无条件回退 AWS 域名。另外 MinIO 桶原本是 `private`，即使改对域名也会返回 403。
+- **修复**：自定义 endpoint 未显式配置公开地址时，按 endpoint 与 addressing style 推导对象 URL；本地配置显式设置 `STORAGE_PUBLIC_URL_BASE`；MinIO 初始化脚本只为 `avatars/*` 增加匿名 `GetObject` 权限，教育附件和内部 blob 仍保持私有。
+- **验证**：新增单元测试覆盖 MinIO path-style endpoint；本地对象 `http://127.0.0.1:9000/onemore-education/avatars/f8d3bcac-5ca2-4f54-9a27-c4e77e83de00.png` 返回 **200 + `image/png`**，`education/*` 匿名访问仍返回 **403**；已有用户头像记录已从 AWS 地址修正为 MinIO 地址。
+
 ### 修复：微信消息无回应的通道 worker 目标地址
 
 - **现象**：微信 iLink 扫码绑定成功、消息也进来了，但发消息没有任何回应。

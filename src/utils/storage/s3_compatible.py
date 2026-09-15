@@ -15,7 +15,7 @@ Environment Variables:
     STORAGE_BUCKET_NAME       - Bucket name (falls back to S3_BUCKET_NAME)
     STORAGE_REGION            - Region (falls back to S3_REGION, default: us-east-1)
     STORAGE_ENDPOINT_URL      - Custom endpoint for non-AWS services (falls back to S3_ENDPOINT_URL)
-    STORAGE_PUBLIC_URL_BASE   - Public URL base (falls back to S3_PUBLIC_URL_BASE)
+    STORAGE_PUBLIC_URL_BASE   - Explicit public URL base (falls back to S3_PUBLIC_URL_BASE)
     STORAGE_MAX_UPLOAD_SIZE   - Max upload size in bytes (default: 10MB)
     STORAGE_CONNECT_TIMEOUT_S - boto3 connect timeout in seconds (default: 5)
     STORAGE_READ_TIMEOUT_S    - boto3 read timeout in seconds (default: 30)
@@ -44,7 +44,7 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import boto3
 from botocore.config import Config
@@ -93,11 +93,15 @@ class StorageConfig:
     """
 
     ACCESS_KEY_ID = os.getenv("STORAGE_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY_ID")
-    SECRET_ACCESS_KEY = os.getenv("STORAGE_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY")
+    SECRET_ACCESS_KEY = os.getenv("STORAGE_SECRET_ACCESS_KEY") or os.getenv(
+        "AWS_SECRET_ACCESS_KEY"
+    )
     BUCKET_NAME = os.getenv("STORAGE_BUCKET_NAME") or os.getenv("S3_BUCKET_NAME")
     REGION = os.getenv("STORAGE_REGION") or os.getenv("S3_REGION", "us-east-1")
     ENDPOINT_URL = os.getenv("STORAGE_ENDPOINT_URL") or os.getenv("S3_ENDPOINT_URL")
-    PUBLIC_URL_BASE = os.getenv("STORAGE_PUBLIC_URL_BASE") or os.getenv("S3_PUBLIC_URL_BASE")
+    PUBLIC_URL_BASE = os.getenv("STORAGE_PUBLIC_URL_BASE") or os.getenv(
+        "S3_PUBLIC_URL_BASE"
+    )
     MAX_UPLOAD_SIZE = int(os.getenv("STORAGE_MAX_UPLOAD_SIZE", str(10 * 1024 * 1024)))
 
     DEFAULT_IMAGE_PREFIX = os.getenv("STORAGE_DEFAULT_IMAGE_PREFIX", "images/")
@@ -121,9 +125,34 @@ class StorageConfig:
 
     @classmethod
     def get_public_url_base(cls) -> str:
-        """Get the public URL base for the bucket."""
+        """Get the public URL base for the bucket.
+
+        A custom endpoint is normally paired with a separately configured public
+        base because the S3 API endpoint may not be browser-reachable. When that
+        override is absent, derive the URL from the custom endpoint instead of
+        silently emitting an AWS URL for a MinIO or another compatible provider.
+        """
         if cls.PUBLIC_URL_BASE:
             return cls.PUBLIC_URL_BASE.rstrip("/")
+
+        if cls.ENDPOINT_URL:
+            endpoint = cls.ENDPOINT_URL.rstrip("/")
+            if cls.ADDRESSING_STYLE == "path":
+                return f"{endpoint}/{cls.BUCKET_NAME}"
+
+            parsed = urlsplit(endpoint)
+            if parsed.hostname:
+                host = parsed.hostname
+                if ":" in host:
+                    host = f"[{host}]"
+                netloc = f"{cls.BUCKET_NAME}.{host}"
+                if parsed.port is not None:
+                    netloc = f"{netloc}:{parsed.port}"
+                return urlunsplit(
+                    (parsed.scheme, netloc, parsed.path.rstrip("/"), "", "")
+                )
+            return endpoint
+
         return f"https://{cls.BUCKET_NAME}.s3.{cls.REGION}.amazonaws.com"
 
 
@@ -223,7 +252,9 @@ def upload_file(
         return False
 
     if not content_type:
-        content_type = resolve_content_type(key, default=resolve_content_type(file_path))
+        content_type = resolve_content_type(
+            key, default=resolve_content_type(file_path)
+        )
 
     try:
         client = _get_client()
@@ -435,6 +466,8 @@ def create_presigned_download_url(
         },
         ExpiresIn=expires_seconds,
     )
+
+
 def get_bytes_range(key: str, start: int, length: int) -> bytes | None:
     """Download ``length`` bytes of an object from offset ``start``.
 
@@ -561,7 +594,9 @@ def get_signed_url(key: str, expires_in: int = 3600) -> str | None:
 
 
 def upload_image(
-    file_path: str, prefix: str | None = None, custom_name: str | None = None,
+    file_path: str,
+    prefix: str | None = None,
+    custom_name: str | None = None,
 ) -> str | None:
     """Upload an image file and return the public URL."""
     if prefix is None:
@@ -582,7 +617,9 @@ def upload_image(
 
 def upload_chart(file_path: str, custom_name: str | None = None) -> str | None:
     """Upload a chart image and return the public URL."""
-    return upload_image(file_path, prefix=StorageConfig.DEFAULT_CHART_PREFIX, custom_name=custom_name)
+    return upload_image(
+        file_path, prefix=StorageConfig.DEFAULT_CHART_PREFIX, custom_name=custom_name
+    )
 
 
 def sanitize_storage_key(name: str, data_url: str | None = None) -> str:

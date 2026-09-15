@@ -11,6 +11,7 @@ import pytest
 def _reload_module():
     """Reimport the module so env-var-derived class attributes refresh."""
     import src.utils.storage.s3_compatible as mod
+
     importlib.reload(mod)
     return mod
 
@@ -110,6 +111,22 @@ def test_addressing_style_trims_and_rejects_invalid(monkeypatch):
     assert addressing_for("bogus") == {"addressing_style": "virtual"}
 
 
+def test_custom_path_endpoint_is_used_for_public_urls(monkeypatch):
+    """A MinIO endpoint must not silently produce an AWS public URL."""
+    monkeypatch.delenv("STORAGE_PUBLIC_URL_BASE", raising=False)
+    monkeypatch.delenv("S3_PUBLIC_URL_BASE", raising=False)
+    monkeypatch.setenv("STORAGE_ENDPOINT_URL", "http://localhost:9000")
+    monkeypatch.setenv("STORAGE_ADDRESSING_STYLE", "path")
+    monkeypatch.setenv("STORAGE_BUCKET_NAME", "onemore-education")
+
+    mod = _reload_module()
+
+    assert (
+        mod.StorageConfig.get_public_url_base()
+        == "http://localhost:9000/onemore-education"
+    )
+
+
 # --- E2E timeout → upload error mapping ----------------------------------
 # The Config(...) wiring above is necessary but not sufficient. These tests
 # go through the real upload_bytes() path so we verify both halves:
@@ -165,5 +182,7 @@ async def test_store_binary_raises_upload_error_when_put_times_out(monkeypatch):
     monkeypatch.setattr(memo_binary_storage, "_storage_upload_bytes", fake_upload)
     with pytest.raises(memo_binary_storage.MemoBinaryUploadError):
         await memo_binary_storage.store_binary(
-            user_id="u1", content=b"%PDF-1.4 x", content_type="application/pdf",
+            user_id="u1",
+            content=b"%PDF-1.4 x",
+            content_type="application/pdf",
         )
