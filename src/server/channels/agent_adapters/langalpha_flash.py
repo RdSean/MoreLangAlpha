@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -289,6 +290,20 @@ class LangAlphaFlashAdapter:
         turn: AgentTurn,
         on_event: Callable[[StreamEvent], None] | None = None,
     ) -> AgentTurnResult:
+        try:
+            async with asyncio.timeout(self.timeout):
+                return await self._run_turn(session, turn, on_event)
+        except TimeoutError as exc:
+            raise FlashAgentError(
+                f"Flash turn exceeded {self.timeout:g}s", code="turn_timeout"
+            ) from exc
+
+    async def _run_turn(
+        self,
+        session: AgentSession,
+        turn: AgentTurn,
+        on_event: Callable[[StreamEvent], None] | None = None,
+    ) -> AgentTurnResult:
         thread_id = (
             session.ref
             if session.ref and not session.ref.startswith("wechat:")
@@ -308,7 +323,12 @@ class LangAlphaFlashAdapter:
         if image_contexts:
             body["additional_context"] = image_contexts
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        # Read timeout off: the stream is idle while the agent thinks, compacts,
+        # or waits on a tool, and killing it there is what turned long turns into
+        # retry loops. `timeout` bounds the whole turn instead.
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(self.timeout, read=None)
+        ) as client:
             path = (
                 f"/api/v1/threads/{thread_id}/messages"
                 if thread_id

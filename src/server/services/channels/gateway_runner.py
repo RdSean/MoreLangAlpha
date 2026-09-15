@@ -247,9 +247,24 @@ class GatewayRunner:
             idle_timeout_seconds=lease.idle_timeout_seconds,
         )
 
+    def _inbound_lease_seconds(self) -> int:
+        """A claim has to outlive the turn it was taken for.
+
+        Inbound claims are not renewed while they run, so the lease taken here
+        is the only thing stopping a second worker — or another coroutine in
+        this one — from claiming the same message while the first turn is still
+        going. With a turn budget longer than the lease the loser's dispatch
+        answers 409, and the retry path eventually marks a message dead that the
+        first turn answered perfectly well.
+        """
+        return max(
+            self.config.inbound_lease_seconds,
+            int(self.config.agent_turn_timeout_seconds) + 30,
+        )
+
     async def process_inbound_once(self) -> int:
         claims = await self.repository.claim_pending_inbound(
-            self.config.worker_concurrency, self.config.inbound_lease_seconds
+            self.config.worker_concurrency, self._inbound_lease_seconds()
         )
         processed = 0
         for claim in claims:
@@ -419,10 +434,25 @@ class GatewayRunner:
             except Exception as exc:
                 attempts = getattr(claim, "attempts", 1)
                 delay = min(300, 2 ** max(0, attempts - 1))
+                code = str(
+                    getattr(exc, "code", None) or type(exc).__name__.lower()
+                )[:64]
+                # The class name alone is not a diagnosis: every adapter
+                # failure is a FlashAgentError, and "flashagenterror" says
+                # nothing about whether it was a timeout, an empty answer, or a
+                # rejected request.
+                logger.warning(
+                    "channel inbound %s failed (%s, attempt %s/%s): %s",
+                    claim.inbound_message_id,
+                    code,
+                    attempts,
+                    self.config.max_delivery_attempts,
+                    exc,
+                )
                 await self.repository.nack_inbound(
                     claim.inbound_message_id,
                     claim.lease_generation,
-                    type(exc).__name__.lower()[:64],
+                    code,
                     delay,
                     self.config.max_delivery_attempts,
                 )
@@ -506,10 +536,19 @@ class GatewayRunner:
                 )
             except Exception as exc:
                 delay = min(300, 2 ** max(0, getattr(delivery, "attempts", 1) - 1))
+                code = str(
+                    getattr(exc, "code", None) or type(exc).__name__.lower()
+                )[:64]
+                logger.warning(
+                    "channel delivery %s failed (%s): %s",
+                    delivery.delivery_id,
+                    code,
+                    exc,
+                )
                 await self.repository.nack_delivery(
                     delivery.delivery_id,
                     delivery.lease_generation,
-                    type(exc).__name__.lower()[:64],
+                    code,
                     delay,
                     self.config.max_delivery_attempts,
                 )

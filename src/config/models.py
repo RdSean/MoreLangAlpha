@@ -436,6 +436,17 @@ class ChannelGatewayConfig(BaseModel):
     link_attempt_lease_seconds: int = Field(default=30, ge=10, le=300)
     inbound_lease_seconds: int = Field(default=120, ge=10, le=3600)
     outbox_lease_seconds: int = Field(default=60, ge=10, le=3600)
+    agent_turn_timeout_seconds: int = Field(
+        default=900,
+        ge=60,
+        le=3600,
+        description=(
+            "Wall-clock budget for one channel turn. Bounds the turn as a whole "
+            "rather than the gap between stream events: an agent that is "
+            "thinking, compacting, or waiting on a tool emits nothing for "
+            "minutes, and a per-read timeout kills exactly those turns."
+        ),
+    )
     worker_concurrency: int = Field(default=4, ge=1, le=64)
     max_image_bytes: int = Field(default=8 * 1024 * 1024, ge=1, le=32 * 1024 * 1024)
     max_image_pixels: int = Field(default=24_000_000, ge=1, le=100_000_000)

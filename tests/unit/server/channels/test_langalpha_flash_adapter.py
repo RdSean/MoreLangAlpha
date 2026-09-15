@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 import pytest
@@ -362,3 +363,95 @@ async def test_flash_adapter_preserves_failed_run_status(monkeypatch):
         )
 
     assert getattr(error.value, "code", None) == "failed"
+
+
+@pytest.mark.asyncio
+async def test_the_stream_is_not_killed_between_events(monkeypatch):
+    """A thinking, compacting, or tool-running agent emits nothing for minutes.
+
+    A per-read timeout makes exactly those turns fail, and the retry path then
+    turns them into dead messages — which is what happened to the first long
+    WeChat turn. The turn is bounded as a whole instead.
+    """
+    captured: dict = {}
+
+    def client(**kwargs):
+        captured.update(kwargs)
+        return FakeClient(
+            [
+                FakeResponse(
+                    200,
+                    json_data={
+                        "status": "dispatched",
+                        "thread_id": "thread-1",
+                        "run_id": "run-1",
+                    },
+                ),
+                FakeResponse(
+                    200,
+                    lines=[
+                        "event: message_chunk",
+                        'data: {"content_type":"text","content":"好了"}',
+                        "",
+                        "event: run_end",
+                        'data: {"status":"completed"}',
+                        "",
+                    ],
+                ),
+            ]
+        )
+
+    monkeypatch.setattr(
+        "src.server.channels.agent_adapters.langalpha_flash.httpx.AsyncClient",
+        client,
+    )
+    adapter = LangAlphaFlashAdapter(
+        base_url="http://backend", service_token="svc", timeout=123
+    )
+    await adapter.run_turn(
+        session(),
+        AgentTurn("key-1", "你好", __import__("datetime").datetime.now()),
+    )
+
+    timeout = captured["timeout"]
+    assert timeout.read is None, "the stream must be allowed to sit idle"
+    assert timeout.connect == 123
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_overruns_its_budget_fails_with_a_named_code(monkeypatch):
+    """Bound as a whole, not per read: a stuck stream still has to end."""
+
+    class HangingResponse(FakeResponse):
+        async def aiter_lines(self):
+            await asyncio.sleep(3600)
+            yield ""  # pragma: no cover - the timeout cancels this
+
+    fake = FakeClient(
+        [
+            FakeResponse(
+                200,
+                json_data={
+                    "status": "dispatched",
+                    "thread_id": "thread-1",
+                    "run_id": "run-1",
+                },
+            ),
+            HangingResponse(200),
+        ]
+    )
+    monkeypatch.setattr(
+        "src.server.channels.agent_adapters.langalpha_flash.httpx.AsyncClient",
+        lambda **kwargs: fake,
+    )
+    adapter = LangAlphaFlashAdapter(
+        base_url="http://backend", service_token="svc", timeout=0.05
+    )
+
+    with pytest.raises(FlashAgentError) as error:
+        await adapter.run_turn(
+            session(),
+            AgentTurn("key-1", "你好", __import__("datetime").datetime.now()),
+        )
+
+    assert getattr(error.value, "code", None) == "turn_timeout"

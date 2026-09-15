@@ -2,6 +2,17 @@
 
 ## 2026-09-15
 
+### 修复：长回合的通道消息被判失败（微信收不到回复，Web 端却有）
+
+- **现象**：第一条微信消息（"嗨"）正常收发；之后的长回合（多步工具调用）微信收不到任何回复，而 Web 端明明能看到助手的完整回答。
+- **证据**：`channel_inbound_messages` 里后续消息在 8 次尝试后 `dead`、`last_error_code=flashagenterror`；worker 日志是 `POST .../messages` 409（duplicate_request）与 `GET .../messages/stream` 200 反复交替；Web 端确实产出了回复，说明回合跑成功了，只是**通道侧判定失败**，于是没有生成 outbound。
+- **根因（两层叠加）**：
+  1. adapter 的 httpx 客户端用 `timeout=90s`，而该值**同时作用于 SSE 流式读取**——agent 思考、压缩上下文、跑工具期间不产生任何事件，读超时就把长回合判成 transport 失败并重试；
+  2. inbound 的 claim 租约只有 `inbound_lease_seconds=120` 且**没有续约机制**，而一个真实回合可能跑数分钟：租约过期后同一 worker 的其它协程（`worker_concurrency=4`）可以再次领取同一条消息 → 重复派发 → 应用回 409 → 重试路径最终把消息判死。
+  3. 附带问题：失败只记录异常**类名**（`flashagenterror`），adapter 的 `code` 被丢掉，所以完全看不出是超时、空回复还是 409——这也是这次排查慢的原因。
+- **修复**：新增配置 `channels.agent_turn_timeout_seconds`（默认 900）作为**整回合**预算；流式请求 `read=None`（允许事件之间长时间静默），并用 `asyncio.timeout` 兜住整个回合，超时映射为 `FlashAgentError(code="turn_timeout")`；worker 构造 adapter 时传入该预算；claim 租约改为 `max(inbound_lease_seconds, agent_turn_timeout_seconds + 30)`；失败时把 `exc.code`（回退到类名）写进 `last_error_code` 并 `warning` 打印原因与尝试次数。
+- 验证：channel 相关测试 **74 项通过**（新增 4 项：租约覆盖回合预算、失败记录 `code` 而非类名、流式读超时已关闭、整体预算超时会给出 `turn_timeout`）；`ruff check src/ migrations/` 干净。
+
 ### 修复：`education_create_homework` 执行成功但界面没有任何输出
 
 - **现象**：工具调用成功，transcript 里只有"完成了 1 个步骤"，看不到它到底创建了什么。

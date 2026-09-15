@@ -637,3 +637,95 @@ async def test_inbound_downloads_images_while_epoch_fence_is_held() -> None:
 
     assert await runner.process_inbound_once() == 1
     assert image_fence_states == [True]
+
+
+def _inbound_claim():
+    return SimpleNamespace(
+        binding_id=uuid4(),
+        binding_epoch=1,
+        kind=InboundKind.MESSAGE,
+        session_id=uuid4(),
+        agent_session_ref="thread-1",
+        peer_ref="peer",
+        peer_lookup_hash="peer-hash",
+        user_id="user-1",
+        channel_type="fake",
+        media=(),
+        request_key="request-1",
+        text="布置一份地理作业",
+        inbound_message_id=uuid4(),
+        lease_generation=1,
+        attempts=1,
+        credentials=BindingCredentials("binding", "fake", (("token", "secret"),)),
+        reply_context=ReplyContext("peer", (("context_token", "ctx"),)),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_claim_outlives_the_turn_it_is_taken_for() -> None:
+    """Nothing renews an inbound claim while its turn runs.
+
+    So the lease taken at claim time is the only thing stopping a second worker
+    — or another coroutine in this one — from claiming the same message while
+    the first turn is still going. A turn budget longer than the lease means
+    duplicate dispatch, which the API answers with 409, and the retry path then
+    marks dead a message the first turn answered.
+    """
+    repository = SimpleNamespace(claim_pending_inbound=AsyncMock(return_value=[]))
+    runner = GatewayRunner(
+        channel_adapters={},
+        agent_adapter=SimpleNamespace(),
+        repository=repository,
+    )
+    runner.config = runner.config.model_copy(
+        update={"inbound_lease_seconds": 120, "agent_turn_timeout_seconds": 900}
+    )
+
+    await runner.process_inbound_once()
+
+    lease_seconds = repository.claim_pending_inbound.await_args.args[1]
+    assert lease_seconds >= 900
+
+
+@pytest.mark.asyncio
+async def test_a_failed_turn_records_why_not_just_the_exception_class() -> None:
+    """`flashagenterror` is not a diagnosis: every adapter failure has that name.
+
+    The adapter carries a machine-readable `code` (turn_timeout,
+    empty_response, conflict, …) and it is what an operator needs to tell a
+    too-short timeout from a thread that was genuinely busy.
+    """
+
+    class Boom(Exception):
+        code = "empty_response"
+
+    claim = _inbound_claim()
+
+    @asynccontextmanager
+    async def active_epoch_fence(_binding_id, _binding_epoch):
+        yield True
+
+    async def run_turn(_session, _turn, on_event=None):
+        raise Boom("Flash run produced no text")
+
+    adapter = SimpleNamespace(
+        supports_typing=False,
+        resolve_images=AsyncMock(return_value=()),
+        max_outbound_text_length=None,
+    )
+    repository = SimpleNamespace(
+        claim_pending_inbound=AsyncMock(return_value=[claim]),
+        hold_active_binding_epoch=active_epoch_fence,
+        ack_inbound_and_enqueue_deliveries=AsyncMock(),
+        nack_inbound=AsyncMock(return_value=True),
+    )
+    runner = GatewayRunner(
+        channel_adapters={"fake": adapter},
+        agent_adapter=SimpleNamespace(run_turn=run_turn),
+        repository=repository,
+    )
+
+    assert await runner.process_inbound_once() == 0
+
+    recorded_code = repository.nack_inbound.await_args.args[2]
+    assert recorded_code == "empty_response"

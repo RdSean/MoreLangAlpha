@@ -32,7 +32,12 @@ async def run_worker(*, runner: GatewayRunner | None = None) -> None:
                     max_text_length=config.max_ilink_text_length
                 )
             },
-            agent_adapter=LangAlphaFlashAdapter(),
+            # Bounded by the deployment's turn budget rather than the adapter's
+            # own default: a channel turn runs a real agent, which can think,
+            # compact, and call tools for minutes.
+            agent_adapter=LangAlphaFlashAdapter(
+                timeout=config.agent_turn_timeout_seconds
+            ),
             worker_id=f"channel-worker-{uuid.uuid4()}",
         )
     stop_event = asyncio.Event()
