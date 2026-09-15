@@ -14,6 +14,8 @@ _DOCUMENT_ENV_VARS = (
     "DOCUMENT_MAX_UPLOAD_BYTES",
     "DOCUMENT_SYNC_WAIT_SECONDS",
     "DOCUMENT_PARSE_TIMEOUT_SECONDS",
+    "DOCUMENT_MAX_IMAGE_ARTIFACTS",
+    "DOCUMENT_MAX_IMAGE_BYTES",
 )
 
 
@@ -49,6 +51,10 @@ def test_document_parsing_config_uses_bounded_defaults(
     assert config.max_upload_bytes == 52_428_800
     assert config.sync_wait_seconds == 30
     assert config.parse_timeout_seconds == 600
+    # Images get their own budget: a picture-heavy scan should not have to fit
+    # inside the markdown's allowance (or the other way round).
+    assert config.max_image_artifacts == 200
+    assert config.max_image_bytes == 33_554_432
 
 
 def test_document_parsing_config_uses_environment_overrides(
@@ -60,6 +66,8 @@ def test_document_parsing_config_uses_environment_overrides(
             "DOCUMENT_MAX_UPLOAD_BYTES": "1048576",
             "DOCUMENT_SYNC_WAIT_SECONDS": "12",
             "DOCUMENT_PARSE_TIMEOUT_SECONDS": "90",
+            "DOCUMENT_MAX_IMAGE_ARTIFACTS": "7",
+            "DOCUMENT_MAX_IMAGE_BYTES": "2048",
         },
     ) as settings:
         config = settings.get_document_parsing_config()
@@ -67,6 +75,8 @@ def test_document_parsing_config_uses_environment_overrides(
     assert config.max_upload_bytes == 1_048_576
     assert config.sync_wait_seconds == 12
     assert config.parse_timeout_seconds == 90
+    assert config.max_image_artifacts == 7
+    assert config.max_image_bytes == 2048
 
 
 @pytest.mark.parametrize(
@@ -78,6 +88,10 @@ def test_document_parsing_config_uses_environment_overrides(
         ("DOCUMENT_SYNC_WAIT_SECONDS", "1.5"),
         ("DOCUMENT_PARSE_TIMEOUT_SECONDS", "0"),
         ("DOCUMENT_PARSE_TIMEOUT_SECONDS", "forever"),
+        ("DOCUMENT_MAX_IMAGE_ARTIFACTS", "0"),
+        ("DOCUMENT_MAX_IMAGE_ARTIFACTS", "lots"),
+        ("DOCUMENT_MAX_IMAGE_BYTES", "-1"),
+        ("DOCUMENT_MAX_IMAGE_BYTES", "32M"),
     ],
 )
 def test_document_parsing_config_rejects_invalid_positive_integers(

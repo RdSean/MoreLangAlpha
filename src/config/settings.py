@@ -56,6 +56,10 @@ class DocumentParsingConfig:
     max_upload_bytes: int
     sync_wait_seconds: int
     parse_timeout_seconds: int
+    # Images ride their own budget so a picture-heavy scan cannot fail a job
+    # that has ample room for the text (see the image-artifact design, D3/D4).
+    max_image_artifacts: int
+    max_image_bytes: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -672,6 +676,8 @@ def get_document_parsing_config() -> DocumentParsingConfig:
         max_upload_bytes=env.DOCUMENT_MAX_UPLOAD_BYTES,
         sync_wait_seconds=env.DOCUMENT_SYNC_WAIT_SECONDS,
         parse_timeout_seconds=env.DOCUMENT_PARSE_TIMEOUT_SECONDS,
+        max_image_artifacts=env.DOCUMENT_MAX_IMAGE_ARTIFACTS,
+        max_image_bytes=env.DOCUMENT_MAX_IMAGE_BYTES,
     )
 
 

@@ -2,6 +2,13 @@
 
 ## 2026-09-15
 
+### 文档图片落盘：第一步（图片独立预算的部署配置）
+
+- 新增 `DOCUMENT_MAX_IMAGE_ARTIFACTS`（默认 200）与 `DOCUMENT_MAX_IMAGE_BYTES`（默认 32 MiB），`DocumentParsingConfig` 与 `get_document_parsing_config()` 一并透传。图片从此有**自己的预算**：把图片字节算进 markdown 的字节上限，会让"文字很少、图片很多"的扫描件因为图片而整体失败——这正是设计文档 D9a 点名的风险。
+- `.env.example` 的 Datalab 段落补上这两项及说明：超过上限的图片按 D3 **丢弃并记账**（写进 metadata + warning），而不是让任务失败。
+- 测试：默认值、环境变量覆盖、非正整数（`0` / `lots` / `-1` / `32M`）报错共 4 类断言。先实现后补测试，因此做了变异验证——把默认值临时改成 64 MiB，默认值断言立即失败，恢复后 12 项通过。
+- 验证：`tests/unit/config/test_document_parsing_config.py` 12 项通过；`ruff check src/ migrations/` 干净。
+
 ### 文档解析：Datalab 高级选项面板重做（两行对齐 + 新增图片标题开关）
 
 - **面板原来是"一列五行混排"**：三个复选框、一个下拉、一个文本框堆在一起，`documents-advanced-options` 这些类名**在 CSS 里根本不存在**，所以全靠浏览器默认样式渲染——提示文字跟在复选框后面同一行、控件高度各不相同。现在补上样式并重组为**按控件类型分行**：第一行是取值控件（解析模式 / 解析范围，标签在上、控件等宽对齐，范围提示下沉到控件下方），第二行是开关（2×2 等高等宽贴片，`grid-auto-rows: 1fr` 让两行高度一致）。行内 `repeat(2, minmax(0,1fr))` 而不是 `auto-fit`：按当前向导宽度，四个开关排成一行会把最后一个挤到第二行单独一个，正是这次要消掉的"参差感"。

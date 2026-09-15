@@ -53,6 +53,16 @@ DOCUMENT_PARSE_TIMEOUT_SECONDS: int = _positive_int(
     "DOCUMENT_PARSE_TIMEOUT_SECONDS", 600
 )
 
+# Extracted images are their own budget. A scanned worksheet can legitimately
+# carry a few dozen pictures, and counting them against the markdown's byte
+# budget would fail jobs that have plenty of room for the text alone.
+DOCUMENT_MAX_IMAGE_ARTIFACTS: int = _positive_int(
+    "DOCUMENT_MAX_IMAGE_ARTIFACTS", 200
+)
+DOCUMENT_MAX_IMAGE_BYTES: int = _positive_int(
+    "DOCUMENT_MAX_IMAGE_BYTES", 32 * 1024 * 1024
+)
+
 # Datalab's hosted document conversion. Off unless both the switch and a key are
 # present — ``get_datalab_config`` re-checks that pair and returns None when the
 # parser would be unusable, so the provider's availability is reported honestly
