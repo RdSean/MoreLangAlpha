@@ -16,7 +16,9 @@ from src.server.database.education_members import (
     get_membership_for_user,
     list_student_membership_context,
 )
+from src.server.app.education.models import EducationTaskResponse
 from src.server.services.education_tasks import EducationTaskError, create_task
+from src.tools.education.schemas import EducationHomeworkArtifact
 
 
 def _configurable(config: RunnableConfig | dict[str, Any] | None) -> dict[str, Any]:
@@ -223,11 +225,10 @@ async def _create_homework_impl(
         "destination": "/education",
         "attachments_supported": False,
     }
-    artifact = {
-        "type": "education_homework",
+    artifact = EducationHomeworkArtifact(
         **response,
-        "task": result,
-    }
+        task=EducationTaskResponse.model_validate(result),
+    ).model_dump(mode="json")
     content = json.dumps(response, ensure_ascii=False)
     return content, artifact
 

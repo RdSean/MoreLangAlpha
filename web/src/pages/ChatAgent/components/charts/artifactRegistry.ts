@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import { InlineAutomationCard } from './InlineAutomationCards';
+import InlineEducationHomeworkCard from './InlineEducationHomeworkCard';
 import InlineHomeworkCard from './InlineHomeworkCard';
 import { InlinePreviewCard } from './InlinePreviewCard';
 
@@ -46,6 +47,14 @@ export const ARTIFACT_RENDERERS: ArtifactRenderer[] = [
     artifactType: 'homework_schedule',
     tools: ['get_homework_schedule'],
     component: InlineHomeworkCard,
+  },
+  {
+    // The tool that creates a task, as opposed to the one that lists them: the
+    // card answers "what did you just create", which is the question a parent
+    // asks right after saying it out loud.
+    artifactType: 'education_homework',
+    tools: ['education_create_homework'],
+    component: InlineEducationHomeworkCard,
   },
 ];
 

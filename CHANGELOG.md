@@ -2,6 +2,15 @@
 
 ## 2026-09-15
 
+### 修复：`education_create_homework` 执行成功但界面没有任何输出
+
+- **现象**：工具调用成功，transcript 里只有"完成了 1 个步骤"，看不到它到底创建了什么。
+- **根因**：这个工具（来自本地教育线）把 artifact 拼成了**裸 dict**，`type: "education_homework"` 因此**从未进入发布契约**——`web/src/contracts/artifact-types.json` 是 Pydantic 模型生成的，前端按 artifact 的 `type` 分发卡片，未发布的类型就没有卡片可注册。而工具返回值里的 content（JSON）本来就不在 transcript 里展示，于是消息停在"工具步骤"。合并时它绕过了本线的 artifact 契约，覆盖率测试也看不见它（那条测试只检查"已发布的类型是否都有卡片"）。
+- **修复**：新增 `src/tools/education/schemas.py::EducationHomeworkArtifact`（Pydantic，`type` 用 `Literal`），工具改为用它构造 artifact；在 `scripts/contracts/export_schemas.py` 与 `web/scripts/generate-contracts.mjs` 注册，`make contracts` 生成 schema/zod 并把 `education_homework` 写进 `artifact-types.json`；新增前端卡片 `InlineEducationHomeworkCard`（布置给谁 / 作业标题 / 截止时间 / 文字作业标记）并在 `artifactRegistry.ts` 与工具名绑定；中英文案 `chat.homeworkCard.*`。
+- **刻意保留的细节**：artifact 里的 `due_at` 是**家庭时区的 ISO 字符串**而不是 `datetime`——Pydantic 会把 tz-aware datetime 重新序列化成 UTC，悄悄挪走家长看到的截止时间（本地教育线此前专门修过这个 bug）。
+- 测试：后端契约测试的 discriminator 清单更新为两项；工具新增"artifact 就是卡片要渲染的东西"（用完整 ToolCall 调用取 `.artifact`，断言判别式、任务内容与 +08:00 的截止时间）；前端新增契约测试与卡片测试（正常渲染、文字作业标记、坏 payload 显示提示而非崩溃、点击透传），fixture 取自**真实产物**（真实库行 + 稳定化 id）。
+- 验证：后端 `tests/unit` **7702 通过**（租约续期那条计时用例在满载时偶发失败一次，单独重跑 3/3 通过，与本次无关）；`ruff check src/ migrations/ scripts/ops/ scripts/contracts/` 干净；前端 `tsc --noEmit` 通过，`charts/contracts` 5 文件 30 项通过。
+
 ### 修复：本地 MinIO 用户头像仍生成 AWS S3 地址
 
 - **现象**：头像上传能写入本地 MinIO，但数据库和接口返回的 `avatar_url` 仍指向 `https://{bucket}.s3.{region}.amazonaws.com/avatars/...`。

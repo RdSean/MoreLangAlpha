@@ -1226,6 +1226,12 @@
       "permissionDenied": "Microphone permission denied",
       "serviceError": "Speech recognition service error"
     },
+    "homeworkCard": {
+      "title": "Homework created",
+      "assignedTo": "Assigned to {{name}}",
+      "textOnly": "Text only",
+      "unavailable": "This homework card is missing data and cannot be shown."
+    },
     "sources": {
       "title": "Sources",
       "pill_one": "Sources ({{count}})",

@@ -1,0 +1,28 @@
+{
+  "type": "education_homework",
+  "success": true,
+  "task_id": "task-standin",
+  "student_name": "Stand-in Student",
+  "due_at": "2026-09-16T18:00:00+09:00",
+  "destination": "/education",
+  "attachments_supported": false,
+  "task": {
+    "task_id": "task-standin",
+    "task_rule_id": "rule-standin",
+    "household_id": "household-standin",
+    "assigned_student_id": "student-standin",
+    "occurrence_date": "2026-09-17",
+    "due_at": "2026-09-17T11:00:00Z",
+    "title": "地理作业：中国地形与河流",
+    "description": "1) 填图：在中国地形空白图上标出主要山脉（喜马拉雅山、昆仑山、天山、大兴安岭、秦岭、太行山）、四大高原（青藏、内蒙古、黄土、云贵）、四大盆地（塔里木、准噶尔、柴达木、四川）和三大平原（东北、华北、长江中下游）。\n2) 在图上用蓝色描出长江、黄河干流，并标注其发源地与入海口。\n3) 名词解释（每个 2-3 句）：外流河、内流河、地势三级阶梯、季风区与非季风区分界线。\n4) 完成后请家长检查填图是否完整、地名是否写全。",
+    "subject_code": "geography",
+    "type_code": "practice",
+    "practice_source_code": "schoolwork",
+    "grade_code": "g6",
+    "status": "open",
+    "completed_at": null,
+    "created_at": "2026-09-15T07:39:02.321449Z",
+    "latest_review_decision": null,
+    "latest_feedback_text": null
+  }
+}

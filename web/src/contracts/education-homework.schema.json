@@ -1,0 +1,208 @@
+{
+  "$defs": {
+    "EducationTaskResponse": {
+      "properties": {
+        "assigned_student_id": {
+          "title": "Assigned Student Id",
+          "type": "string"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "due_at": {
+          "title": "Due At",
+          "type": "string"
+        },
+        "grade_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grade Code"
+        },
+        "household_id": {
+          "title": "Household Id",
+          "type": "string"
+        },
+        "latest_feedback_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Feedback Text"
+        },
+        "latest_review_decision": {
+          "anyOf": [
+            {
+              "enum": [
+                "feedback",
+                "revision_requested"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Review Decision"
+        },
+        "occurrence_date": {
+          "title": "Occurrence Date",
+          "type": "string"
+        },
+        "practice_source_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Practice Source Code"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "subject_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject Code"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "task_rule_id": {
+          "title": "Task Rule Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "type_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type Code"
+        }
+      },
+      "required": [
+        "task_id",
+        "task_rule_id",
+        "household_id",
+        "assigned_student_id",
+        "occurrence_date",
+        "due_at",
+        "title",
+        "description",
+        "status"
+      ],
+      "title": "EducationTaskResponse",
+      "type": "object"
+    }
+  },
+  "description": "What `education_create_homework` returns alongside its content.\n\nThis exists because the tool used to build its artifact as a raw dict: the\nfrontend dispatches on an artifact's ``type``, and a type that is not\npublished in ``web/src/contracts/artifact-types.json`` is a type no card\ncan be registered for — the transcript showed the tool step and nothing\nelse. Declaring the model here is what publishes it (see\n``scripts/contracts/export_schemas.py``), and the coverage test in\n``artifactIdCoverage.test.ts`` then refuses to let it render as a blank.",
+  "properties": {
+    "attachments_supported": {
+      "title": "Attachments Supported",
+      "type": "boolean"
+    },
+    "destination": {
+      "description": "Where the task can be seen, e.g. /education.",
+      "title": "Destination",
+      "type": "string"
+    },
+    "due_at": {
+      "description": "ISO 8601 due timestamp already converted to the household's timezone. A string rather than a datetime on purpose: Pydantic would re-serialise a datetime as UTC and quietly undo the household-local conversion.",
+      "title": "Due At",
+      "type": "string"
+    },
+    "student_name": {
+      "description": "Display name, resolved by the tool.",
+      "title": "Student Name",
+      "type": "string"
+    },
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "task": {
+      "$ref": "#/$defs/EducationTaskResponse",
+      "description": "The created task row as stored."
+    },
+    "task_id": {
+      "title": "Task Id",
+      "type": "string"
+    },
+    "type": {
+      "const": "education_homework",
+      "default": "education_homework",
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "success",
+    "task_id",
+    "student_name",
+    "due_at",
+    "destination",
+    "attachments_supported",
+    "task"
+  ],
+  "title": "EducationHomeworkArtifact",
+  "type": "object"
+}

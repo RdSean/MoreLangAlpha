@@ -1224,6 +1224,12 @@
       "permissionDenied": "麦克风权限被拒绝",
       "serviceError": "语音识别服务错误"
     },
+    "homeworkCard": {
+      "title": "已布置作业",
+      "assignedTo": "布置给 {{name}}",
+      "textOnly": "文字作业",
+      "unavailable": "这条作业卡片的数据不完整，无法显示。"
+    },
     "sources": {
       "title": "数据来源",
       "pill_one": "数据来源 ({{count}})",

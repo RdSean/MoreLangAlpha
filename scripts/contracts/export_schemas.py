@@ -43,6 +43,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.server.app.education.models import (  # noqa: E402
     EducationTaskCalendarResponse,
 )
+from src.tools.education.schemas import EducationHomeworkArtifact  # noqa: E402
 from src.tools.homework.schemas import HomeworkScheduleArtifact  # noqa: E402
 
 # The registry of exported contracts: repo-relative output path → source model.
@@ -50,6 +51,7 @@ from src.tools.homework.schemas import HomeworkScheduleArtifact  # noqa: E402
 # drift test derives from this mapping, so a new entry with no file fails.
 OUTPUTS: dict[str, type[pydantic.BaseModel]] = {
     "web/src/contracts/education-calendar.schema.json": EducationTaskCalendarResponse,
+    "web/src/contracts/education-homework.schema.json": EducationHomeworkArtifact,
     "web/src/contracts/homework-schedule.schema.json": HomeworkScheduleArtifact,
 }
 

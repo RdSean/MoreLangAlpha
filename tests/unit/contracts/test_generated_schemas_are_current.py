@@ -48,7 +48,7 @@ def test_the_artifact_index_lists_every_discriminator() -> None:
     two hand-written maps.
     """
     index = build_outputs()[ARTIFACT_INDEX_PATH]
-    assert index["artifact_types"] == ["homework_schedule"]
+    assert index["artifact_types"] == ["education_homework", "homework_schedule"]
 
 
 def test_no_format_keyword_survives() -> None:

@@ -75,6 +75,36 @@ def _parent_membership():
     }
 
 
+def _task_row(**overrides):
+    """A row shaped like the one `create_task` returns.
+
+    The tool validates that row against `EducationTaskResponse` before it
+    becomes the artifact the chat card renders, so a stub carrying only a
+    task_id is no longer a row the tool can publish.
+    """
+    row = {
+        # Real ids are UUIDs: the artifact validates this row against
+        # `EducationTaskResponse`, which types them as UUID rather than str.
+        "task_id": "11111111-1111-4111-8111-111111111111",
+        "task_rule_id": "22222222-2222-4222-8222-222222222222",
+        "household_id": "33333333-3333-4333-8333-333333333333",
+        "assigned_student_id": "student-1",
+        "occurrence_date": "2026-08-28",
+        "due_at": "2026-08-28T12:00:00+00:00",
+        "title": "Read",
+        "description": "Read the assigned chapter",
+        "status": "open",
+        "subject_code": "chinese",
+        "type_code": "read",
+        "practice_source_code": None,
+        "grade_code": "g6",
+        "completed_at": None,
+        "created_at": "2026-08-27T09:00:00+00:00",
+    }
+    row.update(overrides)
+    return row
+
+
 @pytest.mark.asyncio
 async def test_homework_tool_requires_configurable_user_id():
     tool = _homework_tool()
@@ -98,7 +128,7 @@ async def test_homework_tool_resolves_unique_student_name(monkeypatch):
     tool = _homework_tool()
     monkeypatch.setattr(
         "src.tools.education.homework.create_task",
-        AsyncMock(return_value={"task_id": "task-1"}),
+        AsyncMock(return_value=_task_row()),
     )
     monkeypatch.setattr(
         "src.tools.education.homework.get_membership_for_user",
@@ -112,13 +142,61 @@ async def test_homework_tool_resolves_unique_student_name(monkeypatch):
         _ARGS,
         config={"configurable": {"user_id": "parent-1", "run_id": "run-1"}},
     )
-    assert json.loads(result)["task_id"] == "task-1"
+    assert json.loads(result)["task_id"] == "11111111-1111-4111-8111-111111111111"
+
+
+@pytest.mark.asyncio
+async def test_homework_tool_publishes_the_artifact_the_card_renders(monkeypatch):
+    """The tool's artifact is what the transcript card shows.
+
+    It used to be a raw dict whose `type` was never published, so the frontend
+    had nothing to dispatch on and the message ended at the tool step. This
+    pins the three things the card needs: the discriminator, the created task,
+    and a due time already converted to the household's timezone.
+    """
+    tool = _homework_tool()
+    monkeypatch.setattr(
+        "src.tools.education.homework.create_task",
+        AsyncMock(return_value=_task_row()),
+    )
+    monkeypatch.setattr(
+        "src.tools.education.homework.get_membership_for_user",
+        AsyncMock(return_value=_parent_membership()),
+    )
+    monkeypatch.setattr(
+        "src.tools.education.homework.list_student_membership_context",
+        AsyncMock(
+            return_value=[
+                {"user_id": "student-1", "display_name": "Henry", "grade_code": "g6"}
+            ]
+        ),
+    )
+
+    result = await tool.ainvoke(
+        # A full ToolCall-shaped dict is what makes ainvoke return the
+        # ToolMessage (and therefore expose `.artifact`).
+        {
+            "name": "education_create_homework",
+            "args": _ARGS,
+            "id": "call-1",
+            "type": "tool_call",
+        },
+        config={"configurable": {"user_id": "parent-1", "run_id": "run-1"}},
+    )
+
+    assert result.artifact["type"] == "education_homework"
+    assert result.artifact["task"]["task_id"] == "11111111-1111-4111-8111-111111111111"
+    assert result.artifact["task"]["title"] == "Read"
+    assert result.artifact["student_name"] == "Henry"
+    # Asia/Shanghai is UTC+8: 12:00 UTC is 20:00 for the household, which is
+    # what the parent was told.
+    assert result.artifact["due_at"] == "2026-08-28T20:00:00+08:00"
 
 
 @pytest.mark.asyncio
 async def test_homework_tool_passes_text_only_task_and_stable_idempotency_key(monkeypatch):
     tool = _homework_tool()
-    create = AsyncMock(return_value={"task_id": "task-1", "due_at": "2026-08-28T12:00:00+00:00"})
+    create = AsyncMock(return_value=_task_row())
     monkeypatch.setattr("src.tools.education.homework.create_task", create)
     monkeypatch.setattr(
         "src.tools.education.homework.get_membership_for_user",

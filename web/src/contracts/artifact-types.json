@@ -1,5 +1,6 @@
 {
   "artifact_types": [
+    "education_homework",
     "homework_schedule"
   ]
 }
