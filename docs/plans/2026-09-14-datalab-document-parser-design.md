@@ -226,6 +226,11 @@ supports them) plus rewriting references to artifact URLs is a real feature —
 it needs both a publication path and a preview that can resolve it — so it is
 recorded as a follow-up rather than smuggled into this change.
 
+**Superseded 2026-09-15**: that follow-up is now implemented
+(`2026-09-15-document-image-artifacts-design.md`, D7), so the default is back
+to extracting. The reason for turning it off was that the references had
+nothing behind them; that reason is gone.
+
 ### D9a — Where the images go once we do keep them
 
 Settled 2026-09-14 in review: the document library's own object store, not a

@@ -215,9 +215,9 @@ class TestSdkOptionMapping:
         options = datalab._convert_options(DatalabConversionOptions())
 
         assert isinstance(options, ConvertOptions)
-        # Ours, not the SDK's: Datalab extracts images *and* captions by
-        # default, and we ask for neither.
-        assert options.disable_image_extraction is True
+        # Images yes, captions no: we publish and show the pictures, but a
+        # model-written caption competes with the text we are extracting.
+        assert options.disable_image_extraction is False
         assert options.disable_image_captions is True
         assert options.paginate is True
         assert options.mode == "balanced"

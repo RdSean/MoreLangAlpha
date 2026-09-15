@@ -46,14 +46,14 @@ class DatalabConversionOptions(BaseModel):
     max_pages: int | None = Field(default=None, gt=0)
     skip_cache: bool = False
 
-    disable_image_extraction: bool = True
-    """On by default, unlike Datalab's own default.
+    disable_image_extraction: bool = False
+    """Off by default: images are extracted, published and previewed.
 
-    Datalab extracts images unless told not to and returns them as base64, so
-    the markdown it writes references files that a URL-addressed viewer cannot
-    resolve. Until images are published as their own artifacts and the preview
-    can find them, extraction off is the only default that produces a document
-    we can actually render.
+    This was ``True`` while the markdown's image references had nothing behind
+    them — extracting produced a document whose pictures could not resolve, so
+    skipping extraction was the only honest default. Images are now published
+    as their own artifacts and the preview resolves the references, which was
+    the whole condition for flipping this back.
     """
 
     disable_image_captions: bool = True

@@ -20,14 +20,15 @@ class TestDefaults:
         assert options.mode == "balanced"
         assert options.paginate is True
 
-    def test_image_extraction_is_off_by_default(self) -> None:
-        """The default that keeps the stored markdown renderable.
+    def test_image_extraction_is_on_by_default(self) -> None:
+        """Extraction earns its default now that the pictures can be shown.
 
-        Datalab extracts images unless told not to, and returns them as base64
-        rather than at a URL, so the markdown it produces references files our
-        viewer cannot resolve. Off until images are published as artifacts.
+        It was off while the markdown's references had nothing behind them:
+        extracting only produced a document with broken pictures. Images are
+        published as artifacts and resolved at render time, so a picture-heavy
+        worksheet no longer needs the user to know to ask for its figures.
         """
-        assert DatalabConversionOptions().disable_image_extraction is True
+        assert DatalabConversionOptions().disable_image_extraction is False
 
     def test_output_format_is_fixed_to_markdown(self) -> None:
         # A literal rather than an omitted field, so the constraint is visible

@@ -167,12 +167,14 @@ export default function DatalabOptionsFields({
         <ToggleTile
           id={`${baseId}-image-extraction`}
           label={t('documents.wizard.datalab.imageExtraction')}
-          /* The wire field is negative and this label is positive. Binding the
-             checkbox straight to `disable_image_extraction` — which defaults to
-             true — rendered "Extract images" as checked while the server was
-             skipping every image. */
-          checked={value.disable_image_extraction === false}
-          onChange={(checked) => patch('disable_image_extraction', checked ? false : undefined)}
+          /* The wire field is negative and this label is positive, so the box
+             is ticked unless the user explicitly turned extraction off. (It
+             used to be bound straight to the flag, which rendered "Extract
+             images" as checked while the server skipped every image.) */
+          checked={value.disable_image_extraction !== true}
+          onChange={(checked) =>
+            patch('disable_image_extraction', checked ? undefined : true)
+          }
           hint={t('documents.wizard.datalab.imageExtractionHint')}
         />
 

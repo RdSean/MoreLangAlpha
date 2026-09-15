@@ -371,7 +371,7 @@
         "paginate": "Add page markers",
         "tokenEfficient": "Compact markdown for models",
         "imageExtraction": "Extract images",
-        "imageExtractionHint": "Images cannot be previewed yet, so leaving this off keeps the markdown complete.",
+        "imageExtractionHint": "Images are stored as separate files and shown in the parsed preview.",
         "imageCaptions": "Skip image captions",
         "imageCaptionsTip": "Captions are written by a model and can pull accuracy away from the surrounding text, so they stay off unless you ask for them."
       }

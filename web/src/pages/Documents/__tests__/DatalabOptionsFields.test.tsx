@@ -79,15 +79,15 @@ describe('Datalab options panel', () => {
       /Extract images|提取图片/i,
     ) as HTMLInputElement;
 
-    // The server disables image extraction by default. The checkbox used to be
-    // bound straight to the wire flag, so a fresh wizard showed "Extract
-    // images" ticked while every image was skipped, and ticking it on its own
-    // sent nothing.
-    expect(toggle).not.toBeChecked();
+    // Images are extracted by default now that they are published and shown.
+    // The checkbox is still the positive reading of a negative field: ticked
+    // means extract, and only switching it *off* has anything to send.
+    expect(toggle).toBeChecked();
+    expect(screen.getByTestId('payload')).toHaveTextContent('{}');
 
     fireEvent.click(toggle);
     expect(screen.getByTestId('payload')).toHaveTextContent(
-      '{"disable_image_extraction":false}',
+      '{"disable_image_extraction":true}',
     );
 
     fireEvent.click(toggle);

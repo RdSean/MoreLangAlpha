@@ -2,6 +2,15 @@
 
 ## 2026-09-15
 
+### 文档图片落盘：第五步（提取默认打开，文案同步）
+
+- `DatalabConversionOptions.disable_image_extraction` 默认由 `True` 改为 `False`：D9 当初把它关掉的**唯一**理由是"提取出来也没有地址、预览必然裂图"，而这个前提现在消失了（图片已作为 artifact 落盘 + 预览会在渲染时解析引用）。
+- 向导里"提取图片"复选框随之**默认勾选**。表达式仍按否定字段的正向读法写：`checked={value.disable_image_extraction !== true}`，`onChange` 只在**取消勾选**时发送 `disable_image_extraction: true`，保持"只发送用户改过的字段"这一既有契约。
+- 提示文案改为说明图片现在会**另存为独立文件并在解析预览中显示**（中英同步）——原文案"图片暂不支持预览"已经过期。`disable_image_captions` 仍默认 `True`（不生成图片标题），那是另一件事：标题会跟正文抢精度。
+- 回归被测试抓住：`test_a_real_sdk_options_object_carries_the_defaults` 断言旧默认值，翻转后立即失败（正是它该做的事），已更新为新语义；`test_image_extraction_is_off_by_default` 改名为 `..._is_on_by_default` 并说明理由变化。
+- 2026-09-14 的设计文档 D9 补了一条"已被 2026-09-15 的 D7 取代"的注记，避免后来者读到过期的决策。
+- 验证：后端 `tests/unit/server/documents` **161 项通过**；前端 `src/pages/Documents` **8 文件 / 58 项通过**（含 i18n 键位一致性）。
+
 ### 文档图片落盘：第四步（预览在渲染时解析相对引用）
 
 - 新增纯函数 `resolveRelativeImageSources(markdown, artifacts, origin)`：把 `![alt](<32位hex>_img.jpg)` 这类**裸文件名引用**改写成 `${origin}/api/v1/document-artifacts/{artifact_id}/download`，`DocumentPreviewDrawer` 在渲染前调用它（依赖 artifact 列表，`useMemo`）。
