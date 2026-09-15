@@ -17,6 +17,11 @@ i18n.use(initReactI18next).init({
   lng: detectLocale(),
   fallbackLng: 'en-US',
   interpolation: { escapeValue: false },
+  // i18next logs an advertisement for locize.com on init unless this is off.
+  // It is a bundled console.info — no request leaves the app — but it is not
+  // gated to development either, so it would also appear in our users'
+  // consoles. We are not a locize customer; this is not a notice we pass on.
+  showSupportNotice: false,
 });
 
 export default i18n;

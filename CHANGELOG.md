@@ -2,6 +2,12 @@
 
 ## 2026-09-15
 
+### 前端：关掉 i18next 自带的 locize.com 广告
+
+- 前端控制台（以及用户浏览器控制台）每次加载都会打印一行 `🌐 i18next is made possible by ... locize.com`。这是 **i18next 包内硬编码的 `console.info`**（`node_modules/i18next/dist/cjs/i18next.js` 第 1781 行），触发条件是 `showSupportNotice !== false` 且未接入 locize 后端；**不涉及任何网络请求**（整个包里唯一的 `locize` URL 就是这条日志字符串）。
+- 它**没有**限定只在开发环境出现，所以线上用户也会看到。我们的 `src/i18n.ts` 初始化里显式加 `showSupportNotice: false`，并写清原因：这不是我们要传递的第三方告示。
+- 验证：`pnpm vitest run` **256 文件 / 2471 项通过**，日志中 `locize` 出现次数为 **0**（改动前每次运行都会打印）；`pnpm lint` 0 error / 55 warning、`pnpm typecheck` 通过、`pnpm build` 关键路径 **353.4 kB gz**（上限 450）。
+
 ### Datalab 在线解析器：真实链路验证，以及它暴露的失败路径缺陷
 
 - **两条路径都在真实链路上跑通**（`scanned.pdf`，155 130 字节，1 页）：正确密钥 → `completed`（8.3 秒，取回 937 字符 markdown）；故意写错的密钥 → `failed`（4.2 秒，`parser_unavailable`，**0 产物、0 用量行**，不是卡住、也不是把空文档当成功发布）。
