@@ -17,9 +17,17 @@ Two things about the SDK shape the code below:
 
 from __future__ import annotations
 
+import base64
+import binascii
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Any
 
-from src.config.settings import DatalabConfig, get_datalab_config
+from src.config.settings import (
+    DatalabConfig,
+    get_datalab_config,
+    get_document_parsing_config,
+)
 from src.server.documents.contracts import (
     ArtifactBundle,
     ArtifactSpec,
@@ -36,6 +44,25 @@ from src.server.documents.providers.datalab_options import DatalabConversionOpti
 
 
 PARSER_ID = "datalab-online"
+
+_IMAGE_ARTIFACT_KIND = "embedded_image"
+
+# Magic numbers, not extensions: Datalab names every file `*_img.jpg` whatever
+# it actually is, and the browser needs the real type to render it.
+_IMAGE_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"\xff\xd8\xff", "jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "png"),
+    (b"GIF87a", "gif"),
+    (b"GIF89a", "gif"),
+)
+
+_EXTENSION_FORMATS = {
+    "jpg": "jpeg",
+    "jpeg": "jpeg",
+    "png": "png",
+    "gif": "gif",
+    "webp": "webp",
+}
 
 _SUPPORTED_CLASSIFICATIONS = frozenset(
     {"text_based", "mixed", "scanned", "image_based", "unknown"}
@@ -93,6 +120,121 @@ def _as_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class _ImageWrite:
+    """What was stored from the response's images, and what was not."""
+
+    specs: tuple[ArtifactSpec, ...]
+    kept: int
+    dropped: int
+    byte_total: int
+
+
+def _decode_image(payload: Any) -> bytes | None:
+    """Base64 to bytes, tolerating the two shapes the SDK has shipped."""
+    if isinstance(payload, bytes):
+        return payload or None
+    if not isinstance(payload, str):
+        return None
+    encoded = payload.split(",", 1)[1] if payload.startswith("data:") else payload
+    try:
+        return base64.b64decode("".join(encoded.split()), validate=True) or None
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _safe_image_name(name: str) -> str | None:
+    """Reduce a provider-supplied name to a basename we are willing to write.
+
+    The name is the markdown reference *and* a path in our own bundle, so a
+    name like ``../../x.jpg`` would be both a broken reference and a write
+    outside the directory the executor fences us to.
+    """
+    cleaned = PurePosixPath(name.replace("\\", "/")).name.strip()
+    if not cleaned or cleaned in {".", ".."}:
+        return None
+    return cleaned
+
+
+def _image_format(payload: bytes, name: str) -> str:
+    for signature, image_format in _IMAGE_SIGNATURES:
+        if payload.startswith(signature):
+            return image_format
+    if payload[:4] == b"RIFF" and payload[8:12] == b"WEBP":
+        return "webp"
+    suffix = PurePosixPath(name).suffix.lstrip(".").lower()
+    # Datalab's own default is JPEG, so an unrecognised blob keeps that label
+    # rather than being called application/octet-stream and refusing to render.
+    return _EXTENSION_FORMATS.get(suffix, "jpeg")
+
+
+def _image_order(markdown: str, names: list[str]) -> list[str]:
+    """Referenced images first, in the order the document mentions them.
+
+    The response can carry a picture the markdown never links to. When the
+    budget only stretches to some of them, the ones the document points at are
+    the ones worth keeping.
+    """
+    positions = {name: markdown.find(name) for name in names}
+    referenced = sorted(
+        (name for name, at in positions.items() if at >= 0), key=positions.__getitem__
+    )
+    rest = sorted(name for name, at in positions.items() if at < 0)
+    return [*referenced, *rest]
+
+
+def _write_images(
+    *,
+    images: Any,
+    markdown: str,
+    output_dir: Path,
+) -> _ImageWrite:
+    """Write the response's images beside the markdown, within our budget."""
+    if not isinstance(images, dict) or not images:
+        return _ImageWrite((), 0, 0, 0)
+
+    limits = get_document_parsing_config()
+    candidates: dict[str, bytes] = {}
+    dropped = 0
+    for raw_name, payload in images.items():
+        name = _safe_image_name(raw_name) if isinstance(raw_name, str) else None
+        data = _decode_image(payload)
+        if name is None or data is None or name in candidates:
+            # Undecodable, unnameable, or two names that collapse into one:
+            # an image is not worth failing a document that otherwise parsed.
+            dropped += 1
+            continue
+        candidates[name] = data
+
+    specs: list[ArtifactSpec] = []
+    byte_total = 0
+    for name in _image_order(markdown, list(candidates)):
+        data = candidates[name]
+        if (
+            len(specs) >= limits.max_image_artifacts
+            or byte_total + len(data) > limits.max_image_bytes
+        ):
+            dropped += 1
+            continue
+        output_dir.joinpath(name).write_bytes(data)
+        byte_total += len(data)
+        image_format = _image_format(data, name)
+        specs.append(
+            ArtifactSpec(
+                artifact_kind=_IMAGE_ARTIFACT_KIND,
+                format=image_format,
+                media_type=f"image/{image_format}",
+                relative_path=name,
+                metadata={
+                    "bytes": len(data),
+                    "referenced": markdown.find(name) >= 0,
+                },
+            )
+        )
+
+    return _ImageWrite(tuple(specs), len(specs), dropped, byte_total)
 
 
 def _sdk_error(error: Any) -> DocumentDomainError:
@@ -197,6 +339,28 @@ class DatalabExtractor:
             markdown, encoding="utf-8"
         )
 
+        # Images land beside the markdown under the exact names the markdown
+        # references them by, so nothing has to rewrite the stored document.
+        images = _write_images(
+            images=getattr(result, "images", None),
+            markdown=markdown,
+            output_dir=request.output_dir,
+        )
+        metadata = self._metadata(result)
+        metadata["images_kept"] = images.kept
+        metadata["images_dropped"] = images.dropped
+        metadata["image_bytes"] = images.byte_total
+        warnings = (
+            [str(metadata["warning"])] if metadata.get("warning") else []
+        )
+        if images.dropped:
+            warnings.append(
+                f"{images.dropped} image(s) were not stored because the bundle "
+                "limit was reached; the markdown still references them."
+            )
+        if warnings:
+            metadata["warning"] = " ".join(warnings)
+
         return ArtifactBundle(
             artifacts=(
                 ArtifactSpec(
@@ -204,8 +368,9 @@ class DatalabExtractor:
                     format="gfm",
                     media_type="text/markdown",
                     relative_path=relative_path,
-                    metadata=self._metadata(result),
+                    metadata=metadata,
                 ),
+                *images.specs,
             ),
             primary_relative_path=relative_path,
         )

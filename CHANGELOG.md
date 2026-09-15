@@ -2,6 +2,15 @@
 
 ## 2026-09-15
 
+### 文档图片落盘：第二步（provider 把图片写成 artifact）
+
+- `DatalabExtractor` 现在把响应里的图片**写在 `document.md` 旁边，文件名就是 markdown 引用的那个名字**（Datalab 用的是裸文件名 `43012ae8…_img.jpg`）。这样存下来的 markdown 与厂商产出一致，渲染时按 `relative_path` 精确匹配即可解析，不需要把绝对 URL 烧进文档。
+- **类型按魔数判定，不按扩展名**：Datalab 一律命名成 `*_img.jpg`，实际可能是 PNG。识别 JPEG/PNG/GIF/WEBP 魔数，认不出来时才退回扩展名，最后才默认 `jpeg`；`media_type` 据此设置，否则浏览器不渲染。
+- **文件名当作不可信输入**：只取 basename（`../../etc/x.jpg` → `x.jpg`，不会写到 bundle 目录外），空/`.`/`..` 丢弃，两个不同 key 折叠成同名时保留第一个。无法 base64 解码的条目**丢弃并记账**，不因为一张坏图让整份文档解析失败。
+- **按预算裁剪且可解释**：默认上限内优先保留**被 markdown 引用**的图片（按出现顺序），其次才是没被引用的（`RE3 Part.pdf` 实测就有 1 张返回但没被引用的图）。超限的图片记入主 artifact 的 `images_kept` / `images_dropped` / `image_bytes`，并在 `warning` 里说明"有 N 张图未存储，markdown 仍引用它们"——宁可少存并如实告知，也不要整单失败。
+- 测试 10 项（`test_datalab_images.py`）：落盘与命名、魔数判型（含"扩展名撒谎"）、`data:` 前缀兼容、恶意文件名、同名折叠、坏 base64 降级、无图片时行为与今天完全一致、数量上限、被引用优先、字节上限。全部先写测试、确认 10 项失败后再实现。
+- 验证：`tests/unit/server/documents` **158 项通过**；`ruff check src/ migrations/` 干净。
+
 ### 文档图片落盘：第一步（图片独立预算的部署配置）
 
 - 新增 `DOCUMENT_MAX_IMAGE_ARTIFACTS`（默认 200）与 `DOCUMENT_MAX_IMAGE_BYTES`（默认 32 MiB），`DocumentParsingConfig` 与 `get_document_parsing_config()` 一并透传。图片从此有**自己的预算**：把图片字节算进 markdown 的字节上限，会让"文字很少、图片很多"的扫描件因为图片而整体失败——这正是设计文档 D9a 点名的风险。
