@@ -26,10 +26,11 @@ if sys.platform == "win32":
 import importlib
 import logging
 import os
-import certifi
 
-os.environ["SSL_CERT_FILE"] = certifi.where()
-os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
+# Do not override the system CA bundle globally. On macOS networks using a
+# local TLS proxy, forcing certifi here can make outbound clients (Tavily,
+# Scrapling, etc.) fail during the TLS handshake. Set these variables
+# explicitly in the deployment environment when a custom CA bundle is needed.
 
 from contextlib import asynccontextmanager
 from uuid import uuid4

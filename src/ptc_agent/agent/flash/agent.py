@@ -69,6 +69,7 @@ from src.tools.market_data.tool import (
     get_quote,
     screen_stocks,
 )
+from src.tools.education import education_create_homework
 
 logger = structlog.get_logger(__name__)
 
@@ -169,6 +170,7 @@ class FlashAgent:
         from src.tools.secretary import SECRETARY_TOOLS
 
         tools.extend(SECRETARY_TOOLS)
+        tools.append(education_create_homework)
 
         # First-party household reads.
         tools.append(get_homework_schedule)

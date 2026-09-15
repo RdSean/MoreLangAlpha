@@ -129,6 +129,7 @@ from src.tools.market_data.tool import (
 )
 from src.tools.market_watch import watch_market
 from src.tools.homework.tools import get_homework_schedule
+from src.tools.education import education_create_homework
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.mcp_registry import MCPRegistry
 from ptc_agent.core.sandbox import PTCSandbox
@@ -633,6 +634,7 @@ class PTCAgent:
                 preview_url_tool,
                 show_widget_tool,
                 TodoWrite,
+                education_create_homework,
             ]
         else:
             # A managed teaching job gets a confined Bash and TodoWrite and

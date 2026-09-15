@@ -53,3 +53,25 @@ async def list_household_membership_context(household_id: str) -> list[dict[str,
             )
             rows = await cur.fetchall()
     return [dict(row) for row in rows]
+
+
+async def list_student_membership_context(household_id: str) -> list[dict[str, Any]]:
+    """Return same-household students and their optional current grade."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT memberships.user_id, memberships.display_name,
+                       profiles.grade_code
+                FROM education_memberships AS memberships
+                LEFT JOIN education_student_profiles AS profiles
+                  ON profiles.household_id = memberships.household_id
+                 AND profiles.user_id = memberships.user_id
+                WHERE memberships.household_id = %s
+                  AND memberships.role = 'student'
+                ORDER BY memberships.created_at ASC
+                """,
+                (household_id,),
+            )
+            rows = await cur.fetchall()
+    return [dict(row) for row in rows]
