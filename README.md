@@ -59,6 +59,20 @@ uv run python server.py --reload
 cd web && pnpm dev --host 0.0.0.0 --port 5177
 ```
 
+`startup.sh` does all of it in one command — middleware (started only if it is
+not already up), API, frontend, and the WeChat channel worker:
+
+```bash
+./startup.sh            # start everything; logs land in $TMPDIR/langalpha
+./startup.sh status     # per-component state
+./startup.sh stop       # stop the app processes (add --docker for the middleware)
+```
+
+It is idempotent (a port already in use is left alone) and detaches each process
+into its own session, so it keeps running after the terminal closes. The
+channel worker expects the GinlixFlow bridge at `GINLIXFLOW_BASE_URL`
+(`http://127.0.0.1:8010` by default); override it if the bridge lives elsewhere.
+
 The application API listens on port `8000`; the development frontend is exposed
 to the LAN at `http://<host-ip>:5177`.
 
@@ -73,6 +87,7 @@ to the LAN at `http://<host-ip>:5177`.
 | `web/` | React frontend |
 | `migrations/` | PostgreSQL schema migrations |
 | `libs/ptc-cli/` | Standalone interactive PTC CLI |
+| `startup.sh` | One-command local startup of middleware, API, frontend, and channel worker |
 
 ## Development checks
 

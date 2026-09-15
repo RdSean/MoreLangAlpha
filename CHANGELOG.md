@@ -2,6 +2,15 @@
 
 ## 2026-09-15
 
+### 本地一键启动脚本 `startup.sh`
+
+- 仓库根目录新增 `startup.sh`：一条命令拉起**中间件（缺则起）+ 后端 8000 + 前端 5177 + WeChat channel worker**，另有 `status` 与 `stop [--docker]`。README 的 Quick start 与项目结构表同步更新。
+- 每个进程通过 `setsid()` 放进独立会话，脚本退出后仍在跑；pid/日志写到 `${TMPDIR}/langalpha/`；**幂等**——端口已被占用就跳过而不是起第二份；启动后带**健康等待**（后端等 `/api/v1/auth/me`、前端等 5177 首页、中间件等 5432/6379/9000 端口）。
+- 中间件走 `deploy/docker-compose-middleware.yml` + `deploy/.env`，端口从该 env 读取（默认 5432/6379/9000-9001），与应用 `.env` 保持一致。
+- **踩坑记录（写进脚本注释）**：vite **必须在 `web/` 目录下启动**。vite 的 root 与 Tailwind 的配置都按 cwd 解析——从仓库根启动时 Tailwind 退回默认主题，`@apply border-border` 会让整页编译失败（表现为白屏 + PostCSS 报错）。脚本改为在子 shell 内 `cd web` 再拉起。
+- 本次同时把 local-main 的运行环境补齐到合并后的状态：`uv sync`（venv 早于合并，`mcp` 旧版导致 `cannot import name 'Client'`）、`pnpm install`（缺 recharts）、`.env` 补 `STORAGE_ACCESS_KEY_ID/SECRET`、`STORAGE_ADDRESSING_STYLE`、`ENABLE_DATALAB_DOCUMENT_PARSER`、`DATALAB_API_KEY`、`DATALAB_PIPELINE_ID`。
+- 验证：`./startup.sh` 起全栈后 `status` 六项全绿；`http://localhost:5177/` 返回 200；经 5177 代理 `/api/v1/auth/me` 200、`/api/v1/documents` 返回 **16 篇**；重复执行不重复起进程；`stop` 只停应用、`stop --docker` 连中间件一起停。
+
 ### 文档图片落盘（Datalab 提取的图片成为 artifact）
 
 **背景**：D9 当初把图片提取默认关掉，唯一的理由是提取出来也**没有地址**——SDK 返回 base64，markdown 里写的是裸文件名，预览必然裂图。本次补齐那个后续项：图片落盘为独立 artifact，预览在渲染时解析引用。
