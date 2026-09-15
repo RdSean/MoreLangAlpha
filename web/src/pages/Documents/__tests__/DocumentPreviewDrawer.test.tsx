@@ -17,6 +17,7 @@ vi.mock('../hooks', () => ({
 }));
 vi.mock('../api', () => ({
   documentSourceUrl: (id: string) => `/api/v1/documents/${id}/source`,
+  artifactDownloadUrl: (id: string) => `/api/v1/document-artifacts/${id}/download`,
   fetchArtifactText: (...args: unknown[]) => fetchArtifactText(...args),
 }));
 vi.mock('@/pages/ChatAgent/components/Markdown', () => ({ default: ({ content }: { content: string }) => <div>{content}</div> }));
@@ -51,6 +52,26 @@ describe('DocumentPreviewDrawer', () => {
     await user.click(screen.getByRole('tab', { name: 'Parsed file' }));
     expect(await screen.findByText('# Lesson')).toBeInTheDocument();
     expect(fetchArtifactText).toHaveBeenCalledWith('art-1');
+  });
+
+  it('points the parsed tab at the stored images', async () => {
+    // The markdown references images by bare filename and the bytes live in
+    // artifacts, so what reaches the renderer has to be the artifact URL.
+    useDocumentArtifacts.mockReturnValue({
+      data: [
+        { artifact_id: 'art-1', producer_job_id: 'job-1', artifact_kind: 'primary_document', format: 'markdown', media_type: 'text/markdown' },
+        { artifact_id: 'art-img', producer_job_id: 'job-1', artifact_kind: 'embedded_image', format: 'jpeg', media_type: 'image/jpeg', relative_path: 'a_img.jpg' },
+      ],
+    });
+    fetchArtifactText.mockResolvedValue('![a picture](a_img.jpg)');
+
+    const user = userEvent.setup();
+    render(<DocumentPreviewDrawer open documentId="doc-1" onOpenChange={vi.fn()} />);
+    await user.click(screen.getByRole('tab', { name: 'Parsed file' }));
+
+    expect(
+      await screen.findByText(/api\/v1\/document-artifacts\/art-img\/download/),
+    ).toBeInTheDocument();
   });
 
   it('carries one sliding pill between the two file tabs', async () => {

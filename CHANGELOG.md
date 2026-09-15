@@ -2,6 +2,15 @@
 
 ## 2026-09-15
 
+### 文档图片落盘：第四步（预览在渲染时解析相对引用）
+
+- 新增纯函数 `resolveRelativeImageSources(markdown, artifacts, origin)`：把 `![alt](<32位hex>_img.jpg)` 这类**裸文件名引用**改写成 `${origin}/api/v1/document-artifacts/{artifact_id}/download`，`DocumentPreviewDrawer` 在渲染前调用它（依赖 artifact 列表，`useMemo`）。
+- **为什么必须是带 origin 的绝对 URL**：共享的 `Markdown` 组件会把**非外部** `src` 交给 `WorkspaceImage`，而后者读的是**工作区**文件接口——文档 artifact 不在工作区里，相对路径过去必然 404。绝对同源 URL 会被判为 external，由浏览器带 cookie 直接取，正好走那个带 owner 校验的 artifact 接口。
+- 解析规则：`relative_path` 精确匹配**优先于** basename 匹配（两个 artifact 同名不同目录时不会拿错图）；`./` 前缀与百分号编码（`%E5%9B%BE`）都能匹配；`https://` / `data:` / `blob:` 原样保留；匹配不到的引用**原样保留**——静默删掉会让"缺图"这件事消失，alt 文字比空白有用；非图片 artifact 不参与。
+- 测试 9 项（`artifactImages.test.ts`）+ 1 项抽屉集成测试（断言渲染前确实换成了 artifact URL）。其中"精确路径优先"这条第一版测试写得不够严（两种实现都能过），重写成"嵌套 artifact 排在前面 + 引用根目录同名文件"后才真正区分；把两轮索引顺序对调，该测试立即失败，恢复后 15 项通过。
+- `DocumentPreviewDrawer.test.tsx` 的 `../api` mock 补上 `artifactDownloadUrl`（此前只 mock 了两个函数）。
+- 验证：`pnpm vitest run src/pages/Documents` 相关文件全绿；`pnpm typecheck` 通过。
+
 ### 文档图片落盘：第三步（执行器把图片字节分账）
 
 - `_validate_bundle` 原本把 bundle 内**所有**文件的字节加总去比 `max_bundle_bytes`（默认 = 50 MiB 上传上限），于是图片会挤占文字的预算：一份文字很小、图片较多的扫描件会因为"图片"而整单失败。现在分两本账——普通 artifact 计入 `max_bundle_bytes`，`embedded_image` 计入新的 `max_image_bytes`（默认取配置的 32 MiB），超限报**不同的消息**（`Parser image artifacts are too large`），运维一眼能分辨是哪本账爆了。

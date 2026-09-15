@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import Markdown from '@/pages/ChatAgent/components/Markdown';
 import DocumentErrorBoundary from '@/pages/ChatAgent/components/viewers/DocumentErrorBoundary';
 import { fetchArtifactText, documentSourceUrl } from '../api';
+import { resolveRelativeImageSources } from '../artifactImages';
 import { useDocument, useDocumentArtifacts, useDocumentJobs } from '../hooks';
 import type { Artifact } from '../types';
 import './DocumentPreviewDrawer.css';
@@ -77,6 +78,18 @@ export default function DocumentPreviewDrawer({
       && (artifact.format === 'markdown' || artifact.media_type === 'text/markdown')
     ));
   }, [artifacts.data, latestCompletedJobId]);
+
+  // Datalab's markdown references its images by bare filename; the bytes live
+  // in artifacts. Resolve them here rather than in the shared Markdown
+  // component, which reads relative sources from the *workspace*, not the
+  // document library.
+  const renderedMarkdown = useMemo(
+    () =>
+      markdown === undefined
+        ? markdown
+        : resolveRelativeImageSources(markdown, artifacts.data, window.location.origin),
+    [markdown, artifacts.data],
+  );
 
   useEffect(() => {
     if (!open || !documentId) return;
@@ -294,7 +307,7 @@ export default function DocumentPreviewDrawer({
           {tab === 'parsed' && (
             markdownLoading ? <PreviewLoading />
               : markdownError ? <PreviewEmpty message={t('documents.preview.parsedError')} />
-                : markdown !== undefined ? <div className="documents-preview-markdown"><Markdown variant="panel" content={markdown} /></div>
+                : renderedMarkdown !== undefined ? <div className="documents-preview-markdown"><Markdown variant="panel" content={renderedMarkdown} /></div>
                   : <PreviewEmpty message={t('documents.preview.noParsed')} action={onOpenParser && documentId ? { label: t('documents.preview.openParser'), onClick: () => onOpenParser(documentId) } : undefined} />
           )}
           </div>
