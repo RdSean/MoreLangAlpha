@@ -2,55 +2,28 @@
 
 ## 2026-09-15
 
-### 文档图片落盘：第六步（真实链路验证 + 两个反直觉发现）
+### 文档图片落盘（Datalab 提取的图片成为 artifact）
 
-- 用 `RE3 Part.pdf`（2.98 MB / 5 页）走完整 API：上传 → 检测 → `datalab-online` → 解析 → 取 artifact。冷跑 247 秒（同文件第二次走厂商缓存 16 秒），费用 2 分。
-- **结果**：**7 张图片 artifact**（合计 754 497 B，`images_dropped=0`）+ 1 个 `document.md`（14 994 字符，6 处图片引用）；对象键 `documents/doc-kEdIsxVKorxP/artifacts/job-EBaWM1Ay5RFh/<32位hex>_img.jpg`，与 markdown 同目录；`/api/v1/document-artifacts/{id}/download` 返回 **200 + `Content-Type: image/jpeg`**。
-- **浏览器实测**：解析预览里 6 个 `<img>` 全部加载成功（naturalWidth/Height 非 0），src 指向 artifact 下载接口。也就是说 D9 当初"提取出来也看不到"的前提确实已经消除。
-- **反直觉发现一：同样的选项，两次冷跑的图片数量不同。** 同一文件、同样 `options`（提取开、标题关）分别得到 **2 张 / 1 处引用** 与 **7 张 / 6 处引用**。所以"这一轮有几张图"不由我们决定；实现必须容忍任意子集——这正是预览对匹配不到的引用**原样保留**、provider 对返回什么就存什么的原因。
-- **反直觉发现二：`disable_image_captions` 影响的是 alt 文字，不是数量。** 关标题时是 `![](<hex>_img.jpg)`（alt 为空），开标题时是 `![A photograph of a ski resort …](<hex>_img.jpg)`。我先从一次运行得出"关标题会连带丢图"的结论，第二次同配置冷跑直接推翻；这个错误结论也写进设计文档，免得后来者照它做优化。
-- 验证：后端 `tests/unit` **7687 项通过 / 8 deselected / 1 xpassed**；前端 **257 文件 / 2485 项通过**，`pnpm lint` 0 error / 55 warning，`pnpm typecheck` 通过，`pnpm build` 关键路径 **353.6 kB gz**（上限 450）。
+**背景**：D9 当初把图片提取默认关掉，唯一的理由是提取出来也**没有地址**——SDK 返回 base64，markdown 里写的是裸文件名，预览必然裂图。本次补齐那个后续项：图片落盘为独立 artifact，预览在渲染时解析引用。
 
-### 文档图片落盘：第五步（提取默认打开，文案同步）
+**部署上限**：新增 `DOCUMENT_MAX_IMAGE_ARTIFACTS`（默认 200）与 `DOCUMENT_MAX_IMAGE_BYTES`（默认 32 MiB），`DocumentParsingConfig` 与 `get_document_parsing_config()` 透传，`.env.example` 的 Datalab 段落补上说明。图片从此有**自己的预算**：把图片字节算进 markdown 的字节上限，会让"文字很少、图片很多"的扫描件整体失败——正是 D9a 点名的风险。测试覆盖默认值、环境变量覆盖、非正整数（`0`/`lots`/`-1`/`32M`）报错；这几条是后补的，用变异验证代替"先失败"（默认值临时改成 64 MiB，断言立即失败）。
 
-- `DatalabConversionOptions.disable_image_extraction` 默认由 `True` 改为 `False`：D9 当初把它关掉的**唯一**理由是"提取出来也没有地址、预览必然裂图"，而这个前提现在消失了（图片已作为 artifact 落盘 + 预览会在渲染时解析引用）。
-- 向导里"提取图片"复选框随之**默认勾选**。表达式仍按否定字段的正向读法写：`checked={value.disable_image_extraction !== true}`，`onChange` 只在**取消勾选**时发送 `disable_image_extraction: true`，保持"只发送用户改过的字段"这一既有契约。
-- 提示文案改为说明图片现在会**另存为独立文件并在解析预览中显示**（中英同步）——原文案"图片暂不支持预览"已经过期。`disable_image_captions` 仍默认 `True`（不生成图片标题），那是另一件事：标题会跟正文抢精度。
-- 回归被测试抓住：`test_a_real_sdk_options_object_carries_the_defaults` 断言旧默认值，翻转后立即失败（正是它该做的事），已更新为新语义；`test_image_extraction_is_off_by_default` 改名为 `..._is_on_by_default` 并说明理由变化。
-- 2026-09-14 的设计文档 D9 补了一条"已被 2026-09-15 的 D7 取代"的注记，避免后来者读到过期的决策。
-- 验证：后端 `tests/unit/server/documents` **161 项通过**；前端 `src/pages/Documents` **8 文件 / 58 项通过**（含 i18n 键位一致性）。
+**provider 落盘**：`DatalabExtractor` 把响应里的图片写在 `document.md` **旁边**，文件名**就是 markdown 引用的那个名字**（`43012ae8…_img.jpg`），因此存下来的 markdown 与厂商产出逐字节一致，渲染时按 `relative_path` 精确匹配即可，不需要把绝对 URL 烧进文档（D9a 的红线）。类型**按魔数判定**而非扩展名——Datalab 一律命名 `*_img.jpg`，实际可能是 PNG，认不出才退回扩展名、最后默认 jpeg，否则浏览器不渲染。文件名当**不可信输入**处理：只取 basename（`../../etc/x.jpg` → `x.jpg`，不会写到 bundle 目录外）、空/`.`/`..` 丢弃、同名折叠保留第一个；无法 base64 解码的条目丢弃并记账，不因一张坏图让整份文档失败。超预算时**优先保留被 markdown 引用**的图片（按出现顺序），其余丢弃并写入 `images_kept` / `images_dropped` / `image_bytes` 与 `warning`：宁可少存并如实告知，也不要整单失败。测试 10 项，全部先写、确认 10 项失败后再实现。
 
-### 文档图片落盘：第四步（预览在渲染时解析相对引用）
+**执行器分账**：`_validate_bundle` 原本把 bundle 内所有文件字节加总去比 `max_bundle_bytes`（默认 = 50 MiB 上传上限），图片会挤占文字预算。现在普通 artifact 计 `max_bundle_bytes`、`embedded_image` 计 `max_image_bytes`，超限报**不同的消息**，运维一眼能分辨是哪本账爆了。这道限制是**兜底**（provider 已自行裁剪），防的是别的 provider 或未来改动。
 
-- 新增纯函数 `resolveRelativeImageSources(markdown, artifacts, origin)`：把 `![alt](<32位hex>_img.jpg)` 这类**裸文件名引用**改写成 `${origin}/api/v1/document-artifacts/{artifact_id}/download`，`DocumentPreviewDrawer` 在渲染前调用它（依赖 artifact 列表，`useMemo`）。
-- **为什么必须是带 origin 的绝对 URL**：共享的 `Markdown` 组件会把**非外部** `src` 交给 `WorkspaceImage`，而后者读的是**工作区**文件接口——文档 artifact 不在工作区里，相对路径过去必然 404。绝对同源 URL 会被判为 external，由浏览器带 cookie 直接取，正好走那个带 owner 校验的 artifact 接口。
-- 解析规则：`relative_path` 精确匹配**优先于** basename 匹配（两个 artifact 同名不同目录时不会拿错图）；`./` 前缀与百分号编码（`%E5%9B%BE`）都能匹配；`https://` / `data:` / `blob:` 原样保留；匹配不到的引用**原样保留**——静默删掉会让"缺图"这件事消失，alt 文字比空白有用；非图片 artifact 不参与。
-- 测试 9 项（`artifactImages.test.ts`）+ 1 项抽屉集成测试（断言渲染前确实换成了 artifact URL）。其中"精确路径优先"这条第一版测试写得不够严（两种实现都能过），重写成"嵌套 artifact 排在前面 + 引用根目录同名文件"后才真正区分；把两轮索引顺序对调，该测试立即失败，恢复后 15 项通过。
-- `DocumentPreviewDrawer.test.tsx` 的 `../api` mock 补上 `artifactDownloadUrl`（此前只 mock 了两个函数）。
-- 验证：`pnpm vitest run src/pages/Documents` 相关文件全绿；`pnpm typecheck` 通过。
+**预览解析**：新增纯函数 `resolveRelativeImageSources(markdown, artifacts, origin)`，把裸文件名引用改写成 `${origin}/api/v1/document-artifacts/{artifact_id}/download`，`DocumentPreviewDrawer` 渲染前调用（依赖 artifact 列表）。**必须带 origin**：共享 `Markdown` 组件把非外部 `src` 交给 `WorkspaceImage`，而后者读的是**工作区**文件接口——文档 artifact 不在工作区里，相对路径过去必然 404；绝对同源 URL 会被判为 external，由浏览器带 cookie 直取，正好走那个带 owner 校验的接口。规则：`relative_path` 精确匹配优先于 basename 匹配（两个 artifact 同名不同目录不会拿错图）；`./` 前缀与百分号编码可匹配；`https://`/`data:`/`blob:` 原样保留；**匹配不到的引用原样保留**——静默删除会让"缺图"这件事消失，alt 文字比空白有用。
 
-### 文档图片落盘：第三步（执行器把图片字节分账）
+**默认值翻转**：`disable_image_extraction` 默认由 `True` 改为 `False`（D9 关掉它的前提已消失），向导复选框默认勾选，中英提示文案改为"图片会另存为独立文件并在解析预览中显示"。为保住"只发送用户改过的字段"这一契约，只有**取消勾选**时才发送 `disable_image_extraction: true`。`disable_image_captions` 仍默认 `True`（不生成图片标题）——那是另一件事：模型写的标题会跟正文抢精度。翻转被既有断言抓住（`test_a_real_sdk_options_object_carries_the_defaults` 在翻转后立即失败，正是它该做的事），2026-09-14 设计文档的 D9 也补了"已被 2026-09-15 的 D7 取代"的注记。
 
-- `_validate_bundle` 原本把 bundle 内**所有**文件的字节加总去比 `max_bundle_bytes`（默认 = 50 MiB 上传上限），于是图片会挤占文字的预算：一份文字很小、图片较多的扫描件会因为"图片"而整单失败。现在分两本账——普通 artifact 计入 `max_bundle_bytes`，`embedded_image` 计入新的 `max_image_bytes`（默认取配置的 32 MiB），超限报**不同的消息**（`Parser image artifacts are too large`），运维一眼能分辨是哪本账爆了。
-- 这是一道**兜底**：provider 已按 D3 自行裁剪并记账，这里防的是别的 provider 或未来改动。
-- 测试 3 项：图片字节不再吃掉文字预算（文字 10B + 图片 4KiB，文字上限 1KiB 仍成功）、图片有自己的上限（1KiB 上限 → 失败且消息含 image）、文字超限仍然失败（回归）。前两项先在缺 `max_image_bytes` 参数时报 `TypeError` 失败，实现后通过。
-- 验证：`tests/unit/server/documents` **161 项通过**；`ruff check src/ migrations/` 干净。
+**真实链路实测**：`RE3 Part.pdf`（2.98 MB / 5 页）走完整 API：上传 → 检测 → `datalab-online` → 解析 → 取 artifact。冷跑 247 秒（同文件第二次命中厂商缓存 16 秒），费用 2 分；产出 **7 张图片 artifact**（合计 754 497 B，`images_dropped=0`）+ `document.md`（14 994 字符、6 处图片引用）；对象键 `documents/<document_id>/artifacts/<job_id>/<32位hex>_img.jpg`，与 markdown 同目录；`/api/v1/document-artifacts/{id}/download` 返回 **200 + `Content-Type: image/jpeg`**；浏览器里 6 个 `<img>` 全部加载成功（naturalWidth/Height 非 0）。
 
-### 文档图片落盘：第二步（provider 把图片写成 artifact）
+两个与预期不符、已一并写进设计文档的事实：
 
-- `DatalabExtractor` 现在把响应里的图片**写在 `document.md` 旁边，文件名就是 markdown 引用的那个名字**（Datalab 用的是裸文件名 `43012ae8…_img.jpg`）。这样存下来的 markdown 与厂商产出一致，渲染时按 `relative_path` 精确匹配即可解析，不需要把绝对 URL 烧进文档。
-- **类型按魔数判定，不按扩展名**：Datalab 一律命名成 `*_img.jpg`，实际可能是 PNG。识别 JPEG/PNG/GIF/WEBP 魔数，认不出来时才退回扩展名，最后才默认 `jpeg`；`media_type` 据此设置，否则浏览器不渲染。
-- **文件名当作不可信输入**：只取 basename（`../../etc/x.jpg` → `x.jpg`，不会写到 bundle 目录外），空/`.`/`..` 丢弃，两个不同 key 折叠成同名时保留第一个。无法 base64 解码的条目**丢弃并记账**，不因为一张坏图让整份文档解析失败。
-- **按预算裁剪且可解释**：默认上限内优先保留**被 markdown 引用**的图片（按出现顺序），其次才是没被引用的（`RE3 Part.pdf` 实测就有 1 张返回但没被引用的图）。超限的图片记入主 artifact 的 `images_kept` / `images_dropped` / `image_bytes`，并在 `warning` 里说明"有 N 张图未存储，markdown 仍引用它们"——宁可少存并如实告知，也不要整单失败。
-- 测试 10 项（`test_datalab_images.py`）：落盘与命名、魔数判型（含"扩展名撒谎"）、`data:` 前缀兼容、恶意文件名、同名折叠、坏 base64 降级、无图片时行为与今天完全一致、数量上限、被引用优先、字节上限。全部先写测试、确认 10 项失败后再实现。
-- 验证：`tests/unit/server/documents` **158 项通过**；`ruff check src/ migrations/` 干净。
+- **同样选项，两次冷跑的图片数量不同**：同一文件、同样 `options`（提取开、标题关）分别得到 2 张/1 处引用与 7 张/6 处引用。"这一轮有几张图"不由我们决定，所以实现必须容忍任意子集——这正是预览不静默删除未匹配引用、provider 返回什么就存什么的原因。
+- **`disable_image_captions` 影响的是 alt 文字，不是数量**：关标题时是 `![](<hex>_img.jpg)`（alt 为空），开标题时是 `![A photograph of a ski resort …](<hex>_img.jpg)`。我从一次运行得出的"关标题会连带丢图"结论，被第二次同配置冷跑直接推翻；这个错误结论也留在设计文档里，免得后来者照它优化。
 
-### 文档图片落盘：第一步（图片独立预算的部署配置）
-
-- 新增 `DOCUMENT_MAX_IMAGE_ARTIFACTS`（默认 200）与 `DOCUMENT_MAX_IMAGE_BYTES`（默认 32 MiB），`DocumentParsingConfig` 与 `get_document_parsing_config()` 一并透传。图片从此有**自己的预算**：把图片字节算进 markdown 的字节上限，会让"文字很少、图片很多"的扫描件因为图片而整体失败——这正是设计文档 D9a 点名的风险。
-- `.env.example` 的 Datalab 段落补上这两项及说明：超过上限的图片按 D3 **丢弃并记账**（写进 metadata + warning），而不是让任务失败。
-- 测试：默认值、环境变量覆盖、非正整数（`0` / `lots` / `-1` / `32M`）报错共 4 类断言。先实现后补测试，因此做了变异验证——把默认值临时改成 64 MiB，默认值断言立即失败，恢复后 12 项通过。
-- 验证：`tests/unit/config/test_document_parsing_config.py` 12 项通过；`ruff check src/ migrations/` 干净。
+**验证**：后端 `tests/unit` **7687 项通过 / 8 deselected / 1 xpassed**；前端 **257 文件 / 2485 项通过**；`pnpm lint` 0 error / 55 warning；`pnpm typecheck` 通过；`pnpm build` 关键路径 **353.6 kB gz**（上限 450）。提交：`5f3871b2` 配置上限、`65b60171` provider 落盘、`df29740b` 执行器分账、`5b7e392d` 预览解析、`b9829d05` 默认值与文案、`2b8c6d06` 实测与文档收尾。
 
 ### 文档解析：Datalab 高级选项面板重做（两行对齐 + 新增图片标题开关）
 
