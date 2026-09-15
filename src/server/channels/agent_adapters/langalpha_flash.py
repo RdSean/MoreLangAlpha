@@ -39,6 +39,21 @@ class FlashAgentError(RuntimeError):
         self.code = code
 
 
+# Injected as a directive on every channel turn. The surface is plain text, so
+# the AskUserQuestion tool is a dead end here: the user gets the question and
+# nothing to answer with, and the conversation stops. Stating an assumption is
+# worth more than waiting for a button nobody can press.
+_CHANNEL_DIRECTIVE = (
+    "This turn arrived over a messaging channel (WeChat), not the web app. The "
+    "user sees plain text only — no option buttons, no cards, no file "
+    "attachments — and cannot open the web interface to answer a control. Do "
+    "not call AskUserQuestion here. If a decision is missing, choose the most "
+    "reasonable interpretation, state it in one short sentence in your reply "
+    "(for example \"按 9月20日 处理\"), and continue. If you must ask something, "
+    "ask it in ordinary text and treat the user's next message as the answer."
+)
+
+
 class LangAlphaFlashAdapter:
     """Use the existing authenticated HTTP chat surface as an AgentAdapter."""
 
@@ -319,9 +334,13 @@ class LangAlphaFlashAdapter:
         }
         if not thread_id:
             body["external_thread_id"] = session.ref.removeprefix("external:")
-        image_contexts = self._image_contexts(turn)
-        if image_contexts:
-            body["additional_context"] = image_contexts
+        # The channel directive always rides along; image attachments join it
+        # when the inbound message carried any.
+        contexts: list[dict[str, str]] = [
+            {"type": "directive", "content": _CHANNEL_DIRECTIVE}
+        ]
+        contexts.extend(self._image_contexts(turn) or [])
+        body["additional_context"] = contexts
 
         # Read timeout off: the stream is idle while the agent thinks, compacts,
         # or waits on a tool, and killing it there is what turned long turns into

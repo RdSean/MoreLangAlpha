@@ -4,5 +4,12 @@
 - When the user's intent is already clear from their message
 - For simple yes/no follow-ups (just ask in your text response)
 - Repeatedly in quick succession — batch related questions when possible
+- **When the interface cannot render the options.** `AskUserQuestion` draws
+  buttons; on a plain-text surface (a messaging channel such as WeChat) the user
+  receives the question and nothing to answer with, and the conversation stops
+  there. Pick the most reasonable interpretation, say which one you picked in
+  one short sentence, and continue — or ask in ordinary text and treat the
+  next message as the answer. A turn that states its assumption is worth more
+  than one that waits for a button nobody can press.
 
 **A `proactive_questions` preference in the user's profile overrides all of the above.** It is free text describing how eagerly they want to be asked; follow what it says.

@@ -122,10 +122,66 @@ async def test_flash_adapter_sends_image_context_and_collects_final_text(monkeyp
     assert body["platform"] == "telegram"
     assert body["external_thread_id"] == "external-thread-1"
     assert fake.posts[0][1]["headers"]["X-User-Id"] == "user-1"
-    assert body["additional_context"][0]["type"] == "image"
-    assert body["additional_context"][0]["data"] == "data:image/png;base64,"
+    # The channel directive rides first; attachments follow it.
+    assert body["additional_context"][0]["type"] == "directive"
+    assert body["additional_context"][1]["type"] == "image"
+    assert body["additional_context"][1]["data"] == "data:image/png;base64,"
     assert "完整回复" == "".join(part.text for part in result.parts)
     assert result.session_ref == "thread-1"
+
+
+@pytest.mark.asyncio
+async def test_every_channel_turn_says_the_surface_is_plain_text(monkeypatch):
+    """The WeChat user cannot press a button, so the agent must not draw one.
+
+    Without this the agent asks with AskUserQuestion, the options never reach
+    the channel, and the conversation stops at the question — which is what
+    happened to the "下个星期天" turn.
+    """
+    fake = FakeClient(
+        [
+            FakeResponse(
+                200,
+                json_data={
+                    "status": "dispatched",
+                    "thread_id": "thread-1",
+                    "run_id": "run-1",
+                },
+            ),
+            FakeResponse(
+                200,
+                lines=[
+                    "event: message_chunk",
+                    'data: {"content_type":"text","content":"按 9月20日 处理。"}',
+                    "",
+                    "event: run_end",
+                    'data: {"status":"completed"}',
+                    "",
+                ],
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        "src.server.channels.agent_adapters.langalpha_flash.httpx.AsyncClient",
+        lambda **kwargs: fake,
+    )
+    adapter = LangAlphaFlashAdapter(base_url="http://backend", service_token="svc")
+
+    await adapter.run_turn(
+        session(),
+        AgentTurn(
+            request_key="key-1",
+            text="布置一份下个星期天的作业",
+            received_at=__import__("datetime").datetime.now(),
+            channel_type="wechat",
+        ),
+    )
+
+    contexts = fake.posts[0][1]["json"]["additional_context"]
+    directive = contexts[0]
+    assert directive["type"] == "directive"
+    assert "AskUserQuestion" in directive["content"]
+    assert "next message as the answer" in directive["content"]
 
 
 @pytest.mark.asyncio
