@@ -2,6 +2,13 @@
 
 ## 2026-09-15
 
+### 文档图片落盘：第三步（执行器把图片字节分账）
+
+- `_validate_bundle` 原本把 bundle 内**所有**文件的字节加总去比 `max_bundle_bytes`（默认 = 50 MiB 上传上限），于是图片会挤占文字的预算：一份文字很小、图片较多的扫描件会因为"图片"而整单失败。现在分两本账——普通 artifact 计入 `max_bundle_bytes`，`embedded_image` 计入新的 `max_image_bytes`（默认取配置的 32 MiB），超限报**不同的消息**（`Parser image artifacts are too large`），运维一眼能分辨是哪本账爆了。
+- 这是一道**兜底**：provider 已按 D3 自行裁剪并记账，这里防的是别的 provider 或未来改动。
+- 测试 3 项：图片字节不再吃掉文字预算（文字 10B + 图片 4KiB，文字上限 1KiB 仍成功）、图片有自己的上限（1KiB 上限 → 失败且消息含 image）、文字超限仍然失败（回归）。前两项先在缺 `max_image_bytes` 参数时报 `TypeError` 失败，实现后通过。
+- 验证：`tests/unit/server/documents` **161 项通过**；`ruff check src/ migrations/` 干净。
+
 ### 文档图片落盘：第二步（provider 把图片写成 artifact）
 
 - `DatalabExtractor` 现在把响应里的图片**写在 `document.md` 旁边，文件名就是 markdown 引用的那个名字**（Datalab 用的是裸文件名 `43012ae8…_img.jpg`）。这样存下来的 markdown 与厂商产出一致，渲染时按 `relative_path` 精确匹配即可解析，不需要把绝对 URL 烧进文档。

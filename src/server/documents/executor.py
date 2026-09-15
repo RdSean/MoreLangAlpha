@@ -98,6 +98,7 @@ class DocumentJobExecutor:
         parse_timeout_seconds: float | None = None,
         max_artifacts: int = _DEFAULT_MAX_ARTIFACTS,
         max_bundle_bytes: int | None = None,
+        max_image_bytes: int | None = None,
         id_factory: Callable[[str], str] = new_public_id,
         usage_recorder: UsageRecorder = usage_repository.record_usage,
     ) -> None:
@@ -117,7 +118,16 @@ class DocumentJobExecutor:
         self._max_bundle_bytes = (
             config.max_upload_bytes if max_bundle_bytes is None else max_bundle_bytes
         )
-        if self._parse_timeout_seconds <= 0 or self._max_bundle_bytes <= 0:
+        # Images get their own ceiling. Counting them into the text's budget
+        # would fail a picture-heavy scan that has ample room for the words.
+        self._max_image_bytes = (
+            config.max_image_bytes if max_image_bytes is None else max_image_bytes
+        )
+        if (
+            self._parse_timeout_seconds <= 0
+            or self._max_bundle_bytes <= 0
+            or self._max_image_bytes <= 0
+        ):
             raise ValueError("executor limits must be positive")
         self._id_factory = id_factory
         self._usage_recorder = usage_recorder
@@ -273,6 +283,7 @@ class DocumentJobExecutor:
         relative_paths: set[str] = set()
         publications: list[ArtifactPublication] = []
         total_bytes = 0
+        image_bytes = 0
         for spec in bundle.artifacts:
             if spec.relative_path in relative_paths or not is_safe_artifact_path(
                 output_dir,
@@ -291,9 +302,19 @@ class DocumentJobExecutor:
                     "Parser returned an invalid artifact file"
                 )
             relative_paths.add(spec.relative_path)
-            total_bytes += artifact_path.stat().st_size
+            size = artifact_path.stat().st_size
+            # Two budgets, on purpose: the text must fit the upload-sized
+            # allowance, the pictures have their own.
+            if spec.artifact_kind == "embedded_image":
+                image_bytes += size
+            else:
+                total_bytes += size
             if total_bytes > self._max_bundle_bytes:
                 raise InvalidParserOutputError("Parser artifact bundle is too large")
+            if image_bytes > self._max_image_bytes:
+                raise InvalidParserOutputError(
+                    "Parser image artifacts are too large"
+                )
 
             artifact_id = self._id_factory("artifact")
             storage_key = (

@@ -103,6 +103,25 @@ class _Parser:
         )
 
 
+class _SizedParser(_Parser):
+    """Writes files of an exact size, so the arithmetic is what is under test."""
+
+    def __init__(self, specs: tuple[ArtifactSpec, ...], sizes: dict[str, int]) -> None:
+        super().__init__(specs)
+        self.sizes = sizes
+
+    def parse(self, request: ParseRequest) -> ArtifactBundle:
+        request.output_dir.mkdir(parents=True, exist_ok=True)
+        for spec in self.specs:
+            target = request.output_dir / spec.relative_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"x" * self.sizes.get(spec.relative_path, 1))
+        return ArtifactBundle(
+            artifacts=self.specs,
+            primary_relative_path=self.specs[0].relative_path,
+        )
+
+
 class _SymlinkParser(_Parser):
     def parse(self, request: ParseRequest) -> ArtifactBundle:
         request.output_dir.mkdir(parents=True, exist_ok=True)
@@ -181,6 +200,8 @@ def _executor(
     runner: _Runner | None = None,
     ids: tuple[str, ...] = ("art-A1b2C3d4E5f6",),
     usage_recorder=None,
+    max_bundle_bytes: int = 1024,
+    max_image_bytes: int | None = None,
 ) -> DocumentJobExecutor:
     artifact_ids = iter(ids)
     return DocumentJobExecutor(
@@ -190,9 +211,10 @@ def _executor(
         process_runner=runner or _Runner(),
         parse_timeout_seconds=12,
         max_artifacts=10,
-        max_bundle_bytes=1024,
+        max_bundle_bytes=max_bundle_bytes,
         id_factory=lambda kind: next(artifact_ids),
         **({"usage_recorder": usage_recorder} if usage_recorder else {}),
+        **({"max_image_bytes": max_image_bytes} if max_image_bytes else {}),
     )
 
 
@@ -268,6 +290,74 @@ async def test_executor_rejects_parent_absolute_and_symlink_outputs(
     assert result is not None and result["status"] == "failed"
     assert repository.failed["error_code"] == "invalid_parser_output"
     assert store.puts == []
+
+
+def _image_spec(name: str) -> ArtifactSpec:
+    return ArtifactSpec("embedded_image", "jpeg", "image/jpeg", name)
+
+
+@pytest.mark.asyncio
+async def test_image_bytes_do_not_consume_the_markdown_budget() -> None:
+    """A picture-heavy scan must not fail on a budget meant for the text."""
+    repository = _Repository()
+    specs = (
+        ArtifactSpec("primary_document", "gfm", "text/markdown", "document.md"),
+        _image_spec("big.jpg"),
+    )
+    parser = _SizedParser(specs, {"document.md": 10, "big.jpg": 4096})
+
+    result = await _executor(
+        repository,
+        _ObjectStore(),
+        parser,
+        ids=("art-A1b2C3d4E5f6", "art-A1b2C3d4E5f7"),
+        max_bundle_bytes=1024,
+        max_image_bytes=10_000,
+    ).execute(ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1"))
+
+    assert result is not None and result["status"] == "completed"
+    assert repository.failed is None
+
+
+@pytest.mark.asyncio
+async def test_images_have_their_own_ceiling() -> None:
+    repository = _Repository()
+    specs = (
+        ArtifactSpec("primary_document", "gfm", "text/markdown", "document.md"),
+        _image_spec("big.jpg"),
+    )
+    parser = _SizedParser(specs, {"document.md": 10, "big.jpg": 4096})
+
+    result = await _executor(
+        repository,
+        _ObjectStore(),
+        parser,
+        ids=("art-A1b2C3d4E5f6", "art-A1b2C3d4E5f7"),
+        max_image_bytes=1024,
+    ).execute(ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1"))
+
+    assert result is not None and result["status"] == "failed"
+    assert repository.failed["error_code"] == "invalid_parser_output"
+    # Distinct from the text message: an operator reading the job should not
+    # have to guess which budget was actually exceeded.
+    assert "image" in repository.failed["error_message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_markdown_bytes_still_count_against_the_bundle_budget() -> None:
+    repository = _Repository()
+    parser = _SizedParser(
+        (ArtifactSpec("primary_document", "gfm", "text/markdown", "document.md"),),
+        {"document.md": 4096},
+    )
+
+    result = await _executor(repository, _ObjectStore(), parser).execute(
+        ClaimedDocumentJob.from_row(_job(), claimed_by="worker-1")
+    )
+
+    assert result is not None and result["status"] == "failed"
+    assert repository.failed["error_code"] == "invalid_parser_output"
+    assert "too large" in repository.failed["error_message"]
 
 
 @pytest.mark.asyncio
