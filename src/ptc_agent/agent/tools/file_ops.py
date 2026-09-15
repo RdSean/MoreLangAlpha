@@ -11,6 +11,7 @@ from langchain_core.tools import tool
 
 from ptc_agent.agent.backends import FilesystemBackend, ReadOnlyStoreError
 from ptc_agent.core.paths import MEMO_USER_DIR
+from src.server.services.user_data_io import UserDataValidationError
 
 logger = structlog.get_logger(__name__)
 
@@ -67,6 +68,7 @@ _MAX_READ_CHARS = 160_000
 def create_filesystem_tools(
     backend: FilesystemBackend,
     operation_callback: OperationCallback | None = None,
+    *,
     write_validator: Callable[[str, str], str | None] | None = None,
 ) -> tuple:
     """Create the Read, Write, and Edit tools bound to ``backend``.
@@ -81,20 +83,19 @@ def create_filesystem_tools(
 
     @tool("Read")
     async def read_file(file_path: str, offset: int | None = None, limit: int | None = None) -> str:
-        """Read a file with line numbers (cat -n format). Also supports images (PNG, JPG, GIF, WebP), PDFs, and URLs.
-
-        Output is capped to protect the context window: at most ``limit`` lines
-        (default 2000) and at most ~160k characters of formatted output. If
-        either cap fires, the result ends with a marker telling you how to
-        continue with a follow-up Read.
+        """Read a file. Also supports images (PNG, JPG, GIF, WebP), PDFs and URLs.
 
         Args:
-            file_path: Path to file (relative or absolute), or image/PDF URL.
-            offset: Line offset (0-indexed). Default: 0. Ignored for images/PDFs.
-            limit: Maximum number of lines. Default: 2000. Ignored for images/PDFs.
+            file_path: Path to file (relative or absolute), or an image/PDF URL.
+            offset: Line offset (0-indexed). Default 0. Ignored for images/PDFs.
+            limit: Maximum number of lines. Default 2000. Ignored for images/PDFs.
 
         Returns:
-            File contents with line numbers, document loading confirmation, or ERROR.
+            File contents prefixed with line numbers (cat -n format), capped at
+            `limit` lines and ~160k characters. If a cap fires the output ends with
+            a marker giving the offset to resume from.
+
+        Strip the line-number prefix before passing text to Edit.
         """
         try:
             # Middleware injects the actual content; this return is just a sentinel.
@@ -222,11 +223,19 @@ def create_filesystem_tools(
 
     @tool("Write")
     async def write_file(file_path: str, content: str) -> str:
-        """Write content to a file. Overwrites existing."""
+        """Write content to a file. Overwrites existing.
+
+        Args:
+            file_path: Path to the file, relative to the workspace.
+            content: The complete file contents. There is no append mode — to add to
+                a file, Read it and write back the full text.
+        """
         try:
             normalized_path = backend.normalize_path(file_path)
             logger.info("Writing file", file_path=file_path, normalized_path=normalized_path, size=len(content))
 
+            # Managed-execution policy hook: the education service refuses a
+            # write outside the frozen asset contract before it reaches storage.
             if write_validator:
                 error = write_validator(normalized_path, content)
                 if error:
@@ -244,6 +253,9 @@ def create_filesystem_tools(
                     "write rejected on read-only path",
                     file_path=file_path,
                 )
+                return f"ERROR: {exc}"
+            except UserDataValidationError as exc:
+                logger.info("user-data write rejected", file_path=file_path, error=str(exc))
                 return f"ERROR: {exc}"
             if not success:
                 return "ERROR: Write operation failed"
@@ -271,7 +283,16 @@ def create_filesystem_tools(
 
     @tool("Edit")
     async def edit_file(file_path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
-        """Replace exact string in a file. Must Read file first."""
+        """Replace exact string in a file. Must Read file first.
+
+        Args:
+            file_path: Path to the file.
+            old_string: Text to replace. Must match the file exactly, including
+                indentation, and must be unique unless replace_all is set.
+            new_string: Replacement text.
+            replace_all: Replace every occurrence instead of requiring a unique
+                match. Default False.
+        """
         try:
             normalized_path = backend.normalize_path(file_path)
             logger.info(

@@ -181,14 +181,25 @@ async def _is_plan_interrupt_pending(thread_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def process_hitl_response(request: ChatRequest) -> tuple[str, str, dict, list]:
+def process_hitl_response(
+    request: ChatRequest,
+) -> tuple[str, str, dict, list, dict]:
     """Extract HITL answer metadata for persistence.
 
-    Returns (feedback_action, query_content, hitl_answers, interrupt_ids).
+    Returns (feedback_action, query_content, hitl_answers, interrupt_ids,
+    hitl_decisions).
     ``feedback_action`` is "QUESTION_ANSWERED" or "QUESTION_SKIPPED".
     ``query_content`` is the summarized content string.
     ``hitl_answers`` maps interrupt_id -> answer string | None.
     ``interrupt_ids`` is the list of interrupt IDs from the response map.
+    ``hitl_decisions`` maps interrupt_id -> the interrupt's decisions in the
+    order its action requests were raised, each a ``HITLDecision`` payload.
+
+    One interrupt can stop several calls and be answered with a different
+    verdict for each, which ``hitl_answers`` collapses into a single key.
+    ``hitl_decisions`` keeps every decision under its own slot so slot i is the
+    answer to action request i, and it carries the user's own reject message
+    rather than the wording the agent is handed on resume.
     """
     summary = summarize_hitl_response_map(request.hitl_response)
     feedback_action = summary["feedback_action"]
@@ -196,21 +207,26 @@ def process_hitl_response(request: ChatRequest) -> tuple[str, str, dict, list]:
     interrupt_ids = summary["interrupt_ids"]
 
     hitl_answers: dict = {}
+    hitl_decisions: dict = {}
     for interrupt_id, response in request.hitl_response.items():
         decisions = (
             response.decisions
             if hasattr(response, "decisions")
             else response.get("decisions", [])
         )
+        recorded: list[dict] = []
         for d in decisions:
             d_type = d.type if hasattr(d, "type") else d.get("type")
             d_msg = (
                 d.message if hasattr(d, "message") else d.get("message")
             ) or ""
+            recorded.append({"type": d_type, "message": d_msg or None})
             if d_type == "approve" and d_msg:
                 hitl_answers[interrupt_id] = d_msg
             elif d_type == "reject" and not d_msg:
                 hitl_answers[interrupt_id] = None
+        if recorded:
+            hitl_decisions[interrupt_id] = recorded
 
     if hitl_answers:
         has_answers = any(v is not None for v in hitl_answers.values())
@@ -218,7 +234,13 @@ def process_hitl_response(request: ChatRequest) -> tuple[str, str, dict, list]:
             "QUESTION_ANSWERED" if has_answers else "QUESTION_SKIPPED"
         )
 
-    return feedback_action, query_content, hitl_answers, interrupt_ids
+    return (
+        feedback_action,
+        query_content,
+        hitl_answers,
+        interrupt_ids,
+        hitl_decisions,
+    )
 
 
 def serialize_context_metadata(
@@ -226,6 +248,8 @@ def serialize_context_metadata(
     query_metadata: dict,
     user_input: str,
     mode: str,
+    extra_commands: dict[str, str] | None = None,
+    allowed_skills: set[str] | None = None,
 ) -> None:
     """Serialize additional_context into lightweight persistence metadata.
 
@@ -250,7 +274,12 @@ def serialize_context_metadata(
 
     # Detect slash commands from message text when additional_context is absent
     if not request.hitl_response and "additional_context" not in query_metadata:
-        _, early_detected = detect_slash_commands(user_input, mode=mode)
+        _, early_detected = detect_slash_commands(
+            user_input,
+            mode=mode,
+            extra_commands=extra_commands,
+            allowed_skills=allowed_skills,
+        )
         if early_detected:
             query_metadata["additional_context"] = [
                 {"type": "skills", "name": s.name} for s in early_detected
@@ -322,7 +351,12 @@ def apply_fetch_override(config) -> None:
 
 
 def apply_llm_runtime_metadata(config: Any, query_metadata: dict) -> None:
-    """Copy only safe resolved-model provenance into durable run metadata."""
+    """Copy only safe resolved-model provenance into durable run metadata.
+
+    Local: a household turn runs on the owner's credential, and the run rows
+    carry that provenance (household/owner/student ids) so usage can be
+    attributed per student without ever persisting a key.
+    """
     from src.server.services.llm.runtime_metadata import safe_llm_runtime_metadata
 
     safe = safe_llm_runtime_metadata(getattr(config, "llm_runtime_metadata", None))
@@ -394,10 +428,69 @@ def _slash_text_target(content: Any) -> tuple[str, dict | None]:
     return "", None
 
 
+def user_skill_commands(config) -> dict[str, str] | None:
+    """Command → skill-name map for the turn user's skill customizations.
+
+    Read off the resolved ``AgentConfig`` (populated by ``resolve_llm_config``):
+    uploaded skills under their effective triggers, plus platform-command
+    renames (which ``detect_slash_commands`` treats as replacing the builtin
+    trigger). None when there is nothing to add, so slash detection falls back
+    to the builtin map alone.
+
+    Fold precedence, lowest first: platform renames, user-tier skills,
+    workspace-tier rows — so a workspace row wins a same-trigger collision in
+    its workspace, the invariant the cross-scope alias checks rely on.
+    """
+    if config is None:
+        return None
+    extra: dict[str, str] = {}
+    for name, command in (
+        getattr(config, "skill_command_overrides", None) or {}
+    ).items():
+        extra[command] = name
+    specs = sorted(
+        getattr(config, "user_skills", None) or [],
+        key=lambda s: getattr(s, "workspace_scoped", False),
+    )
+    for s in specs:
+        extra[s.command] = s.name
+    return extra or None
+
+
+def turn_skill_names(config, mode: str) -> set[str] | None:
+    """The skill names this turn's build actually exposes.
+
+    Slash detection otherwise matches against the process-wide registry, which
+    knows nothing about this user's disables, feature opt-outs, or the build's
+    mode. A command matching a skill the build then refuses does not error: the
+    prefix is stripped and nothing loads, so the model silently receives a
+    shortened message. Assembled from the config ``resolve_llm_config`` already
+    populated, by the same call the agent build makes, so the two cannot drift.
+    """
+    if config is None:
+        return None
+    from ptc_agent.agent.middleware.skills.registry import (
+        build_effective_skill_registry,
+    )
+
+    return set(
+        build_effective_skill_registry(
+            mode,  # type: ignore[arg-type]
+            feature_resolver=getattr(config, "feature_enabled", None),
+            disabled_skills=getattr(config, "disabled_skills", None) or (),
+            user_skills=getattr(config, "user_skills", None) or (),
+            user_skill_dir=getattr(config, "user_skill_dir", None),
+            workspace_skill_dir=getattr(config, "workspace_skill_dir", None),
+        )
+    )
+
+
 def prepare_skill_contexts(
     messages: list[dict],
     request: ChatRequest,
     mode: str,
+    extra_commands: dict[str, str] | None = None,
+    allowed_skills: set[str] | None = None,
 ) -> list[dict]:
     """Resolve which skills this turn activates, for the agent to inject.
 
@@ -417,7 +510,12 @@ def prepare_skill_contexts(
         last_msg = messages[-1]
         msg_text, text_block = _slash_text_target(last_msg.get("content"))
         if msg_text:
-            cleaned_text, detected = detect_slash_commands(msg_text, mode=mode)
+            cleaned_text, detected = detect_slash_commands(
+                msg_text,
+                mode=mode,
+                extra_commands=extra_commands,
+                allowed_skills=allowed_skills,
+            )
             if detected:
                 skill_contexts = detected
                 if cleaned_text != msg_text:
@@ -445,7 +543,6 @@ def build_graph_config(
     token_callback,
     request: ChatRequest,
     effective_model: str | None,
-    is_byok: bool,
     recursion_limit: int,
     plan_mode: bool | None = None,
     extra_configurable: dict | None = None,
@@ -478,9 +575,6 @@ def build_graph_config(
         locale=request.locale,
         timezone=timezone_str,
         llm_model=effective_model,
-        reasoning_effort=getattr(request, "reasoning_effort", None),
-        fast_mode=getattr(request, "fast_mode", None),
-        is_byok=is_byok,
         platform=request.platform,
         **({"plan_mode": plan_mode} if plan_mode is not None else {}),
     )

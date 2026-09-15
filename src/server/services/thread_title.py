@@ -44,15 +44,15 @@ def _current_time_context(tz_name: str | None) -> str:
 
 def _build_system_prompt(tz_name: str | None) -> str:
     return (
-        "You title a workspace chat thread from the user's first "
+        "You title a financial-research chat thread from the user's first "
         "message. Respond with JSON matching the schema.\n\n"
         "The title's job: let the user recognize and re-find this thread "
         "later in a long sidebar list. It states what the thread is about — "
         "never that a question was asked.\n\n"
         "Hard criteria for the title:\n"
         "- Short: aim for 3-8 words, at most 60 characters.\n"
-        "- Concrete: name the actual subject — documents, projects, topics, "
-        "events, timeframes. Never generic filler like 'question', "
+        "- Concrete: name the actual subject — tickers, companies, sectors, "
+        "metrics, events, timeframes. Never generic filler like 'question', "
         "'help', or 'analysis request'.\n"
         "- Same language as the user's message.\n"
         "- Plain text: no surrounding quotes, markdown, or emoji; no "

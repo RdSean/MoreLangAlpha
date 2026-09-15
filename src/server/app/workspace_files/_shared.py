@@ -17,11 +17,61 @@ from ptc_agent.core.paths import (
     ALWAYS_HIDDEN_PATH_SEGMENTS,
     ALWAYS_HIDDEN_SUFFIXES,
     HIDDEN_DIR_NAMES,
+    USER_PROFILE_DATA_DIR,
+    USER_PROFILE_PORTFOLIO_FILE,
+    USER_PROFILE_PREFERENCE_FILE,
+    USER_PROFILE_WATCHLIST_FILE,
 )
 from src.server.services.workspace_manager import WorkspaceManager
+from src.server.services.persistence.resolve import (
+    FileBytesUnavailable,
+    resolve_file_bytes,
+)
+from src.server.services import user_data_io
+from src.server.utils.error_sanitization import (
+    sandbox_unreachable_detail,
+    single_line,
+)
 from src.observability import safe_record, workspace_fs_bytes
 
 logger = logging.getLogger(__name__)
+
+
+async def http_file_bytes(file_record: dict[str, Any], *, user_id: str) -> bytes:
+    """Resolve a persisted file's bytes for a route that authenticated its caller.
+
+    ``user_id`` is the workspace owner's (the storage namespace), which the
+    caller already holds from the ownership check.
+
+    503 when the bytes exist but object storage can't serve them right now, 404
+    when the row carries no content at all. The caller is already authorized for
+    this workspace, so the distinction leaks nothing to them — and a storage
+    outage must not be reported as "your file is gone". Routes whose only
+    credential is the URL take the opposite policy: see
+    ``resolve_file_bytes_or_none``.
+
+    The underlying error is logged rather than returned; its message names the
+    object key, which the client has no business seeing.
+    """
+    try:
+        content = await resolve_file_bytes(file_record, user_id=user_id)
+    except FileBytesUnavailable as e:
+        logger.warning(f"Blob unavailable for {file_record.get('file_path')!r}: {e}")
+        raise HTTPException(
+            status_code=503, detail="File content temporarily unavailable"
+        ) from None
+    if content is None:
+        raise HTTPException(status_code=404, detail="File content not available")
+    return content
+
+
+async def http_file_text(file_record: dict[str, Any], *, user_id: str) -> str:
+    """:func:`http_file_bytes`, decoded. Caller must 415 binary rows first.
+
+    ``replace`` is a guard, not a decoding strategy; see ``resolve_file_text``.
+    """
+    data = await http_file_bytes(file_record, user_id=user_id)
+    return data.decode("utf-8", errors="replace")
 
 
 def _record_fs_bytes(op: str, size: int | None) -> None:
@@ -40,6 +90,41 @@ _CACHEABLE_IMAGE_TYPES = frozenset(
         "image/webp",
     }
 )
+
+# User-profile virtual files (served by user_data_io, not the sandbox FS).
+# These three paths bypass the system-path filter and route to the DB layer.
+_USER_PROFILE_PREFIX = f"{USER_PROFILE_DATA_DIR.rstrip('/')}/"
+_USER_PROFILE_FILES: dict[str, str] = {
+    f"{_USER_PROFILE_PREFIX}{USER_PROFILE_PORTFOLIO_FILE}": USER_PROFILE_PORTFOLIO_FILE,
+    f"{_USER_PROFILE_PREFIX}{USER_PROFILE_WATCHLIST_FILE}": USER_PROFILE_WATCHLIST_FILE,
+    f"{_USER_PROFILE_PREFIX}{USER_PROFILE_PREFERENCE_FILE}": USER_PROFILE_PREFERENCE_FILE,
+}
+
+
+def _is_user_profile_dir(client_path: str) -> bool:
+    """True when the path refers to the .agents/user/profile/ directory itself."""
+    return client_path.rstrip("/") == _USER_PROFILE_PREFIX.rstrip("/")
+
+
+def _is_user_profile_file(client_path: str) -> bool:
+    return client_path in _USER_PROFILE_FILES
+
+
+async def _serialize_user_profile_file(client_path: str, user_id: str) -> str:
+    """Fetch + serialize one of the three virtual user-profile JSON files."""
+    filename = _USER_PROFILE_FILES[client_path]
+    if filename == USER_PROFILE_PORTFOLIO_FILE:
+        rows = await user_data_io.fetch_portfolio_for_user(user_id)
+        payload = user_data_io.serialize_portfolio(rows)
+    elif filename == USER_PROFILE_WATCHLIST_FILE:
+        watchlists, items = await user_data_io.fetch_watchlist_for_user(user_id)
+        payload = user_data_io.serialize_watchlist(watchlists, items)
+    else:  # preference.json
+        prefs = await user_data_io.fetch_preferences_for_user(user_id)
+        payload = user_data_io.serialize_preferences(prefs)
+    visible = {k: v for k, v in payload.items() if k != "__version__"}
+    return user_data_io.serialize_json(visible)
+
 
 # Derived from shared constants (source of truth: ptc_agent.core.paths)
 _SYSTEM_DIR_PREFIXES = tuple(f"{d}/" for d in sorted(AGENT_SYSTEM_DIRS))
@@ -147,18 +232,30 @@ async def _acquire_sandbox(workspace_id: str, user_id: str) -> Any:
     try:
         session = await manager.get_session_for_workspace(workspace_id, user_id=user_id)
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Sandbox not ready: {e}") from None
+        # Same wording as the app-level SandboxGoneError/SandboxTransientError
+        # handler: the file panel categorizes on this string, and the "starting"
+        # sub-case has to survive the boundary — which is exactly what
+        # sandbox_unreachable_detail preserves while dropping the raw text.
+        logger.warning(
+            f"Sandbox unreachable for workspace {workspace_id}: {single_line(str(e))}"
+        )
+        raise HTTPException(
+            status_code=503, detail=sandbox_unreachable_detail(e)
+        ) from None
 
     sandbox = getattr(session, "sandbox", None)
     if sandbox is None:
-        raise HTTPException(status_code=503, detail="Sandbox not available")
+        raise HTTPException(
+            status_code=503,
+            detail="Sandbox is not reachable: no sandbox attached to the session",
+        )
     return sandbox
 
 
 def _to_client_path(sandbox: Any, absolute_path: str) -> str:
     """Convert an absolute sandbox path into a virtual client path.
 
-    The CLI and web UX prefer paths like "results/foo.txt" (no leading slash),
+    The CLI and web UX prefer paths like "work/task/foo.txt" (no leading slash),
     while still preserving true absolute /tmp paths.
     """
 
@@ -176,6 +273,10 @@ def _to_client_path(sandbox: Any, absolute_path: str) -> str:
 
 
 def _is_system_path(client_path: str) -> bool:
+    # User-profile virtual files live under .agents/ but are first-class
+    # user data — never hide them from the file panel.
+    if _is_user_profile_file(client_path) or _is_user_profile_dir(client_path):
+        return False
     return any(client_path.startswith(prefix) for prefix in _SYSTEM_DIR_PREFIXES)
 
 
@@ -210,6 +311,7 @@ def _is_serve_blocked_path(client_path: str) -> bool:
     endpoints apply, so the unauthenticated wsfiles route and the share-token
     serve route never expose agent-infrastructure dirs (``.agents``, ``tools``,
     ``mcp_servers``, ``_internal``, ...) that those endpoints deliberately hide.
+    The user-profile carve-out lives inside ``_is_system_path``.
     """
     return (
         _is_always_hidden_path(client_path)

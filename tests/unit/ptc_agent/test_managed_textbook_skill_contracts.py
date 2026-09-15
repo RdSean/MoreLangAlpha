@@ -5,6 +5,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
+#: The two managed teaching skills ship in this deployment's own bundle.
+SKILLS_ROOT = ROOT / "plugins/langalpha_local/skills"
 
 
 def _managed_block(text: str) -> str:
@@ -14,7 +16,7 @@ def _managed_block(text: str) -> str:
 
 
 def test_book_to_skill_managed_mode_accepts_only_staged_markdown_manifest():
-    text = (ROOT / "skills/book-to-skill/SKILL.md").read_text()
+    text = (SKILLS_ROOT / "book-to-skill/SKILL.md").read_text()
     managed = _managed_block(text)
 
     assert "--managed-textbook" in text
@@ -26,7 +28,7 @@ def test_book_to_skill_managed_mode_accepts_only_staged_markdown_manifest():
 
 
 def test_knowledge_guy_managed_mode_writes_only_schema_validated_outputs():
-    text = (ROOT / "skills/the-knowledge-guy/SKILL.md").read_text()
+    text = (SKILLS_ROOT / "the-knowledge-guy/SKILL.md").read_text()
     managed = _managed_block(text)
 
     assert "--managed-textbook" in text
@@ -42,10 +44,10 @@ def test_knowledge_guy_managed_mode_writes_only_schema_validated_outputs():
 
 def test_managed_contracts_define_the_same_output_schema():
     book_contract = (
-        ROOT / "skills/book-to-skill/reference/managed-textbook-contract.md"
+        SKILLS_ROOT / "book-to-skill/reference/managed-textbook-contract.md"
     ).read_text()
     knowledge_contract = (
-        ROOT / "skills/the-knowledge-guy/reference/managed-textbook-contract.md"
+        SKILLS_ROOT / "the-knowledge-guy/reference/managed-textbook-contract.md"
     ).read_text()
 
     for required_field in (
@@ -69,7 +71,7 @@ def test_managed_contracts_define_the_same_output_schema():
 def test_managed_contracts_require_questions_for_each_practice_asset():
     for skill_name in ("book-to-skill", "the-knowledge-guy"):
         contract = (
-            ROOT / f"skills/{skill_name}/reference/managed-textbook-contract.md"
+            SKILLS_ROOT / f"{skill_name}/reference/managed-textbook-contract.md"
         ).read_text()
 
         assert re.search(
@@ -83,7 +85,7 @@ def test_managed_contracts_require_questions_for_each_practice_asset():
 def test_managed_contracts_require_concept_index_to_copy_chapter_concepts_verbatim():
     for skill_name in ("book-to-skill", "the-knowledge-guy"):
         contract = (
-            ROOT / f"skills/{skill_name}/reference/managed-textbook-contract.md"
+            SKILLS_ROOT / f"{skill_name}/reference/managed-textbook-contract.md"
         ).read_text()
 
         assert re.search(

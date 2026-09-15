@@ -20,7 +20,7 @@ def _like_escape(value: str) -> str:
     """Escape LIKE wildcards so caller-supplied prefixes match literally.
 
     Use with `ESCAPE '\\'` in the LIKE clause so `_` and `%` in the prefix
-    bind to themselves instead of matching any character.
+    (e.g. `market_view`) bind to themselves instead of matching any character.
     """
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
@@ -43,7 +43,6 @@ async def lookup_thread_by_external_id(
                     WHERE ct.platform = %s
                       AND ct.external_id = %s
                       AND w.user_id = %s
-                      AND NOT (w.config ? 'managed_execution')
                     ORDER BY ct.updated_at DESC
                     LIMIT 1
                 """,
@@ -127,7 +126,8 @@ async def get_workspace_threads(
     """Get threads for a workspace with pagination.
 
     `platform_prefix`: if set, restricts to rows where `platform` LIKE
-    '<prefix>%' for a client-surface family. Sargable on Postgres btree, but after the
+    '<prefix>%' (e.g. "market_view" matches "market_view:AAPL" and any future
+    "market_view:*" suffixes). Sargable on Postgres btree, but after the
     workspace_id filter this is a tiny scan in practice.
 
     `archived`: the two views are disjoint — False (default) lists only
@@ -163,11 +163,6 @@ async def get_workspace_threads(
                     SELECT COUNT(*) as total
                     FROM conversation_threads
                     WHERE workspace_id = %s{archived_filter}{where_extra}
-                      AND NOT EXISTS (
-                          SELECT 1 FROM workspaces w
-                          WHERE w.workspace_id = conversation_threads.workspace_id
-                            AND w.config ? 'managed_execution'
-                      )
                 """,
                     (workspace_id, *extra_params),
                 )
@@ -187,11 +182,6 @@ async def get_workspace_threads(
                             last_seen_run_seq, created_at, updated_at
                         FROM conversation_threads
                         WHERE workspace_id = %s{archived_filter}{where_extra}
-                          AND NOT EXISTS (
-                              SELECT 1 FROM workspaces w
-                              WHERE w.workspace_id = conversation_threads.workspace_id
-                                AND w.config ? 'managed_execution'
-                          )
                         ORDER BY {inner_order}{sort_by} {sort_order.upper()},
                                  conversation_thread_id DESC
                         LIMIT %s OFFSET %s
@@ -225,7 +215,7 @@ async def get_threads_for_user(
     has no archived counterpart (the workspace listing serves that). Pinning
     does not reorder here either: pin scope is within a workspace.
 
-    `platform_prefix`: optional prefix match on `platform`.
+    `platform_prefix`: optional prefix match on `platform` (e.g. "market_view").
     """
     sort_fields = {
         "created_at": "t.created_at",
@@ -255,7 +245,6 @@ async def get_threads_for_user(
                     FROM conversation_threads t
                     JOIN workspaces w ON t.workspace_id = w.workspace_id
                     WHERE w.user_id = %s AND w.status != 'deleted'
-                      AND NOT (w.config ? 'managed_execution')
                       AND t.archived_at IS NULL{where_extra}
                     """,
                     (user_id, *extra_params),
@@ -278,7 +267,6 @@ async def get_threads_for_user(
                         FROM conversation_threads t
                         JOIN workspaces w ON t.workspace_id = w.workspace_id
                         WHERE w.user_id = %s AND w.status != 'deleted'
-                          AND NOT (w.config ? 'managed_execution')
                           AND t.archived_at IS NULL{where_extra}
                         ORDER BY {order_by} {sort_order.upper()},
                                  t.conversation_thread_id DESC
@@ -338,7 +326,6 @@ _LIFECYCLE_SNAPSHOT_SQL = f"""
             LIMIT 1
         ) la ON TRUE
         WHERE w.user_id = %s AND w.status != 'deleted'
-          AND NOT (w.config ? 'managed_execution')
     ),
     watermark AS (
         SELECT COALESCE(MAX(latest_run_seq), 0) AS as_of_seq FROM owned
@@ -405,10 +392,8 @@ async def get_thread_with_summary(
                 await cur.execute(
                     """
                     SELECT conversation_thread_id, workspace_id, current_status, thread_index, created_at, updated_at
-                    FROM conversation_threads AS t
-                    JOIN workspaces AS w ON w.workspace_id = t.workspace_id
-                    WHERE t.conversation_thread_id = %s
-                      AND NOT (w.config ? 'managed_execution')
+                    FROM conversation_threads
+                    WHERE conversation_thread_id = %s
                 """,
                     (conversation_thread_id,),
                 )
@@ -507,6 +492,10 @@ async def get_thread_auth_meta(thread_id: str) -> Optional[Dict[str, Any]]:
     Lets ``/status`` authorize the caller, read share state, and pick the
     report-back read model (flash watch set vs PTC task outbox) from a
     single round-trip. Returns ``None`` if the thread doesn't exist.
+
+    Local: ``managed_execution`` rides along from the workspace config, because
+    a teaching-job thread must read as not-found to every user-facing gate that
+    would otherwise treat its household owner as an ordinary thread owner.
     """
     # Same UUID normalization as get_thread_owner_id: a non-UUID id can't match
     # the column, so treat it as not-found (clean 404) rather than risk a 500.
@@ -560,7 +549,6 @@ async def get_thread_by_share_token(share_token: str) -> Optional[Dict[str, Any]
                     FROM conversation_threads t
                     JOIN workspaces w ON w.workspace_id = t.workspace_id
                     WHERE t.share_token = %s AND t.is_shared = TRUE
-                      AND NOT (w.config ? 'managed_execution')
                 """,
                     (share_token,),
                 )

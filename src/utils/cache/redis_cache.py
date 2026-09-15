@@ -654,6 +654,29 @@ class RedisCacheClient:
             _as_bytes(fields.get(b"record")),
         )
 
+    async def clear_all(self) -> bool:
+        """
+        Clear all market-data cache entries.
+
+        Uses targeted pattern deletes instead of FLUSHDB to avoid
+        wiping unrelated Redis data (e.g. event buffers, sessions).
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.enabled or not self.client:
+            return False
+
+        try:
+            total = 0
+            for pattern in ("ohlcv:*", "snapshot:*", "fmp:*", "market:*"):
+                total += await self.delete_pattern(pattern)
+            logger.warning("Cache cleared: %d market-data keys removed", total)
+            return True
+        except Exception as e:
+            logger.error(f"Cache clear error: {e}")
+            return False
+
     def get_stats(self) -> dict:
         """
         Get cache statistics.

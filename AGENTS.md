@@ -30,7 +30,7 @@ available on the LAN.
 | `src/tools/` | General-purpose web, automation, workspace, and secretary tools |
 | `src/llms/` | LLM wrappers, token accounting, and model manifest |
 | `src/utils/` | Redis and shared utilities |
-| `skills/` | Platform-provided Agent Skills |
+| `plugins/` | Agent Plugins bundles: shipped MCP servers and Skills (see `plugins/README.md`) |
 | `web/` | React 19, Vite, TypeScript, Tailwind, shadcn/ui, and React Query |
 
 `PTCAgent.create_agent()` assembles code execution, filesystem, widget, web,

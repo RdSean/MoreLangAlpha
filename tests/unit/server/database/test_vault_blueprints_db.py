@@ -33,8 +33,8 @@ def vault_mock_db(mock_cursor):
     conn.cursor = _cursor_cm
 
     @asynccontextmanager
-    async def _fake_connection():
-        yield conn
+    async def _fake_connection(conn_in=None):
+        yield conn_in if conn_in is not None else conn
 
     with patch(
         "src.server.database.vault_secrets.get_db_connection",
@@ -54,11 +54,11 @@ async def test_empty_vault_returns_empty_set(vault_mock_db):
 async def test_populated_vault_returns_full_name_set(vault_mock_db):
     vault_mock_db.fetchall.return_value = [
         {"name": "X_BEARER_TOKEN"},
-        {"name": "PLATFORM_SECRET_API_KEY"},
-        {"name": "EXAMPLE_SERVICE_KEY"},
+        {"name": "FMP_API_KEY"},
+        {"name": "POLYGON_KEY"},
     ]
     names = await get_workspace_secret_names("ws-1")
-    assert names == {"X_BEARER_TOKEN", "PLATFORM_SECRET_API_KEY", "EXAMPLE_SERVICE_KEY"}
+    assert names == {"X_BEARER_TOKEN", "FMP_API_KEY", "POLYGON_KEY"}
 
 
 @pytest.mark.asyncio

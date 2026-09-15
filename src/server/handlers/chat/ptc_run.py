@@ -42,6 +42,12 @@ from src.server.utils.widget_context import (
     parse_widget_contexts,
     serialize_widget_contexts_for_metadata,
 )
+from src.server.utils.chart_selection_context import (
+    build_chart_selection_reminder,
+    parse_chart_selection_contexts,
+    serialize_chart_selections_for_metadata,
+)
+from src.server.utils.credit_resume_context import build_credit_resume_update
 from src.llms.llm import get_input_modalities
 from src.server.utils.multimodal_context import (
     build_attachment_metadata,
@@ -55,6 +61,7 @@ from src.server.utils.multimodal_context import (
 from src.utils.tracking import ExecutionTracker
 
 from ptc_agent.agent.graph import build_ptc_graph_with_session
+from ptc_agent.agent.middleware.credit_gate import run_with_credit_gate
 
 from .request_prep import (
     DISPATCH_STARTED_MARKER,
@@ -74,7 +81,10 @@ from .request_prep import (
     process_hitl_response,
     serialize_context_metadata,
     setup_steering_tracking,
+    turn_skill_names,
+    user_skill_commands,
 )
+from src.server.services.credit_gate_port import build_run_credit_gate
 from src.server.services.runs.admission import (
     RunScope,
     begin_run,
@@ -84,6 +94,7 @@ from src.config.settings import get_ptc_recursion_limit
 
 from .admission_gate import wait_or_steer
 from .error_handling import handle_workflow_error
+from src.server.services.llm.clients import is_own_key_turn
 from src.server.services.llm.config import resolve_llm_config
 from .steering import drain_steering_return_event
 from .run_stream_reader import stream_from_log
@@ -232,36 +243,6 @@ async def astream_ptc_workflow(
                 yield steering_event
             return
 
-        # Resolve standalone callers before ensure_thread/START. The normal
-        # HTTP route supplies config eagerly; background and direct drivers may
-        # intentionally omit it.
-        if config is None:
-            config = await resolve_llm_config(
-                setup.agent_config,
-                user_id,
-                request.llm_model,
-                is_byok,
-                mode="ptc",
-                reasoning_effort=getattr(request, "reasoning_effort", None),
-                fast_mode=getattr(request, "fast_mode", None),
-                thread_id=thread_id,
-                enabled_subagents=request.subagents_enabled,
-            )
-
-        # See the matching Flash path: standalone callers resolve their model
-        # here, then carry the stamped credential source into run metadata and
-        # graph configuration. The resolver still received only personal BYOK
-        # status above.
-        from ptc_agent.config.agent import CredentialSource
-
-        credential_source = getattr(config, "credential_source", None)
-        if credential_source is not None:
-            is_byok = credential_source in (
-                CredentialSource.OAUTH,
-                CredentialSource.BYOK,
-                CredentialSource.HOUSEHOLD,
-            )
-
         # =====================================================================
         # Database Persistence Setup
         # =====================================================================
@@ -274,16 +255,41 @@ async def astream_ptc_workflow(
         query_type, fork = _resolve_fork(request=request)
         is_checkpoint_replay = bool(request.checkpoint_id and not request.messages)
 
+        # Resolve LLM config (pre-resolved by the route handler, fallback for
+        # standalone use). Ahead of the metadata below on purpose: that block
+        # records the model and the detected slash command, and both are read
+        # off this config. Resolved late, the standalone path would stamp a
+        # skill the turn then refuses, because activation gates on the
+        # resolved registry while the metadata had nothing to gate on. The
+        # route already resolves before this generator runs, so this only
+        # moves the standalone path onto the ordering production has.
+        if config is None:
+            config = await resolve_llm_config(
+                setup.agent_config, user_id, request.llm_model, is_byok, mode="ptc",
+                reasoning_effort=getattr(request, "reasoning_effort", None),
+                fast_mode=getattr(request, "fast_mode", None),
+                thread_id=thread_id,
+                enabled_subagents=request.subagents_enabled,
+                workspace_id=workspace_id,
+            )
+
         # Persist query start
         feedback_action = None
         query_content = user_input
         effective_model = config.llm.name if config and config.llm else None
+        # Off the resolved credential, not off ``is_byok``: that flag answers
+        # which ladder to try, and an automation with only an OAuth token
+        # passes it false while still paying its own vendor bill.
+        own_key = is_own_key_turn(config)
         query_metadata = {
             "workspace_id": request.workspace_id,
             "msg_type": "ptc",
         }
         if effective_model:
             query_metadata["llm_model"] = effective_model
+        # The model that actually ran, when a deployment model profile routed
+        # the logical catalog name somewhere else, plus the safe credential
+        # provenance a household turn carries.
         resolved_model = getattr(config, "resolved_model", None)
         if resolved_model:
             query_metadata["resolved_llm_model"] = resolved_model
@@ -297,6 +303,7 @@ async def astream_ptc_workflow(
         # Extract attachment and context metadata for display in history
         # (PTC skips this block for HITL resumes — contrast with Flash)
         widget_ctxs = parse_widget_contexts(request.additional_context)
+        chart_selections = parse_chart_selection_contexts(request.additional_context)
         if request.additional_context and not request.hitl_response:
             multimodal_ctxs = parse_multimodal_contexts(request.additional_context)
             if multimodal_ctxs:
@@ -307,20 +314,34 @@ async def astream_ptc_workflow(
                 query_metadata["widget_contexts"] = serialize_widget_contexts_for_metadata(
                     widget_ctxs
                 )
+            if chart_selections:
+                query_metadata["chart_selections"] = serialize_chart_selections_for_metadata(
+                    chart_selections
+                )
 
         # Persist lightweight additional_context + slash command fallback
         # (serialize_context_metadata's slash-command branch already guards
         # on `not request.hitl_response`, so this is safe to call always.)
         if not request.hitl_response:
-            serialize_context_metadata(request, query_metadata, user_input, mode="ptc")
+            serialize_context_metadata(
+                request, query_metadata, user_input, mode="ptc",
+                extra_commands=user_skill_commands(config),
+                allowed_skills=turn_skill_names(config, "ptc"),
+            )
 
         if request.hitl_response:
-            feedback_action, query_content, hitl_answers, interrupt_ids = (
-                process_hitl_response(request)
-            )
+            (
+                feedback_action,
+                query_content,
+                hitl_answers,
+                interrupt_ids,
+                hitl_decisions,
+            ) = process_hitl_response(request)
             query_metadata["hitl_interrupt_ids"] = interrupt_ids
             if hitl_answers:
                 query_metadata["hitl_answers"] = hitl_answers
+            if hitl_decisions:
+                query_metadata["hitl_decisions"] = hitl_decisions
 
         # =====================================================================
         # START txn (v4): query row + in_progress run row + thread projection
@@ -374,6 +395,23 @@ async def astream_ptc_workflow(
 
         token_callback, tool_tracker = init_tracking(thread_id)
 
+        # Runtime credit gate (None when platform gating is inactive): the
+        # run's spend meter, lease, and refresher. Admission above is its
+        # seed verdict; the stream wrapper below owns its lifetime.
+        # Billing principal: a household turn runs on the owner's credential,
+        # so the owner is who the lease and any platform spend belong to. The
+        # student stays the run's actor (and the metadata names them).
+        billing_user_id = (
+            (getattr(config, "llm_runtime_metadata", None) or {}).get(
+                "model_owner_user_id"
+            )
+            or user_id
+        )
+        credit_gate = build_run_credit_gate(
+            billing_user_id, run_id, token_callback, tool_tracker, effective_model,
+            is_byok=own_key,
+        )
+
         _mark_phase("db_setup")
 
         # =====================================================================
@@ -388,6 +426,16 @@ async def astream_ptc_workflow(
         subagents = request.subagents_enabled or config.subagents.enabled
         sandbox_id = None
 
+        # The turn's skill state, folded to one value so the acquire can tell
+        # a warm sandbox its skills moved (upload/delete/disable) without any
+        # extra read — the bundle behind these fields was already loaded by
+        # the config resolve above.
+        from src.server.services.user_skills import skills_delivery_signature
+
+        skills_signature = skills_delivery_signature(
+            config.user_skill_dir, config.disabled_skills
+        )
+
         # ``workspace_manager`` and ``needs_startup`` were resolved above for
         # the pre-steering stale-cancel hook. Reuse them — recomputing here
         # would race with a concurrent reconnect that could flip the state.
@@ -399,7 +447,7 @@ async def astream_ptc_workflow(
         # session in memory). The extra "starting/ready" SSE pair is harmless.
         if not needs_startup:
             session = await workspace_manager.get_session_for_workspace(
-                workspace_id, user_id=user_id
+                workspace_id, user_id=user_id, skills_signature=skills_signature
             )
         else:
             yield f"id: 0\nevent: workspace_status\ndata: {json.dumps({'status': 'starting', 'workspace_id': workspace_id})}\n\n"
@@ -422,6 +470,7 @@ async def astream_ptc_workflow(
                     workspace_id,
                     user_id=user_id,
                     on_state_observed=_on_state,
+                    skills_signature=skills_signature,
                 )
             )
 
@@ -488,6 +537,23 @@ async def astream_ptc_workflow(
         # Note: agent.md is injected dynamically by WorkspaceContextMiddleware
         # on every model call, ensuring it's always the latest content.
         from src.server.app.workspace_sandbox import _set_cached_signed_url
+        from src.server.services.egress.direct_tools import (
+            DirectMCPBinding,
+            bind_direct_mcp_tools,
+        )
+
+        # One relay session per directly bound server, held for the run.
+        # A failure here costs the turn those tools, not the turn: the same
+        # bargain the Flash path makes, and the only one that makes sense when
+        # the rest of the toolset is still reachable through the sandbox.
+        try:
+            direct_mcp = await bind_direct_mcp_tools(session, user_id=user_id)
+        except Exception:
+            logger.warning(
+                "[PTC_CHAT] direct MCP binding failed; running without",
+                exc_info=True,
+            )
+            direct_mcp = DirectMCPBinding(user_id=user_id)
 
         ptc_graph = await build_ptc_graph_with_session(
             session=session,
@@ -512,6 +578,7 @@ async def astream_ptc_workflow(
             thread_id=thread_id,
             store=setup.store,
             on_signed_url=_set_cached_signed_url,
+            direct_mcp=direct_mcp,
         )
 
         _mark_phase("graph_build")
@@ -535,11 +602,16 @@ async def astream_ptc_workflow(
         # Only set on normal turns: HITL resumes and checkpoint replays carry no new
         # user message, so the middleware must not inject (mirrors the prior guard).
         if not request.hitl_response and not is_checkpoint_replay:
-            skill_contexts = prepare_skill_contexts(messages, request, mode="ptc")
+            skill_contexts = prepare_skill_contexts(
+                messages, request, mode="ptc",
+                extra_commands=user_skill_commands(config),
+                allowed_skills=turn_skill_names(config, "ptc"),
+            )
         else:
             skill_contexts = None
         skill_dirs = (
             [local_dir for local_dir, _ in config.skills.local_skill_dirs_with_sandbox()]
+            + ([config.user_skill_dir] if config.user_skill_dir else [])
             if skill_contexts
             else None
         )
@@ -627,7 +699,12 @@ async def astream_ptc_workflow(
             # Pydantic validates this into HITLResponse models, but LangChain's
             # HumanInTheLoopMiddleware expects plain dicts (subscriptable).
             resume_payload = serialize_hitl_response_map(request.hitl_response)
-            input_state = Command(resume=resume_payload)
+            input_state = Command(
+                resume=resume_payload,
+                # None for a resume that was not credit-paused, which is what
+                # ``update`` defaults to anyway.
+                update=await build_credit_resume_update(thread_id, run_id),
+            )
             logger.info(
                 f"[PTC_RESUME] thread_id={thread_id} "
                 f"hitl_response keys={list(request.hitl_response.keys())}"
@@ -672,11 +749,13 @@ async def astream_ptc_workflow(
             logger.info(f"[PTC_CHAT] Plan mode enabled for thread_id={thread_id}")
 
         # =====================================================================
-        # Inline Context Injection (directive + widget)
+        # Inline Context Injection (directive + widget + chart selection)
         # =====================================================================
         # Each appends a <system-reminder> to the last user message, in order.
-        # The target is None on HITL-resume / checkpoint-replay (input_state is
-        # a Command / None there), so injection is skipped on those turns.
+        # Widget image bytes ride MultimodalContext(type='image') above; chart
+        # selections carry structured bounds + OHLCV bars (no screenshot). The
+        # target is None on HITL-resume / checkpoint-replay (input_state is a
+        # Command / None there), so injection is skipped on those turns.
         directives = parse_directive_contexts(request.additional_context)
         inline_target = (
             input_state["messages"]
@@ -688,6 +767,7 @@ async def astream_ptc_workflow(
             [
                 build_directive_reminder(directives),
                 build_widget_context_reminder(widget_ctxs),
+                build_chart_selection_reminder(chart_selections),
             ],
         )
 
@@ -720,7 +800,6 @@ async def astream_ptc_workflow(
             token_callback=token_callback,
             request=request,
             effective_model=effective_model,
-            is_byok=is_byok,
             recursion_limit=get_ptc_recursion_limit(),
             plan_mode=effective_plan_mode,
             skill_contexts=skill_contexts,
@@ -776,27 +855,43 @@ async def astream_ptc_workflow(
             # no longer drop the dispatch. This callback keeps only
             # best-effort sandbox housekeeping.
 
-            # Post-completion sandbox housekeeping (parallel)
+            # Post-completion sandbox housekeeping. Reconcile BEFORE the
+            # backup — the reconcile mutates the skills ledger and dirs, and
+            # the file backup should capture the converged state.
             ws_manager = WorkspaceManager.get_instance()
-            housekeeping = [ws_manager._backup_files_to_db(request.workspace_id)]
             if session and session.sandbox:
-                housekeeping.append(session.sandbox.sync_skills_lock())
-            results = await asyncio.gather(*housekeeping, return_exceptions=True)
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    task_name = "file backup" if i == 0 else "lock sync"
-                    logger.warning(
-                        f"[PTC_COMPLETE] {task_name} failed for {thread_id}: {result}"
-                    )
+                from src.server.services.user_skills.reconcile import (
+                    reconcile_workspace_skills,
+                )
+
+                await reconcile_workspace_skills(
+                    session.sandbox,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    source="post_turn",
+                )
+            try:
+                await ws_manager._backup_files_to_db(request.workspace_id)
+            except Exception as e:
+                logger.warning(
+                    f"[PTC_COMPLETE] file backup failed for {thread_id}: {e}"
+                )
 
         # Start workflow in background with event buffering
         await manager.start_run(
             thread_id=thread_id,
             run_id=run_id,
-            workflow_generator=handler.stream_workflow(
-                graph=ptc_graph,
-                input_state=input_state,
-                config=graph_config,
+            workflow_generator=run_with_credit_gate(
+                credit_gate,
+                # Relay sessions for direct tools open and close with the
+                # run, in the run's task, not with this request's generator.
+                direct_mcp.drive(
+                    handler.stream_workflow(
+                        graph=ptc_graph,
+                        input_state=input_state,
+                        config=graph_config,
+                    )
+                ),
             ),
             metadata={
                 "workspace_id": workspace_id,
@@ -807,7 +902,6 @@ async def astream_ptc_workflow(
                 "start_time": start_time,
                 "msg_type": "ptc",
                 "is_byok": is_byok,
-                "llm_runtime": query_metadata.get("llm_runtime"),
                 "burst_slot_id": request.burst_slot_id,
                 "locale": request.locale,
                 "timezone": timezone_str,

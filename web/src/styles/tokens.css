@@ -153,6 +153,29 @@ html {
 
   /* Dot-grid retired from work surfaces — kept barely-visible for empty states. */
   --color-dot-grid: rgba(255, 255, 255, 0.05);
+  /* Identity tiles (Plugins rows): a name hashes to one of these eight muted
+     tints, so every server/skill/plugin keeps a recognizable mark across
+     surfaces. Identity is meaning — the one sanctioned hue system outside
+     accent + semantic colors; fills stay translucent so the tiles annotate
+     rather than brand. */
+  --color-identity-0-bg: hsla(212, 55%, 60%, 0.16);
+  --color-identity-0-fg: hsl(212, 62%, 72%);
+  --color-identity-1-bg: hsla(175, 55%, 52%, 0.16);
+  --color-identity-1-fg: hsl(175, 45%, 60%);
+  --color-identity-2-bg: hsla(132, 50%, 55%, 0.16);
+  --color-identity-2-fg: hsl(132, 40%, 64%);
+  --color-identity-3-bg: hsla(95, 45%, 55%, 0.16);
+  --color-identity-3-fg: hsl(95, 38%, 62%);
+  --color-identity-4-bg: hsla(45, 60%, 55%, 0.16);
+  --color-identity-4-fg: hsl(45, 55%, 64%);
+  --color-identity-5-bg: hsla(15, 60%, 58%, 0.16);
+  --color-identity-5-fg: hsl(15, 60%, 71%);
+  --color-identity-6-bg: hsla(275, 55%, 62%, 0.16);
+  --color-identity-6-fg: hsl(275, 55%, 76%);
+  --color-identity-7-bg: hsla(322, 55%, 60%, 0.16);
+  --color-identity-7-fg: hsl(322, 50%, 72%);
+
+  --color-bg-card-hover: hsl(220 4% 17%);
   --color-bg-card-gradient: rgba(255, 255, 255, 0.04);
   --color-bg-card-border: rgba(255, 255, 255, 0.10);
 
@@ -293,6 +316,26 @@ html {
 
   /* Solid white tile + crisp system hairline — the 75%-white wash the dark
      theme uses for glass is invisible against the white page. */
+  /* Identity tiles — same hues as dark, tuned for the white page: slightly
+     denser fills, darker monograms. */
+  --color-identity-0-bg: hsla(212, 60%, 45%, 0.12);
+  --color-identity-0-fg: hsl(212, 60%, 38%);
+  --color-identity-1-bg: hsla(175, 55%, 40%, 0.12);
+  --color-identity-1-fg: hsl(175, 60%, 26%);
+  --color-identity-2-bg: hsla(132, 50%, 40%, 0.12);
+  --color-identity-2-fg: hsl(132, 50%, 28%);
+  --color-identity-3-bg: hsla(95, 45%, 40%, 0.12);
+  --color-identity-3-fg: hsl(95, 48%, 27%);
+  --color-identity-4-bg: hsla(45, 70%, 45%, 0.14);
+  --color-identity-4-fg: hsl(45, 80%, 27%);
+  --color-identity-5-bg: hsla(15, 65%, 48%, 0.12);
+  --color-identity-5-fg: hsl(15, 65%, 36%);
+  --color-identity-6-bg: hsla(275, 50%, 50%, 0.12);
+  --color-identity-6-fg: hsl(275, 45%, 40%);
+  --color-identity-7-bg: hsla(322, 55%, 48%, 0.12);
+  --color-identity-7-fg: hsl(322, 55%, 36%);
+
+  --color-bg-card-hover: #FAFAF8;
   --color-bg-card-gradient: #ffffff;
   --color-bg-card-border: #e8e8e6;
 

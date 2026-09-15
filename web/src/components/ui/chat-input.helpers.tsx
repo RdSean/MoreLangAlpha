@@ -34,6 +34,20 @@ export const BUILTIN_SLASH_COMMANDS = [
 ];
 
 /**
+ * Commands the product wants at the top of the menu.
+ *
+ * The skill half of the list is otherwise registry-ordered, which buries
+ * anything added late — and typing a bare `/` is how someone finds out what
+ * exists at all. Which commands deserve that first screen is a product
+ * decision, so it is stated here rather than left to the order a registry
+ * happens to be written in.
+ */
+const FEATURED_SLASH_COMMANDS: ReadonlySet<string> = new Set([
+  'book-to-skill',
+  'the-knowledge-guy',
+]);
+
+/**
  * Index of the `@`/`/` token the cursor is currently inside, or -1.
  *
  * Scans left from the cursor and stops at the first whitespace: the trigger
@@ -52,17 +66,24 @@ export function findTriggerIndex(value: string, cursorPos: number, trigger: '@' 
 }
 
 /**
- * Slash-menu sort key (lower sorts first). Prefix matches (name/alias starts
- * with the query, char-by-char) rank above substring-only matches; within a
- * tier, system/service commands rank above skills. Combined: prefix+system 0,
- * prefix+skill 1, substring+system 2, substring+skill 3.
+ * Slash-menu sort key (lower sorts first).
+ *
+ * Match quality comes first: a prefix match (the name or an alias starts with
+ * the query, char-by-char) beats a substring-only one. Within a match quality:
+ * featured commands, then system/service commands, then the rest of the
+ * skills. So a bare `/` opens with the featured skills and `/d` still puts
+ * `/dcf-model` above a featured command that merely contains a "d".
  */
 export function slashRank(item: SlashCommand, query: string): number {
   const isPrefix =
     item.name.toLowerCase().startsWith(query) ||
     !!item.aliases?.some((a) => a.toLowerCase().startsWith(query));
-  const isSkill = item.type === 'skill';
-  return (isPrefix ? 0 : 2) + (isSkill ? 1 : 0);
+  const tier = FEATURED_SLASH_COMMANDS.has(item.name)
+    ? 0
+    : item.type === 'skill'
+      ? 2
+      : 1;
+  return (isPrefix ? 0 : 10) + tier;
 }
 
 /** Derive a short display name from a model key string. */

@@ -73,7 +73,6 @@ def build_finalize_jobs(
     workspace_id: Optional[str] = None,
     run_seq: Optional[int] = None,
     interrupt_reason: Optional[str] = None,
-    suppress_lifecycle_hooks: bool = False,
 ) -> Callable[[str], List[HookJob]]:
     """The one decision table mapping a run's final status to its hook jobs.
 
@@ -91,12 +90,6 @@ def build_finalize_jobs(
     """
 
     def _jobs(final_status: str) -> List[HookJob]:
-        # Some service-owned PTC roots deliberately have no user-facing chat
-        # lifecycle. They still use the durable run ledger and SSE transport,
-        # but must not report back into a visible conversation or publish a
-        # generic user-feed spinner for a hidden workspace.
-        if suppress_lifecycle_hooks:
-            return []
         jobs: List[HookJob] = []
         is_ptc = msg_type == "ptc"
         rb_ptc = report_back_ptc_thread_id or thread_id
@@ -211,5 +204,4 @@ def build_finalize_jobs_from_run_row(
         run_seq=run.get("run_seq"),
         # The post-CAS row's column: NULL unless the CAS adopted 'interrupted'.
         interrupt_reason=run.get("interrupt_reason"),
-        suppress_lifecycle_hooks=bool(meta.get("suppress_lifecycle_hooks")),
     )

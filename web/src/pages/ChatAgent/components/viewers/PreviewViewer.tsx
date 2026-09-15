@@ -1,19 +1,28 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { RefreshCw, ExternalLink, X, Globe, AlertCircle } from 'lucide-react';
 import { Loader } from '@/components/ui/loader';
+import PdfViewer from './PdfViewer';
 import './PreviewViewer.css';
 import type { PreviewData } from '../../hooks/utils/types';
 
 interface PreviewViewerProps extends Pick<PreviewData, 'url' | 'port' | 'title' | 'loading' | 'error'> {
   onClose: () => void;
   onRefresh?: () => void;
+  /** Override the iframe sandbox for trusted same-origin document previews. */
+  sandbox?: string | null;
+  /** Render a fetched PDF buffer with PDF.js instead of an iframe. */
+  documentData?: ArrayBuffer | Uint8Array;
+  documentViewMode?: 'continuous' | 'single';
+  documentPage?: number;
+  onDocumentPageChange?: (page: number) => void;
+  onDocumentPageCount?: (pages: number) => void;
   /** When true, a frosted overlay covers the iframe for smooth resizing. */
   isDragging?: boolean;
   /** Monotonic counter — when it changes, force iframe reload even if URL is the same. */
   reloadToken?: number;
 }
 
-export default function PreviewViewer({ url, port, title, loading: externalLoading, error: externalError, onClose, onRefresh, isDragging, reloadToken }: PreviewViewerProps) {
+export default function PreviewViewer({ url, port, title, loading: externalLoading, error: externalError, onClose, onRefresh, sandbox = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals', documentData, documentViewMode = 'single', documentPage, onDocumentPageChange, onDocumentPageCount, isDragging, reloadToken }: PreviewViewerProps) {
   const [loading, setLoading] = useState(true);
   const [iframeKey, setIframeKey] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -115,6 +124,16 @@ export default function PreviewViewer({ url, port, title, loading: externalLoadi
       ) : (
         /* Normal iframe view */
         <>
+          {documentData ? (
+            <PdfViewer
+              data={documentData}
+              viewMode={documentViewMode}
+              pageNumber={documentPage}
+              onPageChange={onDocumentPageChange}
+              onNumPagesChange={onDocumentPageCount}
+            />
+          ) : (
+            <>
           {loading && !showDragOverlay && (
             <div className="preview-viewer-loading">
               <Loader size={24} className="text-[color:var(--color-text-tertiary)]" />
@@ -137,10 +156,12 @@ export default function PreviewViewer({ url, port, title, loading: externalLoadi
             src={url}
             className="preview-viewer-frame"
             title={`Preview - port ${port}`}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+            {...(sandbox ? { sandbox } : {})}
             onLoad={handleIframeLoad}
             style={isDragging ? { pointerEvents: 'none' } : undefined}
           />
+            </>
+          )}
         </>
       )}
     </div>

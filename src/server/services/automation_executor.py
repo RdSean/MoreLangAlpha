@@ -12,8 +12,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from ptc_agent.config.agent import CredentialSource
+from fastapi import HTTPException
+
 from src.server.database import automation as auto_db
+from src.server.models.automation import PriceTriggerConfig, RetriggerMode
 from src.server.database.api_keys import is_byok_active
 from src.server.database.oauth_tokens import has_any_oauth_token
 from src.server.database.workspace import get_or_create_flash_workspace
@@ -151,43 +153,18 @@ class AutomationExecutor:
         thread_id = None
         workspace_id = None
         try:
-            # ─── Credential resolution + credit gate ───────────────
+            # ─── Credential check + credit gate ───────────────────
             # BYOK and OAuth checks are independent — run concurrently.
-            # ``has_byok`` remains an input to resolution; the resolved source
-            # decides whether billing follows the non-platform path.
             has_byok, has_oauth = await asyncio.gather(
                 is_byok_active(user_id), has_any_oauth_token(user_id)
             )
-
-            # ─── Determine thread_id without persistence ───────────
-            thread_strategy = automation.get("thread_strategy", "new")
-            needs_new_thread = not (
-                thread_strategy == "continue" and automation.get("conversation_thread_id")
-            )
-            if not needs_new_thread:
-                thread_id = str(automation["conversation_thread_id"])
-            else:
-                thread_id = str(uuid4())
-
-            # Resolve before creating a workspace/thread or calling a workflow:
-            # a student household with no selected model must fail pre-run.
-            from src.server.app import setup
-            from src.server.services.llm.config import resolve_llm_config
-
-            config = await resolve_llm_config(
-                setup.agent_config,
-                user_id,
-                automation.get("llm_model"),
-                has_byok,
-                mode=agent_mode,
-                thread_id=thread_id,
-            )
-            resolved_is_byok = config.credential_source in (
-                CredentialSource.OAUTH,
-                CredentialSource.BYOK,
-                CredentialSource.HOUSEHOLD,
-            )
-            await enforce_credit_limit(user_id, byok=resolved_is_byok)
+            # has_cred is what the credit gate reports: an OAuth turn pays its
+            # own vendor bill just as a BYOK one does. The workflow's is_byok is
+            # a different question — whether to attempt the BYOK ladder — so it
+            # keys off has_byok alone, or an OAuth-only user gets a futile
+            # BYOK prefetch.
+            has_cred = has_byok or has_oauth
+            await enforce_credit_limit(user_id, byok=has_cred)
 
             # ─── Resolve workspace ─────────────────────────────────
             if agent_mode == "flash":
@@ -202,7 +179,13 @@ class AutomationExecutor:
                     )
                 workspace_id = str(ws_id)
 
-            if needs_new_thread:
+            # ─── Determine thread_id ───────────────────────────────
+            thread_strategy = automation.get("thread_strategy", "new")
+
+            if thread_strategy == "continue" and automation.get("conversation_thread_id"):
+                thread_id = str(automation["conversation_thread_id"])
+            else:
+                thread_id = str(uuid4())
                 # If strategy is 'continue' but no pinned thread yet, pin this one
                 if thread_strategy == "continue":
                     await auto_db.update_automation(
@@ -248,8 +231,7 @@ class AutomationExecutor:
                     run_id=run_id,
                     user_input=instruction,
                     user_id=user_id,
-                    is_byok=resolved_is_byok,
-                    config=config,
+                    is_byok=has_byok,
                 )
             else:
                 generator = astream_ptc_workflow(
@@ -259,8 +241,7 @@ class AutomationExecutor:
                     user_input=instruction,
                     user_id=user_id,
                     workspace_id=workspace_id,
-                    is_byok=resolved_is_byok,
-                    config=config,
+                    is_byok=has_byok,
                 )
 
             # Notify webhooks: started
@@ -320,10 +301,29 @@ class AutomationExecutor:
                 await auto_db.update_automation_next_run(
                     automation_id, next_run_at=None, status="completed"
                 )
+            elif automation["trigger_type"] == "price":
+                tc = automation.get("trigger_config") or {}
+                config = PriceTriggerConfig(**tc)
+                if config.retrigger.mode == RetriggerMode.ONE_SHOT:
+                    await auto_db.update_automation_next_run(
+                        automation_id, next_run_at=None, status="completed"
+                    )
+                else:
+                    # Recurring — restore to active only if still 'executing'
+                    # (user may have paused/disabled during execution)
+                    await auto_db.restore_executing_to_active(automation_id)
+
             safe_add(automation_executions, 1, {"status": "success", "trigger": _trigger})
             _exec_span.set_attribute("status", "success")
 
         except Exception as e:
+            # A 503 here is our own outage, not this automation's fault — the
+            # credit gate fails closed when the quota service gives no verdict.
+            # The run is still recorded as failed, but it must not count toward
+            # auto-disable, or a quota-service restart landing on a schedule
+            # window would quietly switch off a user's automation.
+            ours_not_theirs = isinstance(e, HTTPException) and e.status_code == 503
+
             error_msg = f"{type(e).__name__}: {str(e)[:500]}"
             logger.error(
                 f"[AUTOMATION_EXEC] Execution failed: "
@@ -342,7 +342,18 @@ class AutomationExecutor:
             # Increment failure count (may auto-disable). A credit-gate 429 from
             # enforce_credit_limit lands here too — intentionally counted as a
             # failure so a persistently zero-credit automation auto-disables.
-            await auto_db.increment_failure_count(automation_id)
+            if ours_not_theirs:
+                logger.warning(
+                    f"[AUTOMATION_EXEC] Not counting a strike against "
+                    f"automation_id={automation_id}: the failure was ours"
+                )
+            else:
+                await auto_db.increment_failure_count(automation_id)
+
+            # Restore price automations from 'executing' to 'active' on failure
+            # (increment_failure_count may have set 'disabled' — only restore if still 'executing')
+            if automation.get("trigger_type") == "price":
+                await auto_db.restore_executing_to_active(automation_id)
 
             # Notify webhooks: failed
             delivery_result = await self._fire_webhook(

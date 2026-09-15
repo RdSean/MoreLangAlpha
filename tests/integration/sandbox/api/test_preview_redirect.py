@@ -72,7 +72,7 @@ async def mock_session(sandbox):
     session.sandbox = sandbox
     session.mcp_registry = MagicMock()
     session.mcp_registry.connectors = MagicMock()
-    session.mcp_registry.connectors.keys.return_value = ["search", "documents"]
+    session.mcp_registry.connectors.keys.return_value = ["fmp", "sec"]
     return session
 
 

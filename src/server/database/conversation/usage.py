@@ -60,9 +60,6 @@ async def create_usage_record(
                 infrastructure_credits,
                 total_credits,
                 is_byok,
-                household_id,
-                credential_source,
-                model_snapshot,
                 created_at
             ) VALUES (
                 %(conversation_usage_id)s,
@@ -78,9 +75,6 @@ async def create_usage_record(
                 %(infrastructure_credits)s,
                 %(total_credits)s,
                 %(is_byok)s,
-                %(household_id)s,
-                %(credential_source)s,
-                %(model_snapshot)s,
                 %(created_at)s
             )
         """,
@@ -98,13 +92,6 @@ async def create_usage_record(
                 "infrastructure_credits": usage_data["infrastructure_credits"],
                 "total_credits": usage_data["total_credits"],
                 "is_byok": usage_data.get("is_byok", False),
-                "household_id": usage_data.get("household_id"),
-                "credential_source": usage_data.get("credential_source"),
-                "model_snapshot": (
-                    Json(usage_data["model_snapshot"])
-                    if usage_data.get("model_snapshot") is not None
-                    else None
-                ),
                 "created_at": usage_data["created_at"],
             },
         )

@@ -7,3 +7,6 @@
 *.sh        text eol=lf
 Dockerfile  text eol=lf
 Dockerfile.* text eol=lf
+
+# Deterministic document fixtures are binary test assets, not source text.
+/tests/fixtures/documents/*.pdf binary

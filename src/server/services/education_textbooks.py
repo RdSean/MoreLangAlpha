@@ -271,11 +271,25 @@ async def get_parent_textbook(
 
 
 def _managed_skill_hash(skill_name: str) -> str:
-    source = Path(__file__).resolve().parents[3] / "skills" / skill_name / "SKILL.md"
+    # The managed teaching skills ship in a bundle, so the source is found
+    # through the same chain the agent's skill delivery uses rather than a
+    # repo-relative path.
+    source = _managed_skill_source_root(skill_name) / "SKILL.md"
     try:
         return hashlib.sha256(source.read_bytes()).hexdigest()
     except OSError as exc:
         raise TextbookError("教材教学加工能力当前不可用") from exc
+
+
+def _managed_skill_source_root(skill_name: str) -> Path:
+    """Host directory holding one managed skill, wherever the bundle puts it."""
+    from ptc_agent.config.agent import host_skill_dirs
+
+    for root in host_skill_dirs():
+        candidate = root / skill_name
+        if (candidate / "SKILL.md").is_file():
+            return candidate
+    raise TextbookError("教材教学加工能力当前不可用")
 
 
 def _teaching_actions(*, status: str) -> list[str]:

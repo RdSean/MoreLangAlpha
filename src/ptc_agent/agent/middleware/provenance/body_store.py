@@ -1,10 +1,11 @@
 """Shared background writer for content-addressed provenance result bodies.
 
-``ProvenanceMiddleware`` persists result bodies to the global content-addressed
-store off its critical path. This module owns the
-``src.server.database.provenance_bodies`` import, the bounded-concurrency task
-lifecycle, and exception consumption. The task set is caller-owned (passed in),
-so concurrent subagents on a shared instance cannot mix data.
+Both ``ProvenanceMiddleware`` and ``MarketWatchMiddleware`` persist result bodies
+to the global content-addressed store OFF their critical path. This module owns
+the ``src.server.database.provenance_bodies`` import, the bounded-concurrency task
+lifecycle, and exception consumption so neither middleware reimplements it. The
+task set is caller-owned (passed in), so each middleware instance keeps its own —
+concurrent subagents on a shared instance can't mix data.
 """
 
 from __future__ import annotations

@@ -42,11 +42,13 @@ def test_no_user_id_closes_every_user_scoped_surface(workflows):
     assert not gates.user_memory
     assert not gates.workspace_memory
     assert not gates.memo
+    assert not gates.user_data
     assert not gates.workflow_fs
 
 
-def test_no_store_closes_store_backed_routes(workflows):
-    """Without a LangGraph store, no store-backed filesystem route is enabled."""
+def test_no_store_closes_the_store_routes_but_not_the_user_data_backend(workflows):
+    """The user-profile backend reads the application DB, not the LangGraph
+    store, so it is gated on identity alone."""
     workflows(True)
 
     gates = _resolve_identity_gates(
@@ -59,6 +61,7 @@ def test_no_store_closes_store_backed_routes(workflows):
     assert not gates.memory
     assert not gates.memo
     assert not gates.workflow_fs
+    assert gates.user_data
 
 
 def test_workspace_memory_needs_a_workspace_as_well_as_a_user(workflows):

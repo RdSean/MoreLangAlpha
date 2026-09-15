@@ -17,6 +17,9 @@ from ptc_agent.config.agent import SkillsConfig
 
 NATIVE_BOOK_SKILLS = ("book-to-skill", "the-knowledge-guy")
 REPO_ROOT = Path(__file__).resolve().parents[4]
+#: This deployment's own skills travel as a bundle, so the host sources are
+#: the bundles followed by the operator's directory.
+LOCAL_BUNDLE = REPO_ROOT / "plugins/langalpha_local/skills"
 
 
 @pytest.mark.parametrize("name", NATIVE_BOOK_SKILLS)
@@ -40,16 +43,17 @@ def test_native_book_learning_skills_are_ptc_only_registry_entries(name):
 
 def test_native_book_learning_skills_use_the_sandbox_skills_runtime_root():
     """PTC commands resolve generated knowledge from the sandbox sync destination."""
-    project_dir, sandbox_dir = SkillsConfig().local_skill_dirs_with_sandbox(cwd=REPO_ROOT)[-1]
+    sources = SkillsConfig().local_skill_dirs_with_sandbox()
+    sandbox_dirs = {sandbox for _, sandbox in sources}
 
-    assert Path(project_dir) == REPO_ROOT / "skills"
-    assert sandbox_dir == "/home/workspace/.agents/skills"
+    assert sandbox_dirs == {"/home/workspace/.agents/skills"}
+    assert str(LOCAL_BUNDLE) in [source for source, _ in sources]
 
-    book_to_skill = (REPO_ROOT / "skills/book-to-skill/SKILL.md").read_text(encoding="utf-8")
-    knowledge_guy = (REPO_ROOT / "skills/the-knowledge-guy/SKILL.md").read_text(
+    book_to_skill = (LOCAL_BUNDLE / "book-to-skill/SKILL.md").read_text(encoding="utf-8")
+    knowledge_guy = (LOCAL_BUNDLE / "the-knowledge-guy/SKILL.md").read_text(
         encoding="utf-8"
     )
-    walk_mode = (REPO_ROOT / "skills/the-knowledge-guy/walk-mode.md").read_text(
+    walk_mode = (LOCAL_BUNDLE / "the-knowledge-guy/walk-mode.md").read_text(
         encoding="utf-8"
     )
 

@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { InlineAutomationCard } from './InlineAutomationCards';
-import { InlinePreviewCard } from './InlinePreviewCard';
 
-export const INLINE_ARTIFACT_TOOLS = new Set([
-  'check_automations',
-  'create_automation',
-  'GetPreviewUrl',
-]);
+// The renderer table lives in `artifactRegistry.ts`; both lookups are derived
+// from it there and re-exported here so existing importers are unaffected.
+export {
+  ARTIFACT_RENDERERS,
+  ARTIFACT_TYPES_WITHOUT_INLINE_CARD,
+  INLINE_ARTIFACT_MAP,
+  INLINE_ARTIFACT_TOOLS,
+} from './artifactRegistry';
 
 /** Build a Google favicon service URL for a web result. */
 export function googleFaviconUrl(domain: string): string {
@@ -41,11 +42,3 @@ export function FaviconImg({ src, domain, size = 14 }: { src: string; domain: st
 
   return <img src={src} alt="" width={size} height={size} style={{ borderRadius: 2, flexShrink: 0 }} onError={() => setFailed(true)} />;
 }
-
-export const INLINE_ARTIFACT_MAP: Record<
-  string,
-  React.ComponentType<{ artifact: Record<string, unknown>; onClick?: () => void }>
-> = {
-  automations: InlineAutomationCard,
-  preview_url: InlinePreviewCard,
-};

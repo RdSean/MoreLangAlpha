@@ -13,9 +13,32 @@ const e2eMockSource = readFileSync(
 );
 
 describe('generic workspace locale boundary', () => {
-  it('keeps only the workspace overview in the dashboard namespace', () => {
-    expect(Object.keys(enUS.dashboard)).toEqual(['overview']);
-    expect(Object.keys(zhCN.dashboard)).toEqual(['overview']);
+  it('keeps the workspace overview and the widget canvas in the dashboard namespace', () => {
+    // The dashboard is two surfaces: the classic workspace overview, and the
+    // widget canvas restored from upstream, plus the control that switches
+    // between them. Nothing else belongs in the namespace — a
+    // `dashboard.market*` block would mean a finance widget crept back in.
+    expect(Object.keys(enUS.dashboard)).toEqual(['overview', 'widgets', 'layoutToggle']);
+    expect(Object.keys(zhCN.dashboard)).toEqual(['overview', 'widgets', 'layoutToggle']);
+  });
+
+  it('keeps the canvas free of finance widget copy', () => {
+    // The layout framework came back; the finance widgets it used to host did
+    // not. A locale key for one of those widgets is the earliest sign that one
+    // is being re-registered, so assert the subtrees are gone by name.
+    const retiredWidgetLocales = [
+      'marketsOverview', 'newsFeed', 'earningsCalendar', 'watchlist',
+      'portfolio', 'portfolioWatchlist', 'insightBrief', 'miniChartGrid',
+      'chart', 'holdings', 'tickerTape', 'stockHeatmap', 'cryptoHeatmap',
+      'forexHeatmap', 'etfHeatmap', 'economicEvents', 'economicMap',
+      'technicals', 'movers', 'symbolSpotlight', 'singleTicker', 'symbolInfo',
+      'companyProfile', 'companyFinancials', 'stockScreener',
+      'cryptoScreener', 'topStories',
+    ];
+    for (const key of retiredWidgetLocales) {
+      expect(enUS.dashboard.widgets).not.toHaveProperty(key);
+      expect(zhCN.dashboard.widgets).not.toHaveProperty(key);
+    }
   });
 
   it('does not ship retired market or onboarding locale namespaces', () => {
@@ -26,14 +49,33 @@ describe('generic workspace locale boundary', () => {
   });
 
   it('does not retain financial product language in either catalog', () => {
-    expect(JSON.stringify(enUS)).not.toMatch(/TradingView|Watchlist|Price Alert|MarketView|market watch|SEC filings|Stock Prices|Options chain|Pre-Market|Portfolio/i);
-    expect(JSON.stringify(zhCN)).not.toMatch(/TradingView|自选股|投资组合|价格提醒|财报|证券文件|实时行情|市场总览|股票价格|期权链|盘前|持仓/);
+    // The brokerage consent dialog is the one deliberate exception: its
+    // capability groups name what a connection may do, so `watchlists` and
+    // `alerts` have to say so. Everything else stays out — a retired market
+    // surface must not creep back in through a label.
+    const withoutBrokerageConsent = (catalog: unknown) => {
+      const clone = structuredClone(catalog) as {
+        plugins?: { brokerages?: { capabilities?: unknown } };
+      };
+      if (clone.plugins?.brokerages) delete clone.plugins.brokerages.capabilities;
+      return JSON.stringify(clone);
+    };
+    expect(withoutBrokerageConsent(enUS)).not.toMatch(/TradingView|Watchlist|Price Alert|MarketView|market watch|SEC filings|Stock Prices|Options chain|Pre-Market|Portfolio/i);
+    expect(withoutBrokerageConsent(zhCN)).not.toMatch(/TradingView|自选股|投资组合|价格提醒|财报|证券文件|实时行情|市场总览|股票价格|期权链|盘前|持仓/);
   });
 
   it('does not retain retired financial packages or E2E response fixtures', () => {
-    expect(Object.keys(packageJson.dependencies)).not.toEqual(
-      expect.arrayContaining(['lightweight-charts', 'react-grid-layout', 'recharts']),
-    );
+    // Checked one package at a time, and that is a fix rather than a style
+    // choice. The previous form was
+    //   expect(deps).not.toEqual(expect.arrayContaining(['lightweight-charts', 'recharts']))
+    // which only fails when *every* listed package is present — so it happily
+    // permitted any subset, and nobody noticed until `recharts` was added back
+    // and the guard still passed.
+    //
+    // What is deliberately allowed now: `react-grid-layout` (a pure layout
+    // library the dashboard canvas needs) and `recharts` (the Usage page's bar
+    // chart). Neither carries market data.
+    expect(Object.keys(packageJson.dependencies)).not.toContain('lightweight-charts');
     expect(e2eMockSource).not.toMatch(
       /market-data|watchlist|portfolio|calendar\/earnings|sampleNewsArticle|sampleIndexSnapshot/i,
     );

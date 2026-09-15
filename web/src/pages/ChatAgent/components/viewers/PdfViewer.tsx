@@ -13,9 +13,13 @@ const DEFAULT_ZOOM_INDEX = 2; // 1.0
 
 interface PdfViewerProps {
   data: ArrayBuffer | Uint8Array;
+  viewMode?: 'continuous' | 'single';
+  pageNumber?: number;
+  onPageChange?: (page: number) => void;
+  onNumPagesChange?: (pages: number) => void;
 }
 
-export default function PdfViewer({ data }: PdfViewerProps) {
+export default function PdfViewer({ data, viewMode = 'single', pageNumber: controlledPageNumber, onPageChange, onNumPagesChange }: PdfViewerProps) {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
@@ -26,18 +30,33 @@ export default function PdfViewer({ data }: PdfViewerProps) {
   const onDocumentLoadSuccess = useCallback(({ numPages: n }: { numPages: number }) => {
     setNumPages(n);
     setPageNumber(1);
-  }, []);
+    onNumPagesChange?.(n);
+  }, [onNumPagesChange]);
 
-  const goToPrev = () => setPageNumber((p) => Math.max(1, p - 1));
-  const goToNext = () => setPageNumber((p) => Math.min(numPages || 1, p + 1));
+  const currentPage = controlledPageNumber ?? pageNumber;
+  const changePage = (nextPage: number) => {
+    const boundedPage = Math.max(1, Math.min(numPages || nextPage, nextPage));
+    setPageNumber(boundedPage);
+    onPageChange?.(boundedPage);
+  };
+  const goToPrev = () => changePage(currentPage - 1);
+  const goToNext = () => changePage(currentPage + 1);
   const zoomIn = () => setZoomIndex((i) => Math.min(ZOOM_STEPS.length - 1, i + 1));
   const zoomOut = () => setZoomIndex((i) => Math.max(0, i - 1));
 
-  // Memoize once — pdf.js transfers the buffer to its web worker which detaches it,
-  // so re-creating Uint8Array on subsequent renders would fail.
+  // pdf.js posts the bytes to its worker as a transferable — `sendWithPromise(
+  // "GetDocRequest", params, [data.buffer])` in pdf.mjs — which DETACHES the
+  // buffer it was handed. Callers keep their own copy for as long as the viewer
+  // is on screen (the documents drawer refetches only when the document or the
+  // drawer changes, so switching tabs back to the original file remounts this
+  // component with the same buffer), so pdf.js gets a COPY and theirs survives.
+  // A view — `new Uint8Array(data)` — would be detached along with it, and the
+  // next mount would fail to load a zero-byte buffer.
   const fileData = useMemo(() => {
     if (!data) return null;
-    const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+    // Both branches copy: ArrayBuffer.prototype.slice makes a new buffer, and
+    // the Uint8Array constructor copies when handed another typed array.
+    const bytes = data instanceof ArrayBuffer ? new Uint8Array(data.slice(0)) : new Uint8Array(data);
     return { data: bytes };
   }, [data]);
 
@@ -49,13 +68,13 @@ export default function PdfViewer({ data }: PdfViewerProps) {
       {/* Controls */}
       <div className="pdf-controls">
         <div className="pdf-nav">
-          <button onClick={goToPrev} disabled={pageNumber <= 1} className="pdf-btn">
+          <button onClick={goToPrev} disabled={viewMode !== 'single' || currentPage <= 1} className="pdf-btn">
             Prev
           </button>
           <span className="pdf-page-info">
-            {pageNumber} / {numPages ?? '...'}
+            {currentPage} / {numPages ?? '...'}
           </span>
-          <button onClick={goToNext} disabled={pageNumber >= (numPages || 1)} className="pdf-btn">
+          <button onClick={goToNext} disabled={viewMode !== 'single' || currentPage >= (numPages || 1)} className="pdf-btn">
             Next
           </button>
         </div>
@@ -80,11 +99,11 @@ export default function PdfViewer({ data }: PdfViewerProps) {
             <div className="pdf-loading">Loading PDF...</div>
           }
         >
-          <Page
-            pageNumber={pageNumber}
-            scale={scale}
-            loading={<div className="pdf-loading">Rendering page...</div>}
-          />
+          {viewMode === 'continuous' && numPages
+            ? Array.from({ length: numPages }, (_, index) => (
+              <Page key={index + 1} pageNumber={index + 1} scale={scale} loading={<div className="pdf-loading">Rendering page...</div>} />
+            ))
+            : <Page pageNumber={currentPage} scale={scale} loading={<div className="pdf-loading">Rendering page...</div>} />}
         </Document>
       </div>
     </div>

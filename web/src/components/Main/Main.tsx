@@ -6,41 +6,25 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSyncUserLocale } from '@/hooks/useSyncUserLocale';
 import { ContextOverflowPill } from '@/components/ui/ContextOverflowPill';
 import StudentFlashChat from '@/pages/Education/StudentFlashChat';
+import { routeChunks } from './routeChunks';
 
-// Chunk thunks shared by the lazy components and preloadRouteChunk — import()
-// is deduped by the module system, so a preload and the lazy mount share one
-// network fetch.
-const routeChunks = {
-  dashboard: () => import('../../pages/Dashboard/DashboardRouter'),
-  chat: () => import('../../pages/ChatAgent/ChatAgent'),
-  automations: () => import('../../pages/Automations/Automations'),
-  education: () => import('../../pages/Education/EducationPage'),
-  createHomework: () => import('../../pages/Education/EducationPage'),
-  textbookLibrary: () => import('../../pages/Education/TextbooksPage'),
-  textbookDetail: () => import('../../pages/Education/TextbookDetailPage'),
-  studentLearning: () => import('../../pages/Education/StudentLearningPage'),
-  settings: () => import('../../pages/Settings/Settings'),
-};
+/** Keep OAuth return links created before the connectors -> plugins rename. */
+export function LegacyConnectorsRedirect() {
+  const location = useLocation();
+  return <Navigate to={`/plugins${location.search}${location.hash}`} replace />;
+}
 
 const Dashboard = React.lazy(routeChunks.dashboard);
 const ChatAgent = React.lazy(routeChunks.chat);
+const Documents = React.lazy(routeChunks.documents);
 const Automations = React.lazy(routeChunks.automations);
 const Education = React.lazy(routeChunks.education);
 const CreateHomework = React.lazy(async () => ({ default: (await routeChunks.createHomework()).CreateHomeworkPage }));
 const TextbookLibrary = React.lazy(routeChunks.textbookLibrary);
 const TextbookDetail = React.lazy(routeChunks.textbookDetail);
 const StudentLearning = React.lazy(routeChunks.studentLearning);
+const Plugins = React.lazy(routeChunks.plugins);
 const Settings = React.lazy(routeChunks.settings);
-
-/** Start downloading the chunk for `pathname` without rendering it, so the
- * shell can warm the target route while the /users/me gate is still
- * resolving instead of serializing the two network legs. Unknown segments
- * warm the dashboard chunk (the catch-all redirect's target). */
-export function preloadRouteChunk(pathname: string): void {
-  const chunkFor: Record<string, () => Promise<unknown>> = routeChunks;
-  const segment = pathname.split('/')[1] || 'dashboard';
-  void (chunkFor[segment] ?? routeChunks.dashboard)();
-}
 
 function Main() {
   const location = useLocation();
@@ -57,7 +41,10 @@ function Main() {
         <Route path="/chat/t/:threadId/:taskId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
         <Route path="/chat/t/:threadId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
         <Route path="/chat/:workspaceId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
+        <Route path="/documents" element={<Documents />} />
         <Route path="/automations" element={<Automations />} />
+        <Route path="/plugins" element={<Plugins />} />
+        <Route path="/connectors" element={<LegacyConnectorsRedirect />} />
         <Route path="/education" element={<Education />} />
         <Route path="/education/tasks/new" element={<CreateHomework />} />
         <Route path="/education/textbooks" element={<TextbookLibrary />} />

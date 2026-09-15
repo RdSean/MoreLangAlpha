@@ -1,86 +1,111 @@
-"""Unit tests for PDF text extraction with pdfplumber/pypdf fallback."""
+"""Unit tests for memo PDF extraction's shared-core boundary."""
 
 from __future__ import annotations
 
+import time
 from unittest.mock import patch
 
 import pytest
 
+from ptc_agent.agent.memo import pdf as memo_pdf
 from ptc_agent.agent.memo.pdf import (
     MemoPdfExtractionError,
+    MemoPdfTooManyPagesError,
     extract_pdf_text,
 )
+from src.utils.pdf_text import PdfPageLimitError, PdfTextBackend, PdfTextResult
+
+
+def _result(
+    markdown: str,
+    *,
+    backend: PdfTextBackend = "pdfplumber",
+) -> PdfTextResult:
+    return PdfTextResult(
+        markdown=markdown,
+        backend=backend,
+        extracted_pages=(1,) if markdown else (),
+        total_pages=1,
+    )
 
 
 class TestExtractPdfText:
     @pytest.mark.asyncio
-    async def test_pdfplumber_success_returns_text(self):
-        with patch(
-            "ptc_agent.agent.memo.pdf._pdfplumber_extract",
-            return_value="This is a PDF with plenty of readable content spanning multiple lines.",
-        ) as mock_plumber, patch(
-            "ptc_agent.agent.memo.pdf._pypdf_extract"
-        ) as mock_pypdf:
-            text = await extract_pdf_text(b"%PDF-1.4 fake")
-            assert "readable content" in text
-            mock_plumber.assert_called_once()
-            mock_pypdf.assert_not_called()
+    async def test_pdfplumber_timeout_still_gives_pypdf_a_full_attempt(
+        self,
+        monkeypatch,
+    ):
+        def extract_backend(content, *, backend, **kwargs):
+            if backend == "pdfplumber":
+                time.sleep(0.1)
+                return _result("too late")
+            return _result("x" * 100, backend="pypdf")
+
+        monkeypatch.setattr(memo_pdf, "_EXTRACTION_TIMEOUT_S", 0.01)
+        monkeypatch.setattr(
+            memo_pdf,
+            "extract_document_pdf_text_with_backend",
+            extract_backend,
+            raising=False,
+        )
+
+        text = await extract_pdf_text(b"%PDF-1.4 fake")
+
+        assert text == "x" * 100
 
     @pytest.mark.asyncio
-    async def test_pypdf_fallback_when_pdfplumber_returns_short(self):
-        # pdfplumber returns < MEMO_CONTENT_MIN_CHARS (50) — should try pypdf.
+    async def test_delegates_with_memo_limits_and_returns_readable_text(self):
+        content = b"%PDF-1.4 fake"
+        readable = "This is a PDF with plenty of readable content spanning lines."
         with patch(
-            "ptc_agent.agent.memo.pdf._pdfplumber_extract", return_value="tiny"
-        ), patch(
-            "ptc_agent.agent.memo.pdf._pypdf_extract",
-            return_value="x" * 100,
-        ) as mock_pypdf:
-            text = await extract_pdf_text(b"%PDF-1.4 fake")
-            assert len(text.strip()) >= 50
-            mock_pypdf.assert_called_once()
+            "ptc_agent.agent.memo.pdf.extract_document_pdf_text_with_backend",
+            return_value=_result(readable),
+        ) as shared_extract:
+            text = await extract_pdf_text(content)
+
+        assert text == readable
+        shared_extract.assert_called_once_with(
+            content,
+            backend="pdfplumber",
+            max_pages=500,
+            max_output_bytes=1_048_576,
+        )
 
     @pytest.mark.asyncio
-    async def test_pypdf_fallback_when_pdfplumber_raises(self):
+    async def test_empty_shared_result_raises_extraction_error(self):
         with patch(
-            "ptc_agent.agent.memo.pdf._pdfplumber_extract",
-            side_effect=RuntimeError("pdfplumber blew up"),
-        ), patch(
-            "ptc_agent.agent.memo.pdf._pypdf_extract",
-            return_value="x" * 100,
-        ) as mock_pypdf:
-            text = await extract_pdf_text(b"%PDF-1.4 fake")
-            assert text
-            mock_pypdf.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_both_empty_raises_extraction_error(self):
-        with patch(
-            "ptc_agent.agent.memo.pdf._pdfplumber_extract", return_value=""
-        ), patch(
-            "ptc_agent.agent.memo.pdf._pypdf_extract", return_value=""
+            "ptc_agent.agent.memo.pdf.extract_document_pdf_text_with_backend",
+            return_value=_result("", backend="pypdf"),
         ):
-            with pytest.raises(MemoPdfExtractionError) as exc:
+            with pytest.raises(MemoPdfExtractionError, match="readable text"):
                 await extract_pdf_text(b"%PDF-1.4 scan")
-            assert "readable text" in str(exc.value).lower()
 
     @pytest.mark.asyncio
-    async def test_both_below_minimum_raises(self):
+    async def test_short_shared_result_raises_extraction_error(self):
         with patch(
-            "ptc_agent.agent.memo.pdf._pdfplumber_extract", return_value="tiny"
-        ), patch(
-            "ptc_agent.agent.memo.pdf._pypdf_extract", return_value="also tiny"
+            "ptc_agent.agent.memo.pdf.extract_document_pdf_text_with_backend",
+            return_value=_result("tiny", backend="pypdf"),
         ):
             with pytest.raises(MemoPdfExtractionError):
                 await extract_pdf_text(b"%PDF-1.4 scan")
 
     @pytest.mark.asyncio
-    async def test_both_raise_raises_extraction_error(self):
+    async def test_shared_failure_raises_extraction_error(self):
         with patch(
-            "ptc_agent.agent.memo.pdf._pdfplumber_extract",
-            side_effect=RuntimeError("plumber"),
-        ), patch(
-            "ptc_agent.agent.memo.pdf._pypdf_extract",
-            side_effect=RuntimeError("pypdf"),
+            "ptc_agent.agent.memo.pdf.extract_document_pdf_text_with_backend",
+            side_effect=RuntimeError("both backends failed"),
         ):
             with pytest.raises(MemoPdfExtractionError):
                 await extract_pdf_text(b"%PDF-1.4 broken")
+
+    @pytest.mark.asyncio
+    async def test_page_limit_preserves_memo_specific_error(self):
+        with patch(
+            "ptc_agent.agent.memo.pdf.extract_document_pdf_text_with_backend",
+            side_effect=PdfPageLimitError(page_count=501, max_pages=500),
+        ):
+            with pytest.raises(
+                MemoPdfTooManyPagesError,
+                match="PDF has 501 pages; max is 500",
+            ):
+                await extract_pdf_text(b"%PDF-1.4 large")

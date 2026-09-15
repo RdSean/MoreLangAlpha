@@ -1,0 +1,155 @@
+.documents-preview-panel {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  width: 0;
+  min-width: 0;
+  flex: 0 0 0;
+  overflow: visible;
+  transition: width 220ms ease, flex-basis 220ms ease;
+}
+
+.documents-preview-panel.is-open {
+  width: min(42vw, 680px);
+  min-width: min(420px, 100vw);
+  flex-basis: min(42vw, 680px);
+}
+
+.documents-preview-drawer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  flex-direction: column;
+  border-left: 1px solid var(--color-border-muted);
+  background: var(--color-bg-canvas);
+  box-shadow: -12px 0 32px rgb(0 0 0 / 18%);
+  overflow: hidden;
+}
+
+.documents-preview-drawer.is-fullscreen { width: 100vw !important; height: 100vh; }
+
+.documents-preview-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -2px;
+  height: auto;
+}
+
+.documents-preview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--color-border-muted);
+  color: var(--color-text-primary);
+}
+
+.documents-preview-header h2 { margin: 0; font-size: 0.95rem; font-weight: 600; }
+.documents-preview-header [data-slot='badge'] { flex-shrink: 0; }
+.documents-preview-header-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+
+.documents-preview-tabs {
+  display: flex;
+  width: max-content;
+  max-width: calc(100% - 36px);
+  justify-content: flex-start;
+  gap: 3px;
+  margin: 10px 18px 0;
+  padding: 3px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 6px;
+  background: var(--color-border-muted);
+  flex-shrink: 0;
+}
+
+.documents-preview-tabs button,
+.documents-preview-mode-switch button {
+  border: 0;
+  border-radius: 4px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.documents-preview-tabs button[aria-selected='true'],
+.documents-preview-mode-switch button[aria-selected='true'] {
+  background: var(--color-bg-page);
+  color: var(--color-text-primary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+
+/* The original/parsed strip paints its active state with a pill that slides
+   between the two buttons (framer-motion layoutId), so the button itself stays
+   transparent and only the label rides above it. The rule above is unchanged
+   and still styles the continuous/single-page switch, which has no pill. */
+.documents-preview-tabs .documents-preview-tab {
+  position: relative;
+}
+
+.documents-preview-tabs button[aria-selected='true'].documents-preview-tab {
+  background: transparent;
+  box-shadow: none;
+}
+
+.documents-preview-tab-pill {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  background: var(--color-bg-page);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+
+.documents-preview-tab-label {
+  position: relative;
+  z-index: 1;
+}
+
+.documents-preview-body { position: relative; min-height: 0; flex: 1; overflow: hidden; }
+.documents-preview-content { min-height: 0; }
+.documents-preview-content > .documents-preview-state { position: absolute; inset: 0; }
+.documents-preview-markdown { min-height: 100%; overflow-y: auto; padding: 22px 24px 48px; }
+
+.documents-preview-source { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+.documents-preview-source-controls {
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-border-muted);
+  cursor: default;
+  flex-shrink: 0;
+}
+.documents-preview-mode-switch,
+.documents-preview-page-controls { display: flex; align-items: center; gap: 2px; }
+.documents-preview-page-number { min-width: 24px; color: var(--color-text-tertiary); font-size: 0.7rem; text-align: center; }
+.documents-preview-source-viewer { min-height: 0; flex: 1; overflow: hidden; }
+.documents-preview-source-viewer .preview-viewer-toolbar { display: none; }
+.documents-preview-source-viewer .preview-viewer-loading,
+.documents-preview-source-viewer .preview-viewer-resize-overlay { top: 0; }
+
+.documents-preview-state {
+  display: flex;
+  height: 100%;
+  min-height: 260px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 32px;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.documents-preview-state img { width: 130px; height: 120px; opacity: 0.62; }
+.documents-preview-state p { max-width: 300px; margin: 0; font-size: 0.85rem; }
+
+@media (max-width: 640px) {
+  .documents-preview-panel.is-open { width: 100vw; min-width: 0; flex-basis: 100vw; }
+  .documents-preview-divider { display: none; }
+}

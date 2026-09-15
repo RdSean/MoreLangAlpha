@@ -108,6 +108,38 @@ async def get_current_user_id(
 CurrentUserId = Annotated[str, Depends(get_current_user_id)]
 
 
+async def get_optional_user_id(request: Request) -> Optional[str]:
+    """Resolve the caller when credentials are present, otherwise return None.
+
+    This supports endpoints that expose an anonymous baseline and enrich it for
+    an authenticated user (for example the merged Skills listing). Invalid
+    credentials still follow the normal authentication failure path.
+    """
+    matched, user_id = _service_token_user_id(request)
+    if matched:
+        return user_id
+
+    from src.config.settings import HOST_MODE
+
+    if (
+        HOST_MODE == "oss"
+        and not _SERVICE_TOKEN
+        and request.headers.get("X-Dispatch") == "background"
+    ):
+        return request.headers.get("X-User-Id")
+
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        return None
+    user_id = await get_user_id_for_session_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Session expired or revoked")
+    return user_id
+
+
+OptionalUserId = Annotated[Optional[str], Depends(get_optional_user_id)]
+
+
 async def get_stamp_auth(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_legacy_bearer),

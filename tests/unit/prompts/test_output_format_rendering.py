@@ -11,7 +11,7 @@ import pytest
 from ptc_agent.agent.prompts import get_loader, reset_loader
 
 HTML_BLOCK_MARKER = "Output Format: Styled HTML"
-SKILL_REFS = (".agents/skills/html-report/SKILL.md",)
+SKILL_REFS = (".agents/skills/html-report/SKILL.md", ".agents/skills/ui-design/SKILL.md")
 
 
 def _render(agent_preference, sandbox_enabled=True):
@@ -29,6 +29,7 @@ def _render(agent_preference, sandbox_enabled=True):
     return loader.render(
         "components/user_profile.md.j2",
         user_profile=profile,
+        user_data_counts=None,
         sandbox_enabled=sandbox_enabled,
     )
 
@@ -47,7 +48,7 @@ class TestHtmlSteeringBlock:
     def test_html_renders_block(self):
         out = _render({"output_format": "html"})
         assert HTML_BLOCK_MARKER in out
-        assert "results/*.html" in out
+        assert "work/<task>/<name>.html" in out
         for ref in SKILL_REFS:
             assert ref in out
 
@@ -68,7 +69,7 @@ class TestHtmlSteeringBlock:
 
     def test_html_no_block_without_sandbox(self):
         # Flash has no sandbox: HTML steering must not fire even when the user
-        # set output_format=html — there is no filesystem to write results/ to.
+        # set output_format=html — there is no filesystem to write the report to.
         out = _render({"output_format": "html"}, sandbox_enabled=False)
         assert HTML_BLOCK_MARKER not in out
         for ref in SKILL_REFS:
@@ -110,7 +111,7 @@ class TestGenericLoop:
         # excluded key must not leave a dangling "- " bullet behind.
         out = _render({"output_format": "html"})
         assert HTML_BLOCK_MARKER in out
-        prefs_section = out.split("## Agent Preferences", 1)[1]
+        prefs_section = out.split("## Agent Preferences", 1)[1].split("## Financial Context", 1)[0]
         for line in prefs_section.splitlines():
             assert line.strip() != "-"
             assert line.strip() != "- **"

@@ -191,6 +191,7 @@ class RunCoordinator:
                     query=query,
                     fork=fork,
                     metadata=metadata,
+                    user_id=user_id,
                     conn=guard.conn if guard is not None else None,
                 )
             handle = RunHandle(
@@ -282,11 +283,7 @@ class RunCoordinator:
             checkpoint_id = await self._latest_checkpoint_id(handle)
 
             usage_writer = None
-            if (
-                outcome.per_call_records
-                or outcome.tool_usage
-                or outcome.metadata.get("llm_runtime")
-            ):
+            if outcome.per_call_records or outcome.tool_usage:
                 usage_writer = self._build_usage_writer(handle, outcome)
 
             if outcome.errors:
@@ -455,9 +452,9 @@ class RunCoordinator:
         """
         error_frame = {
             "thread_id": thread_id,
-            "content": "background workflow failed",
+            "content": "background turn failed",
             "error_type": "background_failure",
-            "error": error_text or "background workflow failed",
+            "error": error_text or "background turn failed",
         }
         try:
             result = await self.finalize_detached_run(
@@ -465,7 +462,7 @@ class RunCoordinator:
                 run_id,
                 RunOutcome(
                     status="error",
-                    errors=[error_text or "background workflow failed"],
+                    errors=[error_text or "background turn failed"],
                     metadata={"recovery": "dispatch_consumer_crash"},
                 ),
                 error_frame=error_frame,

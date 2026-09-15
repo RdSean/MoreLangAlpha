@@ -47,11 +47,6 @@ async def client():
                 f"{DB}._get_provider_info_map",
                 return_value=PROVIDER_INFO_MAP,
             ),
-            patch(
-                f"{DB}.get_household_owner_for_user",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
         ):
             yield c
 
@@ -149,6 +144,11 @@ async def test_update_api_keys_set_key(client):
             new_callable=AsyncMock,
             return_value=updated,
         ),
+        patch(
+            "src.server.services.onboarding.maybe_complete_personalization",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
     ):
         resp = await client.put(
             "/api/v1/users/me/api-keys",
@@ -182,6 +182,11 @@ async def test_update_api_keys_delete_key(client):
             f"{DB}.get_user_api_keys",
             new_callable=AsyncMock,
             return_value=updated,
+        ),
+        patch(
+            "src.server.services.onboarding.maybe_complete_personalization",
+            new_callable=AsyncMock,
+            return_value=False,
         ),
     ):
         resp = await client.put(
@@ -263,125 +268,6 @@ async def test_remove_api_key_unsupported_provider(client):
 
     assert resp.status_code == 400
     assert "Unsupported provider" in resp.json()["detail"]
-
-
-# ---------------------------------------------------------------------------
-# Student household isolation
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_student_cannot_read_personal_api_keys(client):
-    """Student accounts must not observe legacy personal BYOK configuration."""
-    with (
-        patch(
-            f"{DB}.get_household_owner_for_user",
-            new_callable=AsyncMock,
-            return_value={"household_id": "household-1", "role": "student"},
-        ),
-        patch(
-            f"{DB}.get_user_api_keys",
-            new_callable=AsyncMock,
-            return_value={"byok_enabled": False, "keys": {}, "base_urls": {}},
-        ) as get_keys,
-        patch(f"{DB}._get_custom_providers", new_callable=AsyncMock, return_value=[]),
-    ):
-        response = await client.get("/api/v1/users/me/api-keys")
-
-    assert response.status_code == 403
-    get_keys.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_student_cannot_update_personal_api_keys(client):
-    """Student accounts cannot create or change legacy personal BYOK keys."""
-    with (
-        patch(
-            f"{DB}.get_household_owner_for_user",
-            new_callable=AsyncMock,
-            return_value={"household_id": "household-1", "role": "student"},
-        ),
-        patch(f"{DB}.set_byok_enabled", new_callable=AsyncMock) as set_enabled,
-        patch(f"{DB}.upsert_api_key", new_callable=AsyncMock) as upsert_key,
-        patch(f"{DB}._get_custom_providers", new_callable=AsyncMock, return_value=[]),
-        patch(
-            f"{DB}.get_user_api_keys",
-            new_callable=AsyncMock,
-            return_value={"byok_enabled": True, "keys": {}, "base_urls": {}},
-        ),
-    ):
-        response = await client.put(
-            "/api/v1/users/me/api-keys",
-            json={
-                "byok_enabled": True,
-                "api_keys": {"openai": "sk-student-key-123456"},
-            },
-        )
-
-    assert response.status_code == 403
-    set_enabled.assert_not_awaited()
-    upsert_key.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_student_cannot_delete_personal_api_keys(client):
-    """Student accounts cannot remove or otherwise mutate personal BYOK keys."""
-    with (
-        patch(
-            f"{DB}.get_household_owner_for_user",
-            new_callable=AsyncMock,
-            return_value={"household_id": "household-1", "role": "student"},
-        ),
-        patch(f"{DB}.delete_api_key", new_callable=AsyncMock) as delete_key,
-        patch(f"{DB}._get_custom_providers", new_callable=AsyncMock, return_value=[]),
-        patch(
-            f"{DB}.get_user_api_keys",
-            new_callable=AsyncMock,
-            return_value={"byok_enabled": True, "keys": {}, "base_urls": {}},
-        ),
-    ):
-        response = await client.delete("/api/v1/users/me/api-keys/openai")
-
-    assert response.status_code == 403
-    delete_key.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_student_cannot_test_a_personal_api_key(client):
-    """Key validation would otherwise let students use an independent endpoint."""
-    with (
-        patch(
-            f"{DB}.get_household_owner_for_user",
-            new_callable=AsyncMock,
-            return_value={"household_id": "household-1", "role": "student"},
-        ),
-        patch(f"{DB}._test_openai_key", new_callable=AsyncMock) as test_key,
-        patch(f"{DB}._get_custom_providers", new_callable=AsyncMock, return_value=[]),
-    ):
-        response = await client.post(
-            "/api/v1/keys/test",
-            json={"provider": "openai", "api_key": "sk-student-key-123456"},
-        )
-
-    assert response.status_code == 403
-    test_key.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_student_cannot_discover_models_from_a_personal_endpoint(client):
-    """Dynamic discovery must not read a student's legacy endpoint settings."""
-    with (
-        patch(
-            f"{DB}.get_household_owner_for_user",
-            new_callable=AsyncMock,
-            return_value={"household_id": "household-1", "role": "student"},
-        ),
-        patch(f"{DB}.get_base_url_for_provider", new_callable=AsyncMock) as get_base_url,
-    ):
-        response = await client.get("/api/v1/providers/openai/models")
-
-    assert response.status_code == 403
-    get_base_url.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -496,3 +382,45 @@ async def test_list_visible_models_platform_only_rejected(client):
         resp = await client.get("/api/v1/providers/platform-proxy/visible-models")
 
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# _get_custom_providers — which column it reads
+# ---------------------------------------------------------------------------
+
+# Every test above patches _get_custom_providers wholesale, so nothing exercised
+# the read itself. It spent a release pointed at the legacy column, which
+# emptied the custom-provider list for every migrated user.
+
+
+@pytest.mark.asyncio
+async def test_custom_providers_read_from_model_preference():
+    from src.server.app.api_keys import _get_custom_providers
+
+    stored = [{"name": "mylab", "parent_provider": "openai"}]
+    with patch(
+        "src.server.database.user.get_user_preferences",
+        AsyncMock(return_value={"other_preference": {}, "model_preference": {"custom_providers": stored}}),
+    ):
+        assert await _get_custom_providers("u1") == stored
+
+
+@pytest.mark.asyncio
+async def test_custom_providers_falls_back_to_legacy_column():
+    """A row the 026 migration has not reached still resolves."""
+    from src.server.app.api_keys import _get_custom_providers
+
+    stored = [{"name": "mylab", "parent_provider": "openai"}]
+    with patch(
+        "src.server.database.user.get_user_preferences",
+        AsyncMock(return_value={"other_preference": {"custom_providers": stored}, "model_preference": {}}),
+    ):
+        assert await _get_custom_providers("u1") == stored
+
+
+@pytest.mark.asyncio
+async def test_custom_providers_absent_is_empty():
+    from src.server.app.api_keys import _get_custom_providers
+
+    with patch("src.server.database.user.get_user_preferences", AsyncMock(return_value=None)):
+        assert await _get_custom_providers("u1") == []

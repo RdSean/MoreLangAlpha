@@ -6,6 +6,7 @@ socket creation turns that failure mode into a loud error. AF_UNIX stays
 allowed: asyncio's event loop self-pipe is a unix socketpair.
 """
 
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -44,12 +45,63 @@ def _reader_pool_follows_cache_client(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _default_education_membership(monkeypatch):
-    """Keep synthetic unit-test users outside a household unless a test opts in."""
-    from src.server.services import education_access
+def _empty_user_skill_bundle(monkeypatch):
+    """Stub the per-turn user-skill bundle to empty for unit tests.
 
+    ``resolve_llm_config`` loads it from Postgres on every turn; unit tests
+    have no pool. Both binding sites are patched: the package attribute the
+    lazy imports resolve, and the defining module's global that
+    ``sandbox_skill_sync_params`` calls. Tests *about* the bundle itself put
+    the real function back — see ``server/services/user_skills/conftest.py``.
+    """
+    from src.server.services import user_skills
+    from src.server.services.user_skills import materialize
+
+    async def _empty(user_id, workspace_id=None):
+        return user_skills.EMPTY_USER_SKILL_BUNDLE
+
+    monkeypatch.setattr(user_skills, "load_user_skill_bundle", _empty)
+    monkeypatch.setattr(materialize, "load_user_skill_bundle", _empty)
+
+
+@pytest.fixture(autouse=True)
+def _default_education_membership(monkeypatch):
+    """Keep synthetic unit-test users outside a household unless a test opts in.
+
+    Every turn resolves the household tier before anything else, and that read
+    is a Postgres query. Both binding sites are stubbed: the access-control
+    re-export, and the global the LLM resolver calls, which unit tests have no
+    pool for.
+    """
+    from src.server.services import education_access
+    from src.server.services.llm import household
+
+    anonymous = AsyncMock(return_value=None)
     monkeypatch.setattr(
         education_access,
         "get_membership_for_user",
-        AsyncMock(return_value=None),
+        anonymous,
     )
+    monkeypatch.setattr(household, "get_membership_for_user", anonymous)
+
+
+@pytest.fixture(scope="session")
+def shipped_skill_md():
+    """Locate a shipped skill's SKILL.md on disk, by name.
+
+    A registry entry's ``skill_md_path`` is where the *agent* reaches the file
+    inside a sandbox, not where this repo keeps it: the shipped skills live in
+    the bundle that declares them, and the sync flattens every source into one
+    directory. Joining that suffix onto the repo root reads as correct and is
+    not, so the lookup asks the bundles instead.
+    """
+    from ptc_agent.config.plugins import bundled_skill_dirs
+
+    def find(name: str) -> Path:
+        for root in bundled_skill_dirs():
+            candidate = root / name / "SKILL.md"
+            if candidate.is_file():
+                return candidate
+        raise AssertionError(f"no bundle ships a {name!r} skill")
+
+    return find

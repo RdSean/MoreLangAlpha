@@ -2,17 +2,55 @@
 
 import asyncio
 import logging
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from ptc_agent.agent.agent import PTCAgent
-from ptc_agent.agent.managed_execution import ManagedExecutionPolicy
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.session import Session
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from ptc_agent.agent.managed_execution import ManagedExecutionPolicy
+
 
 _USER_PROFILE_TTL = 86400  # 24h — freshness via explicit invalidation
+
+# Cached-shape version, part of the key so a bump retires every entry the
+# previous shape wrote. Bump it whenever the dict below changes keys: a
+# migration can move preference data in raw SQL, under no application write
+# path, and nothing invalidates a profile cached before it ran.
+_USER_PROFILE_SHAPE = 1
+
+
+def _user_profile_cache_key(user_id: str) -> str:
+    return f"user_profile_prompt:v{_USER_PROFILE_SHAPE}:{user_id}"
+
+
+async def fetch_user_data_counts(user_id: str | None) -> dict[str, Any] | None:
+    """Lightweight counts for the static `<user_profile>` block.
+
+    Three indexed queries in parallel. Failure is non-fatal — returns None and
+    the awareness block omits the counts line.
+    """
+    if not user_id:
+        return None
+    try:
+        from src.server.services import user_data_io as io
+        portfolio_count, watchlist_counts, prefs_set = await asyncio.gather(
+            io.count_portfolio_for_user(user_id),
+            io.count_watchlist_for_user(user_id),
+            io.exists_preferences_for_user(user_id),
+        )
+        wl_count, item_count = watchlist_counts
+        return {
+            "portfolio_count": int(portfolio_count),
+            "watchlist_summary": f"{wl_count}:{item_count}",
+            "prefs_set": bool(prefs_set),
+        }
+    except Exception:
+        logger.warning("user-data counts fetch failed; awareness block will omit counts", exc_info=True)
+        return None
 
 
 async def get_user_profile_for_prompt(user_id: str) -> dict[str, Any] | None:
@@ -23,7 +61,7 @@ async def get_user_profile_for_prompt(user_id: str) -> dict[str, Any] | None:
     """
     import json as _json
 
-    cache_key = f"user_profile_prompt:{user_id}"
+    cache_key = _user_profile_cache_key(user_id)
     try:
         from src.utils.cache.redis_cache import get_cache_client
 
@@ -76,7 +114,7 @@ async def invalidate_user_profile_cache(user_id: str) -> None:
 
         cache = get_cache_client()
         if cache.enabled and cache.client:
-            await cache.client.delete(f"user_profile_prompt:{user_id}")
+            await cache.client.delete(_user_profile_cache_key(user_id))
     except Exception:
         pass
 
@@ -89,6 +127,23 @@ class SessionProvider(Protocol):
         self, conversation_id: str, sandbox_id: str | None = None
     ) -> Session:
         ...
+
+
+async def _read_workspace_naming(workspace_id: str) -> tuple[str, str]:
+    """The workspace's name and description for the prompt's `<workspace>` block.
+
+    Read once here rather than inside the model call, so the values are bound
+    when the turn's agent is built: the model never sees the name change under
+    it mid-answer, and a rename lands on the very next turn.
+    """
+    try:
+        from src.server.database.workspace import get_workspace_name_and_description
+
+        row = await get_workspace_name_and_description(workspace_id) or {}
+        return (row.get("name") or "").strip(), (row.get("description") or "").strip()
+    except Exception as e:
+        logger.warning(f"Failed to read the name of workspace {workspace_id}: {e}")
+        return "", ""
 
 
 async def build_ptc_graph(
@@ -118,7 +173,11 @@ async def build_ptc_graph(
             f"Failed to initialize session for conversation {conversation_id}"
         )
 
-    ptc_agent = await asyncio.to_thread(PTCAgent, config)
+    ptc_agent, user_data_counts, (workspace_name, workspace_description) = await asyncio.gather(
+        asyncio.to_thread(PTCAgent, config),
+        fetch_user_data_counts(user_id),
+        _read_workspace_naming(conversation_id),
+    )
 
     inner_agent = ptc_agent.create_agent(
         sandbox=session.sandbox,
@@ -129,9 +188,12 @@ async def build_ptc_graph(
         background_registry=background_registry,
         # session gives workspace-tier memory a real namespace.
         session=session,
+        workspace_name=workspace_name,
+        workspace_description=workspace_description,
         store=store,
         on_signed_url=on_signed_url,
         user_id=user_id,
+        user_data_counts=user_data_counts,
         tool_summary=getattr(session, "mcp_tool_summary", None),
     )
 
@@ -158,7 +220,8 @@ async def build_ptc_graph_with_session(
     on_signed_url: Any | None = None,
     namespace_owner: Any | None = None,
     disable_subagents: bool = False,
-    managed_policy: ManagedExecutionPolicy | None = None,
+    direct_mcp: Any | None = None,
+    managed_policy: "ManagedExecutionPolicy | None" = None,
 ) -> Any:
     """Build a BackgroundSubagentOrchestrator from a pre-acquired session (WorkspaceManager path)."""
     workspace_id = session.conversation_id
@@ -177,25 +240,34 @@ async def build_ptc_graph_with_session(
         user_id = None
         store = None
         on_signed_url = None
-        # The guard only fences service-created worker checkpoint namespaces;
-        # it carries no parent identity or capability. Keep it when this
-        # managed policy explicitly permits its fixed worker set.
-        namespace_owner = (
-            namespace_owner if managed_policy.allow_subagents else None
-        )
+        # The guard only fences service-created worker checkpoint namespaces; it
+        # carries no parent identity or capability. Keep it when this managed
+        # policy explicitly permits its fixed worker set.
+        namespace_owner = namespace_owner if managed_policy.allow_subagents else None
         plan_mode = False
         disable_subagents = not managed_policy.allow_subagents
 
     if user_id:
-        user_profile, ptc_agent = await asyncio.gather(
+        (
+            user_profile,
+            user_data_counts,
+            ptc_agent,
+            (workspace_name, workspace_description),
+        ) = await asyncio.gather(
             get_user_profile_for_prompt(user_id),
+            fetch_user_data_counts(user_id),
             asyncio.to_thread(PTCAgent, config),
+            _read_workspace_naming(workspace_id),
         )
         if user_profile:
             logger.debug(f"Loaded user profile for {user_id}: {user_profile}")
     else:
         user_profile = None
-        ptc_agent = await asyncio.to_thread(PTCAgent, config)
+        user_data_counts = None
+        ptc_agent, (workspace_name, workspace_description) = await asyncio.gather(
+            asyncio.to_thread(PTCAgent, config),
+            _read_workspace_naming(workspace_id),
+        )
 
     vault_secrets = getattr(session.sandbox, "vault_secrets", None)
 
@@ -212,16 +284,19 @@ async def build_ptc_graph_with_session(
         plan_mode=plan_mode,
         session=session,
         thread_id=thread_id,
+        workspace_name=workspace_name,
+        workspace_description=workspace_description,
         on_agent_md_write=session.invalidate_agent_md,
         store=store,
         on_signed_url=on_signed_url,
         vault_secrets=vault_secrets,
         user_id=user_id,
+        user_data_counts=user_data_counts,
         # Session-cached tool summary (precomputed once per session) so the per
         # turn create_agent never recomputes it — keeps the prompt-cache prefix
         # byte-stable. None → create_agent computes from the registry.
         tool_summary=getattr(session, "mcp_tool_summary", None),
-        managed_policy=managed_policy,
+        direct_mcp=direct_mcp,
     )
 
     logger.debug(

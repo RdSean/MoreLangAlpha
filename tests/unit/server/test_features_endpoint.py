@@ -41,13 +41,13 @@ class TestGetFeatures:
             resp = await features_client.get("/api/v1/features")
         assert resp.status_code == 200
         by_key = {f["key"]: f for f in resp.json()["features"]}
-        site_crawl = by_key["site_crawl"]
-        assert site_crawl["enabled"] is False  # opt_in: off until the user opts in
-        assert site_crawl["gate"] == "opt_in"
-        assert site_crawl["min_tier"] is None
-        assert site_crawl["user_override"] is None
-        assert site_crawl["label"] and site_crawl["description"]
-        assert site_crawl["tradeoffs"]
+        mw = by_key["market_watch"]
+        assert mw["enabled"] is False  # opt_in: off until the user opts in
+        assert mw["gate"] == "opt_in"
+        assert mw["min_tier"] is None
+        assert mw["user_override"] is None
+        assert mw["label"] and mw["description"]
+        assert mw["tradeoffs"]
 
     @pytest.mark.asyncio
     async def test_kill_switched_feature_is_omitted(self, features_client):
@@ -66,20 +66,20 @@ class TestGetFeatures:
             resp = await features_client.get("/api/v1/features")
         assert resp.status_code == 200
         assert all(
-            f["key"] != "site_crawl" for f in resp.json()["features"]
+            f["key"] != "market_watch" for f in resp.json()["features"]
         )
 
     @pytest.mark.asyncio
     async def test_user_override_wins_and_is_reported(self, features_client):
         with patch(
             "src.server.services.features.get_user_preferences",
-            new=AsyncMock(return_value=_prefs({"site_crawl": True})),
+            new=AsyncMock(return_value=_prefs({"market_watch": True})),
         ):
             resp = await features_client.get("/api/v1/features")
-        site_crawl = {f["key"]: f for f in resp.json()["features"]}["site_crawl"]
-        assert site_crawl["enabled"] is True
-        assert site_crawl["user_override"] is True
-        assert site_crawl["gate"] == "opt_in"
+        mw = {f["key"]: f for f in resp.json()["features"]}["market_watch"]
+        assert mw["enabled"] is True
+        assert mw["user_override"] is True
+        assert mw["gate"] == "opt_in"
 
 
 class TestPutFeatureOverride:
@@ -90,7 +90,7 @@ class TestPutFeatureOverride:
         with (
             patch(
                 "src.server.services.features.get_user_preferences",
-                new=AsyncMock(side_effect=[_prefs(), _prefs({"site_crawl": True})]),
+                new=AsyncMock(side_effect=[_prefs(), _prefs({"market_watch": True})]),
             ),
             patch("src.server.services.features.upsert_user_preferences", new=upsert),
             patch(
@@ -99,13 +99,13 @@ class TestPutFeatureOverride:
             ),
         ):
             resp = await features_client.put(
-                "/api/v1/features/site_crawl", json={"enabled": True}
+                "/api/v1/features/market_watch", json={"enabled": True}
             )
         assert resp.status_code == 200
-        site_crawl = {f["key"]: f for f in resp.json()["features"]}["site_crawl"]
-        assert site_crawl["enabled"] is True
+        mw = {f["key"]: f for f in resp.json()["features"]}["market_watch"]
+        assert mw["enabled"] is True
         upsert.assert_awaited_once_with(
-            USER_ID, other_preference={"feature_overrides": {"site_crawl": True}}
+            USER_ID, other_preference={"feature_overrides": {"market_watch": True}}
         )
         invalidate.assert_awaited_once_with(USER_ID)
 
@@ -115,7 +115,7 @@ class TestPutFeatureOverride:
         with (
             patch(
                 "src.server.services.features.get_user_preferences",
-                new=AsyncMock(side_effect=[_prefs({"site_crawl": True}), _prefs()]),
+                new=AsyncMock(side_effect=[_prefs({"market_watch": True}), _prefs()]),
             ),
             patch("src.server.services.features.upsert_user_preferences", new=upsert),
             patch(
@@ -124,7 +124,7 @@ class TestPutFeatureOverride:
             ),
         ):
             resp = await features_client.put(
-                "/api/v1/features/site_crawl", json={"enabled": None}
+                "/api/v1/features/market_watch", json={"enabled": None}
             )
         assert resp.status_code == 200
         # Emptied dict is written as None so the DB layer deletes the field.
@@ -148,7 +148,7 @@ class TestPutFeatureOverride:
             "src.server.services.features.system_flag", lambda key: locked
         ):
             resp = await features_client.put(
-                "/api/v1/features/site_crawl", json={"enabled": True}
+                "/api/v1/features/market_watch", json={"enabled": True}
             )
         assert resp.status_code == 403
 

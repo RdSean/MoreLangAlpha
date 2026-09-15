@@ -47,6 +47,30 @@ async def users_client():
 
 
 @pytest_asyncio.fixture
+async def watchlist_client():
+    """Client with only the watchlist router."""
+    from src.server.app.watchlist import router
+
+    app = create_test_app(router)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        yield client
+
+
+@pytest_asyncio.fixture
+async def portfolio_client():
+    """Client with only the portfolio router."""
+    from src.server.app.portfolio import router
+
+    app = create_test_app(router)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        yield client
+
+
+@pytest_asyncio.fixture
 async def automations_client():
     """Client with only the automations router."""
     from src.server.app.automations import router

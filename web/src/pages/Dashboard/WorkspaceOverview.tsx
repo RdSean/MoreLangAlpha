@@ -10,8 +10,17 @@ import { queryKeys } from '@/lib/queryKeys';
 import { relativeTime } from '@/lib/format';
 import { getRecentThreads } from '@/pages/ChatAgent/utils/api';
 import type { Thread, ThreadsResponse, Workspace } from '@/types/api';
+import LayoutModeToggle, { type LayoutToggle } from './components/LayoutModeToggle';
 
 const RECENT_THREAD_LIMIT = 6;
+
+interface WorkspaceOverviewProps {
+  /**
+   * Supplied by `DashboardRouter` on desktop. When absent — mobile, or the
+   * page rendered on its own — the canvas switch is not shown.
+   */
+  layoutToggle?: LayoutToggle;
+}
 
 function threadTitle(thread: Thread, fallback: string): string {
   return thread.title || (thread as { first_query_content?: string }).first_query_content || fallback;
@@ -67,7 +76,7 @@ function RecentThreadRow({ thread }: { thread: Thread }) {
   );
 }
 
-export default function WorkspaceOverview() {
+export default function WorkspaceOverview({ layoutToggle }: WorkspaceOverviewProps = {}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data: workspacesData, isLoading: workspacesLoading } = useWorkspaces({ limit: 20 });
@@ -101,9 +110,14 @@ export default function WorkspaceOverview() {
               {t('dashboard.overview.description')}
             </p>
           </div>
-          <span className="shrink-0 font-mono text-xs tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>
-            {t('dashboard.overview.workspaceCount', { count: workspaces.length })}
-          </span>
+          <div className="flex shrink-0 items-center gap-3">
+            <span className="font-mono text-xs tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>
+              {t('dashboard.overview.workspaceCount', { count: workspaces.length })}
+            </span>
+            {layoutToggle ? (
+              <LayoutModeToggle mode={layoutToggle.mode} onModeChange={layoutToggle.onModeChange} />
+            ) : null}
+          </div>
         </header>
 
         <section aria-label={t('dashboard.overview.actionsLabel')} className="grid grid-cols-1 gap-3 md:grid-cols-3">

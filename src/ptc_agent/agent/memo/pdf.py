@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from io import BytesIO
 
 from ptc_agent.agent.memo.schema import (
     MEMO_CONTENT_MIN_CHARS,
     MEMO_MAX_CONTENT_BYTES,
+)
+from src.utils.pdf_text import (
+    PdfPageLimitError,
+    PdfTextBackend,
+    extract_pdf_text_with_backend as extract_document_pdf_text_with_backend,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,53 +53,6 @@ class MemoPdfTooManyPagesError(MemoPdfExtractionError):
     """Raised when a PDF exceeds the configured page-count cap."""
 
 
-def _pdfplumber_extract(content: bytes) -> str:
-    import pdfplumber
-
-    pages: list[str] = []
-    accumulated_bytes = 0
-    with pdfplumber.open(BytesIO(content)) as pdf:
-        if len(pdf.pages) > _MAX_PDF_PAGES:
-            raise MemoPdfTooManyPagesError(
-                f"PDF has {len(pdf.pages)} pages; "
-                f"max is {_MAX_PDF_PAGES}. Split the document or summarize first."
-            )
-        for i, page in enumerate(pdf.pages, 1):
-            text = page.extract_text() or ""
-            page.close()
-            if text.strip():
-                pages.append(f"--- Page {i} ---\n\n{text}")
-                # Short-circuit when accumulated text already exceeds the
-                # store-side cap. Defends against PDFs whose page count is
-                # below the cap but whose individual pages emit megabytes
-                # of text via embedded fonts or repeated streams.
-                accumulated_bytes += len(text.encode("utf-8"))
-                if accumulated_bytes > MEMO_MAX_CONTENT_BYTES:
-                    break
-    return "\n\n".join(pages)
-
-
-def _pypdf_extract(content: bytes) -> str:
-    import pypdf
-
-    reader = pypdf.PdfReader(BytesIO(content))
-    if len(reader.pages) > _MAX_PDF_PAGES:
-        raise MemoPdfTooManyPagesError(
-            f"PDF has {len(reader.pages)} pages; "
-            f"max is {_MAX_PDF_PAGES}. Split the document or summarize first."
-        )
-    pages: list[str] = []
-    accumulated_bytes = 0
-    for i, page in enumerate(reader.pages, 1):
-        text = page.extract_text() or ""
-        if text.strip():
-            pages.append(f"--- Page {i} ---\n\n{text}")
-            accumulated_bytes += len(text.encode("utf-8"))
-            if accumulated_bytes > MEMO_MAX_CONTENT_BYTES:
-                break
-    return "\n\n".join(pages)
-
-
 async def extract_pdf_text(content: bytes) -> str:
     """Extract readable text from PDF bytes.
 
@@ -108,42 +65,34 @@ async def extract_pdf_text(content: bytes) -> str:
     worker's RSS stays bounded even under a burst of PDF uploads.
     """
     async with _EXTRACTION_SEM:
-        # Primary: pdfplumber
-        try:
-            text = await asyncio.wait_for(
-                asyncio.to_thread(_pdfplumber_extract, content),
-                timeout=_EXTRACTION_TIMEOUT_S,
-            )
-            if _is_usable(text):
-                return text
-        except asyncio.TimeoutError:
-            logger.warning(
-                "memo pdf pdfplumber timed out (%ss)", _EXTRACTION_TIMEOUT_S,
-            )
-        except MemoPdfTooManyPagesError:
-            # Page-count cap is not a fall-through: the same PDF will trip pypdf
-            # too. Surface the specific error so the router returns the page-cap
-            # message to the user instead of the generic "couldn't extract" one.
-            raise
-        except Exception as exc:
-            logger.debug(
-                "memo pdf pdfplumber failed: %s; falling back to pypdf", exc,
-            )
-
-        # Fallback: pypdf
-        try:
-            text = await asyncio.wait_for(
-                asyncio.to_thread(_pypdf_extract, content),
-                timeout=_EXTRACTION_TIMEOUT_S,
-            )
-            if _is_usable(text):
-                return text
-        except asyncio.TimeoutError:
-            logger.warning("memo pdf pypdf timed out (%ss)", _EXTRACTION_TIMEOUT_S)
-        except MemoPdfTooManyPagesError:
-            raise
-        except Exception as exc:
-            logger.debug("memo pdf pypdf failed: %s", exc)
+        for backend in ("pdfplumber", "pypdf"):
+            typed_backend: PdfTextBackend = backend
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        extract_document_pdf_text_with_backend,
+                        content,
+                        backend=typed_backend,
+                        max_pages=_MAX_PDF_PAGES,
+                        max_output_bytes=MEMO_MAX_CONTENT_BYTES,
+                    ),
+                    timeout=_EXTRACTION_TIMEOUT_S,
+                )
+                if _is_usable(result.markdown):
+                    return result.markdown
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "memo pdf %s timed out (%ss)",
+                    backend,
+                    _EXTRACTION_TIMEOUT_S,
+                )
+            except PdfPageLimitError as error:
+                raise MemoPdfTooManyPagesError(
+                    f"PDF has {error.page_count} pages; max is {error.max_pages}. "
+                    "Split the document or summarize first."
+                ) from error
+            except Exception as exc:
+                logger.debug("memo pdf %s failed: %s", backend, exc)
 
     raise MemoPdfExtractionError(
         "Could not extract readable text from this PDF (it may be a scan). "

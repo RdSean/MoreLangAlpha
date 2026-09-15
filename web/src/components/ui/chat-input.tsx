@@ -10,17 +10,18 @@ import {
 } from './dropdown-menu';
 import { Loader } from './loader';
 import { usePreferences } from '@/hooks/usePreferences';
+import { useEffectiveTuning, useModelProfileWriter } from '@/hooks/useModelProfile';
 import { useAllModels } from '@/hooks/useAllModels';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { deriveQuickAccessModels } from './chat-input.models';
-import type { ModelMetadataEntry } from '@/hooks/useFilteredModels';
-import { supportsXhighEffort } from '@/lib/modelCapabilities';
-import { getModelMetadata } from '../../pages/ChatAgent/utils/api';
 import { ChatInputRegistry, ContextBus } from '@/lib/contextBus';
 import type { WidgetContextSnapshot } from '@/types/widgetContext';
 import './chat-input.css';
 import type { FamilyModelOption, ModelOptions, ReadyAttachment, SlashCommand, Workspace } from './chat-input.types';
 import { getSlashCommandIcon, isLargePaste } from './chat-input.helpers';
+import { supportsXhighEffort } from '@/lib/modelCapabilities';
+import { effortLabelFor } from '@/lib/modelTuning';
+import type { ModelProfile } from '@/lib/modelTuning';
 import {
   ChatInputWidgetDeck, FilePreviewCard, MentionAutocompleteList, SlashCommandList,
 } from './chat-input.parts';
@@ -33,6 +34,7 @@ import { useMentions } from './chat-input.useMentions';
 import { useSlashCommands } from './chat-input.useSlashCommands';
 import { speechSupported, useVoiceInput } from './chat-input.useVoiceInput';
 import { useFileAttachments } from './chat-input.useFileAttachments';
+import { modelPrefs, modelProfile } from '@/lib/modelPreferences';
 
 /** Autosize cap for the composer textarea; past this the box scrolls. */
 const MAX_TEXTAREA_HEIGHT = 200;
@@ -138,13 +140,16 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const { preferences } = usePreferences();
-  const { validModelNames } = useAllModels();
+  const { validModelNames, metadata: modelMetadata } = useAllModels();
   const otherPref = (preferences as Record<string, Record<string, unknown>> | null)?.other_preference;
   const starredModels = Array.isArray(otherPref?.starred_models)
     ? (otherPref.starred_models as unknown[]).filter((m): m is string => typeof m === 'string')
     : [];
-  const preferredModel = (otherPref?.preferred_model as string | undefined) || null;
-  const preferredFlashModel = (otherPref?.preferred_flash_model as string | undefined) || null;
+  // Model routing moved to its own bucket; starred_models above did not,
+  // so the two reads deliberately differ.
+  const mPref = modelPrefs(preferences);
+  const preferredModel = mPref.preferred_model || null;
+  const preferredFlashModel = mPref.preferred_flash_model || null;
   const [message, setMessage] = useState('');
   const { attachedFiles, setAttachedFiles, isDragging, handleFiles, removeFile, onDragOver, onDragLeave, onDrop, handlePaste } = useFileAttachments({ mode });
   const [planMode, setPlanMode] = useState(false);
@@ -155,10 +160,32 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const modePreferredModel = mode === 'fast' ? (preferredFlashModel || preferredModel) : preferredModel;
   const effectiveInitialModel = isFamilyModelMode ? initialModel : (initialModel || modePreferredModel);
   const [selectedModel, setSelectedModel] = useState<string | null>(effectiveInitialModel);
-  const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
-  const [fastMode, setFastMode] = useState(false);
 
-  const [modelMetadata, setModelMetadata] = useState<Record<string, ModelMetadataEntry>>({});
+  // Per-model tuning is an account preference, not a device one: the server
+  // resolves ``profiles[<model>]`` for turns this input never starts (schedules,
+  // automations, subagent role models). ``null`` clears a field; the server
+  // merges per model, so siblings and this model's other fields survive.
+  const { writeProfile: writeModelProfile } = useModelProfileWriter();
+
+  // Both controls read the account profile straight through, with no local
+  // copy: a failed write rolls the cache back and the pill follows it, instead
+  // of naming a level the next scheduled turn will not run.
+  const { profile: modelTuningProfile, efforts: reasoningEfforts, inherited, effective } =
+    useEffectiveTuning(selectedModel);
+  // The raw override, which is what the effort menu needs: it renders "Default"
+  // from the absence of one. The fast-mode toggle has no such state, so it
+  // reads the resolved value below.
+  const reasoningEffort = modelTuningProfile.reasoning_effort ?? null;
+  const inheritedEffort = inherited.reasoning_effort;
+  // The resolved value, which is what a send carries. Tuning writes are
+  // optimistic and not awaited, so between picking Default and the PUT landing
+  // the composer already reads as cleared while the row still holds the old
+  // level. Sending the raw override omits a cleared level and lets the server
+  // resolve against the row the write is still replacing, so the turn runs a
+  // setting the screen no longer shows. Sending what is displayed cannot
+  // disagree with it.
+  const resolvedEffort = effective.reasoning_effort;
+  const resolvedFastMode = effective.fast_mode;
 
   // Sync from a family availability refresh, including a disabled or deleted
   // preference that has fallen back to the server-provided default.
@@ -175,9 +202,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   useEffect(() => {
     onModelChange?.(selectedModel);
   }, [selectedModel, onModelChange]);
-
-  // Fetch model metadata to detect Codex-SDK models (eager prefetch, resolves instantly after first load)
-  useEffect(() => { getModelMetadata().then((d: Record<string, unknown>) => setModelMetadata(d as typeof modelMetadata)).catch(() => { }); }, []);
 
   const isCodexModel = selectedModel ? modelMetadata[selectedModel]?.sdk === 'codex' : false;
   const supportsXhigh = supportsXhighEffort(selectedModel);
@@ -212,7 +236,10 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   // return fresh objects each render, so hooks below depend on the individual
   // (memoized) members rather than the machine itself.
   const mentions = useMentions({ textareaRef, message, setMessage, workspaceFiles });
-  const slash = useSlashCommands({ textareaRef, message, setMessage, mode });
+  // The workspace context scopes the slash menu: inside a workspace the
+  // enabled-skill list is the workspace-effective one (workspace-scoped
+  // skills included, its disables applied).
+  const slash = useSlashCommands({ textareaRef, message, setMessage, mode, workspaceId: selectedWorkspaceId });
   const {
     mentionedFiles, setMentionedFiles, pruneRemoved: pruneMentions, detectTrigger: detectMention,
     close: closeMentions, reset: resetMentions, handleKeyDown: mentionKeyDown, open: mentionsOpen,
@@ -233,8 +260,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     getModelOptions() {
       return {
         model: selectedModel,
-        reasoningEffort: isFamilyModelMode ? null : reasoningEffort,
-        fastMode: isFamilyModelMode ? false : fastMode,
+        reasoningEffort: isFamilyModelMode ? null : resolvedEffort,
+        fastMode: isFamilyModelMode ? false : resolvedFastMode,
       };
     },
     addContext({ path, snippet, label, lineStart, lineEnd, lineCount, source }) {
@@ -274,7 +301,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     setModel(model) {
       if (model) setSelectedModel(model);
     },
-  }), [selectedModel, reasoningEffort, fastMode, isFamilyModelMode, setMentionedFiles]);
+  }), [selectedModel, resolvedEffort, resolvedFastMode, isFamilyModelMode, setMentionedFiles]);
 
   // Subscribe to ContextBus so this input mirrors the global widget-context
   // deck. Multiple chat inputs can be visible simultaneously (hero card +
@@ -315,33 +342,59 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     }
   }, [prefillMessage, onClearPrefill]);
 
-  // Load per-model reasoning effort from localStorage
+  // These picks used to be device-local, which meant server-started turns never
+  // saw them. Lift what this device still holds into the account profile, then
+  // drop the keys. Per field, not per record: a profile that already carries one
+  // of the two must not strand the other. And the keys are this value's only
+  // copy until the write lands, so they go only once it has.
+  const liftedModelRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!selectedModel) { setReasoningEffort(null); return; }
-    const saved = localStorage.getItem(`reasoning_effort:${selectedModel}`);
-    setReasoningEffort(saved || null);
-  }, [selectedModel]);
+    // The model's own row has to be in hand first: `reasoningEfforts` reads
+    // empty both while the catalog loads and for a model that declares no
+    // ladder, and the clamp below wants opposite answers for the two.
+    const meta = selectedModel ? modelMetadata[selectedModel] : undefined;
+    if (!selectedModel || !preferences || !meta || liftedModelRef.current === selectedModel) return;
+    liftedModelRef.current = selectedModel;
 
-  // Persist reasoning effort per model
-  useEffect(() => {
-    if (!selectedModel) return;
-    if (reasoningEffort) localStorage.setItem(`reasoning_effort:${selectedModel}`, reasoningEffort);
-    else localStorage.removeItem(`reasoning_effort:${selectedModel}`);
-  }, [reasoningEffort, selectedModel]);
+    const profile = modelProfile(preferences, selectedModel);
+    const storedEffort = localStorage.getItem(`reasoning_effort:${selectedModel}`);
+    const storedFast = localStorage.getItem(`fast_mode:${selectedModel}`) === 'true';
+    const lift: ModelProfile = {};
+    // These keys predate per-model ladders, when one fixed list of levels was
+    // offered for every model, so a device may hold a level this model never
+    // declared. The account rejects it and a run would drop it anyway, so it
+    // is discarded with the keys rather than lifted.
+    if (storedEffort && reasoningEfforts.includes(storedEffort) && profile.reasoning_effort === undefined) {
+      lift.reasoning_effort = storedEffort;
+    }
+    if (storedFast && profile.fast_mode === undefined) lift.fast_mode = true;
 
-  // Load per-model fast mode from localStorage
-  useEffect(() => {
-    if (!selectedModel) { setFastMode(false); return; }
-    const saved = localStorage.getItem(`fast_mode:${selectedModel}`);
-    setFastMode(saved === 'true');
-  }, [selectedModel]);
+    const dropDeviceKeys = () => {
+      localStorage.removeItem(`reasoning_effort:${selectedModel}`);
+      localStorage.removeItem(`fast_mode:${selectedModel}`);
+    };
+    if (Object.keys(lift).length > 0) {
+      // No release of the guard on failure: the write moves `preferences`
+      // twice, so re-entry is immediate and a rejection would resubmit itself
+      // without bound. A failed lift keeps its device keys and is retried on
+      // the next mount or model switch.
+      writeModelProfile(selectedModel, lift, { onSuccess: dropDeviceKeys });
+    } else {
+      dropDeviceKeys();
+    }
+  }, [selectedModel, preferences, writeModelProfile, modelMetadata, reasoningEfforts]);
 
-  // Persist fast mode per model
-  useEffect(() => {
-    if (!selectedModel) return;
-    if (fastMode) localStorage.setItem(`fast_mode:${selectedModel}`, 'true');
-    else localStorage.removeItem(`fast_mode:${selectedModel}`);
-  }, [fastMode, selectedModel]);
+  const handleReasoningEffortChange = useCallback((effort: string | null) => {
+    if (selectedModel) writeModelProfile(selectedModel, { reasoning_effort: effort });
+  }, [selectedModel, writeModelProfile]);
+
+  const handleFastModeChange = useCallback((fast: boolean) => {
+    // Both states are explicit. `null` here would mean "inherit", which this
+    // toggle cannot express — and on an account defaulting to fast it would
+    // delete the override and snap straight back to fast. Clearing is the
+    // per-model matrix's job, where Default is its own option.
+    if (selectedModel) writeModelProfile(selectedModel, { fast_mode: fast });
+  }, [selectedModel, writeModelProfile]);
 
   // Reset isStopping once both a running turn and a compaction have finished.
   useEffect(() => {
@@ -458,8 +511,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     }
     onSend(finalMessage, planMode, readyAttachments, slashCommands, {
       model: selectedModel,
-      reasoningEffort: isFamilyModelMode ? null : reasoningEffort,
-      fastMode: isFamilyModelMode ? false : fastMode,
+      reasoningEffort: isFamilyModelMode ? null : resolvedEffort,
+      fastMode: isFamilyModelMode ? false : resolvedFastMode,
       widgetSnapshots: widgetSnapshots.length ? widgetSnapshots : undefined,
     });
     setMessage('');
@@ -479,7 +532,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     }
   }, [hasContent, disabled, familyModelBlocked, message, planMode, attachedFiles, setAttachedFiles, onSend, onAction,
     mentionedFiles, resetMentions, slashCommands, resetSlash,
-    selectedModel, reasoningEffort, fastMode, isFamilyModelMode, widgetSnapshots, t]);
+    selectedModel, resolvedEffort, resolvedFastMode, isFamilyModelMode, widgetSnapshots, t]);
 
   const handleModelSelection = useCallback((model: string) => {
     if (!isFamilyModelMode) {
@@ -549,7 +602,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     containerRef: chatContainerRef,
     items: toolbarItems,
     // The model pill is measured too, but it isn't foldable.
-    measureKey: `${selectedModel}|${fastMode && isCodexModel}`,
+    measureKey: `${selectedModel}|${resolvedEffort}|${resolvedFastMode && isCodexModel}`,
     // Left of the first pill: container border + px-3, the attach button, and
     // the optional token ring.
     fixedLeft: CONTAINER_BORDER + CONTAINER_PX + ICON_BUTTON_W
@@ -734,7 +787,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 }
               }}
               placeholder={isListening ? "" : placeholder}
-              className={`font-content w-full bg-transparent border-0 outline-none text-[var(--color-text-primary)] ${isMobile ? 'text-base' : 'text-sm'} placeholder:text-[var(--color-text-tertiary)] resize-none overflow-y-auto leading-relaxed block transition-opacity duration-300 ${isListening ? 'opacity-20' : 'opacity-100'}`}
+              className={`font-content w-full bg-transparent border-0 text-[var(--color-text-primary)] ${isMobile ? 'text-base' : 'text-sm'} placeholder:text-[var(--color-text-tertiary)] resize-none overflow-y-auto leading-relaxed block transition-opacity duration-300 ${isListening ? 'opacity-20' : 'opacity-100'}`}
               rows={minRows}
               disabled={disabled}
               style={{ minHeight: `${minRows * 1.5}em` }}
@@ -818,7 +871,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 <span data-measure="model">
                   <ModelTriggerMeasure
                     selectedModel={isFamilyModelMode ? selectedModel : (displayModel || selectedModel)}
-                    fastMode={isFamilyModelMode ? false : fastMode}
+                    effortLabel={isFamilyModelMode ? null : effortLabelFor(t, resolvedEffort)}
+                    fastMode={isFamilyModelMode ? false : resolvedFastMode}
                     isCodexModel={isFamilyModelMode ? false : isCodexModel}
                     modelLabels={isFamilyModelMode ? familyModelLabels : undefined}
                     emptyLabel={isFamilyModelMode ? '选择模型' : undefined}
@@ -838,11 +892,12 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 moreModelsItems={moreModelsItems}
                 hasStarredModels={starredModels.length > 0}
                 reasoningEffort={reasoningEffort}
-                onReasoningEffortChange={setReasoningEffort}
-                fastMode={fastMode}
-                onFastModeChange={setFastMode}
+                inheritedEffort={inheritedEffort}
+                onReasoningEffortChange={handleReasoningEffortChange}
+                fastMode={resolvedFastMode}
+                onFastModeChange={handleFastModeChange}
                 isCodexModel={isCodexModel}
-                supportsXhigh={supportsXhigh}
+                reasoningEfforts={reasoningEfforts}
                 dropdownDirection={dropdownDirection}
                 containerRef={chatContainerRef}
                 familyModels={familyModels}

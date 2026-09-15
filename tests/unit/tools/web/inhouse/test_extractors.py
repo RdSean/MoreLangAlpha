@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
+from src.tools.web.inhouse.extractors import pdf as web_pdf
 from src.tools.web.inhouse.backend import CrawlOutput
 from src.tools.web.inhouse.extractors.base import (
     ContentExtractor,
@@ -18,6 +20,7 @@ from src.tools.web.inhouse.extractors.base import (
 from src.tools.web.inhouse.extractors.pdf import PdfExtractor
 from src.tools.web.inhouse.extractors.twitter import TwitterExtractor, _parse_tweet_url
 from src.tools.web.inhouse.extractors.youtube import YouTubeExtractor, _parse_video_id
+from src.utils.pdf_text import PdfTextResult
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +250,27 @@ class TestPdfExtract:
         self.extractor = PdfExtractor()
 
     @pytest.mark.asyncio
+    async def test_pdfplumber_timeout_still_allows_pypdf_fallback(
+        self,
+        monkeypatch,
+    ):
+        def extract_backend(content, *, backend, **kwargs):
+            if backend == "pdfplumber":
+                time.sleep(0.1)
+                return PdfTextResult("too late", "pdfplumber", (1,), 1)
+            return PdfTextResult("Fallback text", "pypdf", (1,), 1)
+
+        monkeypatch.setattr(web_pdf, "_EXTRACTION_TIMEOUT_SECONDS", 0.01, raising=False)
+        monkeypatch.setattr(
+            web_pdf,
+            "extract_document_pdf_text_with_backend",
+            extract_backend,
+            raising=False,
+        )
+
+        assert await self.extractor._extract_text(b"%PDF-fake") == "Fallback text"
+
+    @pytest.mark.asyncio
     async def test_happy_path(self):
         """Mock successful download + pdfplumber parse -> CrawlOutput."""
         fake_pdf_bytes = b"%PDF-fake-content"
@@ -270,15 +294,26 @@ class TestPdfExtract:
 
         with patch.object(
             self.extractor._client, "stream", side_effect=lambda *a, **kw: _async_cm(mock_response)
-        ), patch.object(
-            PdfExtractor, "_pdfplumber_extract", return_value="Page 1 text content"
-        ):
+        ), patch(
+            "src.tools.web.inhouse.extractors.pdf.extract_document_pdf_text_with_backend",
+            return_value=PdfTextResult(
+                markdown="Page 1 text content",
+                backend="pdfplumber",
+                extracted_pages=(1,),
+                total_pages=1,
+            ),
+        ) as shared_extract:
             result = await self.extractor.extract("https://example.com/report.pdf")
 
         assert result is not None
         assert isinstance(result, CrawlOutput)
         assert result.markdown == "Page 1 text content"
         assert result.title == "report"
+        shared_extract.assert_called_once_with(
+            fake_pdf_bytes,
+            backend="pdfplumber",
+            max_pages=None,
+        )
 
     @pytest.mark.asyncio
     async def test_content_type_mismatch(self):
@@ -346,10 +381,17 @@ class TestPdfExtract:
 
         with patch.object(
             self.extractor._client, "stream", side_effect=lambda *a, **kw: _async_cm(mock_response)
-        ), patch.object(
-            PdfExtractor, "_pdfplumber_extract", side_effect=RuntimeError("corrupt PDF")
-        ), patch.object(
-            PdfExtractor, "_pypdf_extract", return_value="Fallback text"
+        ), patch(
+            "src.tools.web.inhouse.extractors.pdf.extract_document_pdf_text_with_backend",
+            side_effect=[
+                RuntimeError("pdfplumber failed"),
+                PdfTextResult(
+                    markdown="Fallback text",
+                    backend="pypdf",
+                    extracted_pages=(1,),
+                    total_pages=1,
+                ),
+            ],
         ):
             result = await self.extractor.extract("https://example.com/report.pdf")
 
@@ -376,10 +418,9 @@ class TestPdfExtract:
 
         with patch.object(
             self.extractor._client, "stream", side_effect=lambda *a, **kw: _async_cm(mock_response)
-        ), patch.object(
-            PdfExtractor, "_pdfplumber_extract", side_effect=RuntimeError("parse error")
-        ), patch.object(
-            PdfExtractor, "_pypdf_extract", side_effect=RuntimeError("fallback error")
+        ), patch(
+            "src.tools.web.inhouse.extractors.pdf.extract_document_pdf_text_with_backend",
+            side_effect=RuntimeError("both parsers failed"),
         ):
             result = await self.extractor.extract("https://example.com/report.pdf")
 

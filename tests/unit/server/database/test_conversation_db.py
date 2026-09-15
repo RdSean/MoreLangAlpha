@@ -203,30 +203,6 @@ async def test_get_thread_by_id_malformed_id_skips_database(
 
 
 @pytest.mark.asyncio
-async def test_thread_list_queries_exclude_service_owned_managed_execution(
-    mock_db_connection, mock_cursor
-):
-    """Managed education roots must not surface in any regular thread list."""
-    from src.server.database.conversation import (
-        get_threads_for_user,
-        get_workspace_threads,
-    )
-
-    mock_cursor.fetchone.return_value = {"total": 0}
-    mock_cursor.fetchall.return_value = []
-    await get_threads_for_user("user-1")
-    user_sql = "\n".join(call.args[0] for call in mock_cursor.execute.call_args_list)
-    assert "managed_execution" in user_sql
-
-    mock_cursor.execute.reset_mock()
-    mock_cursor.fetchone.return_value = {"total": 0}
-    mock_cursor.fetchall.return_value = []
-    await get_workspace_threads("workspace-1")
-    workspace_sql = "\n".join(call.args[0] for call in mock_cursor.execute.call_args_list)
-    assert "managed_execution" in workspace_sql
-
-
-@pytest.mark.asyncio
 async def test_update_thread_fields_title(mock_db_connection, mock_cursor):
     """Title update sets title, bumps updated_at, returns the updated row."""
     from src.server.database.conversation import update_thread_fields
@@ -708,7 +684,6 @@ async def test_get_thread_by_share_token(mock_db_connection, mock_cursor):
     sql = mock_cursor.execute.call_args[0][0]
     assert "share_token = %s" in sql
     assert "is_shared = TRUE" in sql
-    assert "managed_execution" in sql
 
 
 @pytest.mark.asyncio

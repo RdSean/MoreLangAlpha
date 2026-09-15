@@ -24,6 +24,7 @@ from src.server.utils.content_normalizer import (
 from src.server.utils.pg_sanitize import finite_json_dumps
 from src.llms.content_utils import extract_reasoning_summary_index
 from src.utils.tracking import ExecutionTracker
+from src.config import settings as app_settings
 from src.config.settings import (
     get_workflow_timeout,
     is_sse_event_log_enabled,
@@ -176,6 +177,9 @@ _UPSTREAM_MODULE_PREFIXES: tuple[str, ...] = (
     "google.generativeai",
     "cohere",
     "httpx",
+    # Our own wrappers around a provider stream. They quote the provider and
+    # are raised fresh rather than chained, so nothing below would match them.
+    "src.llms.extension",
     # LangChain wrappers — their exceptions may not chain through the raw SDK
     # when the wrapper normalizes errors, so match them directly.
     "langchain_openai",
@@ -196,6 +200,33 @@ _STATUS_CODE_RE = re.compile(r"\b([45]\d{2})\b")
 def _parse_status_from_message(text: str) -> Optional[int]:
     match = _STATUS_CODE_RE.search(text)
     return int(match.group(1)) if match else None
+
+
+# Statuses meaning the provider refused the request we sent: bad shape,
+# unsupported content, oversized payload. Never the caller's credential and
+# never the provider's health, so the only honest hint is to move to a model
+# that accepts the request. 401/403/404 are absent because they have their own
+# branches; they are about access, not about the request body.
+_REQUEST_REFUSED_STATUSES: frozenset[int] = frozenset({400, 405, 413, 422})
+
+# Hints that ask the user to go fix a credential. Only truthful when the user
+# is the one holding it.
+_CREDENTIAL_HINTS: frozenset[str] = frozenset({"api_key", "model_access"})
+
+
+def user_owns_credential(credential_source: Any) -> bool:
+    """Whether the reader of the error holds the credential that ran the call.
+
+    Both halves are load-bearing, because ``platform`` means opposite things in
+    the two host modes: in OSS the key is the operator's own ``.env`` entry and
+    the operator is the user, while on the hosted service the user has no key at
+    all and "check your API key" sends them to a page that is not the cause.
+    An unknown source fails closed, since a wrong credential hint is worse than
+    a missing one.
+    """
+    if app_settings.HOST_MODE == "oss":
+        return True
+    return str(credential_source) in ("oauth", "byok")
 
 
 def find_resilience_trace(exc: BaseException) -> Optional[Dict[str, Any]]:
@@ -534,6 +565,9 @@ class RunSSEProducer:
             # langgraph_sdk SSE protocol so frontend reconnect/demotion
             # logic can latch onto the authoritative identity immediately.
             metadata_payload = {"thread_id": self.thread_id, "run_id": self.run_id}
+            # The model this turn actually runs: a deployment model profile
+            # routes a logical catalog name through a managed model, and the
+            # client is the authoritative identity for it.
             resolved_model = getattr(self.agent_config, "resolved_model", None)
             if resolved_model:
                 metadata_payload["resolved_llm_model"] = resolved_model
@@ -576,7 +610,7 @@ class RunSSEProducer:
                             "warning",
                             {
                                 "thread_id": self.thread_id,
-                                "message": f"Workflow approaching timeout ({int(elapsed_time)}s / {self.workflow_timeout}s)",
+                                "message": f"Turn approaching timeout ({int(elapsed_time)}s / {self.workflow_timeout}s)",
                                 "type": "timeout_warning",
                                 "elapsed_seconds": int(elapsed_time),
                                 "timeout_seconds": self.workflow_timeout,
@@ -594,7 +628,7 @@ class RunSSEProducer:
                             "error",
                             {
                                 "thread_id": self.thread_id,
-                                "error": f"Workflow timeout after {int(elapsed_time)} seconds",
+                                "error": f"Turn timed out after {int(elapsed_time)} seconds",
                                 "type": "timeout_error",
                                 "elapsed_seconds": int(elapsed_time),
                                 "timeout_seconds": self.workflow_timeout,
@@ -801,6 +835,24 @@ class RunSSEProducer:
                             yield self._format_sse_event("artifact", ui_artifact_event)
                             continue
 
+                        # Live market-watch stamp notification. Transient like
+                        # ``metadata``/``model_retry`` (accumulate=False): the
+                        # durable watchlist re-seeds the chip on replay via
+                        # GET /{thread}/market-watch, so this must not persist —
+                        # see tests/.../history/test_event_ledger.py LIVE_ONLY.
+                        if event_type == "market_watch_update":
+                            yield self._format_sse_event(
+                                "market_watch_update",
+                                {
+                                    "thread_id": self.thread_id,
+                                    "symbols": event_data.get("symbols", []),
+                                    "content": event_data.get("content", ""),
+                                    "timestamp": event_data.get("timestamp"),
+                                },
+                                accumulate=False,
+                            )
+                            continue
+
                         # Check if this is an artifact event from middleware
                         # Generic handler: any event with artifact_type is emitted as artifact SSE
                         artifact_type = event_data.get("artifact_type")
@@ -935,22 +987,17 @@ class RunSSEProducer:
             try:
                 from src.server.services.persistence.usage import UsagePersistenceService
 
-                # Get token tracking from callback (already stored in self.token_callback)
+                # Snapshot under the tracker's lock: background subagent writers
+                # can still be appending records as the turn winds down.
                 per_call_records = None
                 if self.token_callback:
-                    per_call_records = self.token_callback.per_call_records
+                    per_call_records = self.token_callback.get_per_call_records()
 
                 # Get tool usage (non-destructive read, can be called multiple times)
                 tool_usage = self.get_tool_usage()
 
                 # Calculate credits if we have usage data
                 if per_call_records or tool_usage:
-                    # Calculate token usage for display
-                    token_usage = {}
-                    if per_call_records:
-                        from src.utils.tracking import calculate_cost_from_per_call_records
-                        token_usage = calculate_cost_from_per_call_records(per_call_records)
-
                     # Calculate total credits using same logic as persistence
                     credit_service = UsagePersistenceService(
                         thread_id=self.thread_id,
@@ -958,8 +1005,12 @@ class RunSSEProducer:
                         user_id="temp"
                     )
 
+                    # One pricing pass, reused for the display payload. The
+                    # authoritative pass runs again at finalize (coordinator's
+                    # usage writer) against whatever records exist by then.
+                    token_usage = {}
                     if per_call_records:
-                        await credit_service.track_llm_usage(per_call_records)
+                        token_usage = await credit_service.track_llm_usage(per_call_records)
 
                     if tool_usage:
                         credit_service.record_tool_usage_batch(tool_usage)
@@ -1066,8 +1117,8 @@ class RunSSEProducer:
             )
             return False
 
-    def _derive_interrupt_reason(self) -> str:
-        """Classify the buffered interrupt: user question vs plan review."""
+    def _derive_interrupt_reason(self) -> Optional[str]:
+        """Classify the buffered interrupt into the ledger's reason column."""
         from src.server.contracts.status import classify_interrupt_reason
 
         return classify_interrupt_reason(
@@ -1520,18 +1571,18 @@ class RunSSEProducer:
                     raw_args = state["args_accumulated"]
                     parsed_args, err_repr, err_window = _parse_tool_args(raw_args)
 
-                    if parsed_args is None:
+                    args_parse_error = parsed_args is None
+                    if args_parse_error:
                         logger.error(
                             f"[TOOL_CALL_PARSE_ERROR] agent={agent_name} provider={provider_type} "
                             f"name={state.get('name')} args_length={len(raw_args)} "
                             f"error={err_repr} window={err_window!r}"
                         )
-                        # Clear state so the broken call doesn't leak across turns.
-                        if provider_type == "response_api":
-                            self.function_call_state.pop(state_key, None)
-                        else:  # anthropic
-                            self.anthropic_tool_call_state.pop(state_key, None)
-                        continue
+                        # The graph parses args independently and may still run this
+                        # call — dropping the event leaves the stream without a card
+                        # for a call whose tool_call_result arrives later. Emit with
+                        # empty args so the call stays addressable by id.
+                        parsed_args = {}
 
                     try:
                         # id field differs by provider: "call_id" for Response API, "id" for Anthropic.
@@ -1551,6 +1602,8 @@ class RunSSEProducer:
                             "tool_calls": tool_calls,
                             "finish_reason": finish_reason,
                         }
+                        if args_parse_error:
+                            tool_calls_message["args_parse_error"] = True
 
                         logger.debug(
                             f"[TOOL_CALLS_COMPLETE] agent={agent_name} provider={provider_type} "
@@ -1587,6 +1640,13 @@ class RunSSEProducer:
         if isinstance(message_chunk, ToolMessage):
             # Tool Message - Return the result of the tool call
             event_stream_message["tool_call_id"] = message_chunk.tool_call_id
+
+            # The whole status travels, not just the failing one. An explicit
+            # success is what stops a client from reading prose that merely
+            # looks like a failure.
+            tool_status = getattr(message_chunk, "status", None)
+            if tool_status:
+                event_stream_message["status"] = tool_status
 
             # Check for artifact (native LangChain pattern for metadata)
             # Artifact contains complete metadata (URLs, favicons, images) for frontend
@@ -1796,6 +1856,10 @@ class RunSSEProducer:
         the frontend to render user-actionable guidance. The legacy ``error``
         and ``message`` fields stay so older clients keep working.
 
+        Hints are chosen by status and then filtered by who holds the credential
+        (see ``user_owns_credential``), so a platform-billed turn never asks the
+        user to check a key they do not have.
+
         Args:
             error_message: Raw error text (usually ``str(exc)``).
             exc: The exception itself — enables classification. Optional to
@@ -1846,23 +1910,30 @@ class RunSSEProducer:
                 # "check your API key" first on a 503 is misleading.
                 status = info.get("status_code")
                 if status in (401, 403):
-                    data["hints"] = [
-                        "api_key",
-                        "model_access",
-                        "try_another_model",
-                    ]
+                    hints = ["api_key", "model_access", "try_another_model"]
                 elif status == 404:
-                    data["hints"] = ["model_access", "try_another_model"]
+                    hints = ["model_access", "try_another_model"]
+                elif status in _REQUEST_REFUSED_STATUSES:
+                    hints = ["try_another_model"]
                 elif status == 429 or (isinstance(status, int) and status >= 500):
-                    data["hints"] = ["provider_status", "try_another_model"]
+                    hints = ["provider_status", "try_another_model"]
                 else:
                     # No status (network error) — could be anything; show all.
-                    data["hints"] = [
+                    hints = [
                         "api_key",
                         "model_access",
                         "provider_status",
                         "try_another_model",
                     ]
+                # The status says what failed; the credential says who can act
+                # on it. Drop the hints that would send a user to fix a key
+                # they do not hold. Every branch above keeps
+                # "try_another_model", so the list never empties.
+                if not user_owns_credential(
+                    getattr(self.agent_config, "credential_source", None)
+                ):
+                    hints = [h for h in hints if h not in _CREDENTIAL_HINTS]
+                data["hints"] = hints
             if trace is not None:
                 primary_model = trace.get("model")
                 if isinstance(primary_model, str) and primary_model:

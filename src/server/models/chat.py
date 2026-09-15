@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.server.models.additional_context import AdditionalContext
 
+from src.llms.reasoning import ReasoningLevel
+
 # Roles the chat path can VALIDLY persist into the ``messages`` channel. The
 # chat path writes ``{"role", "content"}`` dicts straight in; under DeltaChannel
 # that raw write is stored BEFORE the reducer runs, so a role must clear TWO bars:
@@ -31,7 +33,9 @@ from src.server.models.additional_context import AdditionalContext
 # FAILS bar 2 (not in langgraph's ``_MESSAGE_ROLES``), so it is excluded — clients
 # wanting developer semantics send ``system``, which maps identically and stamps.
 # ``role`` is client-controlled; reject the rest with a clean 422 before persisting.
-_VALID_MESSAGE_ROLES = frozenset({"user", "assistant", "system", "human", "ai"})
+_VALID_MESSAGE_ROLES = frozenset(
+    {"user", "assistant", "system", "human", "ai"}
+)
 
 
 # =============================================================================
@@ -60,17 +64,16 @@ class HITLResponse(BaseModel):
 
 
 def _format_rejection_message(user_feedback: Optional[str]) -> str:
-    """Format a clear rejection message for the agent.
+    """The tool message the agent reads after a rejection.
 
-    Args:
-        user_feedback: Optional feedback from the user explaining why they rejected.
-
-    Returns:
-        Formatted rejection message that clearly indicates the plan was rejected.
+    Worded for any interrupted action, not only a plan: the same resume path
+    now carries a declined order, and telling the model its "plan" was
+    rejected when it asked to place an order sends it off rewriting a plan it
+    never had.
     """
     if user_feedback and user_feedback.strip():
-        return f"User rejected the plan with the following feedback: {user_feedback.strip()}"
-    return "User rejected the plan. No specific feedback was provided."
+        return f"User rejected this action with the following feedback: {user_feedback.strip()}"
+    return "User rejected this action. No specific feedback was provided."
 
 
 def serialize_hitl_response_map(hitl_response: Mapping[str, Any]) -> Dict[str, dict]:
@@ -243,11 +246,6 @@ class ChatRequest(BaseModel):
         description="Workspace identifier - required for 'full' mode, optional for 'flash' mode",
     )
 
-    # Student textbook-learning chat references. The server resolves published
-    # chapter material from these IDs; browser content never becomes textbook context.
-    education_assignment_id: Optional[str] = Field(default=None, max_length=64)
-    education_chapter_id: Optional[str] = Field(default=None, max_length=64)
-
     # Messages
     messages: List[ChatMessage] = Field(
         default_factory=list,
@@ -326,6 +324,12 @@ class ChatRequest(BaseModel):
         description="Additional context to be included. Supports: skills (skill instructions)",
     )
 
+    # Student textbook-learning chat references. The server resolves published
+    # chapter material from these IDs; browser content never becomes textbook
+    # context.
+    education_assignment_id: Optional[str] = Field(default=None, max_length=64)
+    education_chapter_id: Optional[str] = Field(default=None, max_length=64)
+
     # LLM selection (optional - defaults to agent_config.yaml setting)
     llm_model: Optional[str] = Field(
         default=None,
@@ -333,11 +337,13 @@ class ChatRequest(BaseModel):
     )
 
     # Reasoning effort override (optional - defaults to model's configured level)
-    # xhigh is honored only by Anthropic adaptive thinking (Opus 4.7+); other
-    # providers clamp it to high in src/llms/reasoning.py.
-    reasoning_effort: Optional[Literal["low", "medium", "high", "xhigh"]] = Field(
+    # The full canonical vocabulary, not a subset: a level the chosen model does
+    # not declare is clamped in LLM.__init__, which is the only layer that can
+    # see the model's enum. Narrowing here instead turns an unsupported level
+    # into a 422 the caller cannot act on.
+    reasoning_effort: Optional[ReasoningLevel] = Field(
         default=None,
-        description="Override reasoning effort for this request (low/medium/high/xhigh)",
+        description="Override reasoning effort for this request.",
     )
 
     fast_mode: Optional[bool] = Field(
@@ -367,7 +373,8 @@ class ChatRequest(BaseModel):
     # the authoritative origin from Redis at execution time.
     origin_flash_thread_id: Optional[str] = Field(
         default=None,
-        description="Flash thread watching this dispatched PTC run. Internal use only.",
+        description="Flash thread watching this dispatched PTC run. "
+        "Internal use only.",
     )
 
     # Internal: dispatch-incarnation token for the report-back pair, minted
@@ -405,18 +412,20 @@ class ChatRequest(BaseModel):
         description="Stable external thread identifier (e.g. 'chat_id:topic_id'). "
         "When provided with platform, langalpha resolves to an existing thread or creates a new one.",
     )
-    # Format: lowercase prefix (a-z, underscore), optionally `:<IDENTIFIER>`.
-    # The suffix may begin with a letter or digit and accepts A-Z, 0-9, `.` and
-    # `-`, which accommodates external channel and integration identifiers.
-    # Current namespace: 'web', 'telegram', 'slack', 'discord', 'feishu'.
-    # Reserved prefixes should not be reused for other origins.
+    # Format: lowercase prefix (a-z, underscore), optionally `:<SYMBOL>` where the
+    # suffix is a market ticker — it starts with a letter OR digit and accepts
+    # A-Z, 0-9, `.` and `-`. Digit-first symbols are real and common: CN A-shares
+    # (002851.SZ, 600519.SH) and HK tickers (0700.HK) all begin with a digit, not
+    # a letter, so the suffix must not require a leading [A-Z].
+    # Current namespace: 'web', 'market_view:<SYMBOL>', 'telegram', 'slack',
+    # 'discord', 'feishu'. Reserved prefixes shouldn't be reused for other origins.
     platform: Optional[str] = Field(
         default=None,
         pattern=r"^[a-z_]+(:[A-Z0-9][A-Z0-9.-]*)?$",
         max_length=50,
         description="Surface the chat originated from. Examples: 'web', "
-        "'telegram:12345', 'slack', 'discord', 'feishu'. Absent for "
-        "system-initiated threads (see origin).",
+        "'market_view:AAPL', 'market_view:002851.SZ', 'telegram', 'slack', "
+        "'discord', 'feishu'. Absent for system-initiated threads (see origin).",
     )
     # Orthogonal to platform: platform = which user surface, origin = who
     # initiated. Absent origin = user-initiated (the common case is never
@@ -457,6 +466,5 @@ class GeneratePodcastRequest(BaseModel):
 class SubagentMessageRequest(BaseModel):
     """Request model for sending a message to a running subagent."""
 
-    content: str = Field(
-        ..., description="The instruction/message to send to the subagent"
-    )
+    content: str = Field(..., description="The instruction/message to send to the subagent")
+

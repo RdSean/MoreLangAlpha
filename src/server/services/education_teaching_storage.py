@@ -8,7 +8,6 @@ import io
 import json
 import re
 import zipfile
-from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, Protocol
 from uuid import UUID
@@ -55,11 +54,19 @@ async def stage_managed_teaching_skills(
 ) -> None:
     """Stage the two complete static built-in skills, never executable helpers."""
     root = managed_job_root(job_id)
-    repo_root = Path(__file__).resolve().parents[3]
+    from ptc_agent.config.agent import host_skill_dirs
+
     files: list[tuple[str, bytes]] = []
     for skill_name in _MANAGED_SKILL_NAMES:
-        source_root = repo_root / "skills" / skill_name
-        if not (source_root / "SKILL.md").is_file():
+        source_root = next(
+            (
+                root_dir / skill_name
+                for root_dir in host_skill_dirs()
+                if (root_dir / skill_name / "SKILL.md").is_file()
+            ),
+            None,
+        )
+        if source_root is None:
             raise TeachingPackageStorageError("Managed teaching skill is unavailable")
         for source in sorted(source_root.rglob("*")):
             if (

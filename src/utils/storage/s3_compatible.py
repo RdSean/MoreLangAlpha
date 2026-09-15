@@ -19,6 +19,7 @@ Environment Variables:
     STORAGE_MAX_UPLOAD_SIZE   - Max upload size in bytes (default: 10MB)
     STORAGE_CONNECT_TIMEOUT_S - boto3 connect timeout in seconds (default: 5)
     STORAGE_READ_TIMEOUT_S    - boto3 read timeout in seconds (default: 30)
+    STORAGE_MAX_POOL_CONNECTIONS - boto3 connection pool size (default: 32)
     STORAGE_ADDRESSING_STYLE  - Bucket addressing: virtual (default) | path | auto
 
 Endpoint / addressing:
@@ -37,9 +38,13 @@ bucket double-prefixes object keys under virtual addressing.
 import base64
 import logging
 import os
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import boto3
 from botocore.config import Config
@@ -51,6 +56,16 @@ logger = logging.getLogger(__name__)
 
 
 _VALID_ADDRESSING_STYLES = {"virtual", "path", "auto"}
+_DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectDownloadStream:
+    """An opened object body that can be streamed without exposing its URL."""
+
+    chunks: Iterator[bytes]
+    content_length: int | None
+    close: Callable[[], None]
 
 
 def _resolve_addressing_style() -> str:
@@ -91,6 +106,12 @@ class StorageConfig:
     CONNECT_TIMEOUT_S = int(os.getenv("STORAGE_CONNECT_TIMEOUT_S", "5"))
     READ_TIMEOUT_S = int(os.getenv("STORAGE_READ_TIMEOUT_S", "30"))
 
+    # botocore defaults this to 10, which workspace-file restore overruns: it
+    # fetches blobs under a semaphore of 16, so six of every sixteen requests
+    # got their connection discarded and paid a fresh TLS handshake. Sized
+    # above that concurrency with headroom for the concurrent sync path.
+    MAX_POOL_CONNECTIONS = int(os.getenv("STORAGE_MAX_POOL_CONNECTIONS", "32"))
+
     # boto3 bucket addressing. Defaults to "virtual" because most cloud
     # S3-compatible services require/prefer virtual-hosted addressing, whereas
     # boto3's own default ("path" for custom endpoints) double-prefixes keys
@@ -106,12 +127,20 @@ class StorageConfig:
         return f"https://{cls.BUCKET_NAME}.s3.{cls.REGION}.amazonaws.com"
 
 
-# Module-level cache. boto3 clients are thread-safe and the underlying
-# botocore connection pool reuses TLS sessions, so a single shared client
+# Module-level cache. Using a boto3 client from many threads is safe and the
+# underlying connection pool reuses TLS sessions, so a single shared client
 # eliminates the per-op handshake that previously dominated upload/download
 # latency under load. Lazy so import-time failures (missing creds in tests)
 # don't blow up modules that never actually use object storage.
+#
+# *Constructing* one is a different matter: botocore's session and loader are
+# not thread-safe, and every caller here arrives through asyncio.to_thread.
+# Workspace file restore fetches blobs under a semaphore of 16, so on a cold
+# process all 16 threads reach this at once. The lock makes construction
+# happen exactly once; the unlocked fast path keeps the steady state free.
 _CLIENT: Any | None = None
+_RANGE_CLIENT: Any | None = None
+_CLIENT_MU = threading.Lock()
 
 
 def _get_client() -> Any:
@@ -119,6 +148,32 @@ def _get_client() -> Any:
     global _CLIENT
     if _CLIENT is not None:
         return _CLIENT
+    with _CLIENT_MU:
+        if _CLIENT is not None:
+            return _CLIENT
+        _CLIENT = _build_client()
+    return _CLIENT
+
+
+def _get_range_client() -> Any:
+    """The client for ranged GETs, which must not validate response checksums.
+
+    An object uploaded with a full-object checksum comes back with that
+    checksum header on a ranged response too, and the SDK then checks the
+    partial body against it and fails every time. Callers reading a range
+    verify the bytes they get by their own means.
+    """
+    global _RANGE_CLIENT
+    if _RANGE_CLIENT is not None:
+        return _RANGE_CLIENT
+    with _CLIENT_MU:
+        if _RANGE_CLIENT is not None:
+            return _RANGE_CLIENT
+        _RANGE_CLIENT = _build_client(response_checksum_validation="when_required")
+    return _RANGE_CLIENT
+
+
+def _build_client(**config_overrides: Any) -> Any:
     kwargs: dict[str, Any] = {
         "aws_access_key_id": StorageConfig.ACCESS_KEY_ID,
         "aws_secret_access_key": StorageConfig.SECRET_ACCESS_KEY,
@@ -129,21 +184,30 @@ def _get_client() -> Any:
             retries={"max_attempts": 3, "mode": "standard"},
             connect_timeout=StorageConfig.CONNECT_TIMEOUT_S,
             read_timeout=StorageConfig.READ_TIMEOUT_S,
+            max_pool_connections=StorageConfig.MAX_POOL_CONNECTIONS,
+            **config_overrides,
         ),
     }
     if StorageConfig.ENDPOINT_URL:
         kwargs["endpoint_url"] = StorageConfig.ENDPOINT_URL
-    _CLIENT = boto3.client("s3", **kwargs)
-    return _CLIENT
+    return boto3.client("s3", **kwargs)
 
 
 def _reset_client_for_test() -> None:
-    """Drop the cached client. Test-only — production never re-initializes."""
-    global _CLIENT
-    _CLIENT = None
+    """Drop the cached clients. Test-only — production never re-initializes."""
+    global _CLIENT, _RANGE_CLIENT
+    with _CLIENT_MU:
+        _CLIENT = None
+        _RANGE_CLIENT = None
 
 
-def upload_file(key: str, file_path: str, content_type: str | None = None) -> bool:
+def upload_file(
+    key: str,
+    file_path: str,
+    content_type: str | None = None,
+    *,
+    max_bytes: int | None = None,
+) -> bool:
     """Upload a local file."""
     path_obj = Path(file_path)
     if not path_obj.exists():
@@ -151,8 +215,11 @@ def upload_file(key: str, file_path: str, content_type: str | None = None) -> bo
         return False
 
     file_size = path_obj.stat().st_size
-    if file_size > StorageConfig.MAX_UPLOAD_SIZE:
-        logger.error(f"File too large: {file_size} bytes > {StorageConfig.MAX_UPLOAD_SIZE} bytes")
+    upload_cap = StorageConfig.MAX_UPLOAD_SIZE if max_bytes is None else max_bytes
+    if upload_cap < 0:
+        raise ValueError("max_bytes must be non-negative")
+    if file_size > upload_cap:
+        logger.error(f"File too large: {file_size} bytes > {upload_cap} bytes")
         return False
 
     if not content_type:
@@ -194,10 +261,22 @@ def upload_base64(key: str, image_data: str, content_type: str | None = None) ->
         return False
 
 
-def upload_bytes(key: str, data: bytes, content_type: str | None = None) -> bool:
-    """Upload raw bytes."""
-    if len(data) > StorageConfig.MAX_UPLOAD_SIZE:
-        logger.error(f"Data too large: {len(data)} bytes > {StorageConfig.MAX_UPLOAD_SIZE} bytes")
+def upload_bytes(
+    key: str,
+    data: bytes,
+    content_type: str | None = None,
+    max_size: int | None = None,
+) -> bool:
+    """Upload raw bytes.
+
+    ``max_size`` overrides ``STORAGE_MAX_UPLOAD_SIZE`` for this call only.
+    Callers whose own domain cap is larger than the shared default (workspace
+    file blobs, at 100MB) pass it rather than lifting the guard globally for
+    avatars, charts, and memo binaries.
+    """
+    cap = StorageConfig.MAX_UPLOAD_SIZE if max_size is None else max_size
+    if len(data) > cap:
+        logger.error(f"Data too large: {len(data)} bytes > {cap} bytes")
         return False
 
     if not content_type:
@@ -244,6 +323,150 @@ def get_bytes(key: str) -> bytes | None:
         return None
 
 
+def download_to_file(key: str, destination: Path, *, max_bytes: int) -> int:
+    """Stream an object into a local file without writing beyond ``max_bytes``."""
+    if max_bytes < 0:
+        raise ValueError("max_bytes must be non-negative")
+
+    body: Any | None = None
+    try:
+        response = _get_client().get_object(
+            Bucket=StorageConfig.BUCKET_NAME,
+            Key=key,
+        )
+        body = response.get("Body")
+        if body is None:
+            raise RuntimeError("storage response did not include a body")
+
+        content_length = response.get("ContentLength")
+        if isinstance(content_length, int) and content_length > max_bytes:
+            raise ValueError("object exceeds maximum size")
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        total = 0
+        with destination.open("wb") as target:
+            while True:
+                remaining = max_bytes - total
+                chunk = body.read(min(_DOWNLOAD_CHUNK_SIZE, remaining + 1))
+                if not chunk:
+                    break
+                if total + len(chunk) > max_bytes:
+                    raise ValueError("object exceeds maximum size")
+                target.write(chunk)
+                total += len(chunk)
+        return total
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        close = getattr(body, "close", None)
+        if callable(close):
+            close()
+
+
+def open_download_stream(key: str) -> ObjectDownloadStream:
+    """Open an object and expose fixed-size chunks with deterministic cleanup."""
+    response = _get_client().get_object(
+        Bucket=StorageConfig.BUCKET_NAME,
+        Key=key,
+    )
+    body = response.get("Body")
+    if body is None:
+        raise RuntimeError("storage response did not include a body")
+
+    raw_content_length = response.get("ContentLength")
+    content_length = (
+        raw_content_length
+        if isinstance(raw_content_length, int)
+        and not isinstance(raw_content_length, bool)
+        and raw_content_length >= 0
+        else None
+    )
+    closed = False
+
+    def close() -> None:
+        nonlocal closed
+        if closed:
+            return
+        closed = True
+        close_body = getattr(body, "close", None)
+        if callable(close_body):
+            close_body()
+
+    def chunks() -> Iterator[bytes]:
+        try:
+            while chunk := body.read(_DOWNLOAD_CHUNK_SIZE):
+                yield chunk if isinstance(chunk, bytes) else bytes(chunk)
+        finally:
+            close()
+
+    return ObjectDownloadStream(
+        chunks=chunks(),
+        content_length=content_length,
+        close=close,
+    )
+
+
+def create_presigned_download_url(
+    key: str,
+    *,
+    expires_seconds: int,
+    download_name: str,
+) -> str:
+    """Create a private download URL with a caller-supplied short lifetime."""
+    if expires_seconds <= 0:
+        raise ValueError("expires_seconds must be positive")
+    if "\r" in download_name or "\n" in download_name:
+        raise ValueError("download_name must not contain line breaks")
+
+    normalized_name = Path(download_name.replace("\\", "/")).name or "download"
+    ascii_name = normalized_name.encode("ascii", "ignore").decode() or "download"
+    ascii_name = ascii_name.replace('"', "'")
+    disposition = (
+        f'attachment; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(normalized_name)}"
+    )
+    return _get_client().generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": StorageConfig.BUCKET_NAME,
+            "Key": key,
+            "ResponseContentDisposition": disposition,
+        },
+        ExpiresIn=expires_seconds,
+    )
+def get_bytes_range(key: str, start: int, length: int) -> bytes | None:
+    """Download ``length`` bytes of an object from offset ``start``.
+
+    ``None`` on failure or a missing object, like :func:`get_bytes`. A zero
+    length returns ``b""`` without a request: an empty HTTP range is invalid.
+    """
+    if length <= 0:
+        return b""
+    try:
+        client = _get_range_client()
+        response = client.get_object(
+            Bucket=StorageConfig.BUCKET_NAME,
+            Key=key,
+            Range=f"bytes={start}-{start + length - 1}",
+        )
+        body = response.get("Body")
+        if body is None:
+            return None
+        data = body.read()
+        return data if isinstance(data, bytes) else bytes(data)
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code")
+        if code in {"NoSuchKey", "404"}:
+            logger.debug(f"Object not found: {key}")
+            return None
+        logger.exception(f"Ranged download failed for {key}")
+        return None
+    except Exception:
+        logger.exception(f"Unexpected error downloading a range of {key}")
+        return None
+
+
 def does_object_exist(key: str) -> bool:
     """Check if an object exists in the bucket."""
     try:
@@ -278,6 +501,46 @@ def delete_object(key: str) -> bool:
 def get_public_url(key: str) -> str:
     """Get the public URL for an uploaded object."""
     return f"{StorageConfig.get_public_url_base()}/{key}"
+
+
+def get_signed_upload_url(
+    key: str,
+    *,
+    sha256_hex: str,
+    content_length: int,
+    content_type: str,
+    expires_in: int = 900,
+) -> tuple[str, dict[str, str]] | None:
+    """Presign a PUT bound to the object's content, not just its key.
+
+    The digest, length and type are signed into the URL, so the store rejects
+    any body that does not hash to ``sha256_hex`` or exceed ``content_length``
+    (BadDigest / SignatureDoesNotMatch). That binding is what lets an
+    untrusted uploader write into a shared content-addressed prefix. The
+    returned headers must be sent verbatim; Content-Length is set by the
+    uploader from the body it streams.
+    """
+    checksum_b64 = base64.b64encode(bytes.fromhex(sha256_hex)).decode("ascii")
+    try:
+        client = _get_client()
+        url = client.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": StorageConfig.BUCKET_NAME,
+                "Key": key,
+                "ContentLength": content_length,
+                "ContentType": content_type,
+                "ChecksumSHA256": checksum_b64,
+            },
+            ExpiresIn=expires_in,
+        )
+    except Exception as e:
+        logger.error(f"Failed to presign upload for {key}: {e}")
+        return None
+    return url, {
+        "Content-Type": content_type,
+        "x-amz-checksum-sha256": checksum_b64,
+    }
 
 
 def get_signed_url(key: str, expires_in: int = 3600) -> str | None:

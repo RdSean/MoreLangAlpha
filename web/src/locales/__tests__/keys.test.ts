@@ -133,4 +133,13 @@ describe('locale key parity (src-wide)', () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  it('defines the knowledge library shell in both locales', () => {
+    for (const locale of [enUS, zhCN]) {
+      expect(lookup(locale, 'sidebar.documents')).toEqual(expect.any(String));
+      expect(lookup(locale, 'documents.title')).toEqual(expect.any(String));
+      expect(lookup(locale, 'documents.tabs.datasets')).toEqual(expect.any(String));
+      expect(lookup(locale, 'documents.tabs.allDocuments')).toEqual(expect.any(String));
+    }
+  });
 });

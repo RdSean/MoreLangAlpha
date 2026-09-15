@@ -31,6 +31,7 @@ from ptc_agent.core.sandbox.runtime import (
     ExecResult,
     PreviewInfo,
     RuntimeState,
+    SandboxFailureKind,
     SandboxProvider,
     SandboxRuntime,
     SessionCommandResult,
@@ -41,6 +42,8 @@ from ptc_agent.core.sandbox.platform_secrets import (
 )
 from ptc_agent.core.sandbox.providers.daytona_secrets import (
     DaytonaSecretReconciler,
+    daytona_error_code as _daytona_error_code,
+    daytona_error_status as _daytona_error_status,
     is_transient_daytona_error,
 )
 
@@ -497,6 +500,39 @@ class DaytonaProvider(SandboxProvider):
         """Classify whether *exc* is a transient Daytona SDK error."""
         return is_transient_daytona_error(exc)
 
+    def classify_error(self, exc: Exception) -> SandboxFailureKind:
+        """Classify a Daytona failure from its structured error metadata.
+
+        ``DaytonaError`` carries ``status_code`` and a machine-readable
+        ``error_code``; both are needed because a missing *file* and a missing
+        *sandbox* are both HTTP 404. Measured against the live API (SDK 0.200.1):
+        a per-path miss reports ``FILE_NOT_FOUND``, a dead sandbox reports
+        ``NOT_FOUND``, and a bulk-download against a deleted sandbox reports
+        *neither* — it arrives with no status at all, which is why status-less
+        failures must stay ``UNKNOWN`` instead of collapsing into "absent".
+
+        Absence is checked before ``is_transient_daytona_error`` for the reason
+        the base classifier gives: that helper scans the message, and the server
+        echoes the path into it ("file not found: /home/workspace/x.log"), so a
+        missing file named ``session_timeout.log`` read as a timeout and turned
+        an ordinary 404 into a permanent 503. The 404 → ``SANDBOX_GONE`` check
+        deliberately stays *after* the scan: gone authorizes destroying and
+        replacing the sandbox, so a transient-looking failure must not reach it.
+        """
+        error_code = _daytona_error_code(exc)
+        if error_code == "FILE_NOT_FOUND":
+            return SandboxFailureKind.PATH_ABSENT
+
+        if is_transient_daytona_error(exc):
+            return SandboxFailureKind.TRANSIENT
+
+        status = _daytona_error_status(exc)
+        if status == 404:
+            return SandboxFailureKind.SANDBOX_GONE
+        if status == 429 or (status is not None and 500 <= status <= 599):
+            return SandboxFailureKind.TRANSIENT
+        return SandboxFailureKind.UNKNOWN
+
     # -- Snapshot management --
 
     def _get_snapshot_hash(
@@ -549,6 +585,7 @@ class DaytonaProvider(SandboxProvider):
                 "qpdf",
                 "fonts-noto-cjk",
                 "gh",
+                "polymarket",
                 "playwright",
                 "docker-ce",
                 "docker-ce-cli",
@@ -601,6 +638,14 @@ class DaytonaProvider(SandboxProvider):
                 " && tar -xzf /tmp/gh.tar.gz -C /tmp"
                 " && mv /tmp/gh_2.87.3_linux_${GH_ARCH}/bin/gh /usr/local/bin/gh"
                 " && rm -rf /tmp/gh.tar.gz /tmp/gh_2.87.3_linux_${GH_ARCH}",
+                "POLY_ARCH=$(uname -m)"
+                " && curl -fsSL https://github.com/Polymarket/polymarket-cli/"
+                "releases/download/v0.1.4/"
+                "polymarket-v0.1.4-${POLY_ARCH}-unknown-linux-gnu.tar.gz"
+                " -o /tmp/polymarket.tar.gz"
+                " && tar -xzf /tmp/polymarket.tar.gz -C /tmp"
+                " && mv /tmp/polymarket /usr/local/bin/polymarket"
+                " && rm -rf /tmp/polymarket.tar.gz",
                 "npm install -g playwright"
                 " && PLAYWRIGHT_BROWSERS_PATH=/usr/local/ms-playwright"
                 " npx playwright install --with-deps chromium",
@@ -629,7 +674,8 @@ class DaytonaProvider(SandboxProvider):
                 {"PLAYWRIGHT_BROWSERS_PATH": "/usr/local/ms-playwright"}
             )
             .run_commands(
-                # Scrapling requires a recent curl_cffi release.
+                # yfinance pins curl_cffi<0.14 but scrapling[all] requires >=0.14.
+                # Override resolves the conflict (tested, yfinance works with 0.14+).
                 "echo 'curl_cffi>=0.14' > /tmp/overrides.txt",
                 "uv pip install --system --override /tmp/overrides.txt "
                 + " ".join(dependencies),

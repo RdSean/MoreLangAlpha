@@ -123,8 +123,8 @@ async def store_result_bodies(
     """Batch-persist content-addressed result bodies (best-effort, never raises).
 
     ``items`` is an iterable of ``(sha256, body, true_byte_len, content_type)``.
-    Dedupes by sha in-memory (a single turn's parallel research can repeat the
-    same body), spills oversize bodies to object storage, then upserts the
+    Dedupes by sha in-memory (a single turn's market fan-out repeats the same body
+    across symbols), spills oversize bodies to object storage, then upserts the
     rows in chunked multi-row statements on ONE connection. Bodies are immutable +
     content-addressed, so the write is ``ON CONFLICT DO NOTHING`` — a dedup hit is a
     pure no-op (no row rewrite, no WAL, no autovacuum churn on hot rows).

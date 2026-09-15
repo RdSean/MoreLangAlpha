@@ -13,6 +13,7 @@ from uuid import uuid4
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
+from src.llms.preferences import MOVED_MODEL_KEYS, TuningError
 from src.server.database.pool import get_db_connection
 from src.server.utils.db import UpdateQueryBuilder
 
@@ -119,6 +120,89 @@ async def find_user_by_email(email: str) -> Optional[Dict[str, Any]]:
             """, (email,))
             result = await cur.fetchone()
             return dict(result) if result else None
+
+
+async def migrate_user_id(old_user_id: str, new_user_id: str) -> Optional[Dict[str, Any]]:
+    """Update a user's PK from old_user_id to new_user_id.
+
+    Requires ON UPDATE CASCADE on all FK constraints so child tables
+    (workspaces, watchlists, etc.) update automatically.
+    """
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute("""
+                UPDATE users SET user_id = %s, updated_at = NOW()
+                WHERE user_id = %s
+                RETURNING
+                    user_id, email, name, avatar_url, timezone, locale,
+                    onboarding_completed,
+                    COALESCE(personalization_completed, FALSE) AS personalization_completed,
+                    auth_provider,
+                    created_at, updated_at, last_login_at,
+                    """ + _HAS_API_KEY + """,
+                    """ + _HAS_OAUTH + """
+            """, (new_user_id, old_user_id))
+            result = await cur.fetchone()
+            if result:
+                logger.info(f"[user_db] migrate_user_id {old_user_id} -> {new_user_id}")
+            return dict(result) if result else None
+
+
+async def create_user_from_auth(
+    user_id: str,
+    email: Optional[str] = None,
+    name: Optional[str] = None,
+    avatar_url: Optional[str] = None,
+    auth_provider: Optional[str] = None,
+    timezone: Optional[str] = None,
+    locale: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create a new user from Supabase auth data.
+
+    Uses ON CONFLICT DO UPDATE so it's idempotent — if the user already
+    exists it just refreshes their profile fields.  ``auth_provider``,
+    ``timezone``, and ``locale`` are only written when the existing value
+    is NULL (lazy backfill on next login).
+    """
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute("""
+                INSERT INTO users (
+                    user_id, email, name, avatar_url, auth_provider,
+                    timezone, locale,
+                    onboarding_completed, created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, NOW(), NOW())
+                ON CONFLICT (user_id) DO UPDATE
+                SET
+                    email = COALESCE(EXCLUDED.email, users.email),
+                    name = COALESCE(EXCLUDED.name, users.name),
+                    avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
+                    auth_provider = COALESCE(users.auth_provider, EXCLUDED.auth_provider),
+                    timezone = COALESCE(EXCLUDED.timezone, users.timezone),
+                    locale = COALESCE(EXCLUDED.locale, users.locale),
+                    updated_at = NOW()
+                RETURNING
+                    user_id, email, name, avatar_url, timezone, locale,
+                    onboarding_completed,
+                    COALESCE(personalization_completed, FALSE) AS personalization_completed,
+                    auth_provider,
+                    created_at, updated_at, last_login_at,
+                    """ + _HAS_API_KEY + """,
+                    """ + _HAS_OAUTH + """
+            """, (user_id, email, name, avatar_url, auth_provider, timezone, locale))
+            result = await cur.fetchone()
+
+            # Ensure a preferences row exists so the user can configure
+            # models/BYOK without completing onboarding first.
+            await cur.execute("""
+                INSERT INTO user_preferences (user_preference_id, user_id, created_at, updated_at)
+                VALUES (gen_random_uuid(), %s, NOW(), NOW())
+                ON CONFLICT (user_id) DO NOTHING
+            """, (user_id,))
+
+            logger.info(f"[user_db] create_user_from_auth user_id={user_id}")
+            return dict(result)
 
 
 async def get_user(user_id: str) -> Optional[Dict[str, Any]]:
@@ -316,7 +400,8 @@ async def get_user_preferences(user_id: str) -> Optional[Dict[str, Any]]:
             await cur.execute("""
                 SELECT
                     user_preference_id, user_id,
-                    agent_preference, other_preference,
+                    risk_preference, investment_preference,
+                    agent_preference, other_preference, model_preference,
                     created_at, updated_at
                 FROM user_preferences
                 WHERE user_id = %s
@@ -351,14 +436,7 @@ async def invalidate_user_prefs_cache(user_id: str) -> None:
 
 
 def _split_updates_and_deletes(data: Optional[Dict[str, Any]]) -> tuple[Dict[str, Any], list[str]]:
-    """Split data into updates (non-None values) and deletes (None values).
-
-    Args:
-        data: Dict that may contain None values to signal deletion
-
-    Returns:
-        Tuple of (updates_dict, delete_keys_list)
-    """
+    """Split a patch into the keys it sets and the keys it deletes (value ``None``)."""
     if not data:
         return {}, []
     updates = {}
@@ -371,89 +449,155 @@ def _split_updates_and_deletes(data: Optional[Dict[str, Any]]) -> tuple[Dict[str
     return updates, deletes
 
 
+def _mirror_moved_deletes(
+    model_preference: Optional[Dict[str, Any]],
+    other_preference: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Clear a moved key out of the pre-move column when the model column clears it.
+
+    The deep merge reads ``null`` as a delete rather than storing it, and
+    ``get_model_preference`` reads ``other_preference`` underneath for exactly
+    these keys, so a clear applied to one column alone is answered by the old
+    value on the next read. Done here because every writer reaches this
+    function, and one that forgot would resurrect a setting the user cleared.
+    """
+    deletes = {
+        key: None
+        for key, value in (model_preference or {}).items()
+        if value is None and key in MOVED_MODEL_KEYS
+    }
+    if not deletes:
+        return other_preference
+    # An explicit value from the caller wins: it named the column outright.
+    return {**deletes, **(other_preference or {})}
+
+
+def _validate_model_shape(model_preference: Optional[Dict[str, Any]]) -> None:
+    """Reject a ``profiles`` bag the merge cannot interpret.
+
+    Enforced here rather than at the HTTP layer because other writers reach this
+    function directly, and a shape error raised past them would surface as a 500
+    where the same payload gets a 400 through the API.
+    """
+    profiles = (model_preference or {}).get("profiles")
+    if profiles is None:
+        return
+    if not isinstance(profiles, dict):
+        raise TuningError(
+            "profiles",
+            "model_preference.profiles must be a map of model name to settings",
+        )
+    for name, entry in profiles.items():
+        if entry is not None and not isinstance(entry, dict):
+            raise TuningError(
+                "profiles",
+                f"model_preference.profiles[{name}] must be an object or null",
+            )
+
+
+#: The JSONB preference columns, and whether a patch merges into nested objects.
+#: Only ``model_preference`` does: its ``profiles`` bag is keyed by model name,
+#: so a patch for one model has to leave the other models standing. The four
+#: beside it are rewritten whole by their callers, which depend on a shallow
+#: write to shrink a nested bag — ``other_preference.feature_overrides`` loses a
+#: key exactly that way.
+_PREF_COLUMNS: tuple[tuple[str, bool], ...] = (
+    ("risk_preference", False),
+    ("investment_preference", False),
+    ("agent_preference", False),
+    ("other_preference", False),
+    ("model_preference", True),
+)
+
+
+def _insert_value(deep: bool) -> str:
+    """The column's value on a fresh row. A deep column runs its patch through
+    the merge so a ``null`` deletes rather than being stored literally."""
+    return "jsonb_deep_merge('{}'::jsonb, %s::jsonb)" if deep else "%s::jsonb"
+
+
+def _merge_clause(column: str, deep: bool) -> str:
+    existing = f"COALESCE(user_preferences.{column}, '{{}}'::jsonb)"
+    if deep:
+        return f"{column} = jsonb_deep_merge({existing}, COALESCE(%s::jsonb, '{{}}'::jsonb))"
+    return f"{column} = ({existing} - %s::text[]) || COALESCE(%s::jsonb, '{{}}'::jsonb)"
+
+
+def _replace_clause(column: str, deep: bool) -> str:
+    return f"{column} = CASE WHEN %s THEN {_insert_value(deep)} ELSE user_preferences.{column} END"
+
+
+_SET_JOIN = ",\n                        "
+_PREF_COLUMN_LIST = ", ".join(column for column, _ in _PREF_COLUMNS)
+_PREF_INSERT_VALUES = ", ".join(_insert_value(deep) for _, deep in _PREF_COLUMNS)
+_PREF_MERGE_SET = _SET_JOIN.join(_merge_clause(c, d) for c, d in _PREF_COLUMNS)
+_PREF_REPLACE_SET = _SET_JOIN.join(_replace_clause(c, d) for c, d in _PREF_COLUMNS)
+_PREF_RETURNING = (
+    f"user_preference_id, user_id, {_PREF_COLUMN_LIST}, created_at, updated_at"
+)
+
+
 async def upsert_user_preferences(
     user_id: str,
+    risk_preference: Optional[Dict[str, Any]] = None,
+    investment_preference: Optional[Dict[str, Any]] = None,
     agent_preference: Optional[Dict[str, Any]] = None,
     other_preference: Optional[Dict[str, Any]] = None,
+    model_preference: Optional[Dict[str, Any]] = None,
     replace: bool = False,
 ) -> Dict[str, Any]:
+    """Create or update a user's preferences, merging each column that is passed.
+
+    A ``None`` value deletes its key; under ``model_preference`` that holds at
+    any depth, so ``{"profiles": {"m1": None}}`` drops one model's overrides and
+    leaves its siblings, and clearing a key 034 moved clears its pre-move copy
+    too. ``replace=True`` overwrites each provided column whole.
     """
-    Create or update user preferences (upsert with merge or replace).
+    _validate_model_shape(model_preference)
+    other_preference = _mirror_moved_deletes(model_preference, other_preference)
 
-    For existing preferences, merges the JSONB fields by default.
-    To delete a field within a preference, pass it with a None value (e.g., {"notes": None}).
-    Use replace=True to completely replace the preference instead of merging.
+    patches: dict[str, Optional[Dict[str, Any]]] = {
+        "risk_preference": risk_preference,
+        "investment_preference": investment_preference,
+        "agent_preference": agent_preference,
+        "other_preference": other_preference,
+        "model_preference": model_preference,
+    }
 
-    Args:
-        user_id: User ID
-        agent_preference: Agent behavior settings dict (None values = delete field)
-        other_preference: Miscellaneous settings dict (None values = delete field)
-        replace: If True, replace entire preference instead of merging
+    insert_params: list[Any] = []
+    set_params: list[Any] = []
+    for column, deep in _PREF_COLUMNS:
+        patch = patches[column]
+        # A deep column keeps its nulls: the merge function reads them as
+        # deletes, wherever they sit. A shallow one has them split off into the
+        # ``- text[]`` its clause subtracts.
+        value = patch if deep else _split_updates_and_deletes(patch)[0]
+        insert_params.append(Json(value or {}))
+        if replace:
+            set_params.extend([patch is not None, Json(value or {})])
+        elif deep:
+            set_params.append(Json(patch) if patch else None)
+        else:
+            updates, deletes = _split_updates_and_deletes(patch)
+            set_params.extend([deletes, Json(updates) if updates else None])
 
-    Returns:
-        Updated preferences dict
+    sql = f"""
+        INSERT INTO user_preferences (
+            user_preference_id, user_id, {_PREF_COLUMN_LIST}, created_at, updated_at
+        )
+        VALUES (%s, %s, {_PREF_INSERT_VALUES}, NOW(), NOW())
+        ON CONFLICT (user_id) DO UPDATE
+        SET
+                        {_PREF_REPLACE_SET if replace else _PREF_MERGE_SET},
+                        updated_at = NOW()
+        RETURNING {_PREF_RETURNING}
     """
-    user_preference_id = str(uuid4())
-
-    # Split each preference into updates and deletes.
-    agent_updates, agent_deletes = _split_updates_and_deletes(agent_preference)
-    other_updates, other_deletes = _split_updates_and_deletes(other_preference)
 
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
-            if replace:
-                # Replace mode: completely replace the JSONB field (only for provided preferences)
-                await cur.execute("""
-                    INSERT INTO user_preferences (
-                        user_preference_id, user_id,
-                        agent_preference, other_preference,
-                        created_at, updated_at
-                    )
-                    VALUES (%s, %s, %s, %s, NOW(), NOW())
-                    ON CONFLICT (user_id) DO UPDATE
-                    SET
-                        agent_preference = CASE WHEN %s THEN %s::jsonb ELSE user_preferences.agent_preference END,
-                        other_preference = CASE WHEN %s THEN %s::jsonb ELSE user_preferences.other_preference END,
-                        updated_at = NOW()
-                    RETURNING
-                        user_preference_id, user_id,
-                        agent_preference, other_preference,
-                        created_at, updated_at
-                """, (
-                    user_preference_id, user_id,
-                    Json(agent_updates or {}),
-                    Json(other_updates or {}),
-                    # For UPDATE: flag if provided, then the value
-                    agent_preference is not None, Json(agent_updates or {}),
-                    other_preference is not None, Json(other_updates or {}),
-                ))
-            else:
-                # Merge mode: use JSONB merge (||) to add/update, remove deleted keys (- text[])
-                await cur.execute("""
-                    INSERT INTO user_preferences (
-                        user_preference_id, user_id,
-                        agent_preference, other_preference,
-                        created_at, updated_at
-                    )
-                    VALUES (%s, %s, %s, %s, NOW(), NOW())
-                    ON CONFLICT (user_id) DO UPDATE
-                    SET
-                        agent_preference = (COALESCE(user_preferences.agent_preference, '{}'::jsonb) - %s::text[]) || COALESCE(%s::jsonb, '{}'::jsonb),
-                        other_preference = (COALESCE(user_preferences.other_preference, '{}'::jsonb) - %s::text[]) || COALESCE(%s::jsonb, '{}'::jsonb),
-                        updated_at = NOW()
-                    RETURNING
-                        user_preference_id, user_id,
-                        agent_preference, other_preference,
-                        created_at, updated_at
-                """, (
-                    user_preference_id, user_id,
-                    Json(agent_updates or {}),
-                    Json(other_updates or {}),
-                    # For the UPDATE clause: deletes then updates for each column
-                    agent_deletes, Json(agent_updates) if agent_updates else None,
-                    other_deletes, Json(other_updates) if other_updates else None,
-                ))
-
+            await cur.execute(
+                sql, [str(uuid4()), user_id, *insert_params, *set_params]
+            )
             result = await cur.fetchone()
             logger.info(f"[user_db] upsert_user_preferences user_id={user_id} replace={replace}")
             return dict(result)
@@ -500,7 +644,8 @@ async def get_user_with_preferences(user_id: str) -> Optional[Dict[str, Any]]:
                     u.auth_provider,
                     u.created_at, u.updated_at, u.last_login_at,
                     """ + _gate_cols("u") + """,
-                    p.user_preference_id, p.agent_preference, p.other_preference,
+                    p.user_preference_id, p.risk_preference, p.investment_preference,
+                    p.agent_preference, p.other_preference, p.model_preference,
                     p.created_at as pref_created_at, p.updated_at as pref_updated_at
                 FROM users u
                 LEFT JOIN user_preferences p ON u.user_id = p.user_id
@@ -534,8 +679,11 @@ async def get_user_with_preferences(user_id: str) -> Optional[Dict[str, Any]]:
                 preferences = {
                     'user_preference_id': result['user_preference_id'],
                     'user_id': result['user_id'],
+                    'risk_preference': result['risk_preference'],
+                    'investment_preference': result['investment_preference'],
                     'agent_preference': result['agent_preference'],
                     'other_preference': result['other_preference'],
+                    'model_preference': result['model_preference'],
                     'created_at': result['pref_created_at'],
                     'updated_at': result['pref_updated_at'],
                 }

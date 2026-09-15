@@ -12,11 +12,16 @@ let scenarios = {};
 let requestLog = [];
 
 const server = http.createServer(async (req, res) => {
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': req.headers.origin || '*',
+    ...(req.headers.origin ? { 'Access-Control-Allow-Credentials': 'true' } : {}),
+  };
+
   try {
   // CORS preflight
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
+      ...corsHeaders,
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept',
     });
@@ -27,9 +32,18 @@ const server = http.createServer(async (req, res) => {
   // ── Control endpoints (called by tests) ──
   if (req.url === '/__scenario' && req.method === 'POST') {
     const body = await readBody(req);
-    const { method, path, events, delay, status, errorBody, once, json } = JSON.parse(body);
+    const { method, path, events, delay, status, errorBody, once, json, responses } = JSON.parse(body);
     const key = `${method || 'GET'} ${path}`;
-    scenarios[key] = { events: events || [], delay: delay ?? 50, status: status || 200, errorBody, once, json };
+    scenarios[key] = {
+      events: events || [],
+      delay: delay ?? 50,
+      status: status || 200,
+      errorBody,
+      once,
+      json,
+      responses,
+      responseIndex: 0,
+    };
     res.writeHead(200);
     res.end('ok');
     return;
@@ -72,7 +86,7 @@ const server = http.createServer(async (req, res) => {
   });
 
   if (!scenario) {
-    res.writeHead(404, { 'Access-Control-Allow-Origin': '*' });
+    res.writeHead(404, corsHeaders);
     res.end('no scenario');
     return;
   }
@@ -85,11 +99,17 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (scenario.responses?.length) {
+    const responseIndex = Math.min(scenario.responseIndex, scenario.responses.length - 1);
+    scenario.responseIndex += 1;
+    scenario = { ...scenario, ...scenario.responses[responseIndex] };
+  }
+
   // Non-200: return JSON error
   if (scenario.status !== 200) {
     res.writeHead(scenario.status, {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
+      ...corsHeaders,
     });
     res.end(JSON.stringify(scenario.errorBody || { detail: 'error' }));
     return;
@@ -99,7 +119,7 @@ const server = http.createServer(async (req, res) => {
   if (scenario.json !== undefined) {
     res.writeHead(200, {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
+      ...corsHeaders,
     });
     res.end(JSON.stringify(scenario.json));
     return;
@@ -110,7 +130,7 @@ const server = http.createServer(async (req, res) => {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
+    ...corsHeaders,
   });
 
   for (let i = 0; i < scenario.events.length; i++) {
@@ -130,7 +150,7 @@ const server = http.createServer(async (req, res) => {
   } catch (err) {
     console.error('Mock SSE server request error:', err.message);
     if (!res.headersSent) {
-      res.writeHead(500, { 'Access-Control-Allow-Origin': '*' });
+      res.writeHead(500, corsHeaders);
     }
     res.end(JSON.stringify({ error: err.message }));
   }

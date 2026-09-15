@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent, type RefObject, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getSkills } from '@/pages/ChatAgent/utils/api';
+import { useSkills } from '@/hooks/useSkills';
 import { BUILTIN_SLASH_COMMANDS, findTriggerIndex, slashRank } from './chat-input.helpers';
 import type { SlashCommand } from './chat-input.types';
 
@@ -14,11 +14,13 @@ export function useSlashCommands({
   message,
   setMessage,
   mode,
+  workspaceId,
 }: {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   message: string;
   setMessage: Dispatch<SetStateAction<string>>;
   mode?: 'fast' | 'ptc';
+  workspaceId?: string | null;
 }) {
   const { t } = useTranslation();
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
@@ -26,14 +28,14 @@ export function useSlashCommands({
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [slashStart, setSlashStart] = useState(-1);
-  const [skills, setSkills] = useState<Array<{ command?: string; name: string; description?: string }>>([]);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Fetch skills filtered by agent mode (re-fetches when mode changes; cached per mode in api.js)
+  // Enabled-only skills for the agent mode, via React Query so a skill
+  // uploaded or toggled on the Plugins page reaches this menu without a
+  // reload. Inside a workspace this is the workspace-effective view, so
+  // workspace-scoped skills surface here too.
   const skillsMode = mode === 'fast' ? 'flash' : 'ptc';
-  useEffect(() => {
-    getSkills(skillsMode).then((s: unknown[]) => setSkills(s as typeof skills)).catch(() => { });
-  }, [skillsMode]);
+  const { data: skills = [] } = useSkills(skillsMode, { workspaceId });
 
   const filtered = useMemo(() => {
     if (!open) return [];
@@ -59,11 +61,15 @@ export function useSlashCommands({
       // /subagent) outrank skills. So `/d` puts /dcf-model (prefix) above
       // /offload (a system command matching "d" only mid-word), while `/comp`
       // puts /compact above /comps-analysis (both prefix → system wins). Combined
-      // score (lower = earlier): prefix+system 0, prefix+skill 1, substr+system
-      // 2, substr+skill 3. Array.sort is stable, preserving within-tier order;
-      // sort before slice so a high-rank match never falls off the top-10.
+      // score (lower = earlier): prefix+featured 0, prefix+system 1,
+      // prefix+skill 2, then the substring tiers. Array.sort is stable, so
+      // within a tier the order is the one the API returned.
+      //
+      // No truncation: the panel caps its own height and scrolls (see
+      // .mention-autocomplete), so every match stays reachable. A top-N list
+      // was how a skill added late — the two book-learning ones, at the end of
+      // the registry — could never be found by typing a bare "/".
       .sort((a, b) => slashRank(a, q) - slashRank(b, q))
-      .slice(0, 10);
   }, [skills, open, query, slashCommands, t]);
 
   useEffect(() => {

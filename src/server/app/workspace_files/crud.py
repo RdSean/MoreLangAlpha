@@ -12,6 +12,10 @@ from fastapi import APIRouter, Body, File, HTTPException, Query, Request, Upload
 from pydantic import BaseModel, Field
 
 from src.server.utils.api import CurrentUserId, require_workspace_owner
+from src.server.utils.error_sanitization import (
+    sandbox_unreachable_detail,
+    single_line,
+)
 from src.server.utils.http_headers import content_disposition
 from fastapi.responses import Response
 
@@ -23,10 +27,12 @@ from src.utils.mime import resolve_content_type
 
 from ._shared import (
     DEFAULT_READ_LIMIT_LINES,
+    _USER_PROFILE_FILES,
     _is_text_content_type,
     _is_utf8,
     MAX_UPLOAD_BYTES,
     _CACHEABLE_IMAGE_TYPES,
+    _USER_PROFILE_PREFIX,
     _acquire_sandbox,
     _decode_file_text,
     _get_work_dir,
@@ -35,11 +41,15 @@ from ._shared import (
     _is_flash_workspace,
     _is_hidden_path,
     _is_system_path,
+    _is_user_profile_file,
     _normalize_requested_path,
     _record_fs_bytes,
     _requested_hidden_ok,
     _requested_system_ok,
+    _serialize_user_profile_file,
     _to_client_path,
+    http_file_bytes,
+    http_file_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,26 +125,14 @@ async def list_workspace_files(
     if not wait_for_sandbox and not sandbox.is_ready():
         return {"files": [], "sandbox_ready": False}
 
-    # Pre-check sandbox health before file listing.
-    # aglob_files swallows all exceptions and returns [], which turns a broken
-    # sandbox into "200 with no files". This check surfaces the real error.
-    try:
-        await sandbox.ensure_sandbox_ready()
-    except Exception as e:
-        logger.warning(f"Sandbox health check failed for workspace {workspace_id}: {e}")
-        raise HTTPException(
-            status_code=503,
-            detail=f"Sandbox is not reachable: {e}",
-        )
-
     # Allow explicit listing of hidden internal paths (e.g. _internal/...).
+    # No pre-flight health probe: ``aglob_files`` raises on an unreachable
+    # sandbox rather than returning [], so the glob already reports the truth
+    # and an extra round trip on every listing would buy nothing.
     allow_denied = _requested_hidden_ok(path, work_dir)
-    try:
-        absolute_paths: list[str] = await sandbox.aglob_files(
-            pattern, path=path, allow_denied=allow_denied
-        )
-    except RuntimeError:
-        raise HTTPException(status_code=503, detail="Sandbox is still starting")
+    absolute_paths: list[str] = await sandbox.aglob_files(
+        pattern, path=path, allow_denied=allow_denied
+    )
 
     allow_hidden = _requested_hidden_ok(path, work_dir)
 
@@ -159,6 +157,20 @@ async def list_workspace_files(
             continue
 
         files.append(client_path)
+
+    # Splice in the three virtual user-profile files when the request scope
+    # includes .agents/user/profile/. They don't exist on the sandbox FS,
+    # so aglob_files never returns them.
+    requested_norm = _normalize_requested_path(path, work_dir)
+    if (
+        requested_norm == ""
+        or _USER_PROFILE_PREFIX.startswith(f"{requested_norm}/")
+        or _USER_PROFILE_PREFIX.rstrip("/") == requested_norm
+        or requested_norm.startswith(_USER_PROFILE_PREFIX)
+    ):
+        for virtual_path in _USER_PROFILE_FILES:
+            if virtual_path not in files:
+                files.append(virtual_path)
 
     return {
         "workspace_id": workspace_id,
@@ -195,7 +207,36 @@ async def read_workspace_file(
             status_code=400, detail="Flash workspaces do not have a sandbox"
         )
 
+    # Virtual user-profile JSON files — served from DB, independent of sandbox state.
+    # Works whether the workspace is running, stopped, or never started.
     work_dir = _get_work_dir()
+    normalized_for_profile = _normalize_requested_path(path, work_dir)
+    if _is_user_profile_file(normalized_for_profile):
+        try:
+            text_content = await _serialize_user_profile_file(normalized_for_profile, x_user_id)
+        except Exception:
+            logger.exception(
+                "user-profile virtual read failed", extra={"path": normalized_for_profile}
+            )
+            raise HTTPException(status_code=500, detail="Failed to read user profile data")
+        if unlimited:
+            content = text_content
+            truncated = False
+        else:
+            lines = text_content.splitlines()
+            content = "\n".join(lines[offset : offset + limit])
+            truncated = len(lines) > offset + limit
+        return {
+            "workspace_id": workspace_id,
+            "path": normalized_for_profile,
+            "offset": offset,
+            "limit": limit,
+            "content": content,
+            "mime": "application/json",
+            "truncated": truncated,
+            "source": "user_data_backend",
+        }
+
     # DB fallback for stopped workspaces
     if workspace.get("status") in ("stopped", "stopping", "starting"):
         normalized_path = _normalize_requested_path(path, work_dir)
@@ -216,7 +257,10 @@ async def read_workspace_file(
                 detail="Cannot read binary file as text. Use GET /files/download instead.",
             )
 
-        text_content = file_record.get("content_text", "")
+        # Never `.get("content_text", "")` — the key exists with a NULL value on
+        # a blob-backed row, so the default never fires and redact() would be
+        # handed None.
+        text_content = await http_file_text(file_record, user_id=workspace["user_id"])
         text_content = get_redactor().redact(text_content, vault_secrets=vault_secrets)
         if unlimited:
             content = text_content
@@ -244,11 +288,11 @@ async def read_workspace_file(
     if error:
         raise HTTPException(status_code=403, detail=error)
 
-    # Download raw bytes first to distinguish "not found" from "binary file"
-    try:
-        raw_bytes = await sandbox.adownload_file_bytes(normalized)
-    except RuntimeError:
-        raise HTTPException(status_code=503, detail="Sandbox is still starting")
+    # Download raw bytes first to distinguish "not found" from "binary file".
+    # ``None`` means the file genuinely is not there; an unreachable or replaced
+    # sandbox raises (SandboxGoneError / SandboxTransientError, both
+    # RuntimeError) so it cannot masquerade as "the file was deleted".
+    raw_bytes = await sandbox.adownload_file_bytes(normalized)
     if raw_bytes is None:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -326,6 +370,22 @@ async def write_workspace_file(
             detail=f"Cannot write files — workspace is {workspace.get('status')}. Wait for it to be running.",
         )
 
+    # User-profile virtual files are read-only through this API. Writes happen
+    # via the dashboard widgets (portfolio/watchlist CRUD) or the agent's
+    # CompositeFilesystemBackend → UserDataBackend route, both of which apply
+    # schema validation and version checks that this generic write endpoint
+    # cannot enforce safely.
+    work_dir = _get_work_dir()
+    normalized_for_profile = _normalize_requested_path(path, work_dir)
+    if _is_user_profile_file(normalized_for_profile):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "User-profile JSON files are read-only through the file panel. "
+                "Edit via the dashboard widget or ask the agent to update it."
+            ),
+        )
+
     content_bytes = body.content.encode("utf-8")
     if len(content_bytes) > MAX_WRITE_BYTES:
         raise HTTPException(status_code=413, detail="File content too large (max 10MB)")
@@ -336,10 +396,7 @@ async def write_workspace_file(
     if error:
         raise HTTPException(status_code=403, detail=error)
 
-    try:
-        ok = await sandbox.awrite_file_text(normalized, body.content)
-    except RuntimeError:
-        raise HTTPException(status_code=503, detail="Sandbox is still starting")
+    ok = await sandbox.awrite_file_text(normalized, body.content)
     if not ok:
         raise HTTPException(status_code=500, detail="Write failed")
 
@@ -421,14 +478,7 @@ async def download_workspace_file(
         if not file_record:
             raise HTTPException(status_code=404, detail="File not found")
 
-        if file_record.get("is_binary") and file_record.get("content_binary"):
-            content = file_record["content_binary"]
-            if isinstance(content, memoryview):
-                content = bytes(content)
-        elif file_record.get("content_text") is not None:
-            content = file_record["content_text"].encode("utf-8")
-        else:
-            raise HTTPException(status_code=404, detail="File content not available")
+        content = await http_file_bytes(file_record, user_id=workspace["user_id"])
 
         filename = file_record.get("file_name", "download")
         mime = file_record.get("mime_type") or "application/octet-stream"
@@ -444,10 +494,7 @@ async def download_workspace_file(
     if error:
         raise HTTPException(status_code=403, detail=error)
 
-    try:
-        content = await sandbox.adownload_file_bytes(normalized)
-    except RuntimeError:
-        raise HTTPException(status_code=503, detail="Sandbox is still starting")
+    content = await sandbox.adownload_file_bytes(normalized)
     if content is None:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -512,10 +559,7 @@ async def upload_workspace_file(
             detail=f"File is too large ({size_mb:.1f} MB). Maximum upload size is {limit_mb} MB.",
         )
 
-    try:
-        ok = await sandbox.aupload_file_bytes(normalized, content)
-    except RuntimeError:
-        raise HTTPException(status_code=503, detail="Sandbox is still starting")
+    ok = await sandbox.aupload_file_bytes(normalized, content)
     if not ok:
         raise HTTPException(status_code=500, detail="Upload failed")
 
@@ -555,9 +599,15 @@ async def backup_workspace_files(
     try:
         result = await FilePersistenceService.sync_to_db(workspace_id, sandbox)
     except RuntimeError as e:
+        # Same wording as every other producer: the file panel keys its error
+        # card off this string, so a fourth variant here would render a
+        # different card for the same condition.
+        logger.warning(
+            f"Sandbox unreachable syncing {workspace_id}: {single_line(str(e))}"
+        )
         raise HTTPException(
             status_code=503,
-            detail=f"Sandbox not ready: {e}",
+            detail=sandbox_unreachable_detail(e),
         )
     return {
         "workspace_id": workspace_id,
@@ -565,6 +615,7 @@ async def backup_workspace_files(
         "skipped": result["skipped"],
         "deleted": result["deleted"],
         "errors": result["errors"],
+        "oversized": result.get("oversized", 0),
         "total_size": result["total_size"],
     }
 
@@ -596,7 +647,13 @@ async def get_backup_status(
         get_workspace_total_size,
     )
 
-    db_meta = await get_file_metadata_for_sync(workspace_id)
+    # The sync metadata carries directory and symlink rows too; this status
+    # is about files, and the running branch below only ever sees files.
+    db_meta = {
+        path: meta
+        for path, meta in (await get_file_metadata_for_sync(workspace_id)).items()
+        if meta.get("kind", "file") == "file"
+    }
 
     # If sandbox is stopped, everything in DB is "backed_up", nothing else
     if workspace.get("status") in ("stopped", "stopping", "starting"):
@@ -623,9 +680,11 @@ async def get_backup_status(
             "total_backed_up_size": total_size,
         }
 
-    # Run find to get current sandbox file metadata
+    # The sandbox lists itself; known rows let it skip re-hashing.
     try:
-        sandbox_meta = await FilePersistenceService.list_sandbox_files(sandbox)
+        sandbox_meta = await FilePersistenceService.list_sandbox_files(
+            sandbox, prior=FilePersistenceService.prior_from_meta(db_meta)
+        )
     except Exception:
         total_size = await get_workspace_total_size(workspace_id)
         return {
@@ -705,6 +764,15 @@ async def delete_workspace_files(
             continue
 
         client_path = _to_client_path(sandbox, normalized)
+        if _is_user_profile_file(client_path):
+            errors.append({
+                "path": path,
+                "detail": (
+                    "User-profile JSON files cannot be deleted through the file panel. "
+                    "Manage entries via the dashboard widgets."
+                ),
+            })
+            continue
         if _is_system_path(client_path):
             errors.append({"path": path, "detail": "Cannot delete system files"})
             continue
@@ -714,10 +782,7 @@ async def delete_workspace_files(
     deleted: list[str] = []
     if valid_paths:
         rm_args = " ".join(shlex.quote(p) for p, _ in valid_paths)
-        try:
-            result = await sandbox.execute_bash_command(f"rm -f {rm_args}")
-        except RuntimeError:
-            raise HTTPException(status_code=503, detail="Sandbox is still starting")
+        result = await sandbox.execute_bash_command(f"rm -f {rm_args}")
         if result.get("success"):
             deleted = [cp for _, cp in valid_paths]
         else:

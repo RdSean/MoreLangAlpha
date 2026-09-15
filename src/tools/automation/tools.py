@@ -125,6 +125,7 @@ async def check_automations(
                                 else None
                             ),
                             "next_run_at": a.get("next_run_at"),
+                            **({"trigger_config": a.get("trigger_config")} if a.get("trigger_type") == "price" else {}),
                         }
                         for a in automations
                     ],
@@ -149,6 +150,7 @@ async def check_automations(
                             ),
                             "next_run_at": a.get("next_run_at"),
                             "trigger_type": a.get("trigger_type", "cron"),
+                            **({"trigger_config": a.get("trigger_config")} if a.get("trigger_type") == "price" else {}),
                         }
                         for a in automations
                     ],
@@ -180,6 +182,7 @@ async def check_automations(
                         if automation.get("next_run_at")
                         else None
                     ),
+                    **({"trigger_config": automation.get("trigger_config")} if automation.get("trigger_type") == "price" else {}),
                     "agent_mode": automation["agent_mode"],
                     "thread_strategy": automation.get("thread_strategy", "new"),
                     "conversation_thread_id": automation.get("conversation_thread_id"),
@@ -224,11 +227,24 @@ async def create_automation(
     schedule: Annotated[
         str | None,
         "Cron expression (e.g. '0 9 * * 1-5') for recurring, "
-        "or ISO datetime (e.g. '2026-03-01T10:00:00') for one-time.",
+        "or ISO datetime (e.g. '2026-03-01T10:00:00') for one-time. "
+        "Required for cron/once triggers. Omit for price triggers.",
     ] = None,
     trigger_type: Annotated[
         str | None,
-        "Trigger type: 'cron' or 'once'. Auto-detected from schedule if omitted.",
+        "Trigger type: 'cron', 'once', or 'price'. "
+        "Auto-detected from schedule if omitted.",
+    ] = None,
+    trigger_config: Annotated[
+        dict | None,
+        "Price trigger config (required when trigger_type='price'). "
+        "Schema: {symbol: 'AAPL', market: 'stock', conditions: [{type: 'price_below', value: 150}], "
+        "retrigger: {mode: 'one_shot'}}. "
+        "market: 'stock' (default) or 'index'. For index, use bare symbol (e.g. 'SPX', 'DJI', 'VIX'). "
+        "Condition types: price_above, price_below, pct_change_above, pct_change_below. "
+        "Retrigger modes: one_shot (fire once, default), "
+        "recurring (re-arm after cooldown; omit cooldown_seconds for once-per-trading-day default, "
+        "or set cooldown_seconds >= 14400 for custom interval).",
     ] = None,
     description: Annotated[str | None, "Optional description"] = None,
     thread: Annotated[
@@ -239,7 +255,7 @@ async def create_automation(
     ] = None,
     delivery: Annotated[str | None, "Comma-separated delivery methods (e.g. 'slack'). Omit to skip delivery."] = None,
 ) -> tuple[str, dict]:
-    """Create a new scheduled automation."""
+    """Create a new automation — scheduled (cron/once) or price-triggered."""
     try:
         user_id = _get_user_id(config)
         workspace_id = _get_workspace_id(config)
@@ -247,13 +263,16 @@ async def create_automation(
         effective_mode = _get_agent_mode(config)
 
         # Determine trigger type and schedule info
-        if schedule:
+        if trigger_config and schedule:
+            return json.dumps({"error": "Provide schedule (for cron/once) or trigger_config (for price), not both"}), {}
+        if trigger_type == "price" or trigger_config:
+            if not trigger_config:
+                return json.dumps({"error": "trigger_config is required for price triggers"}), {}
+            schedule_info = {"trigger_type": "price", "trigger_config": trigger_config}
+        elif schedule:
             schedule_info = _parse_schedule(schedule)
         else:
-            return json.dumps({"error": "A cron or one-time schedule is required"}), {}
-
-        if trigger_type is not None and trigger_type != schedule_info["trigger_type"]:
-            return json.dumps({"error": "trigger_type does not match the supplied schedule"}), {}
+            return json.dumps({"error": "Either schedule or trigger_config is required"}), {}
 
         # Resolve thread strategy
         thread_strategy = "new"
@@ -306,6 +325,8 @@ async def create_automation(
             "schedule": schedule_display,
             "next_run_at": automation.get("next_run_at"),
         }
+        if automation["trigger_type"] == "price":
+            result_data["trigger_config"] = automation.get("trigger_config")
         if delivery_warning:
             result_data["warning"] = delivery_warning
         result = _serialize(result_data)
@@ -319,6 +340,8 @@ async def create_automation(
             "schedule": result.get("schedule"),
             "next_run_at": result.get("next_run_at"),
         }
+        if result.get("trigger_type") == "price":
+            artifact["trigger_config"] = result.get("trigger_config")
         return json.dumps(result), artifact
 
     except ValueError as e:

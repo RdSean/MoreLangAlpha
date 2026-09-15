@@ -35,11 +35,13 @@ import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.gzip import GZipMiddleware
 
 from ptc_agent.core.sandbox.platform_secrets import PlatformSecretError
+from ptc_agent.core.sandbox.runtime import SandboxGoneError, SandboxTransientError
 from src.config.logging_config import configure_logging
 from src.config.settings import (
     get_allowed_origins,
@@ -48,6 +50,10 @@ from src.observability import init_otel, init_otel_runtime, shutdown_otel_runtim
 from src.server.services.runs.executor import LocalRunExecutor
 from src.server.services.background_registry_store import BackgroundRegistryStore
 from src.server.utils.api import find_malformed_route_ids  # TEMP (malformed-id-diag)
+from src.server.utils.error_sanitization import (
+    sandbox_unreachable_detail,
+    single_line,
+)
 
 # Phase 1: install fork-safe class-level instrumentor patches BEFORE FastAPI(...)
 # is constructed. FastAPIInstrumentor patches the FastAPI class — must run
@@ -69,6 +75,12 @@ INTERNAL_SERVER_ERROR_DETAIL = "Internal Server Error"
 
 # Global variables
 agent_config = None  # PTC Agent configuration (loaded from config files)
+# Which bundle owns each shipped MCP server and skill, as of the read that
+# composed `agent_config`. Enforcement reads this rather than re-reading
+# plugins/, so it cannot disagree with the server set actually running; the
+# Plugins page keeps the live read, where showing an edited manifest at once
+# is the point. See services/plugins/bundled.enforcement_owners.
+bundle_owners = None
 session_service = None  # PTC Session service instance
 workspace_manager = None  # Workspace manager instance
 checkpointer = None  # PTC Agent LangGraph checkpointer for state persistence
@@ -105,6 +117,9 @@ _REDIS_BACKGROUND_SINGLETONS: tuple[tuple[str, str], ...] = (
     # Tells apart "Redis is slow" from "this worker's loop was blocked", which
     # read identically at the redis-py boundary.
     ("EventLoopLagMonitor", "src.observability.loop_lag"),
+    # Refreshes expiring MCP OAuth connections ahead of the hot path; the
+    # per-connection advisory try-lock dedups it across workers.
+    ("McpOAuthRefreshSweeper", "src.server.services.mcp_oauth.sweep"),
 )
 
 
@@ -180,11 +195,14 @@ async def lifespan(app: FastAPI):
     """Initialize resources when server starts, cleanup when stops."""
     global \
         agent_config, \
+        bundle_owners, \
         session_service, \
         workspace_manager, \
         checkpointer, \
         store, \
         llm_service
+
+    document_job_worker = None
 
     # Configure logging based on environment settings (first thing on startup)
     configure_logging()
@@ -279,6 +297,13 @@ async def lifespan(app: FastAPI):
 
         logger.info("Loading PTC Agent configuration...")
         agent_config = await load_from_files(context=ConfigContext.SDK)
+
+        # Freeze bundle ownership alongside the composed agent config. Runtime
+        # enforcement must match the MCP/Skills set loaded at startup, even if
+        # files on disk change while the process is running.
+        from src.server.services.plugins.bundled import component_owners
+
+        bundle_owners = component_owners()
 
         from src.server.services.platform_secret_rollout import (
             reconcile_platform_secrets_at_boot,
@@ -542,10 +567,53 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to start ProvenanceGCService: {e}")
 
+    # Each process may execute jobs, while PostgreSQL claims and leases remain
+    # authoritative across workers.
+    try:
+        from src.server.documents.executor import DocumentJobExecutor
+        from src.server.documents.storage import S3CompatibleDocumentStore
+        from src.server.services.document_job_events import (
+            publish_document_job_hint,
+        )
+        from src.server.services.document_job_worker import DocumentJobWorker
+
+        document_executor = DocumentJobExecutor(object_store=S3CompatibleDocumentStore())
+        document_executor.set_update_notifier(publish_document_job_hint)
+        document_job_worker = DocumentJobWorker(executor=document_executor)
+        await document_job_worker.start()
+        logger.info("DocumentJobWorker started")
+    except Exception as e:
+        logger.warning(f"Failed to start DocumentJobWorker: {e}")
+    # Start WorkspaceFileGCService (condemn-then-reap of unreferenced file blobs)
+    try:
+        from src.server.services.workspace_file_gc import WorkspaceFileGCService
+
+        await WorkspaceFileGCService.get_instance().start()
+    except Exception as e:
+        logger.warning(f"Failed to start WorkspaceFileGCService: {e}")
+
+    # Confirm the runtime credit gate can reach its lease service, and on
+    # terms its refresher can work with. Both failures it catches are silent
+    # at request time.
+    try:
+        from src.server.services.credit_gate_port import verify_credit_gate_wiring
+
+        await verify_credit_gate_wiring()
+    except Exception as e:
+        logger.warning(f"Credit gate wiring check failed: {e}")
+
     yield  # Server is running
 
     # Shutdown
     logger.info("Application shutdown started...")
+
+    # Stop new claims before database and Redis pools begin draining.
+    if document_job_worker is not None:
+        try:
+            await document_job_worker.shutdown()
+            logger.info("DocumentJobWorker stopped")
+        except Exception as e:
+            logger.warning(f"Error stopping DocumentJobWorker: {e}")
 
     # 0.0. Stop the recovery scanner first — no new recovery work while the
     # process drains (live runs hold their guards and are skipped anyway).
@@ -565,6 +633,13 @@ async def lifespan(app: FastAPI):
         await PlatformSecretSweeper.get_instance().stop()
     except Exception as e:
         logger.warning(f"Error stopping PlatformSecretSweeper: {e}")
+
+    try:
+        from src.server.services.egress.relay import close_relay_client
+
+        await close_relay_client()
+    except Exception as e:
+        logger.warning(f"Error closing egress relay client: {e}")
 
     # 0.0b. Stop the turn-cancel nudge listener.
     try:
@@ -589,6 +664,39 @@ async def lifespan(app: FastAPI):
         await ProvenanceGCService.get_instance().stop()
     except Exception as e:
         logger.warning(f"Error shutting down ProvenanceGCService: {e}")
+
+    try:
+        from src.server.services.workspace_file_gc import WorkspaceFileGCService
+
+        await WorkspaceFileGCService.get_instance().stop()
+    except Exception as e:
+        logger.warning(f"Error shutting down WorkspaceFileGCService: {e}")
+
+    # 0.2. Shutdown NewsRefreshService
+    try:
+        from src.server.services.news_refresh_service import NewsRefreshService
+
+        await NewsRefreshService.get_instance().stop()
+    except Exception as e:
+        logger.warning(f"Error shutting down NewsRefreshService: {e}")
+
+    # 0.3. Shutdown MarketInsightService
+    try:
+        from src.server.services.insight_service import InsightService
+
+        insight_svc = InsightService.get_instance()
+        await insight_svc.shutdown()
+    except Exception as e:
+        logger.warning(f"Error shutting down MarketInsightService: {e}")
+
+    # 0.5. Shutdown PriceMonitorService (before scheduler so executions can drain)
+    try:
+        from src.server.services.price_monitor import PriceMonitorService
+
+        price_mon = PriceMonitorService.get_instance()
+        await price_mon.stop()
+    except Exception as e:
+        logger.warning(f"Error shutting down PriceMonitorService: {e}")
 
     # 1. Shutdown AutomationScheduler
     try:
@@ -895,6 +1003,36 @@ app.add_middleware(
 
 
 # ============================================================================
+# Exception Handlers
+# ============================================================================
+
+
+async def _sandbox_unreachable_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Map an unreachable sandbox to 503 once, for every route.
+
+    The detail wording is a wire contract, not a message: the file panel
+    categorizes the error by matching this string, so it must stay identical
+    across producers rather than being re-spelled per route. It is built by
+    ``sandbox_unreachable_detail`` because the raw exception carries provider
+    URLs and SDK response bodies that must not leave the server.
+    """
+    # The exception is the live carrier: it quotes provider response bodies, so
+    # it can hold a newline and a forged entry. Starlette's path is already
+    # CR/LF-free (urlsplit drops them); it is escaped to keep the rule uniform.
+    logger.warning(
+        f"Sandbox unreachable for {single_line(request.url.path)}: {single_line(str(exc))}"
+    )
+    return JSONResponse(
+        status_code=503,
+        content={"detail": sandbox_unreachable_detail(exc)},
+    )
+
+
+app.add_exception_handler(SandboxGoneError, _sandbox_unreachable_handler)
+app.add_exception_handler(SandboxTransientError, _sandbox_unreachable_handler)
+
+
+# ============================================================================
 # Router Registration
 # ============================================================================
 # Import routers
@@ -906,7 +1044,16 @@ from src.server.app.workspaces import router as workspaces_router
 from src.server.app.workspace_files import router as workspace_files_router
 from src.server.app.workspace_files import wsfiles_router
 from src.server.app.workspace_sandbox import router as workspace_sandbox_router
+from src.server.app.chart_annotations import router as chart_annotations_router
 from src.server.app.workspace_sandbox import preview_redirect_router
+from src.server.app.market_data import router as market_data_router
+from src.server.app.bars import router as bars_router
+from src.server.app.watchlist import router as watchlist_router
+from src.server.app.portfolio import router as portfolio_router
+from src.server.app.news import router as news_router
+from src.server.app.calendar import router as calendar_router
+from src.server.app.sec_proxy import router as sec_proxy_router
+from src.server.app.insights import router as insights_router
 from src.server.app.user_events import router as user_events_router
 from src.server.app.auth import router as auth_router
 from src.server.app.education.assets import router as education_assets_router
@@ -920,15 +1067,41 @@ from src.server.app.automations import router as automations_router
 from src.server.app.oauth import router as oauth_router
 from src.server.app.public import router as public_router
 from src.server.app.skills import router as skills_router
+from src.server.app.skills import workspace_router as workspace_skills_router
 from src.server.app.vault import router as vault_router
 from src.server.app.memo import router as memo_router
 from src.server.app.memory import router as memory_router
 from src.server.app.workflows import include_workflow_router
+from src.server.app.egress_relay import router as egress_relay_router
 from src.server.app.mcp_catalog import router as mcp_catalog_router
+from src.server.app.mcp_oauth import router as mcp_oauth_router
+from src.server.app.plugins import router as plugins_router
+from src.server.app.user_vault import router as user_vault_router
 from src.server.app.mcp_servers import router as mcp_servers_router
+
+# Conditionally import ginlix-data WS proxy (only when GINLIX_DATA_WS_URL is set)
+from src.config.settings import GINLIX_DATA_ENABLED
+
+if GINLIX_DATA_ENABLED:
+    from src.server.app.market_data_ws import router as market_data_ws_router
+
+    logger.info("ginlix-data WS proxy enabled")
+else:
+    # Register a minimal status endpoint so the frontend preflight check
+    # gets a clean 200 instead of a noisy 404.
+    from fastapi import APIRouter as _APIRouter
+
+    market_data_ws_router = _APIRouter()
+
+    @market_data_ws_router.get("/ws/v1/market-data/status")
+    async def market_data_ws_status_disabled():
+        return {"enabled": False}
+
+    logger.info("ginlix-data WS proxy disabled (GINLIX_DATA_URL not set)")
 from src.server.app.speech import router as speech_router
 from src.server.app.channels import router as channels_router
 from src.server.app.runtime_resources import router as runtime_resources_router
+from src.server.app.documents import router as documents_router
 
 # Include all routers
 app.include_router(threads_router)  # /api/v1/threads/* - Thread CRUD, messages, control
@@ -940,7 +1113,14 @@ app.include_router(
 app.include_router(
     workspace_sandbox_router
 )  # /api/v1/workspaces/{id}/sandbox/* - Sandbox stats & packages
+app.include_router(
+    chart_annotations_router
+)  # /api/v1/workspaces/{id}/chart-annotations - Agent-drawn chart annotations
 app.include_router(cache_router)  # /api/v1/cache/* - Cache management
+app.include_router(market_data_router)  # /api/v1/market-data/* - Market data proxy
+app.include_router(
+    bars_router
+)  # /api/v1/market-data/bars/* - Protocol-native progressive bars
 app.include_router(auth_router)  # /api/v1/auth/* - Local accounts and household membership
 app.include_router(family_llm_router)  # /api/v1/family/* - Shared household models
 app.include_router(education_assets_router)  # /api/v1/education/assets/* - Private attachments
@@ -952,16 +1132,31 @@ app.include_router(
 )  # /api/v1/users/me/thread-events - Thread lifecycle SSE feed
 app.include_router(features_router)  # /api/v1/features/* - Feature flags (per-user resolved)
 app.include_router(
+    watchlist_router
+)  # /api/v1/users/me/watchlist/* - Watchlist management
+app.include_router(
+    portfolio_router
+)  # /api/v1/users/me/portfolio/* - Portfolio management
+app.include_router(news_router)  # /api/v1/news - News feed (general + ticker-filtered)
+app.include_router(
+    calendar_router
+)  # /api/v1/calendar/* - Economic & earnings calendars
+app.include_router(sec_proxy_router)  # /api/v1/sec-proxy/* - SEC EDGAR document proxy
+app.include_router(
     api_keys_router
 )  # /api/v1/users/me/api-keys + /api/v1/models - BYOK & model config
 app.include_router(
     automations_router
 )  # /api/v1/automations/* - Scheduled automation triggers
+app.include_router(insights_router)  # /api/v1/insights/* - AI market insights
 app.include_router(oauth_router)  # /api/v1/oauth/* - OAuth provider connections (Codex)
 app.include_router(
     public_router
 )  # /api/v1/public/* - Public shared thread access (no auth)
 app.include_router(skills_router)  # /api/v1/skills - Available agent skills
+app.include_router(
+    workspace_skills_router
+)  # /api/v1/workspaces/{id}/skills - Workspace-scoped skills
 app.include_router(
     vault_router
 )  # /api/v1/workspaces/{id}/vault/secrets - Per-workspace secret storage
@@ -974,13 +1169,41 @@ app.include_router(
 include_workflow_router(app)  # /api/v1/workflows/* - Reusable JavaScript workflows
 app.include_router(
     mcp_catalog_router
-)  # /api/v1/mcp/servers - User-level MCP server catalog (templates)
+)  # /api/v1/mcp/servers - User-level MCP servers (Plugins backing store)
+app.include_router(
+    mcp_oauth_router
+)  # /api/v1/mcp/servers/{name}/oauth + /api/v1/mcp/oauth/callback - MCP OAuth
+app.include_router(
+    user_vault_router
+)  # /api/v1/mcp/vault/secrets - User-level vault (merged into sandbox pushes)
+app.include_router(
+    plugins_router
+)  # /api/v1/plugins/* - Agent Plugins packages (install/manage/export)
+app.include_router(
+    egress_relay_router
+)  # /v1/egress/{grant_id} - Sandbox egress relay (relay-JWT auth, not user auth)
+app.include_router(
+    mcp_oauth_router
+)  # /api/v1/mcp/servers/{name}/oauth - MCP OAuth lifecycle
+app.include_router(
+    user_vault_router
+)  # /api/v1/mcp/vault/secrets - User-level vault
+app.include_router(
+    plugins_router
+)  # /api/v1/plugins/* - Agent Plugins packages
+app.include_router(
+    egress_relay_router
+)  # /v1/egress/{grant_id} - Sandbox egress relay
 app.include_router(
     mcp_servers_router
 )  # /api/v1/workspaces/{id}/mcp/servers - Per-workspace MCP server config
 app.include_router(speech_router)  # /ws/v1/speech/transcribe - Backend ASR relay
+app.include_router(
+    market_data_ws_router
+)  # /ws/v1/market-data/* - ginlix-data WS proxy (or its status stub)
 app.include_router(channels_router)  # /api/v1/channels/* - Generic channel bindings
 app.include_router(runtime_resources_router)  # /api/v1/runtime-resources/*
+app.include_router(documents_router)  # /api/v1/documents/* - User-private knowledge library
 app.include_router(health_router)  # /health - Health check
 app.include_router(
     preview_redirect_router

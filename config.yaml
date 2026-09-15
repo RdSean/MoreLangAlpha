@@ -41,7 +41,10 @@ langsmith_tracing: false
 #                plan    — requires a platform plan with access tier >=
 #                          min_tier (OSS deployments bypass plan gates)
 #   min_tier:  plan gate only — minimum platform access tier
-features: {}
+features:
+  market_watch:
+    enabled: true
+    gate: opt_in
 
 # SSE Event Logging
 sse_event_log_enabled: false
@@ -135,12 +138,21 @@ redis:
   ttl:
     results_list: 300  # Results list cache TTL (5 minutes)
     result_detail: 900  # Result detail cache TTL (15 minutes)
-    metadata: 900  # Metadata cache TTL (15 minutes)
+    metadata: 900  # Metadata tags/tickers cache TTL (15 minutes)
     metadata_summary: 600  # Metadata summary cache TTL (10 minutes)
     workflow_events: 86400  # Workflow event buffer TTL (24 hours)
     workflow_status: 3600   # Completed/cancelled workflow status key TTL (1 hour)
     cancel_flag: 300        # Workflow cancel flag TTL (5 minutes)
     steering: 3600          # Steering message key TTL (1 hour)
+    market_watch: 21600     # Market watch list TTL (6 hours)
+    ohlcv:
+      "1min": 90
+      "5min": 360
+      "15min": 1080
+      "30min": 2100
+      "1hour": 4200
+      "4hour": 16200
+      "1day": 86400
     memo_metadata_inflight: 300  # Cross-worker visibility of in-flight memo metadata tasks (5 minutes)
     memo_metadata_cancel: 60     # Cooperative cross-worker cancel flag for memo metadata (1 minute)
 
@@ -153,6 +165,40 @@ redis:
     enabled: true  # Enable SWR for cache reads
     soft_ttl_ratio: 0.6
   warm_after_invalidation: true  # Pre-populate cache after invalidation
+
+# Market and news provider chains. Credentials remain in .env or Vault.
+market_data:
+  providers:
+    - name: ginlix-data
+      markets: [us]
+    - name: yfinance
+      markets: []
+      intraday_markets: [non-us]
+    - name: fmp
+      markets: [all]
+    - name: yfinance
+      markets: [all]
+
+news_data:
+  providers:
+    - name: ginlix-data
+    - name: fmp
+    - name: yfinance
+
+news_poll:
+  enabled: true
+  interval_seconds: 60
+  max_items: 100
+  feeds:
+    - provider: tickertick
+      limit: 50
+    - provider: null
+      limit: 50
+
+market_watch:
+  min_interval_seconds: 25
+  max_symbols: 10
+  cache_breakpoint_pin: true
 
 # External messaging channel worker controls. Credentials remain in .env and
 # encrypted PostgreSQL columns; this section only governs bounded behavior.

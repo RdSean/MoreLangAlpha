@@ -3,8 +3,12 @@
 import asyncio
 import logging
 import re
-from io import BytesIO
 from urllib.parse import unquote, urlparse
+
+from src.utils.pdf_text import (
+    PdfTextBackend,
+    extract_pdf_text_with_backend as extract_document_pdf_text_with_backend,
+)
 
 from ..backend import CrawlOutput
 from .base import ExtractorError, ContentExtractor, _validate_url, register_extractor
@@ -12,6 +16,7 @@ from .base import ExtractorError, ContentExtractor, _validate_url, register_extr
 logger = logging.getLogger(__name__)
 
 _MAX_PDF_SIZE = 20 * 1024 * 1024  # 20 MB
+_EXTRACTION_TIMEOUT_SECONDS = 30
 
 
 @register_extractor
@@ -70,57 +75,30 @@ class PdfExtractor(ContentExtractor):
 
     async def _extract_text(self, content: bytes) -> str | None:
         """Extract text via pdfplumber, falling back to pypdf."""
-        try:
-            text = await asyncio.wait_for(
-                asyncio.to_thread(self._pdfplumber_extract, content),
-                timeout=30,
-            )
-            if text and text.strip():
-                return text
-        except asyncio.TimeoutError:
-            logger.warning("pdfplumber extraction timed out (30s)")
-        except Exception as e:
-            logger.debug(f"pdfplumber failed: {e}, trying pypdf fallback")
-
-        # Fallback: pypdf
-        try:
-            text = await asyncio.wait_for(
-                asyncio.to_thread(self._pypdf_extract, content),
-                timeout=30,
-            )
-            if text and text.strip():
-                return text
-        except asyncio.TimeoutError:
-            logger.warning("pypdf extraction timed out (30s)")
-        except Exception as e:
-            logger.debug(f"pypdf fallback also failed: {e}")
+        for backend in ("pdfplumber", "pypdf"):
+            typed_backend: PdfTextBackend = backend
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        extract_document_pdf_text_with_backend,
+                        content,
+                        backend=typed_backend,
+                        max_pages=None,
+                    ),
+                    timeout=_EXTRACTION_TIMEOUT_SECONDS,
+                )
+                if result.markdown.strip():
+                    return result.markdown
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "%s extraction timed out (%ss)",
+                    backend,
+                    _EXTRACTION_TIMEOUT_SECONDS,
+                )
+            except Exception as e:
+                logger.debug("%s extraction failed: %s", backend, e)
 
         return None
-
-    @staticmethod
-    def _pdfplumber_extract(content: bytes) -> str:
-        import pdfplumber
-
-        pages: list[str] = []
-        with pdfplumber.open(BytesIO(content)) as pdf:
-            for i, page in enumerate(pdf.pages, 1):
-                text = page.extract_text() or ""
-                page.close()
-                if text.strip():
-                    pages.append(f"--- Page {i} ---\n\n{text}")
-        return "\n\n".join(pages)
-
-    @staticmethod
-    def _pypdf_extract(content: bytes) -> str:
-        import pypdf
-
-        reader = pypdf.PdfReader(BytesIO(content))
-        pages: list[str] = []
-        for i, page in enumerate(reader.pages, 1):
-            text = page.extract_text() or ""
-            if text.strip():
-                pages.append(f"--- Page {i} ---\n\n{text}")
-        return "\n\n".join(pages)
 
     @staticmethod
     def _title_from_url(url: str) -> str:

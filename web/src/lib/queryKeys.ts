@@ -21,7 +21,7 @@ export const queryKeys = {
     all: ['models'],
   },
   runtimeResources: {
-    all:       ['runtime-resources'],
+    all: ['runtime-resources'],
     tokenizer: () => [...queryKeys.runtimeResources.all, 'tokenizer'],
   },
   features: {
@@ -84,8 +84,72 @@ export const queryKeys = {
     all:       ['mcp'],
     // User-level catalog of MCP templates (not workspace-scoped).
     catalog:   () => [...queryKeys.mcp.all, 'catalog'],
+    // Process-global builtins with the user's account-wide toggles.
+    builtins:  () => [...queryKeys.mcp.all, 'builtins'],
     // Effective per-workspace server list (builtins + workspace servers).
     workspace: (wsId: string) => [...queryKeys.mcp.all, 'workspace', wsId],
+    // Discovered tool snapshot for one catalog server (the detail view).
+    serverTools: (name: string) => [...queryKeys.mcp.all, 'serverTools', name],
+    // A builtin's tools, read from the frozen process registry. Its own family
+    // rather than a child of `builtins()`: schemas are fixed for the process
+    // lifetime, so a toggle there has nothing to tell this.
+    builtinServerTools: (name: string) => [
+      ...queryKeys.mcp.all,
+      'builtinServerTools',
+      name,
+    ],
+  },
+  // The brokerage connectors this build ships. Deliberately its own family
+  // rather than a child of `mcp`: it is static and user-independent, so the
+  // MCP fan-out has nothing to tell it, and sitting under that prefix meant
+  // every server toggle refetched a list whose `staleTime: Infinity` says it
+  // can never have changed.
+  brokerages: {
+    all:  ['brokerages'],
+    list: () => [...queryKeys.brokerages.all, 'list'],
+  },
+  // Skills are per-user and mutable; the mode variant is what the slash menu
+  // reads, the manage variant is the full list including disabled rows. A
+  // workspace id keys the workspace-effective view (shadowing + disables).
+  skills: {
+    all:  ['skills'],
+    // The scope slot is one of: 'user' (user view), a workspace id
+    // (workspace-effective view), or 'all-scopes' (the Plugins inventory) —
+    // allScopes and workspaceId are mutually exclusive on the wire.
+    list: (
+      mode: string | null,
+      includeDisabled = false,
+      workspaceId: string | null = null,
+      allScopes = false,
+    ) =>
+      [
+        ...queryKeys.skills.all, 'list', mode ?? 'all', includeDisabled,
+        allScopes ? 'all-scopes' : (workspaceId ?? 'user'),
+      ],
+    // One skill's SKILL.md text (the detail view).
+    content: (name: string, workspaceId: string | null = null) =>
+      [...queryKeys.skills.all, 'content', name, workspaceId ?? 'user'],
+  },
+  userVault: {
+    all:        ['userVault'],
+    secrets:    () => [...queryKeys.userVault.all, 'secrets'],
+    blueprints: () => [...queryKeys.userVault.all, 'blueprints'],
+  },
+  // Installed Agent Plugins packages. Their components live in the mcp and
+  // skills caches; mutations here invalidate the whole fan-out.
+  plugins: {
+    all:    ['plugins'],
+    list:   () => [...queryKeys.plugins.all, 'list'],
+    detail: (name: string) => [...queryKeys.plugins.all, 'detail', name],
+  },
+  // Workspace-tier vault. Scoped under the workspace id so a mutation
+  // invalidates that workspace's secrets AND blueprints (the recommended-
+  // credentials list is derived from them) without touching a sibling's cache.
+  workspaceVault: {
+    all:         ['workspaceVault'],
+    byWorkspace: (wsId: string) => [...queryKeys.workspaceVault.all, wsId],
+    secrets:     (wsId: string) => [...queryKeys.workspaceVault.byWorkspace(wsId), 'secrets'],
+    blueprints:  (wsId: string) => [...queryKeys.workspaceVault.byWorkspace(wsId), 'blueprints'],
   },
   education: {
     all: ['education'],
@@ -103,11 +167,27 @@ export const queryKeys = {
     learning: () => [...queryKeys.education.all, 'learning'],
     assignment: (id: string) => [...queryKeys.education.learning(), id],
   },
+  documents: {
+    all: ['documents'],
+    lists: () => [...queryKeys.documents.all, 'list'],
+    list: <T extends object>(params: T) => [...queryKeys.documents.lists(), params],
+    detail: (id: string) => [...queryKeys.documents.all, 'detail', id],
+    datasets: () => [...queryKeys.documents.all, 'datasets'],
+    datasetList: <T extends object>(params: T) => [...queryKeys.documents.datasets(), params],
+    dataset: (id: string) => [...queryKeys.documents.datasets(), id],
+    tags: () => [...queryKeys.documents.all, 'tags'],
+    inspections: (documentId: string) => [...queryKeys.documents.all, 'inspections', documentId],
+    parseOptions: (documentId: string, inspectionId?: string) => [...queryKeys.documents.inspections(documentId), 'options', inspectionId ?? 'latest'],
+    jobs: (documentId?: string) => [...queryKeys.documents.all, 'jobs', ...(documentId ? [documentId] : [])],
+    job: (id: string) => [...queryKeys.documents.all, 'jobs', id],
+    artifacts: (documentId: string, jobId?: string) => [...queryKeys.documents.all, 'artifacts', documentId, ...(jobId ? [jobId] : [])],
+  },
   settings: {
     all: ['settings'],
-    channels: {
-      all: ['settings', 'channels'],
-      wechat: () => ['settings', 'channels', 'wechat'],
+    channels: { all: ['settings', 'channels'], wechat: () => ['settings', 'channels', 'wechat'] },
+    documents: {
+      all: ['settings', 'documents'],
+      usage: (range: string) => [...queryKeys.settings.documents.all, 'usage', range],
     },
     family: {
       all: ['settings', 'family'],
@@ -116,14 +196,19 @@ export const queryKeys = {
       availability: () => [...queryKeys.settings.family.all, 'llm-availability'],
       preference: () => [...queryKeys.settings.family.all, 'llm-preference'],
       workspace: (studentUserId: string) => [...queryKeys.settings.family.all, 'workspace', studentUserId],
-      threads: (studentUserId: string, limit = 20, offset = 0) => [
-        ...queryKeys.settings.family.all,
-        'threads',
-        studentUserId,
-        limit,
-        offset,
-      ],
+      threads: (studentUserId: string, limit = 20, offset = 0) => [...queryKeys.settings.family.all, 'threads', studentUserId, limit, offset],
     },
+  },
+  marketData: {
+    all:  ['marketData'],
+    bars: (symbol: string, interval: string) => [...queryKeys.marketData.all, 'bars', symbol, interval],
+  },
+  // Per-symbol quote cache — the unified snapshot layer (see lib/quotes/).
+  // Key = uppercase legacy symbol spelling (indexes stripped of a leading '^').
+  // Interim keying until Phase 4 re-keys on the canonical instrument_key.
+  quote: {
+    all:    ['quote'],
+    detail: (symbol: string) => [...queryKeys.quote.all, symbol],
   },
 };
 

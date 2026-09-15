@@ -333,19 +333,27 @@ class TestSkillsConfig:
         cfg = SkillsConfig()
         assert cfg.enabled is True
         assert cfg.user_skills_dir == "~/.ptc-agent/skills"
-        assert cfg.project_skills_dir == "skills"
 
     def test_local_skill_dirs_with_sandbox(self):
+        # Bundles are patched away for this package (see conftest), so what is
+        # left is the operator's own directory and nothing else.
         cfg = SkillsConfig()
-        cwd = Path("/test/project")
-        dirs = cfg.local_skill_dirs_with_sandbox(cwd=cwd)
-        assert len(dirs) == 2
-        # User dir first (lower priority), project dir second (higher priority)
+        dirs = cfg.local_skill_dirs_with_sandbox()
+        assert len(dirs) == 1
         user_dir, user_sandbox = dirs[0]
-        project_dir, project_sandbox = dirs[1]
         assert "ptc-agent/skills" in user_dir
-        assert "/test/project/skills" in project_dir
         assert user_sandbox == "/home/workspace/.agents/skills"
+
+    def test_the_sources_do_not_depend_on_the_working_directory(
+        self, monkeypatch, tmp_path
+    ):
+        # The shipped skills live in the bundle that declares them, so nothing
+        # resolves against cwd any more; a server started from anywhere has to
+        # see the same set.
+        cfg = SkillsConfig()
+        before = cfg.local_skill_dirs_with_sandbox()
+        monkeypatch.chdir(tmp_path)
+        assert cfg.local_skill_dirs_with_sandbox() == before
 
 
 # ---------------------------------------------------------------------------
@@ -437,10 +445,10 @@ class TestAgentConfigNewFields:
 class TestAgentConfigFeatureEnabled:
     def test_resolved_features_win(self):
         config = _minimal_config()
-        config.features = {"site_crawl": False}
-        assert config.feature_enabled("site_crawl") is False
-        config.features = {"site_crawl": True}
-        assert config.feature_enabled("site_crawl") is True
+        config.features = {"market_watch": False}
+        assert config.feature_enabled("market_watch") is False
+        config.features = {"market_watch": True}
+        assert config.feature_enabled("market_watch") is True
 
     def test_unresolved_falls_back_to_no_user_default(self):
         config = _minimal_config()
@@ -448,8 +456,8 @@ class TestAgentConfigFeatureEnabled:
         with patch(
             "src.config.features.default_feature_enabled", return_value=False
         ) as gate:
-            assert config.feature_enabled("site_crawl") is False
-        gate.assert_called_once_with("site_crawl")
+            assert config.feature_enabled("market_watch") is False
+        gate.assert_called_once_with("market_watch")
 
     def test_missing_key_falls_back_to_no_user_default(self):
         config = _minimal_config()
@@ -457,4 +465,4 @@ class TestAgentConfigFeatureEnabled:
         with patch(
             "src.config.features.default_feature_enabled", return_value=True
         ):
-            assert config.feature_enabled("site_crawl") is True
+            assert config.feature_enabled("market_watch") is True
