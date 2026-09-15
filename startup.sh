@@ -15,8 +15,10 @@
 #   .env                                   backend ports and credentials
 #   web/vite.config.js                     proxies /api to http://localhost:8000 by default
 #
-# The WeChat worker talks to the GinlixFlow bridge, which this script does not
-# start: point GINLIXFLOW_BASE_URL at it if it lives elsewhere.
+# The channel worker does not talk to WeChat itself: it polls the linked bridge
+# and dispatches each inbound message to *this* application's HTTP chat API at
+# GINLIXFLOW_BASE_URL (the name is historical). It therefore has to point at the
+# backend this script starts, not at some other deployment's front proxy.
 
 set -euo pipefail
 
@@ -31,7 +33,7 @@ FRONTEND_PORT="${FRONTEND_PORT:-5177}"
 PG_PORT="${PG_PORT:-5432}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 MINIO_PORT="${MINIO_PORT:-9000}"
-GINLIXFLOW_BASE_URL="${GINLIXFLOW_BASE_URL:-http://127.0.0.1:8010}"
+GINLIXFLOW_BASE_URL="${GINLIXFLOW_BASE_URL:-http://127.0.0.1:$BACKEND_PORT}"
 
 # TMPDIR carries a trailing slash on macOS; normalise before joining.
 _scratch="${TMPDIR:-/tmp}"; _scratch="${_scratch%/}"
@@ -187,7 +189,7 @@ main() {
       say "  api      http://localhost:$BACKEND_PORT"
       say "  minio    http://localhost:9001 (console)"
       say "  logs     $LOG_DIR"
-      say "  worker   ginlixflow bridge expected at $GINLIXFLOW_BASE_URL"
+      say "  worker   dispatching channel turns to $GINLIXFLOW_BASE_URL"
       ;;
     stop)
       stop_apps

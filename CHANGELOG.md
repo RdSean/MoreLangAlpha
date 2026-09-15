@@ -2,6 +2,20 @@
 
 ## 2026-09-15
 
+### 修复：微信消息无回应的通道 worker 目标地址
+
+- **现象**：微信 iLink 扫码绑定成功、消息也进来了，但发消息没有任何回应。
+- **根因**：通道 worker 不直接跟微信通信，它把每条入站消息**派发到本应用的 HTTP 聊天接口**，地址来自 `GINLIXFLOW_BASE_URL`（名字是历史遗留）。`Makefile` 里写死了旧部署的 `http://127.0.0.1:8010`——那是**另一个部署前端代理的端口，不是 iLink 桥**。本机应用在 8000，于是 worker 每次派发都失败（worker 日志里是 8 次 `POST http://127.0.0.1:8010/api/v1/threads/messages` → `502 Bad Gateway`），重试耗尽后该入站消息被标记为 `dead`，不会再重试。
+- **修复**：`Makefile` 改为 `GINLIXFLOW_BASE_URL=${GINLIXFLOW_BASE_URL:-http://127.0.0.1:8000}`（保留可用环境变量覆盖），`startup.sh` 默认跟随 `BACKEND_PORT`，README 的措辞一并改正（原来把该变量误写成"iLink 桥地址"）。
+- **验证**：worker 重启后环境变量为 `http://127.0.0.1:8000`；对派发路径做非侵入探测 `POST /api/v1/threads/messages`（带 `X-Dispatch: background` + `X-User-Id`）返回 **400 业务校验错误**（提示 `workspace_id ... agent_mode='flash'`），说明**鉴权与路由都已通过**，只是探测体不完整——证明派发链路已通。已被判 `dead` 的那条旧消息不会自动重发，需重新发一条。
+
+### 修复：迁移后语音输入按钮消失
+
+- **现象**：对话框只剩文字发送按钮，语音（STT）按钮不见了。代码与 Volcengine ASR 配置都在（`.env` 里 `VOLCENGINE_ASR_APP_ID/ACCESS_TOKEN/CLUSTER/WS_URL` 齐全），不是功能被合并掉。
+- **根因**：麦克风按钮的渲染条件是 `speechSupported && other_preference.voice_input_enabled`（浏览器能力 + **用户偏好**）。本机数据库换成本地库后，该用户的 `voice_input_enabled` 是 `false`；而且偏好在 Redis 里按 `user_prefs:{user_id}` 缓存，直接改库不会生效。
+- **修复**：把该用户的 `user_preferences.other_preference.voice_input_enabled` 置为 `true` 并删除对应的 Redis 缓存键（等价于在「设置 → 用户信息」里打开该开关，UI 会自己失效缓存）。
+- **验证**：`/api/v1/users/me/preferences` 返回 `voice_input_enabled = true`；真实浏览器里聊天输入框重新出现 `开启语音输入` 按钮。
+
 ### 本地一键启动脚本 `startup.sh`
 
 - 仓库根目录新增 `startup.sh`：一条命令拉起**中间件（缺则起）+ 后端 8000 + 前端 5177 + WeChat channel worker**，另有 `status` 与 `stop [--docker]`。README 的 Quick start 与项目结构表同步更新。

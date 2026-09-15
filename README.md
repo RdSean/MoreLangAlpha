@@ -70,8 +70,10 @@ not already up), API, frontend, and the WeChat channel worker:
 
 It is idempotent (a port already in use is left alone) and detaches each process
 into its own session, so it keeps running after the terminal closes. The
-channel worker expects the GinlixFlow bridge at `GINLIXFLOW_BASE_URL`
-(`http://127.0.0.1:8010` by default); override it if the bridge lives elsewhere.
+channel worker dispatches inbound WeChat messages to this application's own
+chat API at `GINLIXFLOW_BASE_URL` (default: the backend started above, i.e.
+`http://127.0.0.1:8000`); point it elsewhere only if the worker should dispatch
+into a different deployment.
 
 The application API listens on port `8000`; the development frontend is exposed
 to the LAN at `http://<host-ip>:5177`.

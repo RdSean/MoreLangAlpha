@@ -46,7 +46,7 @@ dev-web: ## Start frontend dev server
 	cd web && pnpm dev
 
 dev-gateway: ## Start the standalone external channel gateway worker
-	GINLIXFLOW_BASE_URL=http://127.0.0.1:8010 uv run python -m src.server.services.channels.worker
+	GINLIXFLOW_BASE_URL=$${GINLIXFLOW_BASE_URL:-http://127.0.0.1:8000} uv run python -m src.server.services.channels.worker
 
 # ---------------------------------------------------------------------------
 # Testing
