@@ -2,6 +2,15 @@
 
 ## 2026-09-15
 
+### 文档图片落盘：第六步（真实链路验证 + 两个反直觉发现）
+
+- 用 `RE3 Part.pdf`（2.98 MB / 5 页）走完整 API：上传 → 检测 → `datalab-online` → 解析 → 取 artifact。冷跑 247 秒（同文件第二次走厂商缓存 16 秒），费用 2 分。
+- **结果**：**7 张图片 artifact**（合计 754 497 B，`images_dropped=0`）+ 1 个 `document.md`（14 994 字符，6 处图片引用）；对象键 `documents/doc-kEdIsxVKorxP/artifacts/job-EBaWM1Ay5RFh/<32位hex>_img.jpg`，与 markdown 同目录；`/api/v1/document-artifacts/{id}/download` 返回 **200 + `Content-Type: image/jpeg`**。
+- **浏览器实测**：解析预览里 6 个 `<img>` 全部加载成功（naturalWidth/Height 非 0），src 指向 artifact 下载接口。也就是说 D9 当初"提取出来也看不到"的前提确实已经消除。
+- **反直觉发现一：同样的选项，两次冷跑的图片数量不同。** 同一文件、同样 `options`（提取开、标题关）分别得到 **2 张 / 1 处引用** 与 **7 张 / 6 处引用**。所以"这一轮有几张图"不由我们决定；实现必须容忍任意子集——这正是预览对匹配不到的引用**原样保留**、provider 对返回什么就存什么的原因。
+- **反直觉发现二：`disable_image_captions` 影响的是 alt 文字，不是数量。** 关标题时是 `![](<hex>_img.jpg)`（alt 为空），开标题时是 `![A photograph of a ski resort …](<hex>_img.jpg)`。我先从一次运行得出"关标题会连带丢图"的结论，第二次同配置冷跑直接推翻；这个错误结论也写进设计文档，免得后来者照它做优化。
+- 验证：后端 `tests/unit` **7687 项通过 / 8 deselected / 1 xpassed**；前端 **257 文件 / 2485 项通过**，`pnpm lint` 0 error / 55 warning，`pnpm typecheck` 通过，`pnpm build` 关键路径 **353.6 kB gz**（上限 450）。
+
 ### 文档图片落盘：第五步（提取默认打开，文案同步）
 
 - `DatalabConversionOptions.disable_image_extraction` 默认由 `True` 改为 `False`：D9 当初把它关掉的**唯一**理由是"提取出来也没有地址、预览必然裂图"，而这个前提现在消失了（图片已作为 artifact 落盘 + 预览会在渲染时解析引用）。

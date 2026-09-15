@@ -98,3 +98,30 @@ D9 把默认设成关的**唯一理由**是"存了也没法显示"。这条理�
 
 * 图片的富交互（灯箱、图库、按页浏览）。
 * 未解析文档的孤儿清理（这是上传/取消路径的问题，与本次无关）。
+
+## 实测（2026-09-15，`RE3 Part.pdf` 2.98 MB / 5 页）
+
+走真实 API：上传 → 检测 → `datalab-online` → 解析 → 取 artifact。
+
+| 观测 | 值 |
+|---|---|
+| 任务耗时 | 冷跑 247 s（同一文件第二次走缓存仅 16 s） |
+| 图片 artifact | **7** 个，合计 754 497 B，`images_dropped=0` |
+| markdown | 14 994 字符，**6** 处图片引用，全部能在 artifact 列表里找到对应 `relative_path` |
+| 存储 key | `documents/doc-kEdIsxVKorxP/artifacts/job-EBaWM1Ay5RFh/<32位hex>_img.jpg`（与 `document.md` 同目录） |
+| 下载 | `/api/v1/document-artifacts/{id}/download` → 200，`Content-Type: image/jpeg` |
+| 预览 | 浏览器实测 6 个 `<img>` 全部加载成功（naturalWidth/Height 非 0），截图见本次会话 |
+| 费用 | 2 分（缓存命中记 0） |
+
+### 两个与预期不符、必须记下来的事实
+
+1. **图片数量在同样的选项下会变**。同一个文件、同样 `options`（`captions` 关、
+   提取开）跑了两次冷转换：一次得到 **2 张图 / 1 处引用**，另一次得到
+   **7 张图 / 6 处引用**。所以"这一轮有几张图"**不是我们能控制的**，实现必须容忍
+   任意子集——这也是为什么预览对匹配不到的引用**原样保留**而不是删除，以及
+   provider 对返回什么就存什么（不做"必须有 N 张"的假设）。
+2. **`disable_image_captions` 影响的是 alt 文字，不是数量**。关掉标题时引用形如
+   `![](<hex>_img.jpg)`（alt 为空），打开时形如
+   `![A photograph of a ski resort …](<hex>_img.jpg)`。我一开始从一次运行得出
+   "关标题会连带丢图"的结论，第二次同配置冷跑就直接推翻了这个结论——记在这里，
+   免得后来者照着那个错误结论做优化。
