@@ -10,6 +10,13 @@
 - 第一阶段不做 AI 结构分析、标准 TOC、Unit 识别、卷子与单元匹配或精确跨来源融合；多来源只作为完整来源集合交给 PTC 尝试加工并记录 provenance。
 - 补充实现计划，按“解析产物来源绑定 -> 私有快照冻结 -> 多来源 PTC staging -> 图书馆/教材双视图 -> 无 sandbox 验收”拆分任务，并保留旧教材资产链路兼容。
 
+### 教材来源绑定图书馆解析任务
+
+- 新增 `education_textbook_artifact_sources`：教材内容版本现在可以绑定到已完成、且由当前家长拥有的主文档 Artifact；来源包含解析任务、文档、Artifact、顺序、SHA-256 与私有快照前缀。
+- 新增 `queue_textbook_processing_from_artifacts()`：在同一事务内锁定并校验教材、创建 `processing` 版本、按顺序写入解析来源并投递一个加工任务；重复解析任务会直接拒绝。
+- `claim_textbook_processing_job()` 优先返回新的 Artifact 来源；没有新来源的历史版本继续读取 `education_textbook_sources` 与 `education_assets`，旧数据不需要回填或迁移。
+- 迁移约束禁止跨家庭引用和悬空来源，同时保留旧来源表不变；新增单元测试覆盖来源顺序、跨家庭拒绝、重复任务拒绝和新旧 claim 分流。
+
 ## 2026-09-15
 
 ### 微信通道：不再让 Agent 停在只有 Web 能回答的提问上

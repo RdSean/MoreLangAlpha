@@ -1633,6 +1633,132 @@ async def queue_textbook_processing(
     return job
 
 
+async def queue_textbook_processing_from_artifacts(
+    *,
+    parent_user_id: str,
+    household_id: str,
+    textbook_id: str,
+    sources: list[dict[str, Any]],
+    extractor_name: str,
+    extractor_version: str,
+) -> dict[str, Any] | None:
+    """Freeze completed library parse bundles into a fresh processing version."""
+    if not sources:
+        raise ValueError("At least one parse job source is required")
+
+    producer_job_ids = [
+        str(source.get("producer_job_id") or "") for source in sources
+    ]
+    if any(not job_id for job_id in producer_job_ids):
+        raise ValueError("Every source requires a producer_job_id")
+    if len(set(producer_job_ids)) != len(producer_job_ids):
+        raise ValueError("Duplicate producer_job_id sources are not allowed")
+
+    version_id = str(uuid4())
+    job_id = str(uuid4())
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT textbook_id FROM education_textbooks
+                    WHERE textbook_id = %s AND household_id = %s
+                    FOR UPDATE
+                    """,
+                    (textbook_id, household_id),
+                )
+                if not await cur.fetchone():
+                    return None
+
+                await cur.execute(
+                    """
+                    SELECT jobs.job_id AS producer_job_id,
+                           jobs.document_id,
+                           jobs.primary_artifact_id
+                    FROM document_parse_jobs AS jobs
+                    JOIN documents ON documents.document_id = jobs.document_id
+                    JOIN document_artifacts AS artifacts
+                      ON artifacts.artifact_id = jobs.primary_artifact_id
+                     AND artifacts.producer_job_id = jobs.job_id
+                    WHERE jobs.job_id = ANY(%s::varchar[])
+                      AND jobs.status = 'completed'
+                      AND jobs.primary_artifact_id IS NOT NULL
+                      AND artifacts.artifact_kind = 'primary_document'
+                      AND documents.owner_user_id = %s
+                    FOR SHARE OF jobs, documents, artifacts
+                    """,
+                    (producer_job_ids, parent_user_id),
+                )
+                available = {
+                    str(row["producer_job_id"]): (
+                        str(row["document_id"]),
+                        str(row["primary_artifact_id"]),
+                    )
+                    for row in await cur.fetchall()
+                }
+                for source in sources:
+                    requested = (
+                        str(source.get("document_id") or ""),
+                        str(source.get("primary_artifact_id") or ""),
+                    )
+                    if available.get(str(source["producer_job_id"])) != requested:
+                        raise ValueError(
+                            "One or more parse job sources are unavailable "
+                            "or not owned by the parent"
+                        )
+
+                await cur.execute(
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM education_textbook_versions WHERE textbook_id = %s",
+                    (textbook_id,),
+                )
+                sequence = (await cur.fetchone())["sequence"]
+                await cur.execute(
+                    """
+                    INSERT INTO education_textbook_versions (
+                        version_id, textbook_id, sequence, status, extractor_name, extractor_version, created_by_user_id
+                    ) VALUES (%s, %s, %s, 'processing', %s, %s, %s)
+                    """,
+                    (
+                        version_id,
+                        textbook_id,
+                        sequence,
+                        extractor_name,
+                        extractor_version,
+                        parent_user_id,
+                    ),
+                )
+                await cur.executemany(
+                    """
+                    INSERT INTO education_textbook_artifact_sources (
+                        version_id, document_id, producer_job_id, primary_artifact_id,
+                        position, primary_sha256, snapshot_prefix
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    [
+                        (
+                            version_id,
+                            str(source["document_id"]),
+                            str(source["producer_job_id"]),
+                            str(source["primary_artifact_id"]),
+                            index,
+                            str(source["primary_sha256"]),
+                            str(source["snapshot_prefix"]),
+                        )
+                        for index, source in enumerate(sources, start=1)
+                    ],
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO education_processing_jobs (job_id, version_id, status)
+                    VALUES (%s, %s, 'queued')
+                    RETURNING job_id, version_id, status, attempt_count, created_at
+                    """,
+                    (job_id, version_id),
+                )
+                job = dict(await cur.fetchone())
+    return job
+
+
 async def claim_textbook_processing_job(*, job_id: str) -> dict[str, Any] | None:
     """Claim exactly one queued job with a row lock; a future PTC worker uses the same contract."""
     async with get_db_connection() as conn:
@@ -1665,6 +1791,32 @@ async def claim_textbook_processing_job(*, job_id: str) -> dict[str, Any] | None
                     (job_id,),
                 )
                 claimed_attempt = await cur.fetchone()
+                await cur.execute(
+                    """
+                    SELECT sources.document_id, documents.original_filename,
+                           documents.media_type, documents.document_format,
+                           sources.producer_job_id, sources.primary_artifact_id,
+                           sources.position, sources.primary_sha256,
+                           sources.snapshot_prefix, parse_jobs.parser_id,
+                           parse_jobs.parser_name, parse_jobs.parser_version,
+                           parse_jobs.completed_at
+                    FROM education_textbook_artifact_sources AS sources
+                    JOIN documents ON documents.document_id = sources.document_id
+                    JOIN document_parse_jobs AS parse_jobs
+                      ON parse_jobs.job_id = sources.producer_job_id
+                     AND parse_jobs.document_id = sources.document_id
+                    WHERE sources.version_id = %s
+                    ORDER BY sources.position
+                    """,
+                    (job["version_id"],),
+                )
+                sources = [dict(row) for row in await cur.fetchall()]
+                if sources:
+                    result = dict(job)
+                    result["attempt_count"] = claimed_attempt["attempt_count"]
+                    result["sources"] = sources
+                    return result
+
                 await cur.execute(
                     """
                     SELECT assets.asset_id, assets.storage_key, assets.original_filename, assets.content_type, assets.size_bytes

@@ -185,6 +185,225 @@ async def test_processing_claim_returns_an_attempt_fence(
 
 
 @pytest.mark.asyncio
+async def test_queue_processing_from_completed_artifacts_creates_ordered_sources(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"textbook_id": "textbook-1"},
+        {"sequence": 3},
+        {
+            "job_id": "job-3",
+            "version_id": "version-3",
+            "status": "queued",
+            "attempt_count": 0,
+            "created_at": None,
+        },
+    ]
+    mock_cursor.fetchall.return_value = [
+        {
+            "producer_job_id": "job-parse-2",
+            "document_id": "doc-2",
+            "primary_artifact_id": "art-2",
+        },
+        {
+            "producer_job_id": "job-parse-1",
+            "document_id": "doc-1",
+            "primary_artifact_id": "art-1",
+        },
+    ]
+
+    job = await education_textbooks.queue_textbook_processing_from_artifacts(
+        parent_user_id="parent-1",
+        household_id="household-1",
+        textbook_id="textbook-1",
+        sources=[
+            {
+                "document_id": "doc-1",
+                "producer_job_id": "job-parse-1",
+                "primary_artifact_id": "art-1",
+                "primary_sha256": "a" * 64,
+                "snapshot_prefix": "education/household-1/textbook/v3/source-bundles/1/",
+            },
+            {
+                "document_id": "doc-2",
+                "producer_job_id": "job-parse-2",
+                "primary_artifact_id": "art-2",
+                "primary_sha256": "b" * 64,
+                "snapshot_prefix": "education/household-1/textbook/v3/source-bundles/2/",
+            },
+        ],
+        extractor_name="managed_ptc",
+        extractor_version="1",
+    )
+
+    assert job is not None and job["status"] == "queued"
+    lock_sql, lock_params = mock_cursor.execute.call_args_list[0].args
+    assert "education_textbooks" in lock_sql
+    assert "household_id = %s" in lock_sql
+    assert "FOR UPDATE" in lock_sql
+    assert lock_params == ("textbook-1", "household-1")
+
+    parse_sql, parse_params = mock_cursor.execute.call_args_list[1].args
+    assert "FROM document_parse_jobs AS jobs" in parse_sql
+    assert "JOIN document_artifacts AS artifacts" in parse_sql
+    assert "jobs.status = 'completed'" in parse_sql
+    assert "artifacts.artifact_kind = 'primary_document'" in parse_sql
+    assert "documents.owner_user_id = %s" in parse_sql
+    assert parse_params == (
+        ["job-parse-1", "job-parse-2"],
+        "parent-1",
+    )
+
+    version_sql, version_params = mock_cursor.execute.call_args_list[3].args
+    assert "INSERT INTO education_textbook_versions" in version_sql
+    assert "'processing'" in version_sql
+    assert version_params[1:3] == ("textbook-1", 3)
+
+    source_sql, source_rows = mock_cursor.executemany.call_args.args
+    assert "INSERT INTO education_textbook_artifact_sources" in source_sql
+    assert [row[4] for row in source_rows] == [1, 2]
+    assert len({row[0] for row in source_rows}) == 1
+    assert source_rows[0][0] == version_params[0]
+
+    queue_sql = mock_cursor.execute.call_args_list[4].args[0]
+    assert "INSERT INTO education_processing_jobs" in queue_sql
+
+
+@pytest.mark.asyncio
+async def test_queue_processing_from_artifacts_rejects_foreign_household(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = None
+
+    job = await education_textbooks.queue_textbook_processing_from_artifacts(
+        parent_user_id="parent-1",
+        household_id="household-2",
+        textbook_id="textbook-1",
+        sources=[
+            {
+                "document_id": "doc-1",
+                "producer_job_id": "job-parse-1",
+                "primary_artifact_id": "art-1",
+                "primary_sha256": "a" * 64,
+                "snapshot_prefix": "education/household-2/textbook/v1/source-bundles/1/",
+            }
+        ],
+        extractor_name="managed_ptc",
+        extractor_version="1",
+    )
+
+    assert job is None
+    assert mock_cursor.execute.await_count == 1
+    assert mock_cursor.executemany.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_queue_processing_from_artifacts_rejects_duplicate_parse_jobs(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    source = {
+        "document_id": "doc-1",
+        "producer_job_id": "job-parse-1",
+        "primary_artifact_id": "art-1",
+        "primary_sha256": "a" * 64,
+        "snapshot_prefix": "education/household-1/textbook/v1/source-bundles/1/",
+    }
+
+    with pytest.raises(ValueError, match="Duplicate producer_job_id"):
+        await education_textbooks.queue_textbook_processing_from_artifacts(
+            parent_user_id="parent-1",
+            household_id="household-1",
+            textbook_id="textbook-1",
+            sources=[source, dict(source, position=2)],
+            extractor_name="managed_ptc",
+            extractor_version="1",
+        )
+
+    assert mock_cursor.execute.await_count == 0
+    assert mock_cursor.executemany.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_processing_claim_returns_artifact_sources_when_present(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"job_id": "job-1", "version_id": "version-1"},
+        {"attempt_count": 1},
+    ]
+    mock_cursor.fetchall.return_value = [
+        {
+            "document_id": "doc-1",
+            "producer_job_id": "job-parse-1",
+            "primary_artifact_id": "art-1",
+            "position": 1,
+            "primary_sha256": "a" * 64,
+            "snapshot_prefix": "education/household-1/textbook/v1/source-bundles/1/",
+        }
+    ]
+
+    job = await education_textbooks.claim_textbook_processing_job(job_id="job-1")
+
+    assert job is not None
+    assert job["sources"] == mock_cursor.fetchall.return_value
+    source_sql = mock_cursor.execute.call_args_list[2].args[0]
+    assert "FROM education_textbook_artifact_sources AS sources" in source_sql
+    assert "ORDER BY sources.position" in source_sql
+
+
+@pytest.mark.asyncio
+async def test_processing_claim_falls_back_to_legacy_asset_sources(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"job_id": "job-1", "version_id": "version-1"},
+        {"attempt_count": 1},
+    ]
+    legacy_source = {
+        "asset_id": "asset-1",
+        "storage_key": "education/household-1/source.pdf",
+        "original_filename": "source.pdf",
+        "content_type": "application/pdf",
+        "size_bytes": 1024,
+    }
+    mock_cursor.fetchall.side_effect = [[], [legacy_source]]
+
+    job = await education_textbooks.claim_textbook_processing_job(job_id="job-1")
+
+    assert job is not None
+    assert job["sources"] == [legacy_source]
+    artifact_sql = mock_cursor.execute.call_args_list[2].args[0]
+    legacy_sql = mock_cursor.execute.call_args_list[3].args[0]
+    assert "education_textbook_artifact_sources" in artifact_sql
+    assert "FROM education_textbook_sources AS sources" in legacy_sql
+
+
+@pytest.mark.asyncio
 async def test_processing_completion_is_fenced_to_its_claimed_attempt(
     mock_connection, mock_cursor, monkeypatch
 ):
