@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const fetchArtifactText = vi.fn();
@@ -33,6 +34,35 @@ vi.mock('@/pages/ChatAgent/components/viewers/PreviewViewer', () => ({
 
 import DocumentPreviewDrawer from '../components/DocumentPreviewDrawer';
 
+function renderDrawer(props: {
+  open?: boolean;
+  documentId?: string;
+  onOpenChange?: (open: boolean) => void;
+  onOpenParser?: (documentId: string) => void;
+} = {}) {
+  return render(
+    <MemoryRouter initialEntries={['/documents']}>
+      <Routes>
+        <Route
+          path="/documents"
+          element={
+            <DocumentPreviewDrawer
+              open={props.open ?? true}
+              documentId={props.documentId ?? 'doc-1'}
+              onOpenChange={props.onOpenChange ?? vi.fn()}
+              onOpenParser={props.onOpenParser}
+            />
+          }
+        />
+        <Route
+          path="/documents/:documentId"
+          element={<output data-testid="document-detail-route">document detail route</output>}
+        />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 describe('DocumentPreviewDrawer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -46,7 +76,7 @@ describe('DocumentPreviewDrawer', () => {
 
   it('defaults to the original tab and can switch to the parsed Markdown tab', async () => {
     const user = userEvent.setup();
-    render(<DocumentPreviewDrawer open documentId="doc-1" onOpenChange={vi.fn()} />);
+    renderDrawer();
     expect(screen.getByRole('tablist', { name: 'Document content' })).toHaveClass('documents-preview-segmented');
     expect(screen.getByRole('tab', { name: 'Original file' })).toHaveAttribute('aria-selected', 'true');
     await user.click(screen.getByRole('tab', { name: 'Parsed file' }));
@@ -66,7 +96,7 @@ describe('DocumentPreviewDrawer', () => {
     fetchArtifactText.mockResolvedValue('![a picture](a_img.jpg)');
 
     const user = userEvent.setup();
-    render(<DocumentPreviewDrawer open documentId="doc-1" onOpenChange={vi.fn()} />);
+    renderDrawer();
     await user.click(screen.getByRole('tab', { name: 'Parsed file' }));
 
     expect(
@@ -78,7 +108,7 @@ describe('DocumentPreviewDrawer', () => {
     // The pill is what animates; exactly one exists, and the tab it belongs to
     // is the selected one. `layoutId` is what makes it travel (see AnimatedTabs).
     const user = userEvent.setup();
-    const { container } = render(<DocumentPreviewDrawer open documentId="doc-1" onOpenChange={vi.fn()} />);
+    const { container } = renderDrawer();
 
     const pills = () => container.querySelectorAll('.documents-preview-tab-pill');
     expect(pills()).toHaveLength(1);
@@ -94,7 +124,7 @@ describe('DocumentPreviewDrawer', () => {
     useDocumentArtifacts.mockReturnValue({ data: [] });
     const onOpenParser = vi.fn();
     const user = userEvent.setup();
-    render(<DocumentPreviewDrawer open documentId="doc-1" onOpenChange={vi.fn()} onOpenParser={onOpenParser} />);
+    renderDrawer({ onOpenParser });
     await user.click(screen.getByRole('tab', { name: 'Parsed file' }));
     await user.click(screen.getByRole('button', { name: 'Start parsing' }));
     expect(onOpenParser).toHaveBeenCalledWith('doc-1');
@@ -102,7 +132,7 @@ describe('DocumentPreviewDrawer', () => {
 
   it('supports continuous and single-page source controls plus fullscreen', async () => {
     const user = userEvent.setup();
-    render(<DocumentPreviewDrawer open documentId="doc-1" onOpenChange={vi.fn()} />);
+    renderDrawer();
 
     expect(screen.getByRole('separator', { name: 'Resize preview' })).toHaveClass('chat-split-divider');
     expect(await screen.findByTestId('preview-viewer')).toBeInTheDocument();
@@ -118,6 +148,15 @@ describe('DocumentPreviewDrawer', () => {
     expect(screen.getByRole('button', { name: 'Exit full screen' })).toBeInTheDocument();
   });
 
+  it('links to the independent document detail page', async () => {
+    const user = userEvent.setup();
+    renderDrawer();
+
+    await user.click(screen.getByRole('link', { name: 'View details' }));
+
+    expect(screen.getByTestId('document-detail-route')).toBeInTheDocument();
+  });
+
   it('contains a viewer failure instead of blanking the page', async () => {
     // Regression: a render-phase throw from the viewer used to escape the
     // drawer entirely — the app unmounted and the user got a blank page, which
@@ -125,7 +164,7 @@ describe('DocumentPreviewDrawer', () => {
     previewViewerState.shouldThrow = true;
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    render(<DocumentPreviewDrawer open documentId="doc-1" onOpenChange={vi.fn()} />);
+    renderDrawer();
 
     expect(await screen.findByText('The original file could not be loaded.')).toBeInTheDocument();
     // The drawer is still mounted — the failure stayed local to the viewer.

@@ -17,6 +17,7 @@ export function LegacyConnectorsRedirect() {
 const Dashboard = React.lazy(routeChunks.dashboard);
 const ChatAgent = React.lazy(routeChunks.chat);
 const Documents = React.lazy(routeChunks.documents);
+const DocumentDetail = React.lazy(routeChunks.documentDetail);
 const Automations = React.lazy(routeChunks.automations);
 const Education = React.lazy(routeChunks.education);
 const CreateHomework = React.lazy(async () => ({ default: (await routeChunks.createHomework()).CreateHomeworkPage }));
@@ -42,6 +43,7 @@ function Main() {
         <Route path="/chat/t/:threadId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
         <Route path="/chat/:workspaceId" element={<StudentFlashChat><ChatAgent /></StudentFlashChat>} />
         <Route path="/documents" element={<Documents />} />
+        <Route path="/documents/:documentId" element={<DocumentDetail />} />
         <Route path="/automations" element={<Automations />} />
         <Route path="/plugins" element={<Plugins />} />
         <Route path="/connectors" element={<LegacyConnectorsRedirect />} />

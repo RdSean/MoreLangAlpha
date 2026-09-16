@@ -44,6 +44,33 @@ export interface DocumentSummary {
   updated_at?: string | null;
 }
 
+export type DocumentTeachingPackageStatus =
+  | 'queued'
+  | 'preparing'
+  | 'building_skill'
+  | 'generating_teaching'
+  | 'validating'
+  | 'review'
+  | 'published'
+  | 'failed'
+  | 'cancelled';
+
+export interface DocumentTeachingUsage {
+  document_id: string;
+  producer_job_id: string;
+  primary_artifact_id: string;
+  textbook_id: string;
+  textbook_title: string;
+  content_version_id: string;
+  content_version_sequence: number;
+  artifact_position: number;
+  teaching_package_id?: string | null;
+  teaching_package_sequence?: number | null;
+  status?: DocumentTeachingPackageStatus | null;
+  has_asset_manifest: boolean;
+  created_at?: string | null;
+}
+
 export interface Inspection {
   inspection_id: string;
   document_id: string;

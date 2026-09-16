@@ -52,6 +52,18 @@
 .documents-preview-header h2 { margin: 0; font-size: 0.95rem; font-weight: 600; }
 .documents-preview-header [data-slot='badge'] { flex-shrink: 0; }
 .documents-preview-header-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.documents-preview-detail-link {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  padding: 0 8px;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.documents-preview-detail-link:hover { color: var(--color-text-primary); }
 
 .documents-preview-tabs {
   display: flex;

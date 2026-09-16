@@ -34,6 +34,14 @@ export function useDocument(documentId?: string) {
   });
 }
 
+export function useDocumentTeachingUsage(documentId?: string) {
+  return useQuery({
+    queryKey: queryKeys.documents.teachingUsage(documentId ?? ''),
+    queryFn: () => documentsApi.getDocumentTeachingUsage(documentId ?? ''),
+    enabled: Boolean(documentId),
+  });
+}
+
 export function useDocumentTags() {
   return useQuery({
     queryKey: queryKeys.documents.tags(),

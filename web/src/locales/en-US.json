@@ -150,6 +150,7 @@
       "title": "Document preview",
       "titleFallback": "Document",
       "close": "Close preview",
+      "viewDetail": "View details",
       "tabsLabel": "Document content",
       "sourceTab": "Original file",
       "parsedTab": "Parsed file",
@@ -166,6 +167,37 @@
       "parsedError": "The parsed file could not be loaded.",
       "noParsed": "This document has no Markdown parse artifact to preview yet.",
       "openParser": "Start parsing"
+    },
+    "detail": {
+      "back": "Back to Library",
+      "loading": "Loading document…",
+      "loadFailed": "The document could not be loaded.",
+      "notFound": "This document was not found or is unavailable.",
+      "tabsLabel": "Document detail views",
+      "sourceTab": "Original",
+      "parsedTab": "Parsed result",
+      "teachingTab": "Teaching assets",
+      "teachingUsage": {
+        "label": "Teaching usage",
+        "loading": "Loading teaching usage…",
+        "loadFailed": "Teaching usage could not be loaded.",
+        "empty": "This document has not been used to process a textbook.",
+        "contentVersion": "Content version v{{sequence}}",
+        "sourcePosition": "Source {{position}}",
+        "unpackaged": "No teaching package",
+        "unpackagedNote": "No teaching package has been generated for this content version.",
+        "package": "Teaching package",
+        "packageSequence": "Teaching package #{{sequence}}",
+        "viewAssets": "View formal teaching assets",
+        "status": {
+          "queued": "Queued",
+          "active": "Processing",
+          "review": "Awaiting review",
+          "published": "Published",
+          "failed": "Teaching package failed",
+          "cancelled": "Teaching package cancelled"
+        }
+      }
     },
     "tabs": {
       "datasets": "Datasets",

@@ -27,6 +27,9 @@ vi.mock('@/pages/Settings/Settings', () => ({
 vi.mock('@/pages/Documents/DocumentsPage', () => ({
   default: () => <div data-testid="documents-page" />,
 }));
+vi.mock('@/pages/Documents/DocumentDetailPage', () => ({
+  default: () => <div data-testid="document-detail-page" />,
+}));
 vi.mock('@/pages/Education/EducationPage', () => ({
   default: () => <div data-testid="education-page" />,
 }));
@@ -68,6 +71,7 @@ describe('generic application routes', () => {
   it.each([
     ['/chat', 'chat-page'],
     ['/documents', 'documents-page'],
+    ['/documents/doc-1', 'document-detail-page'],
     ['/automations', 'automations-page'],
     ['/education', 'education-page'],
     ['/settings', 'settings-page'],
@@ -81,6 +85,14 @@ describe('generic application routes', () => {
     const load = vi.spyOn(routeChunks, 'documents').mockResolvedValue({ default: () => <div /> });
 
     preloadRouteChunk('/documents');
+
+    expect(load).toHaveBeenCalledOnce();
+  });
+
+  it('preloads the document detail route chunk for a nested document URL', () => {
+    const load = vi.spyOn(routeChunks, 'documentDetail').mockResolvedValue({ default: () => <div /> });
+
+    preloadRouteChunk('/documents/doc-1');
 
     expect(load).toHaveBeenCalledOnce();
   });

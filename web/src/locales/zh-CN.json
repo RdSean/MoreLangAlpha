@@ -150,6 +150,7 @@
       "title": "文档预览",
       "titleFallback": "文档",
       "close": "关闭预览",
+      "viewDetail": "查看详情",
       "tabsLabel": "文档内容",
       "sourceTab": "原始文件",
       "parsedTab": "解析文件",
@@ -166,6 +167,37 @@
       "parsedError": "解析文件暂时无法加载。",
       "noParsed": "这份文档还没有可预览的 Markdown 解析产物。",
       "openParser": "开始解析"
+    },
+    "detail": {
+      "back": "返回图书馆",
+      "loading": "正在加载文档…",
+      "loadFailed": "无法加载文档。",
+      "notFound": "未找到这份文档，或无权查看。",
+      "tabsLabel": "文档详情视图",
+      "sourceTab": "原文",
+      "parsedTab": "解析结果",
+      "teachingTab": "教材资产",
+      "teachingUsage": {
+        "label": "教材使用情况",
+        "loading": "正在加载教材使用情况…",
+        "loadFailed": "无法加载教材使用情况。",
+        "empty": "这份文档尚未用于教材加工。",
+        "contentVersion": "内容版本 v{{sequence}}",
+        "sourcePosition": "来源 {{position}}",
+        "unpackaged": "尚未生成教学包",
+        "unpackagedNote": "这个内容版本尚未生成教学包。",
+        "package": "教学包",
+        "packageSequence": "教学包 #{{sequence}}",
+        "viewAssets": "查看正式教材资产",
+        "status": {
+          "queued": "等待加工",
+          "active": "教学包加工中",
+          "review": "等待审阅",
+          "published": "已发布",
+          "failed": "教学包加工失败",
+          "cancelled": "教学包加工已取消"
+        }
+      }
     },
     "tabs": {
       "datasets": "数据集",

@@ -17,6 +17,7 @@ import {
   cancelDocumentJob,
   createDocumentParseJob,
   fetchArtifactText,
+  getDocumentTeachingUsage,
   listDocuments,
   uploadDocument,
   watchDocumentJob,
@@ -125,6 +126,29 @@ describe('Documents API', () => {
 
     expect(mockPost).toHaveBeenCalledWith(
       `/api/v1/document-jobs/${cancelled.job_id}/cancel`,
+    );
+  });
+
+  it('loads typed teaching usages from the owned document endpoint', async () => {
+    const items = [{
+      document_id: 'doc-A1b2C3d4E5f6',
+      producer_job_id: 'job-A1b2C3d4E5f6',
+      primary_artifact_id: 'art-A1b2C3d4E5f6',
+      textbook_id: 'book-A1b2C3d4E5f6',
+      textbook_title: 'Reading Explorer 3',
+      content_version_id: 'ver-A1b2C3d4E5f6',
+      content_version_sequence: 2,
+      artifact_position: 1,
+      teaching_package_id: 'pkg-A1b2C3d4E5f6',
+      teaching_package_sequence: 1,
+      status: 'review' as const,
+      has_asset_manifest: true,
+    }];
+    mockGet.mockResolvedValue({ data: { items } });
+
+    await expect(getDocumentTeachingUsage(items[0].document_id)).resolves.toEqual(items);
+    expect(mockGet).toHaveBeenCalledWith(
+      '/api/v1/documents/doc-A1b2C3d4E5f6/teaching-usage',
     );
   });
 

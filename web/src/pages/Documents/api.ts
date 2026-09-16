@@ -9,6 +9,7 @@ import type {
   DatasetSummary,
   DocumentFilters,
   DocumentSummary,
+  DocumentTeachingUsage,
   InspectionOutcome,
   Paginated,
   ParseJob,
@@ -85,6 +86,13 @@ export async function listDocuments(filters: DocumentFilters = {}): Promise<Pagi
 export async function getDocument(documentId: string): Promise<DocumentSummary> {
   const { data } = await api.get<DocumentSummary>(`/api/v1/documents/${documentId}`);
   return data;
+}
+
+export async function getDocumentTeachingUsage(documentId: string): Promise<DocumentTeachingUsage[]> {
+  const { data } = await api.get<{ items: DocumentTeachingUsage[] }>(
+    `/api/v1/documents/${documentId}/teaching-usage`,
+  );
+  return data.items;
 }
 
 export async function updateDocument(
