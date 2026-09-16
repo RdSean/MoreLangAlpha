@@ -91,6 +91,7 @@ class _Services:
         self.inspections = AsyncMock()
         self.jobs = AsyncMock()
         self.events = AsyncMock()
+        self.teaching_usage_access = AsyncMock(return_value=True)
         self.teaching_usage = AsyncMock(return_value=[])
         self.library.upload_pdf.return_value = _document()
         self.library.list_documents.return_value = ([_document()], 1)
@@ -131,6 +132,11 @@ async def api(monkeypatch):
         documents,
         "list_document_teaching_usages",
         services.teaching_usage,
+    )
+    monkeypatch.setattr(
+        documents,
+        "can_read_document_teaching_usage",
+        services.teaching_usage_access,
     )
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
@@ -310,14 +316,14 @@ async def test_artifact_download_streams_through_the_authenticated_api(api) -> N
 @pytest.mark.asyncio
 async def test_teaching_usage_returns_owned_safe_rows(api) -> None:
     client, services = api
-    services.library.get_document.return_value = _document()
+    services.teaching_usage_access.return_value = True
     services.teaching_usage.return_value = [_teaching_usage()]
 
     response = await client.get(f"/api/v1/documents/{DOC_ID}/teaching-usage")
 
     assert response.status_code == 200
     assert response.json() == {"items": [_teaching_usage()]}
-    services.library.get_document.assert_awaited_once_with(
+    services.teaching_usage_access.assert_awaited_once_with(
         owner_user_id="owner-1",
         document_id=DOC_ID,
     )
@@ -332,11 +338,26 @@ async def test_teaching_usage_returns_owned_safe_rows(api) -> None:
 @pytest.mark.asyncio
 async def test_teaching_usage_returns_404_for_missing_or_foreign_document(api) -> None:
     client, services = api
-    services.library.get_document.return_value = None
+    services.teaching_usage_access.return_value = False
 
     response = await client.get(f"/api/v1/documents/{DOC_ID}/teaching-usage")
 
     assert response.status_code == 404
+    services.teaching_usage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_teaching_usage_returns_404_without_matching_parent_membership(api) -> None:
+    client, services = api
+    services.teaching_usage_access.return_value = False
+
+    response = await client.get(f"/api/v1/documents/{DOC_ID}/teaching-usage")
+
+    assert response.status_code == 404
+    services.teaching_usage_access.assert_awaited_once_with(
+        owner_user_id="owner-1",
+        document_id=DOC_ID,
+    )
     services.teaching_usage.assert_not_awaited()
 
 

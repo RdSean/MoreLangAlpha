@@ -59,6 +59,12 @@ async def test_repository_reads_only_artifact_backed_usage_for_the_owner(
     assert "JOIN education_textbook_artifact_sources AS sources" in normalized_sql
     assert "JOIN education_textbook_versions AS versions" in normalized_sql
     assert "JOIN education_textbooks AS textbooks" in normalized_sql
+    assert (
+        "JOIN education_memberships AS memberships "
+        "ON memberships.household_id = textbooks.household_id "
+        "AND memberships.user_id = documents.owner_user_id "
+        "AND memberships.role = 'parent'" in normalized_sql
+    )
     assert "LEFT JOIN education_teaching_packages AS packages" in normalized_sql
     assert "LEFT JOIN education_teaching_jobs AS jobs" in normalized_sql
     assert "documents.owner_user_id = %s" in normalized_sql
@@ -73,6 +79,66 @@ async def test_repository_reads_only_artifact_backed_usage_for_the_owner(
     assert "bundle_prefix" not in normalized_sql
     assert "storage_key" not in normalized_sql
     assert params == ("doc-A1b2C3d4E5f6", "owner-1")
+
+
+@pytest.mark.asyncio
+async def test_repository_access_requires_current_parent_membership(
+    mock_connection, mock_cursor, monkeypatch
+) -> None:
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {"can_read": False}
+
+    can_read = await education_textbooks.get_document_teaching_usage_access(
+        owner_user_id="owner-1",
+        document_id="doc-A1b2C3d4E5f6",
+    )
+
+    assert can_read is False
+    sql, params = mock_cursor.execute.await_args.args
+    normalized_sql = " ".join(sql.split())
+    assert "WITH usage_candidates AS" in normalized_sql
+    assert "JOIN education_memberships AS memberships" in normalized_sql
+    assert (
+        "memberships.household_id = usage_candidates.household_id"
+        in normalized_sql
+    )
+    assert "memberships.user_id = %s" in normalized_sql
+    assert "memberships.role = 'parent'" in normalized_sql
+    assert "documents.owner_user_id = %s" in normalized_sql
+    assert params == (
+        "doc-A1b2C3d4E5f6",
+        "owner-1",
+        "owner-1",
+        "doc-A1b2C3d4E5f6",
+        "owner-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_service_denies_usage_without_current_parent_membership(
+    monkeypatch,
+) -> None:
+    repository = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        document_teaching_usage.education_textbook_repository,
+        "get_document_teaching_usage_access",
+        repository,
+    )
+
+    can_read = await document_teaching_usage.can_read_document_teaching_usage(
+        owner_user_id="owner-1",
+        document_id="doc-A1b2C3d4E5f6",
+    )
+
+    assert can_read is False
+    repository.assert_awaited_once_with(
+        owner_user_id="owner-1",
+        document_id="doc-A1b2C3d4E5f6",
+    )
 
 
 @pytest.mark.asyncio

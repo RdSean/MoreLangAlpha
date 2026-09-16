@@ -167,6 +167,10 @@ async def list_document_teaching_usages(
                   ON versions.version_id = sources.version_id
                 JOIN education_textbooks AS textbooks
                   ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                 AND memberships.user_id = documents.owner_user_id
+                 AND memberships.role = 'parent'
                 LEFT JOIN education_teaching_packages AS packages
                   ON packages.content_version_id = versions.version_id
                 LEFT JOIN education_teaching_jobs AS jobs
@@ -184,6 +188,57 @@ async def list_document_teaching_usages(
             )
             rows = await cur.fetchall()
     return [dict(row) for row in rows]
+
+
+async def get_document_teaching_usage_access(
+    *, owner_user_id: str, document_id: str
+) -> bool | None:
+    """Authorize an owned Document in the households of its textbook usages."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                WITH usage_candidates AS (
+                    SELECT textbooks.household_id
+                    FROM documents
+                    JOIN education_textbook_artifact_sources AS sources
+                      ON sources.document_id = documents.document_id
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = sources.version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    WHERE documents.document_id = %s
+                      AND documents.owner_user_id = %s
+                )
+                SELECT CASE
+                    WHEN NOT EXISTS (SELECT 1 FROM usage_candidates)
+                    THEN TRUE
+                    ELSE EXISTS (
+                        SELECT 1
+                        FROM usage_candidates
+                        JOIN education_memberships AS memberships
+                          ON memberships.household_id =
+                             usage_candidates.household_id
+                         AND memberships.user_id = %s
+                         AND memberships.role = 'parent'
+                    )
+                END AS can_read
+                FROM documents
+                WHERE documents.document_id = %s
+                  AND documents.owner_user_id = %s
+                """,
+                (
+                    document_id,
+                    owner_user_id,
+                    owner_user_id,
+                    document_id,
+                    owner_user_id,
+                ),
+            )
+            row = await cur.fetchone()
+    if row is None:
+        return None
+    return bool(row["can_read"])
 
 
 async def get_or_create_student_learning_space(

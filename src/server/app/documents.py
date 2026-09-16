@@ -56,6 +56,7 @@ from src.server.services.document_job_events import (
     publish_document_job_hint,
 )
 from src.server.services.document_teaching_usage import (
+    can_read_document_teaching_usage,
     list_document_teaching_usages,
 )
 from src.server.services.education_access import require_nonstudent_agent_features
@@ -295,14 +296,11 @@ async def get_document(
     response_model=DocumentTeachingUsageResponse,
 )
 async def get_document_teaching_usage(
-    document_id: str, user_id: CurrentUserId, service: LibraryService
+    document_id: str, user_id: CurrentUserId
 ) -> DocumentTeachingUsageResponse:
-    if (
-        await service.get_document(
-            owner_user_id=user_id,
-            document_id=document_id,
-        )
-        is None
+    if not await can_read_document_teaching_usage(
+        owner_user_id=user_id,
+        document_id=document_id,
     ):
         raise _not_found("Document")
     rows = await list_document_teaching_usages(

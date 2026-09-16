@@ -38,3 +38,16 @@ async def list_document_teaching_usages(
         document_id=document_id,
     )
     return [_safe_usage(row) for row in rows]
+
+
+async def can_read_document_teaching_usage(
+    *, owner_user_id: str, document_id: str
+) -> bool:
+    """Return whether the owner may read usages under current memberships."""
+    return (
+        await education_textbook_repository.get_document_teaching_usage_access(
+            owner_user_id=owner_user_id,
+            document_id=document_id,
+        )
+        is True
+    )
