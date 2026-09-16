@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
@@ -24,10 +24,13 @@ vi.mock('../api', () => ({
 vi.mock('@/pages/ChatAgent/components/Markdown', () => ({ default: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock('@/pages/ChatAgent/components/viewers/PdfViewer', () => ({ default: () => <div data-testid="pdf-viewer">PDF viewer</div> }));
 vi.mock('@/pages/ChatAgent/components/viewers/PreviewViewer', () => ({
-  default: ({ documentData, documentViewMode }: { documentData?: ArrayBuffer; documentViewMode?: string }) => {
+  default: ({ documentData, documentViewMode, isDragging }: { documentData?: ArrayBuffer; documentViewMode?: string; isDragging?: boolean }) => {
     if (previewViewerState.shouldThrow) throw new Error('detached ArrayBuffer');
     return (
-      <div data-testid="preview-viewer" data-has-document-data={String(Boolean(documentData))} data-document-mode={documentViewMode}>Preview viewer</div>
+      <div data-testid="preview-viewer" data-has-document-data={String(Boolean(documentData))} data-document-mode={documentViewMode} data-dragging={String(Boolean(isDragging))}>
+        Preview viewer
+        {isDragging && <div data-testid="preview-drag-overlay" />}
+      </div>
     );
   },
 }));
@@ -146,6 +149,28 @@ describe('DocumentPreviewDrawer', () => {
 
     await user.click(screen.getByRole('button', { name: 'View full screen' }));
     expect(screen.getByRole('button', { name: 'Exit full screen' })).toBeInTheDocument();
+  });
+
+  it('keeps the viewer in drag mode until the divider drag ends', async () => {
+    renderDrawer();
+
+    const viewer = await screen.findByTestId('preview-viewer');
+    const divider = screen.getByRole('separator', { name: 'Resize preview' });
+    expect(viewer).toHaveAttribute('data-dragging', 'false');
+    expect(screen.queryByTestId('preview-drag-overlay')).not.toBeInTheDocument();
+
+    fireEvent.mouseDown(divider, { clientX: 900 });
+
+    expect(viewer).toHaveAttribute('data-dragging', 'true');
+    expect(screen.getByTestId('preview-drag-overlay')).toBeInTheDocument();
+
+    fireEvent.mouseMove(window, { clientX: 820 });
+    expect(viewer).toHaveAttribute('data-dragging', 'true');
+
+    fireEvent.mouseUp(window);
+
+    expect(viewer).toHaveAttribute('data-dragging', 'false');
+    expect(screen.queryByTestId('preview-drag-overlay')).not.toBeInTheDocument();
   });
 
   it('links to the independent document detail page', async () => {

@@ -20,6 +20,7 @@ interface DocumentContentPaneProps {
   documentId: string;
   document?: DocumentSummary;
   activeTab: DocumentContentTab;
+  isDragging: boolean;
   onOpenParser?: (documentId: string) => void;
   onClose?: () => void;
 }
@@ -28,6 +29,7 @@ export default function DocumentContentPane({
   documentId,
   document,
   activeTab,
+  isDragging,
   onOpenParser,
   onClose,
 }: DocumentContentPaneProps) {
@@ -145,7 +147,7 @@ export default function DocumentContentPane({
                 loading={false}
                 error={false}
                 onClose={onClose ?? (() => undefined)}
-                isDragging={false}
+                isDragging={isDragging}
                 reloadToken={sourcePage}
                 documentData={isPdfSource ? source : undefined}
                 documentViewMode={sourceViewMode}

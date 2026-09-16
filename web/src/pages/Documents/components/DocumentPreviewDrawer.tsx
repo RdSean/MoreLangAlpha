@@ -175,6 +175,7 @@ export default function DocumentPreviewDrawer({
                 documentId={documentId}
                 document={documentRecord.data}
                 activeTab={tab}
+                isDragging={isDragging}
                 onOpenParser={onOpenParser}
                 onClose={() => onOpenChange(false)}
               />

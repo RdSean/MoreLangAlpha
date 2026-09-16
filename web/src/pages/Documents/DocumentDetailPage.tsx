@@ -120,6 +120,7 @@ export default function DocumentDetailPage() {
               documentId={documentId}
               document={document}
               activeTab={activeTab}
+              isDragging={false}
             />
           )}
         </section>

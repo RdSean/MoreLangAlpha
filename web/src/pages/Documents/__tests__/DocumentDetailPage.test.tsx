@@ -28,7 +28,9 @@ vi.mock('@/pages/ChatAgent/components/Markdown', () => ({
   default: ({ content }: { content: string }) => <div>{content}</div>,
 }));
 vi.mock('@/pages/ChatAgent/components/viewers/PreviewViewer', () => ({
-  default: () => <div data-testid="preview-viewer">Preview viewer</div>,
+  default: ({ isDragging }: { isDragging?: boolean }) => (
+    <div data-testid="preview-viewer" data-dragging={String(Boolean(isDragging))}>Preview viewer</div>
+  ),
 }));
 
 import DocumentDetailPage from '../DocumentDetailPage';
@@ -128,6 +130,7 @@ describe('DocumentDetailPage', () => {
     expect(screen.getByRole('tab', { name: '解析结果' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '教材资产' })).toBeInTheDocument();
     expect(await screen.findByTestId('preview-viewer')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-viewer')).toHaveAttribute('data-dragging', 'false');
   });
 
   it('shows parsed Markdown with artifact-backed images', async () => {
