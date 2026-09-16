@@ -887,3 +887,130 @@ async def test_published_textbook_detail_reads_assignment_names_from_household_m
             "created_at": None,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_completed_parse_job_candidates_are_safe_and_owner_scoped(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    candidate = {
+        "producer_job_id": "job-parse-1",
+        "document_id": "doc-1",
+        "primary_artifact_id": "art-1",
+        "filename": "textbook.pdf",
+        "media_type": "application/pdf",
+        "format": "pdf",
+        "parser_id": "datalab",
+        "parser_name": "Datalab",
+        "parser_version": "2",
+        "parse_completed_at": None,
+        "size_bytes": 2048,
+        "artifact_count": 4,
+    }
+    mock_cursor.fetchall.return_value = [candidate]
+
+    result = await education_textbooks.list_completed_parse_jobs_for_parent(
+        parent_user_id="parent-1"
+    )
+
+    assert result == [candidate]
+    sql, params = mock_cursor.execute.call_args.args
+    assert "FROM document_parse_jobs AS jobs" in sql
+    assert "JOIN document_artifacts AS primary_artifacts" in sql
+    assert "jobs.status = 'completed'" in sql
+    assert "documents.owner_user_id = %s" in sql
+    assert "storage_key" not in sql
+    assert params == ("parent-1",)
+
+
+@pytest.mark.asyncio
+async def test_parent_detail_projects_frozen_artifact_sources_without_storage_paths(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {
+        "textbook_id": "textbook-1",
+        "household_id": "household-1",
+        "title": "英语第二册",
+        "slug": "english-2",
+    }
+    artifact_sources = [
+        {
+            "position": 1,
+            "document_id": "doc-1",
+            "producer_job_id": "job-parse-1",
+            "primary_artifact_id": "art-1",
+            "filename": "textbook.pdf",
+            "media_type": "application/pdf",
+            "format": "pdf",
+            "parser_id": "datalab",
+            "parser_name": "Datalab",
+            "parser_version": "2",
+            "parse_completed_at": None,
+            "primary_sha256": "a" * 64,
+            "document_deleted": False,
+            "legacy": False,
+            "asset_id": None,
+            "original_filename": None,
+            "content_type": None,
+            "size_bytes": None,
+        },
+        {
+            "position": 2,
+            "document_id": "doc-deleted",
+            "producer_job_id": "job-parse-2",
+            "primary_artifact_id": "art-2",
+            "filename": "deleted.pdf",
+            "media_type": "application/pdf",
+            "format": "pdf",
+            "parser_id": "datalab",
+            "parser_name": "Datalab",
+            "parser_version": "2",
+            "parse_completed_at": None,
+            "primary_sha256": "b" * 64,
+            "document_deleted": True,
+            "legacy": False,
+            "asset_id": None,
+            "original_filename": None,
+            "content_type": None,
+            "size_bytes": None,
+        },
+    ]
+    mock_cursor.fetchall.side_effect = [
+        [
+            {
+                "version_id": "version-1",
+                "sequence": 1,
+                "status": "failed",
+                "chapter_count": 0,
+                "publication_id": None,
+                "is_published": False,
+            }
+        ],
+        artifact_sources,
+        [],
+        [],
+    ]
+
+    detail = await education_textbooks.get_textbook_for_parent(
+        parent_user_id="parent-1", textbook_id="textbook-1"
+    )
+
+    assert detail is not None
+    assert detail["versions"][0]["sources"] == artifact_sources
+    source_sql = mock_cursor.execute.call_args_list[2].args[0]
+    assert "education_textbook_artifact_sources" in source_sql
+    assert "LEFT JOIN documents" in source_sql
+    assert "documents.document_id IS NULL" in source_sql
+    assert "snapshot_prefix" not in source_sql
+    assert "asset_manifest" not in source_sql
+    assert "storage_key" not in source_sql

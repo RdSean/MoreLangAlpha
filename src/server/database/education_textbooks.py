@@ -2139,6 +2139,55 @@ async def get_owned_parse_job(
     return dict(row) if row else None
 
 
+async def list_completed_parse_jobs_for_parent(
+    *, parent_user_id: str
+) -> list[dict[str, Any]]:
+    """Return safe completed Markdown bundles owned by one parent."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT jobs.job_id AS producer_job_id,
+                       jobs.document_id,
+                       jobs.primary_artifact_id,
+                       documents.original_filename AS filename,
+                       documents.media_type,
+                       documents.document_format AS format,
+                       jobs.parser_id,
+                       jobs.parser_name,
+                       jobs.parser_version,
+                       jobs.completed_at AS parse_completed_at,
+                       documents.source_size_bytes AS size_bytes,
+                       COALESCE(artifact_counts.artifact_count, 0)::int
+                           AS artifact_count
+                FROM document_parse_jobs AS jobs
+                JOIN documents
+                  ON documents.document_id = jobs.document_id
+                JOIN document_artifacts AS primary_artifacts
+                  ON primary_artifacts.artifact_id = jobs.primary_artifact_id
+                 AND primary_artifacts.producer_job_id = jobs.job_id
+                 AND primary_artifacts.artifact_kind = 'primary_document'
+                 AND LOWER(
+                     SPLIT_PART(primary_artifacts.media_type, ';', 1)
+                 ) = 'text/markdown'
+                 AND LOWER(primary_artifacts.format) IN ('gfm', 'markdown')
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS artifact_count
+                    FROM document_artifacts AS artifacts
+                    WHERE artifacts.producer_job_id = jobs.job_id
+                ) AS artifact_counts ON TRUE
+                WHERE jobs.status = 'completed'
+                  AND jobs.primary_artifact_id IS NOT NULL
+                  AND documents.owner_user_id = %s
+                ORDER BY jobs.completed_at DESC NULLS LAST,
+                         jobs.job_id DESC
+                """,
+                (parent_user_id,),
+            )
+            rows = await cur.fetchall()
+    return [dict(row) for row in rows]
+
+
 async def textbook_processing_job_exists(
     *, job_id: str, version_id: str
 ) -> bool:
@@ -2469,14 +2518,61 @@ async def get_textbook_for_parent(
             for version in versions:
                 await cur.execute(
                     """
-                    SELECT assets.asset_id, assets.original_filename,
-                           assets.content_type, assets.size_bytes
-                    FROM education_textbook_sources AS sources
-                    JOIN education_assets AS assets ON assets.asset_id = sources.asset_id
-                    WHERE sources.version_id = %s
-                    ORDER BY sources.position
+                    WITH artifact_sources AS (
+                        SELECT sources.position,
+                               sources.document_id,
+                               sources.producer_job_id,
+                               sources.primary_artifact_id,
+                               sources.source_filename AS filename,
+                               sources.source_media_type AS media_type,
+                               sources.source_format AS format,
+                               sources.parser_id,
+                               sources.parser_name,
+                               sources.parser_version,
+                               sources.parse_completed_at,
+                               sources.primary_sha256,
+                               documents.document_id IS NULL AS document_deleted,
+                               FALSE AS legacy,
+                               NULL::uuid AS asset_id,
+                               NULL::varchar AS original_filename,
+                               NULL::varchar AS content_type,
+                               NULL::bigint AS size_bytes
+                        FROM education_textbook_artifact_sources AS sources
+                        LEFT JOIN documents
+                          ON documents.document_id = sources.document_id
+                        WHERE sources.version_id = %s
+                    ),
+                    legacy_sources AS (
+                        SELECT sources.position,
+                               NULL::varchar AS document_id,
+                               NULL::varchar AS producer_job_id,
+                               NULL::varchar AS primary_artifact_id,
+                               NULL::varchar AS filename,
+                               NULL::varchar AS media_type,
+                               NULL::varchar AS format,
+                               NULL::varchar AS parser_id,
+                               NULL::varchar AS parser_name,
+                               NULL::varchar AS parser_version,
+                               NULL::timestamptz AS parse_completed_at,
+                               NULL::varchar AS primary_sha256,
+                               NULL::boolean AS document_deleted,
+                               TRUE AS legacy,
+                               assets.asset_id,
+                               assets.original_filename,
+                               assets.content_type,
+                               assets.size_bytes
+                        FROM education_textbook_sources AS sources
+                        JOIN education_assets AS assets
+                          ON assets.asset_id = sources.asset_id
+                        WHERE sources.version_id = %s
+                    )
+                    SELECT * FROM artifact_sources
+                    UNION ALL
+                    SELECT * FROM legacy_sources
+                    WHERE NOT EXISTS (SELECT 1 FROM artifact_sources)
+                    ORDER BY position
                     """,
-                    (version["version_id"],),
+                    (version["version_id"], version["version_id"]),
                 )
                 version["sources"] = [dict(row) for row in await cur.fetchall()]
                 await cur.execute(

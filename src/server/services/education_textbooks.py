@@ -26,6 +26,7 @@ from src.server.database.education_textbooks import (
     get_textbook_for_parent,
     get_student_chapter_context_record,
     get_student_learning as get_student_learning_record,
+    list_completed_parse_jobs_for_parent,
     list_student_assignments,
     list_student_learning_records,
     list_textbooks_for_parent,
@@ -621,6 +622,18 @@ async def list_parent_textbooks(*, parent_user_id: str) -> list[dict[str, Any]]:
     if not await get_household_context_for_parent(parent_user_id):
         raise TextbookPermissionError("Only a parent can manage family textbooks")
     return await list_textbooks_for_parent(parent_user_id)
+
+
+async def list_completed_textbook_parse_jobs(
+    *, parent_user_id: str
+) -> list[dict[str, Any]]:
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError(
+            "Only a parent can select textbook sources"
+        )
+    return await list_completed_parse_jobs_for_parent(
+        parent_user_id=parent_user_id
+    )
 
 
 async def get_parent_textbook(

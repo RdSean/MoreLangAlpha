@@ -1,7 +1,7 @@
 """Pydantic contracts for first-party family homework APIs."""
 
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
@@ -268,11 +268,51 @@ class TextbookResponse(BaseModel):
     created_at: datetime | None = None
 
 
-class TextbookSourceResponse(BaseModel):
+class ArtifactTextbookSourceResponse(BaseModel):
+    legacy: Literal[False] = False
+    position: int
+    document_id: str
+    producer_job_id: str
+    primary_artifact_id: str
+    filename: str
+    media_type: str
+    format: str
+    parser_id: str
+    parser_name: str
+    parser_version: str | None = None
+    parse_completed_at: datetime | None = None
+    primary_sha256: str
+    document_deleted: bool
+
+
+class LegacyTextbookSourceResponse(BaseModel):
+    legacy: Literal[True] = True
+    position: int
     asset_id: UUID
     original_filename: str
     content_type: str
     size_bytes: int
+
+
+TextbookSourceResponse = Annotated[
+    ArtifactTextbookSourceResponse | LegacyTextbookSourceResponse,
+    Field(discriminator="legacy"),
+]
+
+
+class TextbookParseJobCandidateResponse(BaseModel):
+    producer_job_id: str
+    document_id: str
+    primary_artifact_id: str
+    filename: str
+    media_type: str
+    format: str
+    parser_id: str
+    parser_name: str
+    parser_version: str | None = None
+    parse_completed_at: datetime | None = None
+    size_bytes: int
+    artifact_count: int
 
 
 class TextbookQuestionResponse(BaseModel):

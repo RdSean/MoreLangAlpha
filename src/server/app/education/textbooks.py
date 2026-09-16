@@ -14,6 +14,7 @@ from src.server.app.education.models import (
     StartTextbookProcessingRequest,
     TextbookAssignmentResponse,
     TextbookDetailResponse,
+    TextbookParseJobCandidateResponse,
     TextbookProcessingResponse,
     TextbookPublicationResponse,
     TextbookResponse,
@@ -40,6 +41,7 @@ from src.server.services.education_textbooks import (
     get_student_chapter_context,
     get_student_learning,
     list_learning_assignments,
+    list_completed_textbook_parse_jobs,
     list_parent_textbooks,
     publish_version,
     queue_teaching_package_for_parent,
@@ -94,6 +96,17 @@ async def get_family_textbook(textbook_id: UUID, user_id: CurrentUserId):
         return await get_parent_textbook(
             parent_user_id=user_id, textbook_id=str(textbook_id)
         )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/textbook-parse-jobs/completed",
+    response_model=list[TextbookParseJobCandidateResponse],
+)
+async def list_completed_parse_jobs(user_id: CurrentUserId):
+    try:
+        return await list_completed_textbook_parse_jobs(parent_user_id=user_id)
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
 

@@ -6,8 +6,7 @@ import TextbookDetailPage from '../TextbookDetailPage';
 
 const state = vi.hoisted(() => ({
   textbook: null as Record<string, unknown> | null,
-  assets: [] as Array<Record<string, unknown>>,
-  upload: vi.fn(),
+  parseJobs: [] as Array<Record<string, unknown>>,
   start: vi.fn(),
   run: vi.fn(),
   retry: vi.fn(),
@@ -22,11 +21,11 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('../api', () => ({
-  uploadEducationAsset: state.upload,
+  uploadEducationAsset: vi.fn(),
 }));
 
 vi.mock('../queries', () => ({
-  useEducationAssets: () => ({ data: state.assets, isLoading: false }),
+  useCompletedParseJobs: () => ({ data: state.parseJobs, isLoading: false }),
   useEducationMembers: () => ({ data: [] }),
   useParentLearningRecords: () => ({ data: { records: [] }, isLoading: false }),
   useParentLearningTranscript: () => ({ data: { messages: [] }, isLoading: false }),
@@ -54,11 +53,10 @@ beforeEach(() => {
     slug: 'english-2',
     versions: [],
   };
-  state.assets = [
-    { asset_id: 'asset-1', original_filename: 'body.pdf', content_type: 'application/pdf', size_bytes: 1024, created_at: '2026-08-13T00:00:00Z' },
-    { asset_id: 'asset-2', original_filename: 'workbook.pdf', content_type: 'application/pdf', size_bytes: 2048, created_at: '2026-08-13T00:01:00Z' },
+  state.parseJobs = [
+    { producer_job_id: 'job-parse-1', document_id: 'doc-1', primary_artifact_id: 'art-1', filename: 'body.pdf', media_type: 'application/pdf', format: 'pdf', parser_id: 'datalab', parser_name: 'Datalab', parser_version: '2', parse_completed_at: '2026-08-13T00:00:00Z', size_bytes: 1024, artifact_count: 3 },
+    { producer_job_id: 'job-parse-2', document_id: 'doc-2', primary_artifact_id: 'art-2', filename: 'workbook.pdf', media_type: 'application/pdf', format: 'pdf', parser_id: 'datalab', parser_name: 'Datalab', parser_version: '2', parse_completed_at: '2026-08-13T00:01:00Z', size_bytes: 2048, artifact_count: 5 },
   ];
-  state.upload.mockReset();
   state.start.mockReset().mockResolvedValue({ job_id: 'job-1' });
   state.run.mockReset();
   state.retry.mockReset();
@@ -80,11 +78,11 @@ describe('TextbookDetailPage', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('heading', { name: '下一步：添加教材资料' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '下一步：从图书馆选择来源' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '开始加工' })).toBeInTheDocument();
   });
 
-  it('submits the selected existing sources explicitly', async () => {
+  it('lists completed parse jobs and submits their parse job IDs', async () => {
     render(
       <MemoryRouter initialEntries={['/education/textbooks/textbook-1']}>
         <Routes><Route path="/education/textbooks/:textbookId" element={<TextbookDetailPage />} /></Routes>
@@ -92,17 +90,20 @@ describe('TextbookDetailPage', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '开始加工' }));
+    expect(screen.getByText('从图书馆选择来源')).toBeInTheDocument();
+    expect(screen.getByText(/body.pdf/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Datalab/)).toHaveLength(2);
     fireEvent.click(screen.getByRole('checkbox', { name: 'body.pdf' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'workbook.pdf' }));
     fireEvent.click(screen.getByRole('button', { name: '创建加工任务' }));
 
     await waitFor(() => expect(state.start).toHaveBeenCalledWith({
       textbookId: 'textbook-1',
-      sourceAssetIds: ['asset-1', 'asset-2'],
+      sourceParseJobIds: ['job-parse-1', 'job-parse-2'],
     }));
   });
 
-  it('separates frozen source, content, teaching, and student review information', () => {
+  it('shows artifact and legacy sources truthfully in the source tab', () => {
     state.textbook = {
       textbook_id: 'textbook-1',
       household_id: 'household-1',
@@ -114,7 +115,50 @@ describe('TextbookDetailPage', () => {
         status: 'review',
         chapter_count: 1,
         is_published: false,
-        sources: [{ asset_id: 'asset-1', original_filename: 'body.pdf', content_type: 'application/pdf', size_bytes: 1024 }],
+        sources: [
+          {
+            legacy: false,
+            position: 1,
+            document_id: 'doc-1',
+            producer_job_id: 'job-parse-1',
+            primary_artifact_id: 'art-1',
+            filename: 'body.pdf',
+            media_type: 'application/pdf',
+            format: 'pdf',
+            parser_id: 'datalab',
+            parser_name: 'Datalab',
+            parser_version: '2',
+            parse_completed_at: '2026-09-16T10:00:00Z',
+            primary_sha256: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+            document_deleted: false,
+            snapshot_prefix: 'education/private/secret/',
+          },
+          {
+            legacy: false,
+            position: 2,
+            document_id: 'doc-deleted',
+            producer_job_id: 'job-parse-2',
+            primary_artifact_id: 'art-2',
+            filename: 'deleted.pdf',
+            media_type: 'application/pdf',
+            format: 'pdf',
+            parser_id: 'datalab',
+            parser_name: 'Datalab',
+            parser_version: '2',
+            parse_completed_at: '2026-09-16T10:01:00Z',
+            primary_sha256: 'fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321',
+            document_deleted: true,
+            storage_key: 'documents/private/deleted.md',
+          },
+          {
+            legacy: true,
+            position: 3,
+            asset_id: 'asset-1',
+            original_filename: 'legacy.pdf',
+            content_type: 'application/pdf',
+            size_bytes: 1024,
+          },
+        ],
         assignments: [],
         chapters: [{
           chapter_id: 'chapter-1',
@@ -136,13 +180,66 @@ describe('TextbookDetailPage', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('body.pdf')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '内容' }));
-    expect(screen.getByText('第 1-10 页')).toBeInTheDocument();
-    expect(screen.getByText(/原始提取内容。/)).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '内容' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '来源' }));
+    expect(screen.getByRole('link', { name: '查看 body.pdf' })).toHaveAttribute('href', '/documents/doc-1');
+    expect(screen.getAllByText(/Datalab/)).toHaveLength(2);
+    expect(screen.getByText(/abcdef123456/)).toBeInTheDocument();
+    expect(screen.getByText('原文档已删除')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '查看 deleted.pdf' })).not.toBeInTheDocument();
+    expect(screen.getByText('legacy.pdf')).toBeInTheDocument();
+    expect(screen.getByText('旧版资料')).toBeInTheDocument();
+    expect(screen.queryByText(/education\/private|documents\/private|storage_key|snapshot_prefix/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '教学' }));
     expect(screen.getByText(/完成阅读。/)).toBeInTheDocument();
     expect(screen.getByText(/完成阅读后做什么？/)).toBeInTheDocument();
+  });
+
+  it('keeps frozen sources and library links visible after a run failure', () => {
+    state.textbook = {
+      textbook_id: 'textbook-1',
+      household_id: 'household-1',
+      title: '英语第二册',
+      slug: 'english-2',
+      versions: [{
+        version_id: 'version-1',
+        sequence: 1,
+        status: 'failed',
+        processing_error: '本地加工失败，未找到 sandbox。',
+        processing_job_status: 'failed',
+        chapter_count: 0,
+        is_published: false,
+        sources: [{
+          legacy: false,
+          position: 1,
+          document_id: 'doc-1',
+          producer_job_id: 'job-parse-1',
+          primary_artifact_id: 'art-1',
+          filename: 'body.pdf',
+          media_type: 'application/pdf',
+          format: 'pdf',
+          parser_id: 'datalab',
+          parser_name: 'Datalab',
+          parser_version: '2',
+          parse_completed_at: '2026-09-16T10:00:00Z',
+          primary_sha256: 'a'.repeat(64),
+          document_deleted: false,
+        }],
+        assignments: [],
+        teaching_packages: [],
+        chapters: [],
+      }],
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/education/textbooks/textbook-1']}>
+        <Routes><Route path="/education/textbooks/:textbookId" element={<TextbookDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/本地加工失败/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '来源' }));
+    expect(screen.getByRole('link', { name: '查看 body.pdf' })).toHaveAttribute('href', '/documents/doc-1');
   });
 
   it('starts a teaching package only after content extraction is reviewable', async () => {

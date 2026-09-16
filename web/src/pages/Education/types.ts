@@ -270,11 +270,47 @@ export interface TeachingJob {
   attempts: TeachingJobAttempt[];
 }
 
-export interface TextbookSource {
+export interface ArtifactTextbookSource {
+  legacy: false;
+  position: number;
+  document_id: string;
+  producer_job_id: string;
+  primary_artifact_id: string;
+  filename: string;
+  media_type: string;
+  format: string;
+  parser_id: string;
+  parser_name: string;
+  parser_version?: string | null;
+  parse_completed_at?: string | null;
+  primary_sha256: string;
+  document_deleted: boolean;
+}
+
+export interface LegacyTextbookSource {
+  legacy: true;
+  position: number;
   asset_id: string;
   original_filename: string;
   content_type: string;
   size_bytes: number;
+}
+
+export type TextbookSource = ArtifactTextbookSource | LegacyTextbookSource;
+
+export interface CompletedParseJob {
+  producer_job_id: string;
+  document_id: string;
+  primary_artifact_id: string;
+  filename: string;
+  media_type: string;
+  format: string;
+  parser_id: string;
+  parser_name: string;
+  parser_version?: string | null;
+  parse_completed_at?: string | null;
+  size_bytes: number;
+  artifact_count: number;
 }
 
 export interface TextbookVersion {

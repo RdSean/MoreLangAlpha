@@ -104,6 +104,43 @@ async def test_only_parent_can_start_a_frozen_textbook_processing_job(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_completed_parse_job_candidates_require_a_parent(monkeypatch):
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_household_context_for_parent",
+        AsyncMock(return_value=None),
+    )
+
+    with pytest.raises(education_textbooks.TextbookPermissionError):
+        await education_textbooks.list_completed_textbook_parse_jobs(
+            parent_user_id="student-1"
+        )
+
+
+@pytest.mark.asyncio
+async def test_completed_parse_job_candidates_delegate_to_the_read_model(monkeypatch):
+    candidates = [{"producer_job_id": "job-parse-1"}]
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    listed = AsyncMock(return_value=candidates)
+    monkeypatch.setattr(
+        education_textbooks,
+        "list_completed_parse_jobs_for_parent",
+        listed,
+    )
+
+    result = await education_textbooks.list_completed_textbook_parse_jobs(
+        parent_user_id="parent-1"
+    )
+
+    assert result == candidates
+    listed.assert_awaited_once_with(parent_user_id="parent-1")
+
+
+@pytest.mark.asyncio
 async def test_creating_chinese_textbooks_uses_distinct_storage_slugs(monkeypatch):
     monkeypatch.setattr(
         education_textbooks,

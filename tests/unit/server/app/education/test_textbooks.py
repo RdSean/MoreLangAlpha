@@ -292,6 +292,8 @@ async def test_parent_detail_exposes_safe_review_sources_and_page_mappings(clien
                 "publication_id": None,
                 "sources": [
                     {
+                        "legacy": True,
+                        "position": 1,
                         "asset_id": source_id,
                         "original_filename": "body.pdf",
                         "content_type": "application/pdf",
@@ -337,6 +339,8 @@ async def test_parent_detail_exposes_safe_review_sources_and_page_mappings(clien
     assert response.status_code == 200
     assert response.json()["versions"][0]["sources"] == [
         {
+            "legacy": True,
+            "position": 1,
             "asset_id": str(source_id),
             "original_filename": "body.pdf",
             "content_type": "application/pdf",
@@ -345,6 +349,127 @@ async def test_parent_detail_exposes_safe_review_sources_and_page_mappings(clien
     ]
     assert response.json()["versions"][0]["chapters"][0]["page_start"] == 1
     assert "storage_key" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_parent_detail_exposes_safe_frozen_artifact_sources(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    version_id = uuid4()
+    detail = {
+        **TEXTBOOK,
+        "versions": [
+            {
+                "version_id": version_id,
+                "sequence": 1,
+                "status": "failed",
+                "chapter_count": 0,
+                "is_published": False,
+                "publication_id": None,
+                "processing_error": "sandbox unavailable",
+                "sources": [
+                    {
+                        "legacy": False,
+                        "position": 1,
+                        "document_id": "doc-A1b2C3d4E5f6",
+                        "producer_job_id": "job-A1b2C3d4E5f6",
+                        "primary_artifact_id": "art-A1b2C3d4E5f6",
+                        "filename": "textbook.pdf",
+                        "media_type": "application/pdf",
+                        "format": "pdf",
+                        "parser_id": "datalab",
+                        "parser_name": "Datalab",
+                        "parser_version": "2",
+                        "parse_completed_at": "2026-09-16T10:00:00Z",
+                        "primary_sha256": "a" * 64,
+                        "document_deleted": False,
+                        "snapshot_prefix": "education/private/secret/",
+                        "storage_key": "documents/private/secret.md",
+                    }
+                ],
+                "chapters": [],
+                "teaching_packages": [],
+                "assignments": [],
+            }
+        ],
+    }
+    with patch(
+        "src.server.app.education.textbooks.get_parent_textbook",
+        new=AsyncMock(return_value=detail),
+    ):
+        response = await client.get(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["versions"][0]["sources"] == [
+        {
+            "legacy": False,
+            "position": 1,
+            "document_id": "doc-A1b2C3d4E5f6",
+            "producer_job_id": "job-A1b2C3d4E5f6",
+            "primary_artifact_id": "art-A1b2C3d4E5f6",
+            "filename": "textbook.pdf",
+            "media_type": "application/pdf",
+            "format": "pdf",
+            "parser_id": "datalab",
+            "parser_name": "Datalab",
+            "parser_version": "2",
+            "parse_completed_at": "2026-09-16T10:00:00Z",
+            "primary_sha256": "a" * 64,
+            "document_deleted": False,
+        }
+    ]
+    assert "snapshot_prefix" not in response.text
+    assert "storage_key" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_parent_lists_only_safe_completed_parse_job_candidates(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    candidates = [
+        {
+            "producer_job_id": "job-A1b2C3d4E5f6",
+            "document_id": "doc-A1b2C3d4E5f6",
+            "primary_artifact_id": "art-A1b2C3d4E5f6",
+            "filename": "textbook.pdf",
+            "media_type": "application/pdf",
+            "format": "pdf",
+            "parser_id": "datalab",
+            "parser_name": "Datalab",
+            "parser_version": "2",
+            "parse_completed_at": "2026-09-16T10:00:00Z",
+            "size_bytes": 2048,
+            "artifact_count": 4,
+            "storage_key": "documents/private/secret.md",
+        }
+    ]
+    with patch(
+        "src.server.app.education.textbooks.list_completed_textbook_parse_jobs",
+        new=AsyncMock(return_value=candidates),
+        create=True,
+    ) as listed:
+        response = await client.get("/api/v1/education/textbook-parse-jobs/completed")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "producer_job_id": "job-A1b2C3d4E5f6",
+            "document_id": "doc-A1b2C3d4E5f6",
+            "primary_artifact_id": "art-A1b2C3d4E5f6",
+            "filename": "textbook.pdf",
+            "media_type": "application/pdf",
+            "format": "pdf",
+            "parser_id": "datalab",
+            "parser_name": "Datalab",
+            "parser_version": "2",
+            "parse_completed_at": "2026-09-16T10:00:00Z",
+            "size_bytes": 2048,
+            "artifact_count": 4,
+        }
+    ]
+    listed.assert_awaited_once_with(parent_user_id="parent-1")
 
 
 @pytest.mark.asyncio

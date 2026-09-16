@@ -86,6 +86,15 @@ export function useTextbook(textbookId: string | undefined) {
   });
 }
 
+export function useCompletedParseJobs(enabled: boolean) {
+  return useQuery({
+    queryKey: ['documents', 'parse-jobs', 'completed'],
+    queryFn: educationApi.listCompletedParseJobs,
+    enabled,
+    staleTime: 10_000,
+  });
+}
+
 export function useTeachingJob(jobId: string | undefined, enabled: boolean) {
   const queryClient = useQueryClient();
   const lastInvalidatedTerminalStatus = useRef<TeachingJob['status'] | null>(null);
@@ -197,7 +206,7 @@ export function useTextbookMutations() {
   ]);
   return {
     create: useMutation({ mutationFn: educationApi.createTextbook, onSuccess: invalidate }),
-    start: useMutation({ mutationFn: ({ textbookId, sourceAssetIds }: { textbookId: string; sourceAssetIds: string[] }) => educationApi.startTextbookProcessing(textbookId, sourceAssetIds), onSuccess: invalidate }),
+    start: useMutation({ mutationFn: ({ textbookId, sourceParseJobIds }: { textbookId: string; sourceParseJobIds: string[] }) => educationApi.startTextbookProcessingFromParseJobs(textbookId, sourceParseJobIds), onSuccess: invalidate }),
     run: useMutation({ mutationFn: educationApi.runTextbookProcessing, onSuccess: invalidate }),
     retry: useMutation({ mutationFn: educationApi.retryTextbookProcessing, onSuccess: invalidate }),
     createTeaching: useMutation({ mutationFn: educationApi.createTeachingPackage, onSuccess: invalidateTeaching }),

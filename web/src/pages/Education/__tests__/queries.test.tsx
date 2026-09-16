@@ -3,7 +3,7 @@ import { waitFor } from '@testing-library/react';
 import { createTestQueryClient, renderHookWithProviders } from '@/test/utils';
 import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from '../api';
-import { useEducationTaskCalendar, useEducationTaskDetail, useTeachingJob, useTextbook, useTextbookMutations } from '../queries';
+import { useCompletedParseJobs, useEducationTaskCalendar, useEducationTaskDetail, useTeachingJob, useTextbook, useTextbookMutations } from '../queries';
 
 vi.mock('../api', () => ({
   getTeachingJob: vi.fn(),
@@ -12,6 +12,8 @@ vi.mock('../api', () => ({
   getEducationTaskDetail: vi.fn(),
   createTextbook: vi.fn(),
   startTextbookProcessing: vi.fn(),
+  listCompletedParseJobs: vi.fn(),
+  startTextbookProcessingFromParseJobs: vi.fn(),
   runTextbookProcessing: vi.fn(),
   retryTextbookProcessing: vi.fn(),
   createTeachingPackage: vi.fn(),
@@ -28,6 +30,8 @@ const getTextbook = educationApi.getTextbook as unknown as ReturnType<typeof vi.
 const getEducationTaskCalendar = educationApi.getEducationTaskCalendar as unknown as ReturnType<typeof vi.fn>;
 const getEducationTaskDetail = educationApi.getEducationTaskDetail as unknown as ReturnType<typeof vi.fn>;
 const createTeachingPackage = educationApi.createTeachingPackage as unknown as ReturnType<typeof vi.fn>;
+const listCompletedParseJobs = educationApi.listCompletedParseJobs as unknown as ReturnType<typeof vi.fn>;
+const startTextbookProcessingFromParseJobs = educationApi.startTextbookProcessingFromParseJobs as unknown as ReturnType<typeof vi.fn>;
 
 describe('education queries', () => {
   beforeEach(() => {
@@ -36,6 +40,55 @@ describe('education queries', () => {
     getEducationTaskCalendar.mockReset();
     getEducationTaskDetail.mockReset();
     createTeachingPackage.mockReset();
+    listCompletedParseJobs.mockReset();
+    startTextbookProcessingFromParseJobs.mockReset();
+  });
+
+  it('loads completed parse-job candidates once when enabled', async () => {
+    listCompletedParseJobs.mockResolvedValue([
+      {
+        producer_job_id: 'job-parse-1',
+        document_id: 'doc-1',
+        primary_artifact_id: 'art-1',
+        filename: 'body.pdf',
+        media_type: 'application/pdf',
+        format: 'pdf',
+        parser_id: 'datalab',
+        parser_name: 'Datalab',
+        parser_version: '2',
+        parse_completed_at: '2026-09-16T10:00:00Z',
+        size_bytes: 1024,
+        artifact_count: 3,
+      },
+    ]);
+
+    const queryClient = createTestQueryClient();
+    const { result } = renderHookWithProviders(() => ({
+      completed: useCompletedParseJobs(true),
+      disabled: useCompletedParseJobs(false),
+    }), { queryClient });
+
+    await waitFor(() => expect(result.current.completed.data?.[0]?.producer_job_id).toBe('job-parse-1'));
+    expect(listCompletedParseJobs).toHaveBeenCalledTimes(1);
+    expect(queryClient.getQueryData(['documents', 'parse-jobs', 'completed'])).toEqual([
+      expect.objectContaining({ producer_job_id: 'job-parse-1' }),
+    ]);
+  });
+
+  it('starts textbook processing from selected parse jobs', async () => {
+    startTextbookProcessingFromParseJobs.mockResolvedValue({ job_id: 'job-1' });
+    const queryClient = createTestQueryClient();
+    const { result } = renderHookWithProviders(() => useTextbookMutations(), { queryClient });
+
+    await result.current.start.mutateAsync({
+      textbookId: 'textbook-1',
+      sourceParseJobIds: ['job-parse-1', 'job-parse-2'],
+    });
+
+    expect(startTextbookProcessingFromParseJobs).toHaveBeenCalledWith(
+      'textbook-1',
+      ['job-parse-1', 'job-parse-2'],
+    );
   });
 
   it('refreshes the active textbook after a teaching job reaches a terminal status', async () => {

@@ -2,6 +2,14 @@
 
 ## 2026-09-16
 
+### 教材详情选择并审阅图书馆来源
+
+- 新增 `GET /api/v1/education/textbook-parse-jobs/completed`，一次返回当前家长拥有的已完成 Markdown 解析任务候选；查询排除未完成、失败、非 Markdown 主产物和他人文档，并提供文件名、完成时间、解析器、原文件大小与 Artifact 数量，不返回存储键或对象 URL。
+- 教材版本的 `sources` 现在优先投影冻结的 Artifact provenance：文档、解析任务、主 Artifact、解析器、完成时间、SHA-256 与 `document_deleted`；历史 `education_assets` 来源继续返回带 `legacy` 标记的兼容字段。详情查询通过 live Document 左连接判断文档是否仍存在，但文件名和解析元数据始终读取冻结来源，因此删除文档后仍可审阅。
+- `开始加工`改为从图书馆一次加载已完成解析任务，可多选并提交 `source_parse_job_ids`；原 `source_asset_ids` 请求路径保留。版本标签调整为“概览 / 来源 / 教学 / 知识资产 / 学生”，“来源”展示真实文件、解析器、完成时间、SHA-256 前缀，并在文档仍存在时链接到 `/documents/:documentId`。
+- 来源列表独立于教学包与 sandbox 运行状态；加工失败不会隐藏来源或图书馆链接，知识资产仍只在教学包进入 `review` 且正式资产清单可用后展示。前端不渲染快照前缀、存储键、对象 URL 或 sandbox 路径。
+- 验证：后端数据库、服务与 API 聚焦测试 79 项通过；教材详情、查询与列表前端测试 14 项通过，`pnpm typecheck`、Ruff 和 `git diff --check` 通过。
+
 ### 图书馆文档详情发布状态与交互修正
 
 - `GET /api/v1/documents/{document_id}/teaching-usage` 现在按内容版本与教学包关联正式发布记录，并返回安全的 `publication_id`、`is_published`；前端仅在发布记录存在时显示“已发布”，否则展示真实教学包生命周期状态，不再使用并不存在的 `published` 教学包状态。
