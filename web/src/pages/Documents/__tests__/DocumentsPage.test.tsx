@@ -33,7 +33,7 @@ describe('DocumentsPage', () => {
   it('opens with Dataset and All Documents tabs', () => {
     renderPage();
 
-    expect(screen.getByRole('heading', { name: 'Knowledge Library' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Library' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Datasets' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'All documents' })).toHaveAttribute('aria-selected', 'false');
     expect(screen.getByRole('tabpanel', { name: 'Datasets' })).toBeInTheDocument();

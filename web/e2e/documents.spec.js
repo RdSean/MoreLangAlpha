@@ -269,7 +269,7 @@ test('browses datasets and all documents with responsive filtering and paginatio
   const state = await mockDocumentLibrary(page);
   await page.goto('/documents');
 
-  await expect(page.getByRole('heading', { name: 'Knowledge Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Datasets' })).toHaveAttribute('aria-selected', 'true');
   await page.getByRole('button', { name: 'Open Mathematics' }).click();
   await expect(page.getByRole('heading', { name: 'Mathematics' })).toBeVisible();
@@ -336,7 +336,7 @@ test('waits for an explicit method choice, then shows progress and extensible ar
   await expect(page.getByText('Legacy PDF text', { exact: true })).toBeVisible();
 });
 
-test('hides the knowledge library navigation from students', async ({ page }) => {
+test('hides the library navigation from students', async ({ page }) => {
   await mockAPI(page, {
     'GET /auth/me': student,
     'GET /education/dictionaries': {
@@ -349,6 +349,6 @@ test('hides the knowledge library navigation from students', async ({ page }) =>
     'GET /education/learning': [],
   });
   await page.goto('/education');
-  await expect(page.locator('a[href="/documents"], button[aria-label="Knowledge Library"]')).toHaveCount(0);
-  await expect(page.getByText('Knowledge Library', { exact: true })).toHaveCount(0);
+  await expect(page.locator('a[href="/documents"], button[aria-label="Library"]')).toHaveCount(0);
+  await expect(page.getByText('Library', { exact: true })).toHaveCount(0);
 });

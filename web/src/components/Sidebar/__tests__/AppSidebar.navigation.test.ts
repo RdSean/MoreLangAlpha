@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { getNewChatNavigation } from '../AppSidebar';
 import { getVisibleNavItems } from '../../nav/navItems';
+import enUS from '../../../locales/en-US.json';
+import zhCN from '../../../locales/zh-CN.json';
 
 describe('getNewChatNavigation', () => {
   it('opens a student current Flash workspace directly at a blank thread', () => {
@@ -20,10 +22,19 @@ describe('getNewChatNavigation', () => {
   });
 });
 
-describe('knowledge library navigation visibility', () => {
+describe('library navigation visibility', () => {
   it('shows documents in both desktop and mobile navigation for a parent', () => {
     expect(getVisibleNavItems('parent').map((item) => item.key)).toContain('/documents');
     expect(getVisibleNavItems('parent', { includeSettings: true }).map((item) => item.key)).toContain('/documents');
+  });
+
+  it('keeps the /documents route while showing the Library label in both locales', () => {
+    expect(getVisibleNavItems('parent').find((item) => item.key === '/documents')).toMatchObject({
+      key: '/documents',
+      labelKey: 'sidebar.documents',
+    });
+    expect(enUS.sidebar.documents).toBe('Library');
+    expect(zhCN.sidebar.documents).toBe('图书馆');
   });
 
   it('hides documents from both navigation surfaces for a student', () => {

@@ -134,12 +134,24 @@ describe('locale key parity (src-wide)', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('defines the knowledge library shell in both locales', () => {
+  it('defines the Library shell in both locales', () => {
     for (const locale of [enUS, zhCN]) {
       expect(lookup(locale, 'sidebar.documents')).toEqual(expect.any(String));
       expect(lookup(locale, 'documents.title')).toEqual(expect.any(String));
       expect(lookup(locale, 'documents.tabs.datasets')).toEqual(expect.any(String));
       expect(lookup(locale, 'documents.tabs.allDocuments')).toEqual(expect.any(String));
     }
+
+    expect(lookup(enUS, 'sidebar.documents')).toBe('Library');
+    expect(lookup(enUS, 'documents.title')).toBe('Library');
+    expect(lookup(enUS, 'documents.viewLabel')).toBe('Library views');
+    expect(lookup(enUS, 'documents.datasets.deleteMessage')).toContain('Library');
+    expect(lookup(enUS, 'documents.wizard.file.subtitle')).toContain('Library');
+
+    expect(lookup(zhCN, 'sidebar.documents')).toBe('图书馆');
+    expect(lookup(zhCN, 'documents.title')).toBe('图书馆');
+    expect(lookup(zhCN, 'documents.viewLabel')).toBe('图书馆视图');
+    expect(lookup(zhCN, 'documents.datasets.deleteMessage')).toContain('图书馆');
+    expect(lookup(zhCN, 'documents.wizard.file.subtitle')).toContain('图书馆');
   });
 });

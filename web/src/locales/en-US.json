@@ -100,7 +100,7 @@
   "sidebar": {
     "dashboard": "Dashboard",
     "chatAgent": "Chat Agent",
-    "documents": "Knowledge Library",
+    "documents": "Library",
     "automations": "Automations",
     "education": "Education",
     "plugins": "Plugins",
@@ -144,8 +144,8 @@
     "removeAgent": "Remove agent"
   },
   "documents": {
-    "title": "Knowledge Library",
-    "viewLabel": "Knowledge library views",
+    "title": "Library",
+    "viewLabel": "Library views",
     "preview": {
       "title": "Document preview",
       "titleFallback": "Document",
@@ -203,7 +203,7 @@
       "updateFailed": "Dataset could not be updated.",
       "deleteFailed": "Dataset could not be deleted.",
       "deleteTitle": "Delete dataset",
-      "deleteMessage": "Delete “{{name}}”? Documents will remain in the library."
+      "deleteMessage": "Delete “{{name}}”? Documents will remain in the Library."
     },
     "filters": {
       "dataset": "Dataset",
@@ -291,7 +291,7 @@
       },
       "file": {
         "title": "Select a file",
-        "subtitle": "Upload the source and choose its library organization.",
+        "subtitle": "Upload the source and choose its Library organization.",
         "pick": "Choose a PDF",
         "inputLabel": "PDF file",
         "datasets": "Datasets",

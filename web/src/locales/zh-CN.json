@@ -100,7 +100,7 @@
   "sidebar": {
     "dashboard": "仪表盘",
     "chatAgent": "智能对话",
-    "documents": "知识库",
+    "documents": "图书馆",
     "automations": "自动化",
     "education": "学习",
     "plugins": "插件",
@@ -144,8 +144,8 @@
     "removeAgent": "移除智能体"
   },
   "documents": {
-    "title": "知识库",
-    "viewLabel": "知识库视图",
+    "title": "图书馆",
+    "viewLabel": "图书馆视图",
     "preview": {
       "title": "文档预览",
       "titleFallback": "文档",
@@ -203,7 +203,7 @@
       "updateFailed": "无法更新数据集。",
       "deleteFailed": "无法删除数据集。",
       "deleteTitle": "删除数据集",
-      "deleteMessage": "删除“{{name}}”？其中的文档仍会保留在知识库中。"
+      "deleteMessage": "删除“{{name}}”？其中的文档仍会保留在图书馆中。"
     },
     "filters": {
       "dataset": "数据集",
@@ -291,7 +291,7 @@
       },
       "file": {
         "title": "选择文件",
-        "subtitle": "上传原文件并选择知识库归类。",
+        "subtitle": "上传原文件并选择图书馆归类。",
         "pick": "选择 PDF",
         "inputLabel": "PDF 文件",
         "datasets": "数据集",
