@@ -33,15 +33,26 @@ _COMPATIBILITY_REGEX = (
 )
 
 
+def _execute_ddl(sql: str) -> None:
+    op.get_bind().exec_driver_sql(sql)
+
+
+def _ensure_alembic_version_capacity() -> None:
+    _execute_ddl(
+        "ALTER TABLE alembic_version "
+        "ALTER COLUMN version_num TYPE VARCHAR(255)"
+    )
+
+
 def _replace_constraint(*, regex: str) -> None:
     # Earlier revisions used an unnamed auto-generated name, then a named
     # replacement. Dropping IF EXISTS makes this safe for both histories.
-    op.execute(
+    _execute_ddl(
         "ALTER TABLE education_textbook_artifact_sources "
         "DROP CONSTRAINT IF EXISTS "
         "education_textbook_artifact_sources_snapshot_prefix_check"
     )
-    op.execute(
+    _execute_ddl(
         f"""
         ALTER TABLE education_textbook_artifact_sources
         ADD CONSTRAINT education_textbook_artifact_sources_snapshot_prefix_check
@@ -54,6 +65,7 @@ def _replace_constraint(*, regex: str) -> None:
 
 
 def upgrade() -> None:
+    _ensure_alembic_version_capacity()
     _replace_constraint(regex=_COMPATIBILITY_REGEX)
 
 

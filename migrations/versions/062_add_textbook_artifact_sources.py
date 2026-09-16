@@ -15,10 +15,14 @@ branch_labels = None
 depends_on = None
 
 
+def _execute_ddl(sql: str) -> None:
+    op.get_bind().exec_driver_sql(sql)
+
+
 def upgrade() -> None:
     # Document, parse-job and artifact IDs are immutable provenance only. The
     # frozen source row must remain readable after those live rows are deleted.
-    op.execute(r"""
+    _execute_ddl(r"""
         CREATE TABLE education_textbook_artifact_sources (
             version_id UUID NOT NULL
                 REFERENCES education_textbook_versions(version_id) ON DELETE RESTRICT,
@@ -51,14 +55,14 @@ def upgrade() -> None:
             UNIQUE (version_id, position)
         )
     """)
-    op.execute("""
+    _execute_ddl("""
         CREATE INDEX idx_education_textbook_artifact_sources_document
         ON education_textbook_artifact_sources (document_id, producer_job_id, version_id)
     """)
 
 
 def downgrade() -> None:
-    op.execute(
+    _execute_ddl(
         "DROP INDEX IF EXISTS idx_education_textbook_artifact_sources_document"
     )
-    op.execute("DROP TABLE IF EXISTS education_textbook_artifact_sources")
+    _execute_ddl("DROP TABLE IF EXISTS education_textbook_artifact_sources")

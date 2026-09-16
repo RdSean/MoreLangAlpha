@@ -34,13 +34,17 @@ _COMPATIBILITY_REGEX = (
 _DOWNGRADE_REGEX = _COMPATIBILITY_REGEX
 
 
+def _execute_ddl(sql: str) -> None:
+    op.get_bind().exec_driver_sql(sql)
+
+
 def _replace_constraint(*, regex: str) -> None:
-    op.execute(
+    _execute_ddl(
         "ALTER TABLE education_textbook_artifact_sources "
         "DROP CONSTRAINT IF EXISTS "
         "education_textbook_artifact_sources_snapshot_prefix_check"
     )
-    op.execute(
+    _execute_ddl(
         f"""
         ALTER TABLE education_textbook_artifact_sources
         ADD CONSTRAINT education_textbook_artifact_sources_snapshot_prefix_check

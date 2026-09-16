@@ -15,8 +15,12 @@ branch_labels = None
 depends_on = None
 
 
+def _execute_ddl(sql: str) -> None:
+    op.get_bind().exec_driver_sql(sql)
+
+
 def upgrade() -> None:
-    op.execute(
+    _execute_ddl(
         "ALTER TABLE education_textbook_artifact_sources "
         "ADD COLUMN IF NOT EXISTS asset_manifest JSONB "
         "NOT NULL DEFAULT '[]'::jsonb"
@@ -24,7 +28,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
+    _execute_ddl(
         "ALTER TABLE education_textbook_artifact_sources "
         "DROP COLUMN IF EXISTS asset_manifest"
     )
