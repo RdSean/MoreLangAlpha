@@ -25,7 +25,7 @@
 - 快照前缀固定为 `education/{household_id}/{textbook_slug}/source-bundles/{version_id}/{position:02d}/`，其中 household、版本 UUID、教材 slug 和位置都会先校验；版本 ID 与加工任务 ID 在复制前生成，浏览器不能指定存储路径。
 - 来源 Artifact 统一复制到 `artifacts/` 下，来源自带的 `manifest.json` 因此位于 `artifacts/manifest.json`，不会与根目录服务生成的 `manifest.json` 冲突。
 - 每个快照对象写入后都由服务端立即读回并重新计算 SHA-256，只有与来源字节摘要一致才被接受；上传同时使用文档领域现有的 `max_upload_bytes` 上限。`primary_sha256` 只取冻结后的主 Markdown 字节，不信任客户端或解析任务中的旧值。主 Artifact 还必须同时满足 Markdown media type 和受支持的 Markdown format。
-- 单个来源失败或取消时只删除该操作已写入的精确对象键；多来源冻结中任一后续来源失败、取消、已知队列校验失败或排队返回空结果时，服务会在 `asyncio.shield` 下清理全部先前快照，不会枚举或删除无关对象。未知数据库异常会对精确 `job_id`/`version_id` 执行最多 3 次、带短暂退避的 shielded 状态探针：确认行不存在才清理，行存在或探针耗尽后仍不确定则保留快照，并记录仅含这两个 ID 的结构化警告供后续孤儿对账。
+- 单个来源失败或取消时只删除该操作已写入的精确对象键；多来源冻结中任一后续来源失败、取消、已知队列校验失败或排队返回空结果时，服务会在 `asyncio.shield` 下清理全部先前快照，不会枚举或删除无关对象。未知数据库异常以及排队调用中的取消，都会对精确 `job_id`/`version_id` 执行最多 3 次、带短暂退避的 shielded 状态探针：确认行不存在才清理，行存在或探针耗尽后仍不确定则保留快照，并记录仅含这两个 ID 的结构化警告供后续孤儿对账。
 - 新增迁移 `063_align_textbook_artifact_source_prefix`：安全删除 `062` 生成的命名快照前缀约束，并重新加入兼容历史前缀与 UUID 精确格式的命名约束，已在旧修订上创建过的来源行无需回填。
 - 新增迁移 `064_strengthen_textbook_source_prefix_constraint`：移除 `063` 中过宽的任意 `education/%` 分支，最终约束只接受两种显式历史格式和可信的新 UUID 格式；降级恢复到同一安全兼容集合。
 - 新增 API 字段 `source_parse_job_ids`，请求必须且只能选择 `source_asset_ids` 或 `source_parse_job_ids` 其中一种；新服务会先冻结全部来源，再以预生成的版本和任务 ID 落入数据库，避免任务在快照完成前被 claim，旧教材附件链路继续兼容。

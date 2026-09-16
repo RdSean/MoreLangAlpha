@@ -190,6 +190,16 @@ async def start_processing_from_parse_jobs(
         if written_keys:
             await asyncio.shield(cleanup_snapshot_objects(written_keys))
 
+    async def reconcile_ambiguous_queue_failure() -> None:
+        durable_job_exists = await asyncio.shield(
+            _probe_textbook_processing_job_state(
+                job_id=job_id,
+                version_id=version_id,
+            )
+        )
+        if durable_job_exists is False:
+            await cleanup_written_snapshots()
+
     try:
         for position, producer_job_id in enumerate(source_parse_job_ids, start=1):
             owned_job = await get_owned_parse_job(
@@ -236,17 +246,10 @@ async def start_processing_from_parse_jobs(
         await cleanup_written_snapshots()
         raise TextbookError(str(exc)) from exc
     except asyncio.CancelledError:
-        await cleanup_written_snapshots()
+        await reconcile_ambiguous_queue_failure()
         raise
     except Exception:
-        durable_job_exists = await asyncio.shield(
-            _probe_textbook_processing_job_state(
-                job_id=job_id,
-                version_id=version_id,
-            )
-        )
-        if durable_job_exists is False:
-            await cleanup_written_snapshots()
+        await reconcile_ambiguous_queue_failure()
         raise
 
     if not job:
