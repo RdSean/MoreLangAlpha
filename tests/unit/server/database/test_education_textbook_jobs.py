@@ -243,7 +243,10 @@ async def test_queue_processing_from_completed_artifacts_freezes_safe_provenance
                 "producer_job_id": "job-parse-1",
                 "primary_artifact_id": "art-1",
                 "primary_sha256": "a" * 64,
-                "snapshot_prefix": "education/attacker/other/v99/source-bundles/99/",
+                "snapshot_prefix": (
+                    "education/attacker/other/source-bundles/"
+                    "f5761267-11d1-4977-8107-e2671c99a2f0/99/"
+                ),
             },
             {
                 "document_id": "doc-2",
@@ -296,12 +299,18 @@ async def test_queue_processing_from_completed_artifacts_freezes_safe_provenance
         "2",
         None,
         "a" * 64,
-        f"education/household-1/reading-explorer-3/{version_id}/source-bundles/01/",
+        (
+            "education/household-1/reading-explorer-3/source-bundles/"
+            f"{version_id}/01/"
+        ),
     )
     assert source_rows[1][5] == "workbook.pdf"
     assert (
         source_rows[1][-1]
-        == f"education/household-1/reading-explorer-3/{version_id}/source-bundles/02/"
+        == (
+            "education/household-1/reading-explorer-3/source-bundles/"
+            f"{version_id}/02/"
+        )
     )
 
     queue_sql, queue_params = mock_cursor.execute.call_args_list[4].args
@@ -486,7 +495,10 @@ async def test_processing_claim_reads_frozen_sources_without_live_joins(
             "parser_version": "2",
             "parse_completed_at": None,
             "primary_sha256": "a" * 64,
-            "snapshot_prefix": "education/household-1/textbook/v1/source-bundles/1/",
+            "snapshot_prefix": (
+                "education/household-1/textbook/source-bundles/"
+                "f5761267-11d1-4977-8107-e2671c99a2f0/01/"
+            ),
         }
     ]
 

@@ -1681,7 +1681,6 @@ async def queue_textbook_processing_from_artifacts(
         if not _SHA256.fullmatch(str(source.get("primary_sha256") or "")):
             raise ValueError("primary_sha256 must be 64 lowercase hex characters")
 
-    supplied_version_id = version_id
     version_id = str(UUID(version_id)) if version_id else str(uuid4())
     job_id = str(UUID(job_id)) if job_id else str(uuid4())
     async with get_db_connection() as conn:
@@ -1752,9 +1751,6 @@ async def queue_textbook_processing_from_artifacts(
                     (textbook_id,),
                 )
                 sequence = (await cur.fetchone())["sequence"]
-                version_component = (
-                    version_id if supplied_version_id else f"v{sequence}"
-                )
                 await cur.execute(
                     """
                     INSERT INTO education_textbook_versions (
@@ -1794,7 +1790,7 @@ async def queue_textbook_processing_from_artifacts(
                             str(source["primary_sha256"]),
                             (
                                 f"education/{household_component}/{textbook_component}/"
-                                f"{version_component}/source-bundles/{index:02d}/"
+                                f"source-bundles/{version_id}/{index:02d}/"
                             ),
                         )
                     )

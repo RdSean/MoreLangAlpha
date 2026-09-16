@@ -23,7 +23,9 @@
 
 - 新增 `education_textbook_source_snapshots` 服务：家长选择已完成的图书馆解析任务后，服务会校验任务、文档和全部 Artifact 的所有权，要求恰好一个 Markdown 主文档，并把主文档、图片、结构化数据和 manifest 按原相对路径复制到私有 `education/` 快照。
 - 快照前缀固定为 `education/{household_id}/{textbook_slug}/source-bundles/{version_id}/{position:02d}/`，其中 household、版本 UUID、教材 slug 和位置都会先校验；版本 ID 与加工任务 ID 在复制前生成，浏览器不能指定存储路径。
-- 每个快照对象都由服务端重新计算 SHA-256，并生成 `manifest.json`；`primary_sha256` 只取冻结后的主 Markdown 字节，不信任客户端或解析任务中的旧值。复制失败时仅删除本次已成功写入的精确对象键。
+- 来源 Artifact 统一复制到 `artifacts/` 下，来源自带的 `manifest.json` 因此位于 `artifacts/manifest.json`，不会与根目录服务生成的 `manifest.json` 冲突。
+- 每个快照对象写入后都由服务端立即读回并重新计算 SHA-256，只有与来源字节摘要一致才被接受；`primary_sha256` 只取冻结后的主 Markdown 字节，不信任客户端或解析任务中的旧值。主 Artifact 还必须同时满足 Markdown media type 和受支持的 Markdown format。
+- 单个来源失败时只删除该操作已写入的精确对象键；多来源冻结中任一后续来源失败、或数据库排队抛错/返回空结果时，服务会按已记录的精确键清理全部先前快照，不会枚举或删除无关对象。
 - 新增 API 字段 `source_parse_job_ids`，请求必须且只能选择 `source_asset_ids` 或 `source_parse_job_ids` 其中一种；新服务会先冻结全部来源，再以预生成的版本和任务 ID 落入数据库，避免任务在快照完成前被 claim，旧教材附件链路继续兼容。
 
 ## 2026-09-15

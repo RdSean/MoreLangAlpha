@@ -45,7 +45,11 @@ def test_artifact_source_schema_binds_versions_to_completed_parse_bundles() -> N
         assert column in table_block
     assert "primary_sha256 ~ '^[0-9a-f]{64}$'" in source
     assert "snapshot_prefix ~" in source
-    assert "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}" in source
+    assert (
+        "/source-bundles/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}"
+        in source
+    )
+    assert "/source-bundles/(v[1-9][0-9]*|" not in source
     assert (
         "idx_education_textbook_artifact_sources_document" in source
         and "(document_id, producer_job_id, version_id)" in source

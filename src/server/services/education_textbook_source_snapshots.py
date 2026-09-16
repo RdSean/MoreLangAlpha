@@ -7,6 +7,8 @@ import hashlib
 import json
 import logging
 import re
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID
@@ -20,10 +22,19 @@ logger = logging.getLogger(__name__)
 
 _SAFE_COMPONENT = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,254}$")
 _MARKDOWN_MEDIA_TYPE = "text/markdown"
+_MARKDOWN_FORMATS = frozenset({"gfm", "markdown"})
 
 
 class TextbookSourceSnapshotError(RuntimeError):
     """A completed parse bundle could not be safely frozen for textbook use."""
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenTextbookSource:
+    """Private snapshot result; written keys never leave the service boundary."""
+
+    source: dict[str, Any]
+    written_keys: tuple[str, ...]
 
 
 def _uuid_component(value: str, label: str) -> str:
@@ -53,8 +64,8 @@ def build_snapshot_prefix(
     if position < 1 or position > 99:
         raise ValueError("position must be between 1 and 99")
     return (
-        f"education/{household}/{slug}/{version}/"
-        f"source-bundles/{position:02d}/"
+        f"education/{household}/{slug}/source-bundles/"
+        f"{version}/{position:02d}/"
     )
 
 
@@ -83,6 +94,15 @@ async def _delete_object(key: str) -> bool:
     return await asyncio.to_thread(delete_object, key)
 
 
+async def cleanup_snapshot_objects(keys: Iterable[str]) -> None:
+    """Delete only explicitly tracked snapshot keys, newest first."""
+    for key in reversed(tuple(dict.fromkeys(keys))):
+        try:
+            await _delete_object(key)
+        except Exception:
+            logger.exception("Failed to remove textbook source snapshot object")
+
+
 async def freeze_parse_job_source(
     *,
     owner_user_id: str,
@@ -92,7 +112,7 @@ async def freeze_parse_job_source(
     textbook_slug: str,
     version_id: str,
     position: int,
-) -> dict[str, Any]:
+) -> FrozenTextbookSource:
     """Copy one completed parse bundle and return only safe queueing metadata."""
     prefix = build_snapshot_prefix(
         household_id=household_id,
@@ -134,14 +154,19 @@ async def freeze_parse_job_source(
         raise TextbookSourceSnapshotError(
             "The primary parse artifact must be Markdown"
         )
+    primary_format = str(primary.get("format") or "").strip().lower()
+    if primary_format not in _MARKDOWN_FORMATS:
+        raise TextbookSourceSnapshotError(
+            "The primary parse artifact has an unsupported format"
+        )
 
     validated_artifacts: list[dict[str, Any]] = []
     relative_paths: set[str] = set()
     for artifact in artifacts:
         relative_path = _validated_relative_path(str(artifact.get("relative_path") or ""))
-        if relative_path == "manifest.json" or relative_path in relative_paths:
+        if relative_path in relative_paths:
             raise TextbookSourceSnapshotError(
-                "A parse artifact would overwrite the snapshot manifest"
+                "A parse bundle contains duplicate artifact paths"
             )
         storage_key = str(artifact.get("storage_key") or "")
         if not storage_key:
@@ -166,7 +191,8 @@ async def freeze_parse_job_source(
                 )
             digest = hashlib.sha256(content).hexdigest()
             relative_path = artifact["relative_path"]
-            destination_key = f"{prefix}{relative_path}"
+            destination_relative_path = f"artifacts/{relative_path}"
+            destination_key = f"{prefix}{destination_relative_path}"
             if not await _write_object(
                 destination_key,
                 content,
@@ -176,13 +202,21 @@ async def freeze_parse_job_source(
                     "A textbook source snapshot object could not be stored"
                 )
             written_keys.append(destination_key)
+            stored_content = await _read_object(destination_key)
+            if (
+                stored_content is None
+                or hashlib.sha256(stored_content).hexdigest() != digest
+            ):
+                raise TextbookSourceSnapshotError(
+                    "A textbook source snapshot object failed verification"
+                )
             manifest_artifacts.append(
                 {
                     "artifact_id": str(artifact.get("artifact_id") or ""),
                     "artifact_kind": str(artifact.get("artifact_kind") or ""),
                     "format": str(artifact.get("format") or ""),
                     "media_type": str(artifact.get("media_type") or ""),
-                    "relative_path": relative_path,
+                    "relative_path": destination_relative_path,
                     "sha256": digest,
                     "schema_name": artifact.get("schema_name"),
                     "schema_version": artifact.get("schema_version"),
@@ -214,12 +248,17 @@ async def freeze_parse_job_source(
                 "A textbook source snapshot object could not be stored"
             )
         written_keys.append(manifest_key)
+        stored_manifest = await _read_object(manifest_key)
+        if (
+            stored_manifest is None
+            or hashlib.sha256(stored_manifest).hexdigest()
+            != hashlib.sha256(manifest_bytes).hexdigest()
+        ):
+            raise TextbookSourceSnapshotError(
+                "A textbook source snapshot object failed verification"
+            )
     except Exception as exc:
-        for key in reversed(written_keys):
-            try:
-                await _delete_object(key)
-            except Exception:
-                logger.exception("Failed to remove incomplete textbook source snapshot")
+        await cleanup_snapshot_objects(written_keys)
         if isinstance(exc, TextbookSourceSnapshotError):
             raise
         raise TextbookSourceSnapshotError(
@@ -238,16 +277,19 @@ async def freeze_parse_job_source(
         raise TextbookSourceSnapshotError(
             "The primary parse artifact was not copied"
         )
-    return {
-        "document_id": str(document_id),
-        "producer_job_id": str(producer_job_id),
-        "primary_artifact_id": primary_artifact_id,
-        "primary_sha256": primary_manifest["sha256"],
-        "filename": str(job.get("original_filename") or ""),
-        "media_type": str(job.get("media_type") or ""),
-        "format": str(job.get("document_format") or ""),
-        "parser_id": str(job.get("parser_id") or ""),
-        "parser_name": str(job.get("parser_name") or ""),
-        "parser_version": job.get("parser_version"),
-        "completed_at": job.get("completed_at"),
-    }
+    return FrozenTextbookSource(
+        source={
+            "document_id": str(document_id),
+            "producer_job_id": str(producer_job_id),
+            "primary_artifact_id": primary_artifact_id,
+            "primary_sha256": primary_manifest["sha256"],
+            "filename": str(job.get("original_filename") or ""),
+            "media_type": str(job.get("media_type") or ""),
+            "format": str(job.get("document_format") or ""),
+            "parser_id": str(job.get("parser_id") or ""),
+            "parser_name": str(job.get("parser_name") or ""),
+            "parser_version": job.get("parser_version"),
+            "completed_at": job.get("completed_at"),
+        },
+        written_keys=tuple(written_keys),
+    )

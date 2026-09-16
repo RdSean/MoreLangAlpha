@@ -43,7 +43,7 @@ def upgrade() -> None:
             snapshot_prefix TEXT NOT NULL
                 CHECK (
                     snapshot_prefix ~
-                    '^education/[0-9A-Za-z][0-9A-Za-z.-]*/[0-9A-Za-z][0-9A-Za-z._-]*/(v[1-9][0-9]*|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/source-bundles/[0-9]{2,}/$'
+                    '^education/[0-9A-Za-z][0-9A-Za-z.-]*/[0-9A-Za-z][0-9A-Za-z._-]*/source-bundles/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[0-9]{2,}/$'
                     AND snapshot_prefix !~ '\.\.'
                 ),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

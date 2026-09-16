@@ -188,10 +188,12 @@ Use `S3CompatibleDocumentStore` or the existing storage helpers to:
 4. Copy the bundle to:
 
 ```text
-education/<household>/<textbook-slug>/v<sequence>/source-bundles/<position>/
+education/<household>/<textbook-slug>/source-bundles/<version-id>/<position>/
 ```
 
-5. Write a service-generated `manifest.json`.
+5. Copy every source artifact under `artifacts/`; a source `manifest.json`
+   therefore becomes `artifacts/manifest.json`, while the service-generated
+   snapshot manifest remains at the bundle root.
 6. Return the database-binding dictionary consumed by
    `queue_textbook_processing_from_artifacts()`.
 

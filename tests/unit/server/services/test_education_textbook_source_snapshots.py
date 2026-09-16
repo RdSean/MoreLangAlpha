@@ -66,6 +66,7 @@ def _configure_store(
     artifacts: list[dict[str, object]],
     objects: dict[str, bytes],
     fail_manifest: bool = False,
+    readback_overrides: dict[str, bytes | None] | None = None,
 ) -> tuple[dict[str, bytes], list[str]]:
     uploads: dict[str, bytes] = {}
     deleted: list[str] = []
@@ -77,12 +78,15 @@ def _configure_store(
     )
 
     async def read_object(key: str) -> bytes | None:
+        if readback_overrides is not None and key in readback_overrides:
+            return readback_overrides[key]
         return objects.get(key)
 
     async def write_object(key: str, content: bytes, _content_type: str) -> bool:
         if fail_manifest and key.endswith("/manifest.json"):
             return False
         uploads[key] = content
+        objects[key] = content
         return True
 
     async def delete_object_key(key: str) -> bool:
@@ -104,8 +108,8 @@ def test_snapshot_prefix_uses_the_pregenerated_version_and_safe_components():
     )
 
     assert prefix == (
-        f"education/{HOUSEHOLD_ID}/reading-explorer-3/{VERSION_ID}/"
-        "source-bundles/01/"
+        f"education/{HOUSEHOLD_ID}/reading-explorer-3/source-bundles/"
+        f"{VERSION_ID}/01/"
     )
 
 
@@ -139,7 +143,7 @@ async def test_completed_owned_bundle_preserves_paths_hashes_and_manifest(monkey
         },
     )
 
-    source = await snapshots.freeze_parse_job_source(
+    frozen = await snapshots.freeze_parse_job_source(
         owner_user_id="parent-1",
         document_id=DOCUMENT_ID,
         producer_job_id=PRODUCER_JOB_ID,
@@ -156,17 +160,19 @@ async def test_completed_owned_bundle_preserves_paths_hashes_and_manifest(monkey
         position=1,
     )
     assert set(uploads) == {
-        f"{prefix}document.md",
-        f"{prefix}images/figure.png",
+        f"{prefix}artifacts/document.md",
+        f"{prefix}artifacts/images/figure.png",
         f"{prefix}manifest.json",
     }
+    assert frozen.written_keys == tuple(uploads)
     manifest = json.loads(uploads[f"{prefix}manifest.json"])
     assert [entry["relative_path"] for entry in manifest["artifacts"]] == [
-        "document.md",
-        "images/figure.png",
+        "artifacts/document.md",
+        "artifacts/images/figure.png",
     ]
     assert manifest["artifacts"][0]["sha256"] == sha256(primary_bytes).hexdigest()
     assert manifest["artifacts"][1]["sha256"] == sha256(image_bytes).hexdigest()
+    source = frozen.source
     assert source == {
         "document_id": DOCUMENT_ID,
         "producer_job_id": PRODUCER_JOB_ID,
@@ -181,6 +187,7 @@ async def test_completed_owned_bundle_preserves_paths_hashes_and_manifest(monkey
         "completed_at": "2026-09-16T10:00:00+00:00",
     }
     assert "storage_key" not in repr(source)
+    assert "storage_key" not in repr(frozen.written_keys)
     assert "documents/" not in repr(source)
 
 
@@ -263,6 +270,161 @@ async def test_snapshot_requires_exactly_one_markdown_primary_artifact(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_snapshot_rejects_a_bundle_without_a_primary_artifact(monkeypatch):
+    image = _artifact(
+        artifact_id=IMAGE_ARTIFACT_ID,
+        artifact_kind="embedded_image",
+        relative_path="images/figure.png",
+        storage_key=f"documents/{DOCUMENT_ID}/images/figure.png",
+        format="png",
+        media_type="image/png",
+    )
+    _configure_store(
+        monkeypatch,
+        job=_parse_job(),
+        artifacts=[image],
+        objects={},
+    )
+
+    with pytest.raises(
+        snapshots.TextbookSourceSnapshotError, match="exactly one"
+    ):
+        await snapshots.freeze_parse_job_source(
+            owner_user_id="parent-1",
+            document_id=DOCUMENT_ID,
+            producer_job_id=PRODUCER_JOB_ID,
+            household_id=HOUSEHOLD_ID,
+            textbook_slug="reading-explorer-3",
+            version_id=VERSION_ID,
+            position=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_snapshot_rejects_unsupported_primary_format(monkeypatch):
+    primary = _artifact(
+        artifact_id=PRIMARY_ARTIFACT_ID,
+        artifact_kind="primary_document",
+        relative_path="document.md",
+        storage_key=f"documents/{DOCUMENT_ID}/document.md",
+        format="pdf",
+    )
+    _configure_store(
+        monkeypatch,
+        job=_parse_job(),
+        artifacts=[primary],
+        objects={},
+    )
+
+    with pytest.raises(snapshots.TextbookSourceSnapshotError, match="format"):
+        await snapshots.freeze_parse_job_source(
+            owner_user_id="parent-1",
+            document_id=DOCUMENT_ID,
+            producer_job_id=PRODUCER_JOB_ID,
+            household_id=HOUSEHOLD_ID,
+            textbook_slug="reading-explorer-3",
+            version_id=VERSION_ID,
+            position=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_snapshot_preserves_a_source_manifest_under_artifacts(monkeypatch):
+    primary_bytes = b"# Book\n"
+    source_manifest_bytes = b'{"source":"manifest"}'
+    primary = _artifact(
+        artifact_id=PRIMARY_ARTIFACT_ID,
+        artifact_kind="primary_document",
+        relative_path="document.md",
+        storage_key=f"documents/{DOCUMENT_ID}/document.md",
+    )
+    source_manifest = _artifact(
+        artifact_id=IMAGE_ARTIFACT_ID,
+        artifact_kind="manifest",
+        relative_path="manifest.json",
+        storage_key=f"documents/{DOCUMENT_ID}/manifest.json",
+        format="json",
+        media_type="application/json",
+    )
+    uploads, _deleted = _configure_store(
+        monkeypatch,
+        job=_parse_job(),
+        artifacts=[primary, source_manifest],
+        objects={
+            str(primary["storage_key"]): primary_bytes,
+            str(source_manifest["storage_key"]): source_manifest_bytes,
+        },
+    )
+
+    frozen = await snapshots.freeze_parse_job_source(
+        owner_user_id="parent-1",
+        document_id=DOCUMENT_ID,
+        producer_job_id=PRODUCER_JOB_ID,
+        household_id=HOUSEHOLD_ID,
+        textbook_slug="reading-explorer-3",
+        version_id=VERSION_ID,
+        position=1,
+    )
+
+    prefix = snapshots.build_snapshot_prefix(
+        household_id=HOUSEHOLD_ID,
+        textbook_slug="reading-explorer-3",
+        version_id=VERSION_ID,
+        position=1,
+    )
+    assert f"{prefix}artifacts/manifest.json" in uploads
+    assert f"{prefix}manifest.json" in uploads
+    manifest = json.loads(uploads[f"{prefix}manifest.json"])
+    assert [entry["relative_path"] for entry in manifest["artifacts"]] == [
+        "artifacts/document.md",
+        "artifacts/manifest.json",
+    ]
+    assert frozen.source["primary_sha256"] == sha256(primary_bytes).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_failure_when_destination_hash_differs_cleans_exact_key(
+    monkeypatch,
+):
+    primary = _artifact(
+        artifact_id=PRIMARY_ARTIFACT_ID,
+        artifact_kind="primary_document",
+        relative_path="document.md",
+        storage_key=f"documents/{DOCUMENT_ID}/document.md",
+    )
+    prefix = snapshots.build_snapshot_prefix(
+        household_id=HOUSEHOLD_ID,
+        textbook_slug="reading-explorer-3",
+        version_id=VERSION_ID,
+        position=1,
+    )
+    destination_key = f"{prefix}artifacts/document.md"
+    uploads, deleted = _configure_store(
+        monkeypatch,
+        job=_parse_job(),
+        artifacts=[primary],
+        objects={str(primary["storage_key"]): b"# Book\n"},
+        readback_overrides={destination_key: b"tampered"},
+    )
+
+    with pytest.raises(
+        snapshots.TextbookSourceSnapshotError, match="verification"
+    ):
+        await snapshots.freeze_parse_job_source(
+            owner_user_id="parent-1",
+            document_id=DOCUMENT_ID,
+            producer_job_id=PRODUCER_JOB_ID,
+            household_id=HOUSEHOLD_ID,
+            textbook_slug="reading-explorer-3",
+            version_id=VERSION_ID,
+            position=1,
+        )
+
+    assert list(uploads) == [destination_key]
+    assert deleted == [destination_key]
+
+
+@pytest.mark.asyncio
 async def test_snapshot_failure_deletes_only_exact_uploaded_keys(monkeypatch):
     primary = _artifact(
         artifact_id=PRIMARY_ARTIFACT_ID,
@@ -304,12 +466,12 @@ async def test_snapshot_failure_deletes_only_exact_uploaded_keys(monkeypatch):
 
     assert list(uploads) == [
         (
-            f"education/{HOUSEHOLD_ID}/reading-explorer-3/{VERSION_ID}/"
-            "source-bundles/01/document.md"
+            f"education/{HOUSEHOLD_ID}/reading-explorer-3/source-bundles/"
+            f"{VERSION_ID}/01/artifacts/document.md"
         ),
         (
-            f"education/{HOUSEHOLD_ID}/reading-explorer-3/{VERSION_ID}/"
-            "source-bundles/01/images/figure.png"
+            f"education/{HOUSEHOLD_ID}/reading-explorer-3/source-bundles/"
+            f"{VERSION_ID}/01/artifacts/images/figure.png"
         ),
     ]
     assert deleted == list(reversed(list(uploads)))

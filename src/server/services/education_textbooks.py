@@ -38,6 +38,7 @@ from src.server.database.education_textbooks import (
 from src.server.database.education_members import get_membership_for_user
 from src.server.services.education_textbook_source_snapshots import (
     TextbookSourceSnapshotError,
+    cleanup_snapshot_objects,
     freeze_parse_job_source,
 )
 from src.server.services.education_textbook_storage import write_textbook_content_bundle
@@ -175,48 +176,55 @@ async def start_processing_from_parse_jobs(
     version_id = str(uuid4())
     job_id = str(uuid4())
     sources: list[dict[str, Any]] = []
-    for position, producer_job_id in enumerate(source_parse_job_ids, start=1):
-        owned_job = await get_owned_parse_job(
-            owner_user_id=parent_user_id,
-            producer_job_id=producer_job_id,
-        )
-        if (
-            not owned_job
-            or str(owned_job.get("status") or "") != "completed"
-        ):
-            raise TextbookNotFoundError(
-                "One or more parse job sources are unavailable or incomplete"
-            )
-        try:
-            source = await freeze_parse_job_source(
-                owner_user_id=parent_user_id,
-                document_id=str(owned_job["document_id"]),
-                producer_job_id=producer_job_id,
-                household_id=household_id,
-                textbook_slug=str(textbook["slug"]),
-                version_id=version_id,
-                position=position,
-            )
-        except TextbookSourceSnapshotError as exc:
-            raise TextbookError(str(exc)) from exc
-        sources.append(source)
-
+    written_keys: list[str] = []
     try:
-        job = await queue_textbook_processing_from_artifacts(
-            parent_user_id=parent_user_id,
-            household_id=household_id,
-            textbook_id=textbook_id,
-            sources=sources,
-            extractor_name="managed_ptc",
-            extractor_version="1",
-            version_id=version_id,
-            job_id=job_id,
-        )
-    except ValueError as exc:
-        raise TextbookError(str(exc)) from exc
-    if not job:
-        raise TextbookNotFoundError("Textbook not found")
-    return job
+        for position, producer_job_id in enumerate(source_parse_job_ids, start=1):
+            owned_job = await get_owned_parse_job(
+                owner_user_id=parent_user_id,
+                producer_job_id=producer_job_id,
+            )
+            if (
+                not owned_job
+                or str(owned_job.get("status") or "") != "completed"
+            ):
+                raise TextbookNotFoundError(
+                    "One or more parse job sources are unavailable or incomplete"
+                )
+            try:
+                frozen = await freeze_parse_job_source(
+                    owner_user_id=parent_user_id,
+                    document_id=str(owned_job["document_id"]),
+                    producer_job_id=producer_job_id,
+                    household_id=household_id,
+                    textbook_slug=str(textbook["slug"]),
+                    version_id=version_id,
+                    position=position,
+                )
+            except TextbookSourceSnapshotError as exc:
+                raise TextbookError(str(exc)) from exc
+            sources.append(frozen.source)
+            written_keys.extend(frozen.written_keys)
+
+        try:
+            job = await queue_textbook_processing_from_artifacts(
+                parent_user_id=parent_user_id,
+                household_id=household_id,
+                textbook_id=textbook_id,
+                sources=sources,
+                extractor_name="managed_ptc",
+                extractor_version="1",
+                version_id=version_id,
+                job_id=job_id,
+            )
+        except ValueError as exc:
+            raise TextbookError(str(exc)) from exc
+        if not job:
+            raise TextbookNotFoundError("Textbook not found")
+        return job
+    except Exception:
+        if written_keys:
+            await cleanup_snapshot_objects(written_keys)
+        raise
 
 
 def build_local_fixture_package(job: dict[str, Any]) -> dict[str, Any]:
