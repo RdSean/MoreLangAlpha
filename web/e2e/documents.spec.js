@@ -245,6 +245,47 @@ function fulfillJSON(route, body, status = 200) {
   });
 }
 
+const sensitiveNetworkPattern = /storage_key|snapshot_prefix|bundle_prefix|sandbox_path|managed_path|object_url|minio|\/managed\//i;
+
+function isRelevantApiPath(pathname) {
+  return pathname.startsWith('/api/v1/documents')
+    || pathname.startsWith('/api/v1/document-')
+    || pathname.startsWith('/api/v1/education');
+}
+
+async function dismissTeachingRunDialog(page, dialog) {
+  if (test.info().project.name === 'documents-mobile') {
+    await dialog.evaluate((element) => {
+      const handle = element.querySelector('.cursor-grab');
+      if (!(handle instanceof HTMLElement)) {
+        throw new Error('Teaching run dialog drag handle is missing');
+      }
+      const touchAt = (clientY) => new Touch({
+        identifier: 1,
+        target: handle,
+        clientX: 24,
+        clientY,
+      });
+      const start = touchAt(100);
+      const end = touchAt(260);
+      const event = (type, touches) => new TouchEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        touches,
+        targetTouches: touches,
+        changedTouches: touches,
+      });
+      handle.dispatchEvent(event('touchstart', [start]));
+      handle.dispatchEvent(event('touchmove', [end]));
+      handle.dispatchEvent(event('touchend', []));
+    });
+  } else {
+    await page.keyboard.press('Escape');
+  }
+  await expect(dialog).toBeHidden();
+}
+
 async function mockDocumentLibrary(page) {
   let parseJobCreates = 0;
   const documentQueries = [];
@@ -308,6 +349,11 @@ async function mockLibraryTextbookFormalAssets(page) {
   let teachingState = 'none';
   let assigned = false;
   let startPayload;
+  let publishRequest;
+  let assignmentRequest;
+  const teachingUsageRequests = [];
+  const teachingUsagePackageIds = [];
+  const assetRequests = [];
   const chapter = {
     chapter_id: formalAssets.chapterId,
     position: 1,
@@ -371,7 +417,7 @@ async function mockLibraryTextbookFormalAssets(page) {
       has_oauth_token: false,
       locale: 'zh-CN',
     },
-    'GET /documents/*/source': (route) => route.fulfill({
+    [`GET /documents/${document.document_id}/source`]: (route) => route.fulfill({
       status: 200,
       contentType: 'application/pdf',
       body: sourcePdf,
@@ -385,9 +431,14 @@ async function mockLibraryTextbookFormalAssets(page) {
     },
     'GET /education/tasks': [],
     'GET /education/textbook-parse-jobs/completed': (route) => fulfillJSON(route, [completedParseJobCandidate]),
-    'GET /documents/*/teaching-usage': (route) => fulfillJSON(route, {
-      items: [documentTeachingUsage(processingState === 'published')],
-    }),
+    [`GET /documents/${document.document_id}/teaching-usage`]: (route) => {
+      teachingUsageRequests.push(new URL(route.request().url()).pathname);
+      const usage = documentTeachingUsage(processingState === 'published');
+      teachingUsagePackageIds.push(usage.teaching_package_id);
+      return fulfillJSON(route, {
+        items: [usage],
+      });
+    },
     'GET /education/textbooks': (route) => fulfillJSON(route, textbookCreated ? [{
       textbook_id: formalAssets.textbookId,
       household_id: parent.household_id,
@@ -409,8 +460,8 @@ async function mockLibraryTextbookFormalAssets(page) {
         assignment_count: 0,
       }, 201);
     },
-    'GET /education/textbooks/*': (route) => fulfillJSON(route, textbookDetail()),
-    'POST /education/textbooks/*/processing': async (route) => {
+    [`GET /education/textbooks/${formalAssets.textbookId}`]: (route) => fulfillJSON(route, textbookDetail()),
+    [`POST /education/textbooks/${formalAssets.textbookId}/processing`]: async (route) => {
       startPayload = route.request().postDataJSON();
       processingState = 'queued';
       await fulfillJSON(route, {
@@ -419,7 +470,7 @@ async function mockLibraryTextbookFormalAssets(page) {
         status: 'queued',
       }, 201);
     },
-    'POST /education/textbook-processing/*/run': async (route) => {
+    [`POST /education/textbook-processing/${formalAssets.processingJobId}/run`]: async (route) => {
       processingState = 'review';
       await fulfillJSON(route, {
         job_id: formalAssets.processingJobId,
@@ -427,7 +478,7 @@ async function mockLibraryTextbookFormalAssets(page) {
         status: 'completed',
       });
     },
-    'POST /education/textbook-versions/*/teaching-packages': async (route) => {
+    [`POST /education/textbook-versions/${formalAssets.versionId}/teaching-packages`]: async (route) => {
       teachingState = 'running';
       await fulfillJSON(route, {
         job_id: formalAssets.teachingJobId,
@@ -443,7 +494,7 @@ async function mockLibraryTextbookFormalAssets(page) {
         attempts: [],
       }, 202);
     },
-    'GET /education/teaching-jobs/*': (route) => fulfillJSON(route, {
+    [`GET /education/teaching-jobs/${formalAssets.teachingJobId}`]: (route) => fulfillJSON(route, {
       job_id: formalAssets.teachingJobId,
       teaching_package_id: formalAssets.teachingPackageId,
       content_version_id: formalAssets.versionId,
@@ -464,31 +515,43 @@ async function mockLibraryTextbookFormalAssets(page) {
         status: teachingState === 'running' ? 'running' : 'completed',
       }],
     }),
-    'GET /education/teaching-packages/*/assets': {
-      teaching_package_id: formalAssets.teachingPackageId,
-      format: 'langalpha-family-teaching-assets/v2',
-      concept_index: { size_bytes: 120, concept_count: 3 },
-      coverage_audit: { size_bytes: 80, status: 'complete' },
-      chapters: [{
+    [`GET /education/teaching-packages/${formalAssets.teachingPackageId}/assets`]: (route) => {
+      assetRequests.push(new URL(route.request().url()).pathname);
+      return fulfillJSON(route, {
+        teaching_package_id: formalAssets.teachingPackageId,
+        format: 'langalpha-family-teaching-assets/v2',
+        concept_index: { size_bytes: 120, concept_count: 3 },
+        coverage_audit: { size_bytes: 80, status: 'complete' },
+        chapters: [{
+          chapter_id: formalAssets.chapterId,
+          position: chapter.position,
+          title: chapter.title,
+          coverage_status: 'complete',
+          concept_count: 3,
+          assets: [
+            { kind: 'knowledge', size_bytes: 20 },
+            { kind: 'toolkit', size_bytes: 30 },
+            { kind: 'practice', size_bytes: 40 },
+          ],
+        }],
+      });
+    },
+    [`GET /education/teaching-packages/${formalAssets.teachingPackageId}/chapters/${formalAssets.chapterId}/assets/toolkit`]: (route) => {
+      assetRequests.push(new URL(route.request().url()).pathname);
+      return fulfillJSON(route, {
+        teaching_package_id: formalAssets.teachingPackageId,
         chapter_id: formalAssets.chapterId,
-        position: chapter.position,
-        title: chapter.title,
-        coverage_status: 'complete',
-        concept_count: 3,
-        assets: [
-          { kind: 'knowledge', size_bytes: 20 },
-          { kind: 'toolkit', size_bytes: 30 },
-          { kind: 'practice', size_bytes: 40 },
-        ],
-      }],
+        kind: 'toolkit',
+        content: '# 代数工具包\n\n正式资产不依赖 sandbox。',
+      });
     },
-    'GET /education/teaching-packages/*/chapters/*/assets/toolkit': {
-      teaching_package_id: formalAssets.teachingPackageId,
-      chapter_id: formalAssets.chapterId,
-      kind: 'toolkit',
-      content: '# 代数工具包\n\n正式资产不依赖 sandbox。',
-    },
-    'POST /education/textbooks/*/versions/*/publish': async (route) => {
+    [`POST /education/textbooks/${formalAssets.textbookId}/versions/${formalAssets.versionId}/publish`]: async (route) => {
+      const body = route.request().postDataJSON();
+      publishRequest = {
+        textbook_id: formalAssets.textbookId,
+        version_id: formalAssets.versionId,
+        teaching_package_id: body.teaching_package_id,
+      };
       processingState = 'published';
       await fulfillJSON(route, {
         publication_id: formalAssets.publicationId,
@@ -496,7 +559,12 @@ async function mockLibraryTextbookFormalAssets(page) {
         teaching_package_id: formalAssets.teachingPackageId,
       }, 201);
     },
-    'POST /education/textbook-publications/*/assignments': async (route) => {
+    [`POST /education/textbook-publications/${formalAssets.publicationId}/assignments`]: async (route) => {
+      const body = route.request().postDataJSON();
+      assignmentRequest = {
+        publication_id: formalAssets.publicationId,
+        student_user_id: body.student_user_id,
+      };
       assigned = true;
       await fulfillJSON(route, {
         assignment_id: formalAssets.assignmentId,
@@ -507,8 +575,13 @@ async function mockLibraryTextbookFormalAssets(page) {
   });
 
   return {
+    assetRequests: () => assetRequests,
+    assignmentRequest: () => assignmentRequest,
     startPayload: () => startPayload,
     finishTeaching: () => { teachingState = 'review'; },
+    publishRequest: () => publishRequest,
+    teachingUsagePackageIds: () => teachingUsagePackageIds,
+    teachingUsageRequests: () => teachingUsageRequests,
   };
 }
 
@@ -614,10 +687,34 @@ test('waits for an explicit method choice, then shows progress and extensible ar
   await expect(page.getByText('Legacy PDF text', { exact: true })).toBeVisible();
 });
 
-test('library textbook formal assets survive sandbox absence', async ({ page }) => {
+test('library textbook formal assets mock flow renders without runtime', async ({ page }) => {
   const state = await mockLibraryTextbookFormalAssets(page);
   let sandboxAvailable = true;
   const sandboxRequests = [];
+  const networkFindings = [];
+  const inspectedResponsePaths = [];
+  const pendingResponseChecks = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.origin !== 'http://127.0.0.1:4100' || !isRelevantApiPath(url.pathname)) return;
+    const body = request.postData();
+    if (body && sensitiveNetworkPattern.test(body)) {
+      networkFindings.push(`request ${url.pathname}: ${body}`);
+    }
+  });
+  page.on('response', (response) => {
+    const url = new URL(response.url());
+    if (url.origin !== 'http://127.0.0.1:4100' || !isRelevantApiPath(url.pathname)) return;
+    if (!response.headers()['content-type']?.includes('application/json')) return;
+    inspectedResponsePaths.push(url.pathname);
+    pendingResponseChecks.push(response.text().then((body) => {
+      if (sensitiveNetworkPattern.test(body)) {
+        networkFindings.push(`response ${url.pathname}: ${body}`);
+      }
+    }).catch((error) => {
+      networkFindings.push(`response ${url.pathname}: ${String(error)}`);
+    }));
+  });
   // If either formal-asset view starts depending on runtime state, it will get
   // a 503 here and the zero-request assertion will also fail.
   await page.route('**/api/v1/workspaces/*/sandbox/stats', (route) => {
@@ -676,8 +773,7 @@ test('library textbook formal assets survive sandbox absence', async ({ page }) 
   await expect(page.getByText('教学包正在加工')).toBeVisible();
   const teachingRunDialog = page.getByRole('dialog', { name: '教材教学包运行' });
   await expect(teachingRunDialog).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(teachingRunDialog).toBeHidden();
+  await dismissTeachingRunDialog(page, teachingRunDialog);
   state.finishTeaching();
   await page.reload();
 
@@ -715,7 +811,41 @@ test('library textbook formal assets survive sandbox absence', async ({ page }) 
   await page.getByRole('tab', { name: '教材资产' }).click();
   await expect(page.getByText('已发布')).toBeVisible();
   await expect(page.getByRole('link', { name: '查看正式教材资产' })).toBeVisible();
+
+  expect(state.teachingUsageRequests().length).toBeGreaterThan(0);
+  for (const path of state.teachingUsageRequests()) {
+    expect(path).toBe(`/api/v1/documents/${document.document_id}/teaching-usage`);
+  }
+  for (const packageId of state.teachingUsagePackageIds()) {
+    expect(packageId).toBe(formalAssets.teachingPackageId);
+  }
+  expect(new Set(state.assetRequests())).toEqual(new Set([
+    `/api/v1/education/teaching-packages/${formalAssets.teachingPackageId}/assets`,
+    `/api/v1/education/teaching-packages/${formalAssets.teachingPackageId}/chapters/${formalAssets.chapterId}/assets/toolkit`,
+  ]));
+  expect(state.publishRequest()).toEqual({
+    textbook_id: formalAssets.textbookId,
+    version_id: formalAssets.versionId,
+    teaching_package_id: formalAssets.teachingPackageId,
+  });
+  expect(state.assignmentRequest()).toEqual({
+    publication_id: formalAssets.publicationId,
+    student_user_id: student.user_id,
+  });
   expect(sandboxRequests).toEqual([]);
+
+  await page.waitForLoadState('networkidle');
+  await Promise.all(pendingResponseChecks);
+  const requiredInspectedPaths = [
+    `/api/v1/documents/${document.document_id}`,
+    `/api/v1/documents/${document.document_id}/teaching-usage`,
+    `/api/v1/education/teaching-packages/${formalAssets.teachingPackageId}/assets`,
+    `/api/v1/education/teaching-packages/${formalAssets.teachingPackageId}/chapters/${formalAssets.chapterId}/assets/toolkit`,
+  ];
+  for (const path of requiredInspectedPaths) {
+    expect(inspectedResponsePaths).toContain(path);
+  }
+  expect(networkFindings).toEqual([]);
 });
 
 test('hides the library navigation from students', async ({ page }) => {

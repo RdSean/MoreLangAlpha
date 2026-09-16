@@ -2,12 +2,13 @@
 
 ## 2026-09-16
 
-### 图书馆与教材正式资产无 sandbox 浏览器验收
+### 图书馆与教材正式资产 mock 回归与后端读取验收
 
-- 新增 Playwright Chromium 闭环：上传并完成模拟解析、在独立图书馆详情审阅 Markdown、以已完成解析任务创建教材、完成模拟教学包、审阅正式知识资产、发布并分配学生。
-- 同一流程在明确将 sandbox 探针置为 503 后重新加载图书馆详情和教材详情，验证两页仍能读取同一教学包与正式资产，并断言页面本身没有发起 sandbox 请求。
-- 已完成解析任务候选与文档教学用途 mock 共用同一文档、解析任务、主 Artifact、教材、内容版本和教学包标识，且只包含安全字段；浏览器回归同时断言页面不渲染存储键、快照前缀、对象 URL 或 sandbox 路径。
-- 验证：指定 Playwright 闭环在 Chromium 桌面与 `documents-mobile` 两个项目通过；关闭教学运行抽屉改用 Escape，不再依赖仅桌面可访问的关闭按钮。文档详情与教材详情相关 Vitest、`pnpm typecheck`、`pnpm build`、ESLint 与 `git diff --check` 通过。
+- 新增 Playwright Chromium mock 回归，不代表真实服务 sandbox 验收：上传并完成模拟解析、在独立图书馆详情审阅 Markdown、以已完成解析任务创建教材、完成模拟教学包、审阅正式知识资产、发布并分配学生。
+- mock 回归使用精确的教材、版本、教学包、章节、文档和学生标识；断言候选来源、文档教学用途、正式资产读取、发布请求和分配请求都命中预期 ID 与 payload，错误 ID 会因无匹配路由而失败。教学运行抽屉在桌面用 Escape、在 `documents-mobile` 用真实 TouchEvent 下拉手势关闭。
+- 新增 API/服务读取回归：正式教学包摘要和章节资产在 managed PTC/运行服务不可用时仍通过 PostgreSQL 审阅投影与对象存储读取成功；测试断言只调用数据库和 MinIO 读取 seam，sandbox 启动、继续和取消路径均未调用。
+- 浏览器回归同时检查所有相关请求与 JSON 响应体，断言正文、教学用途、正式资产和教育 API 流量均不包含存储键、快照前缀、对象 URL、MinIO 地址或 sandbox 路径，而不只检查 DOM 文本。
+- 验证：指定 Playwright mock 回归在 Chromium 桌面与 `documents-mobile` 两个项目通过；正式资产 API/服务聚焦测试、相关 Vitest、`pnpm typecheck`、`pnpm build`、ESLint、Ruff 与 `git diff --check` 通过。
 
 ### 教材详情选择并审阅图书馆来源
 
