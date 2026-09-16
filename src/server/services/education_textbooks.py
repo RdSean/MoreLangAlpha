@@ -34,6 +34,7 @@ from src.server.database.education_textbooks import (
     retry_textbook_processing_job,
     submit_student_answer,
     TextbookQueueValidationError,
+    textbook_processing_job_exists,
     update_student_progress,
 )
 from src.server.database.education_members import get_membership_for_user
@@ -232,8 +233,20 @@ async def start_processing_from_parse_jobs(
         await cleanup_written_snapshots()
         raise
     except Exception:
-        # A database exception may be raised after COMMIT. Keep the snapshots
-        # because deleting them could strand a queued processing job.
+        durable_job_exists: bool | None = None
+        try:
+            durable_job_exists = await asyncio.shield(
+                textbook_processing_job_exists(
+                    job_id=job_id,
+                    version_id=version_id,
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            durable_job_exists = None
+        if durable_job_exists is False:
+            await cleanup_written_snapshots()
         raise
 
     if not job:
