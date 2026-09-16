@@ -2,6 +2,7 @@
 
 import hashlib
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
@@ -83,6 +84,47 @@ def _validated_path_component(value: str, label: str) -> str:
     if ".." in value or not _SAFE_PATH_COMPONENT.fullmatch(value):
         raise ValueError(f"{label} must be a safe path component")
     return value
+
+
+def _validated_asset_manifest(value: object) -> list[dict[str, str]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TextbookQueueValidationError("asset_manifest must be a list")
+    normalized: list[dict[str, str]] = []
+    relative_paths: set[str] = set()
+    for entry in value:
+        if not isinstance(entry, Mapping):
+            raise TextbookQueueValidationError("asset_manifest entry is invalid")
+        fields = {
+            field: str(entry.get(field) or "")
+            for field in (
+                "artifact_id",
+                "artifact_kind",
+                "format",
+                "media_type",
+                "relative_path",
+                "sha256",
+            )
+        }
+        relative_path = fields["relative_path"]
+        if (
+            not all(fields[field] for field in fields if field != "relative_path")
+            or not relative_path
+            or "\\" in relative_path
+            or relative_path.startswith("/")
+            or any(part in {"", ".", ".."} for part in relative_path.split("/"))
+        ):
+            raise TextbookQueueValidationError("asset_manifest entry is invalid")
+        if relative_path in relative_paths:
+            raise TextbookQueueValidationError(
+                "asset_manifest paths must be unique"
+            )
+        if not _SHA256.fullmatch(fields["sha256"]):
+            raise TextbookQueueValidationError("asset_manifest sha256 is invalid")
+        relative_paths.add(relative_path)
+        normalized.append(fields)
+    return normalized
 
 
 def advance_teaching_package_status(*, current: str, target: str) -> str:
@@ -412,6 +454,8 @@ async def get_teaching_input_for_parent(
                 SELECT chapters.chapter_id AS content_chapter_id,
                        artifact_sources.producer_job_id,
                        artifact_sources.document_id,
+                       artifact_sources.snapshot_prefix,
+                       artifact_sources.asset_manifest,
                        chapters.position, chapters.slug, chapters.title, chapters.markdown
                 FROM education_textbook_chapters AS chapters
                 LEFT JOIN education_textbook_artifact_sources AS artifact_sources
@@ -436,6 +480,8 @@ async def get_teaching_input_for_parent(
                             if row.get("document_id") is not None
                             else None
                         ),
+                        "snapshot_prefix": row.get("snapshot_prefix"),
+                        "asset_manifest": row.get("asset_manifest") or [],
                         "position": row["position"],
                         "slug": row["slug"],
                         "title": row["title"],
@@ -1297,6 +1343,8 @@ async def get_teaching_job_for_parent(
                 SELECT chapters.chapter_id AS content_chapter_id,
                        artifact_sources.producer_job_id,
                        artifact_sources.document_id,
+                       artifact_sources.snapshot_prefix,
+                       artifact_sources.asset_manifest,
                        chapters.position, chapters.slug, chapters.title, chapters.markdown
                 FROM education_textbook_chapters AS chapters
                 LEFT JOIN education_textbook_artifact_sources AS artifact_sources
@@ -1321,6 +1369,8 @@ async def get_teaching_job_for_parent(
                             if row.get("document_id") is not None
                             else None
                         ),
+                        "snapshot_prefix": row.get("snapshot_prefix"),
+                        "asset_manifest": row.get("asset_manifest") or [],
                         "position": row["position"],
                         "slug": row["slug"],
                         "title": row["title"],
@@ -1794,6 +1844,12 @@ async def queue_textbook_processing_from_artifacts(
             raise TextbookQueueValidationError(
                 "primary_sha256 must be 64 lowercase hex characters"
             )
+    asset_manifests = {
+        str(source["producer_job_id"]): _validated_asset_manifest(
+            source.get("asset_manifest")
+        )
+        for source in sources
+    }
 
     try:
         version_id = str(UUID(version_id)) if version_id else str(uuid4())
@@ -1914,6 +1970,7 @@ async def queue_textbook_processing_from_artifacts(
                                 f"education/{household_component}/{textbook_component}/"
                                 f"source-bundles/{version_id}/{index:02d}/"
                             ),
+                            Json(asset_manifests[str(source["producer_job_id"])]),
                         )
                     )
                 await cur.executemany(
@@ -1922,9 +1979,9 @@ async def queue_textbook_processing_from_artifacts(
                         version_id, document_id, producer_job_id, primary_artifact_id,
                         position, source_filename, source_media_type, source_format,
                         parser_id, parser_name, parser_version, parse_completed_at,
-                        primary_sha256, snapshot_prefix
+                        primary_sha256, snapshot_prefix, asset_manifest
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                     """,
                     source_rows,
@@ -2031,7 +2088,7 @@ async def claim_textbook_processing_job(*, job_id: str) -> dict[str, Any] | None
                            sources.source_format, sources.parser_id,
                            sources.parser_name, sources.parser_version,
                            sources.parse_completed_at, sources.primary_sha256,
-                           sources.snapshot_prefix
+                           sources.snapshot_prefix, sources.asset_manifest
                     FROM education_textbook_artifact_sources AS sources
                     WHERE sources.version_id = %s
                     ORDER BY sources.position

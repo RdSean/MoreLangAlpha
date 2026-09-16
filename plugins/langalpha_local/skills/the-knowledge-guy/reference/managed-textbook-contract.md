@@ -14,6 +14,10 @@ use of the two staged Skills and any permitted internal reasoning, and must
 produce the final learning structure in the whitelisted outputs below; do not
 impose a second fixed service workflow.
 
+For each source, `asset_paths` lists staged embedded images under
+`inputs/assets/`. Markdown image references may point to those staged asset
+paths. Only referenced assets are supplied.
+
 Write only these service-derived candidate files:
 
 ```text

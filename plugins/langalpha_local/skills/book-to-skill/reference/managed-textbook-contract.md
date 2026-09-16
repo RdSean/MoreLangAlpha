@@ -11,6 +11,7 @@ The service supplies only these files under one job root:
 ```text
 inputs/manifest.json
 inputs/sources/<position>-<slug>.md
+inputs/assets/<position>/<relative_path>
 inputs/chapters/<position>-<slug>.md
 .agents/skills/book-to-skill/
 .agents/skills/the-knowledge-guy/
@@ -25,6 +26,11 @@ Read the staged Skill documentation only when it helps the task. The PTC root
 decides its own map, reduce, audit and teaching order, and must generate the
 final learning structure in the whitelisted outputs below; this contract does
 not prescribe a service pipeline.
+
+Referenced embedded images are staged under `inputs/assets/` only when the
+source Markdown references them. Match them through each source's `asset_paths`
+list; local Markdown image references may point to those staged asset paths.
+Unreferenced assets are not supplied.
 
 Only write the fixed candidate outputs below. Do not create other files, use
 scripts, access a network, enumerate directories, or make public artifacts:

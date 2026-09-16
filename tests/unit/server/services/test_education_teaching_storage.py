@@ -64,6 +64,34 @@ def _source_job() -> dict:
     }
 
 
+def _source_asset_job(
+    *,
+    markdown: str,
+    asset_sha256: str,
+    relative_path: str = "images/figure.png",
+) -> dict:
+    job = _source_job()
+    source = job["sources"][0]
+    source["markdown"] = markdown
+    source["content_sha256"] = sha256(markdown.encode()).hexdigest()
+    source["snapshot_prefix"] = (
+        "education/household-1/english-2/source-bundles/"
+        "f5761267-11d1-4977-8107-e2671c99a2f0/01/"
+    )
+    source["asset_manifest"] = [
+        {
+            "artifact_id": "image-1",
+            "artifact_kind": "embedded_image",
+            "format": "png",
+            "media_type": "image/png",
+            "relative_path": relative_path,
+            "sha256": asset_sha256,
+        }
+    ]
+    job["sources"] = [source]
+    return job
+
+
 @pytest.mark.asyncio
 async def test_stage_teaching_inputs_uploads_only_safe_manifest_and_frozen_chapters():
     sandbox = AsyncMock(spec=["aupload_file_bytes"])
@@ -132,6 +160,117 @@ async def test_stage_teaching_inputs_exposes_ordered_complete_source_bundles_wit
     ):
         assert forbidden not in serialized
     assert [chapter["position"] for chapter in staged["chapters"]] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_stage_teaching_inputs_resolves_exact_and_basename_asset_refs(monkeypatch):
+    image = b"frozen-image-bytes"
+    markdown = (
+        "# Complete source\n\n"
+        "![exact](images/figure.png)\n"
+        '![angle](<images/figure.png> "title")\n'
+        "![basename](figure.png)\n"
+        "![external](https://example.test/figure.png)\n"
+        "![data](data:image/png;base64,AAAA)\n"
+    )
+    job = _source_asset_job(
+        markdown=markdown,
+        asset_sha256=sha256(image).hexdigest(),
+    )
+    requested: list[str] = []
+
+    def get_bytes(key: str) -> bytes:
+        requested.append(key)
+        return image
+
+    monkeypatch.setattr(
+        education_teaching_storage, "get_bytes", get_bytes, raising=False
+    )
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    await education_teaching_storage.stage_teaching_inputs(job, sandbox)
+
+    uploaded = {
+        call.args[0]: call.args[1]
+        for call in sandbox.aupload_file_bytes.await_args_list
+    }
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+    manifest = json.loads(uploaded[f"{root}inputs/manifest.json"])
+    assert manifest["sources"][0]["asset_paths"] == ["assets/01/images/figure.png"]
+    assert uploaded[f"{root}inputs/assets/01/images/figure.png"] == image
+    assert requested == [
+        "education/household-1/english-2/source-bundles/"
+        "f5761267-11d1-4977-8107-e2671c99a2f0/01/artifacts/images/figure.png"
+    ]
+    serialized = json.dumps(manifest)
+    assert "storage_key" not in serialized
+    assert "https://" not in serialized
+    assert "data:image" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_stage_teaching_inputs_ignores_unreferenced_asset_manifest_entries(
+    monkeypatch,
+):
+    job = _source_asset_job(
+        markdown="# Source\n\n![external](https://example.test/figure.png)\n",
+        asset_sha256=sha256(b"not-staged").hexdigest(),
+    )
+    get_bytes = AsyncMock()
+    monkeypatch.setattr(education_teaching_storage, "get_bytes", get_bytes)
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    await education_teaching_storage.stage_teaching_inputs(job, sandbox)
+
+    uploaded = {
+        call.args[0]: call.args[1]
+        for call in sandbox.aupload_file_bytes.await_args_list
+    }
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+    manifest = json.loads(uploaded[f"{root}inputs/manifest.json"])
+    assert manifest["sources"][0]["asset_paths"] == []
+    get_bytes.assert_not_awaited()
+    assert f"{root}inputs/assets/01/images/figure.png" not in uploaded
+
+
+@pytest.mark.asyncio
+async def test_stage_teaching_inputs_fails_closed_for_missing_referenced_asset():
+    job = _source_asset_job(
+        markdown="![missing](images/missing.png)\n",
+        asset_sha256=sha256(b"other").hexdigest(),
+        relative_path="images/other.png",
+    )
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    with pytest.raises(education_teaching_storage.TeachingPackageStorageError):
+        await education_teaching_storage.stage_teaching_inputs(job, sandbox)
+
+
+@pytest.mark.asyncio
+async def test_stage_teaching_inputs_fails_closed_for_referenced_asset_digest_mismatch(
+    monkeypatch,
+):
+    job = _source_asset_job(
+        markdown="![figure](images/figure.png)\n",
+        asset_sha256="a" * 64,
+    )
+    monkeypatch.setattr(
+        education_teaching_storage,
+        "get_bytes",
+        lambda _key: b"different-bytes",
+        raising=False,
+    )
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    with pytest.raises(
+        education_teaching_storage.TeachingPackageStorageError,
+        match="digest",
+    ):
+        await education_teaching_storage.stage_teaching_inputs(job, sandbox)
 
 
 @pytest.mark.asyncio

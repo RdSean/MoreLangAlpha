@@ -44,6 +44,8 @@ flows do not apply.
 1. Treat `<job>` as a UUID and use only
    `/managed/textbook-job/<job>/inputs/manifest.json` plus each staged complete source bundle
    under `/managed/textbook-job/<job>/inputs/sources/`.
+   Markdown image references may point to staged assets under
+   `/managed/textbook-job/<job>/inputs/assets/`.
    Historical jobs may instead use
    `/managed/textbook-job/<job>/inputs/chapters/`. Do not read a binary source,
    object store, home directory, normal workspace file or any path outside

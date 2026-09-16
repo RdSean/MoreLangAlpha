@@ -334,6 +334,17 @@ async def freeze_parse_job_source(
         raise TextbookSourceSnapshotError(
             "The primary parse artifact was not copied"
         )
+    asset_manifest = [
+        {
+            "artifact_id": artifact["artifact_id"],
+            "artifact_kind": artifact["artifact_kind"],
+            "format": artifact["format"],
+            "media_type": artifact["media_type"],
+            "relative_path": artifact["relative_path"].removeprefix("artifacts/"),
+            "sha256": artifact["sha256"],
+        }
+        for artifact in manifest_artifacts
+    ]
     return FrozenTextbookSource(
         source={
             "document_id": str(document_id),
@@ -347,6 +358,7 @@ async def freeze_parse_job_source(
             "parser_name": str(job.get("parser_name") or ""),
             "parser_version": job.get("parser_version"),
             "completed_at": job.get("completed_at"),
+            "asset_manifest": asset_manifest,
         },
         written_keys=tuple(written_keys),
     )

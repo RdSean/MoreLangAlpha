@@ -206,6 +206,24 @@ async def test_completed_owned_bundle_preserves_paths_hashes_and_manifest(monkey
         "parser_name": "Datalab",
         "parser_version": "2",
         "completed_at": "2026-09-16T10:00:00+00:00",
+        "asset_manifest": [
+            {
+                "artifact_id": PRIMARY_ARTIFACT_ID,
+                "artifact_kind": "primary_document",
+                "format": "gfm",
+                "media_type": "text/markdown",
+                "relative_path": "document.md",
+                "sha256": sha256(primary_bytes).hexdigest(),
+            },
+            {
+                "artifact_id": IMAGE_ARTIFACT_ID,
+                "artifact_kind": "embedded_image",
+                "format": "png",
+                "media_type": "image/png",
+                "relative_path": "images/figure.png",
+                "sha256": sha256(image_bytes).hexdigest(),
+            },
+        ],
     }
     assert "storage_key" not in repr(source)
     assert "storage_key" not in repr(frozen.written_keys)

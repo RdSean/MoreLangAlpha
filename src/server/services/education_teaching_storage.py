@@ -13,11 +13,24 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from src.server.services.education_teaching_assets import expected_teaching_asset_paths
-from src.utils.storage import upload_bytes
+from src.utils.storage import get_bytes, upload_bytes
 
 
 _SAFE_COMPONENT_RE = re.compile(r"[^0-9A-Za-z._-]+")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_MARKDOWN_IMAGE_RE = re.compile(
+    r"""!\[[^\]]*\]\(\s*(?P<target><[^>\n]+>|[^\s)]+)"""
+    r"""(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)""",
+    re.DOTALL,
+)
+_SOURCE_ASSET_FIELDS = (
+    "artifact_id",
+    "artifact_kind",
+    "format",
+    "media_type",
+    "relative_path",
+    "sha256",
+)
 _MAX_CANDIDATE_BYTES = 4 * 1024 * 1024
 _MAX_ARCHIVE_STAGE_BYTES = 64 * 1024 * 1024
 _ARCHIVE_PUT_RETRY_DELAYS = (5, 10, 20, 40, 60)
@@ -95,6 +108,99 @@ def managed_job_root(job_id: str) -> str:
     return f"/managed/textbook-job/{UUID(str(job_id))}"
 
 
+def _normalized_source_asset_manifest(value: object) -> list[dict[str, str]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TeachingPackageStorageError("Frozen source asset manifest is invalid")
+    normalized: list[dict[str, str]] = []
+    relative_paths: set[str] = set()
+    for asset in value:
+        if not isinstance(asset, Mapping):
+            raise TeachingPackageStorageError("Frozen source asset is invalid")
+        fields = {
+            field: str(asset.get(field) or "")
+            for field in _SOURCE_ASSET_FIELDS
+        }
+        relative_path = fields["relative_path"]
+        if (
+            not all(fields[field] for field in fields if field != "relative_path")
+            or not relative_path
+            or "\\" in relative_path
+            or relative_path.startswith("/")
+            or any(part in {"", ".", ".."} for part in relative_path.split("/"))
+        ):
+            raise TeachingPackageStorageError("Frozen source asset is invalid")
+        if relative_path in relative_paths:
+            raise TeachingPackageStorageError(
+                "Frozen source asset paths must be unique"
+            )
+        if not _SHA256_RE.fullmatch(fields["sha256"]):
+            raise TeachingPackageStorageError("Frozen source asset digest is invalid")
+        relative_paths.add(relative_path)
+        normalized.append(fields)
+    return normalized
+
+
+def _local_image_references(markdown: str) -> list[str]:
+    references: list[str] = []
+    for match in _MARKDOWN_IMAGE_RE.finditer(markdown):
+        target = match.group("target").strip()
+        if target.startswith("<") and target.endswith(">"):
+            target = target[1:-1].strip()
+        if not target or target.startswith(("#", "//")):
+            continue
+        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target):
+            continue
+        references.append(target)
+    return references
+
+
+def _referenced_source_assets(
+    *,
+    markdown: str,
+    asset_manifest: list[dict[str, str]],
+    position: int,
+) -> tuple[list[str], list[dict[str, str]]]:
+    image_assets = [
+        asset
+        for asset in asset_manifest
+        if asset["artifact_kind"] == "embedded_image"
+    ]
+    by_path = {asset["relative_path"]: asset for asset in image_assets}
+    by_basename: dict[str, list[dict[str, str]]] = {}
+    for asset in image_assets:
+        by_basename.setdefault(asset["relative_path"].rsplit("/", 1)[-1], []).append(
+            asset
+        )
+
+    staged: dict[str, dict[str, str]] = {}
+    for reference in _local_image_references(markdown):
+        normalized = reference[2:] if reference.startswith("./") else reference
+        if (
+            normalized.startswith("/")
+            or "\\" in normalized
+            or any(part in {"", ".", ".."} for part in normalized.split("/"))
+        ):
+            raise TeachingPackageStorageError(
+                "A referenced frozen source asset is unavailable"
+            )
+        asset = by_path.get(reference) or by_path.get(normalized)
+        if asset is None:
+            matches = by_basename.get(normalized.rsplit("/", 1)[-1], [])
+            if len(matches) != 1:
+                raise TeachingPackageStorageError(
+                    "A referenced frozen source asset is unavailable"
+                )
+            asset = matches[0]
+        staged_path = f"assets/{position:02d}/{asset['relative_path']}"
+        staged[asset["relative_path"]] = {
+            **asset,
+            "path": staged_path,
+        }
+    return [asset["path"] for asset in staged.values()], list(staged.values())
+
+
 def freeze_teaching_input(job: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize the service-authorized content used by every managed attempt."""
     job_id = str(UUID(str(job["job_id"])))
@@ -139,6 +245,14 @@ def freeze_teaching_input(job: Mapping[str, Any]) -> dict[str, Any]:
             markdown = source.get("markdown")
             if not isinstance(markdown, str) or not markdown.strip():
                 raise TeachingPackageStorageError("Frozen source text is invalid")
+            asset_manifest = _normalized_source_asset_manifest(
+                source.get("asset_manifest")
+            )
+            asset_paths, staged_assets = _referenced_source_assets(
+                markdown=markdown,
+                asset_manifest=asset_manifest,
+                position=position,
+            )
             content_sha256 = hashlib.sha256(markdown.encode("utf-8")).hexdigest()
             provided_sha256 = source.get("content_sha256")
             if provided_sha256 is not None and (
@@ -166,7 +280,9 @@ def freeze_teaching_input(job: Mapping[str, Any]) -> dict[str, Any]:
                     "title": title,
                     "content_sha256": content_sha256,
                     "path": path,
-                    "asset_paths": [],
+                    "asset_paths": asset_paths,
+                    "snapshot_prefix": source.get("snapshot_prefix"),
+                    "staged_assets": staged_assets,
                     "markdown": markdown,
                 }
             )
@@ -320,6 +436,36 @@ async def stage_teaching_inputs(
             )
             for source in frozen["sources"]
         )
+        for source in frozen["sources"]:
+            snapshot_prefix = source.get("snapshot_prefix")
+            if source["staged_assets"] and (
+                not isinstance(snapshot_prefix, str)
+                or not snapshot_prefix.startswith("education/")
+                or not snapshot_prefix.endswith("/")
+                or "\\" in snapshot_prefix
+                or "\x00" in snapshot_prefix
+                or any(
+                    part in {"", ".", ".."}
+                    for part in snapshot_prefix.rstrip("/").split("/")
+                )
+            ):
+                raise TeachingPackageStorageError(
+                    "Frozen source snapshot prefix is invalid"
+                )
+            for asset in source["staged_assets"]:
+                snapshot_key = (
+                    f"{snapshot_prefix}artifacts/{asset['relative_path']}"
+                )
+                content = await asyncio.to_thread(get_bytes, snapshot_key)
+                if not isinstance(content, bytes):
+                    raise TeachingPackageStorageError(
+                        "A referenced frozen source asset is unavailable"
+                    )
+                if hashlib.sha256(content).hexdigest() != asset["sha256"]:
+                    raise TeachingPackageStorageError(
+                        "A referenced frozen source asset digest does not match"
+                    )
+                files.append((f"{root}/inputs/{asset['path']}", content))
     else:
         files.extend(
             (f"{root}/inputs/{chapter['path']}", chapter["markdown"].encode("utf-8"))

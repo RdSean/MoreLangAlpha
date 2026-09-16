@@ -2,6 +2,13 @@
 
 ## 2026-09-16
 
+### 补齐全来源图片资产的受管 PTC staging
+
+- 新增迁移 `065_add_textbook_source_asset_manifest`，在 `education_textbook_artifact_sources` 上增加 `asset_manifest JSONB NOT NULL DEFAULT '[]'::jsonb`；历史来源行自动保持空 manifest，不需要回填。
+- 快照冻结来源现在把安全 artifact 元数据（artifact ID、类型、格式、media type、源相对路径、SHA-256）写入 `asset_manifest`，队列写入不再暴露 storage key。claim 与教学输入读取会一并返回 `snapshot_prefix` 和 `asset_manifest`。
+- 受管 staging 解析完整来源 Markdown 中的本地图片引用，支持精确相对路径、`./` 归一化和 basename 匹配；只读取被引用且摘要匹配的冻结图片，上传到 `inputs/assets/<position>/<relative_path>`，并在 `inputs/manifest.json` 中写入安全 `asset_paths`。缺失资产、摘要不匹配、外部 URL/data URI 和不相关资产分别按 fail-closed 或忽略处理。
+- 两份 managed Skill contract 与 compact prompt 明确 `inputs/assets/` 和 `asset_paths`；新增迁移、快照 manifest、数据库 round-trip、staging 失败路径与安全投影测试。
+
 ### 教材加工消费冻结图书馆来源
 
 - `process_textbook_job()` 现在识别 `education_textbook_artifact_sources` 来源：逐来源读取服务生成的 `manifest.json`，按 `primary_artifact_id` 定位主 Markdown，并校验路径、格式、大小、UTF-8 与 `primary_sha256`；该路径不会调用 `pypdf`、旧 PDF 打包或重新复制源文件，失败时直接进入既有失败状态。

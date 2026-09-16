@@ -49,7 +49,8 @@ This is a service-owned production stage, not a chat, walk or course request.
 1. Treat `<job>` as a UUID. Read only the staged manifest and complete source
    Markdown at `/managed/textbook-job/<job>/inputs/manifest.json` and
    `/managed/textbook-job/<job>/inputs/sources/`. Historical jobs may instead
-   use `/inputs/chapters/`.
+   use `/inputs/chapters/`. Markdown image references may point to staged assets
+   under `/managed/textbook-job/<job>/inputs/assets/`.
 2. Read the staged managed contract at
    `/managed/textbook-job/<job>/.agents/skills/the-knowledge-guy/reference/managed-textbook-contract.md`.
    Do not solicit input, fan out unrelated skills, dispatch other skills, use

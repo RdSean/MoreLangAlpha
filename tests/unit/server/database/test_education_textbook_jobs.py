@@ -36,6 +36,20 @@ async def test_teaching_input_returns_artifact_backed_complete_sources_in_order(
             "slug": "reading-explorer",
             "title": "reading-explorer.pdf",
             "markdown": first_markdown,
+            "snapshot_prefix": (
+                "education/household-1/english-2/source-bundles/"
+                "version-1/01/"
+            ),
+            "asset_manifest": [
+                {
+                    "artifact_id": "image-1",
+                    "artifact_kind": "embedded_image",
+                    "format": "png",
+                    "media_type": "image/png",
+                    "relative_path": "images/figure.png",
+                    "sha256": "c" * 64,
+                }
+            ],
         },
         {
             "content_chapter_id": "8a77d086-0b23-4a1e-89d0-f163fa23d5d1",
@@ -64,6 +78,10 @@ async def test_teaching_input_returns_artifact_backed_complete_sources_in_order(
         sha256(first_markdown.encode()).hexdigest(),
         sha256(second_markdown.encode()).hexdigest(),
     ]
+    assert result["sources"][0]["snapshot_prefix"].endswith("/01/")
+    assert result["sources"][0]["asset_manifest"][0]["relative_path"] == (
+        "images/figure.png"
+    )
     source_sql = mock_cursor.execute.call_args_list[1].args[0]
     assert "education_textbook_artifact_sources" in source_sql
     assert "ORDER BY chapters.position" in source_sql
@@ -309,6 +327,16 @@ async def test_queue_processing_from_completed_artifacts_freezes_safe_provenance
                     "education/attacker/other/source-bundles/"
                     "f5761267-11d1-4977-8107-e2671c99a2f0/99/"
                 ),
+                "asset_manifest": [
+                    {
+                        "artifact_id": "image-1",
+                        "artifact_kind": "embedded_image",
+                        "format": "png",
+                        "media_type": "image/png",
+                        "relative_path": "images/figure.png",
+                        "sha256": "c" * 64,
+                    }
+                ],
             },
             {
                 "document_id": "doc-2",
@@ -349,6 +377,7 @@ async def test_queue_processing_from_completed_artifacts_freezes_safe_provenance
 
     source_sql, source_rows = mock_cursor.executemany.call_args.args
     assert "INSERT INTO education_textbook_artifact_sources" in source_sql
+    assert "asset_manifest" in source_sql
     assert [row[4] for row in source_rows] == [1, 2]
     assert len({row[0] for row in source_rows}) == 1
     assert source_rows[0][0] == version_params[0]
@@ -368,12 +397,23 @@ async def test_queue_processing_from_completed_artifacts_freezes_safe_provenance
     )
     assert source_rows[1][5] == "workbook.pdf"
     assert (
-        source_rows[1][-1]
+        source_rows[1][13]
         == (
             "education/household-1/reading-explorer-3/source-bundles/"
             f"{version_id}/02/"
         )
     )
+    assert source_rows[0][14].obj == [
+        {
+            "artifact_id": "image-1",
+            "artifact_kind": "embedded_image",
+            "format": "png",
+            "media_type": "image/png",
+            "relative_path": "images/figure.png",
+            "sha256": "c" * 64,
+        }
+    ]
+    assert source_rows[1][14].obj == []
 
     queue_sql, queue_params = mock_cursor.execute.call_args_list[4].args
     assert "INSERT INTO education_processing_jobs" in queue_sql
@@ -638,6 +678,16 @@ async def test_processing_claim_reads_frozen_sources_without_live_joins(
                 "education/household-1/textbook/source-bundles/"
                 "f5761267-11d1-4977-8107-e2671c99a2f0/01/"
             ),
+            "asset_manifest": [
+                {
+                    "artifact_id": "image-1",
+                    "artifact_kind": "embedded_image",
+                    "format": "png",
+                    "media_type": "image/png",
+                    "relative_path": "images/figure.png",
+                    "sha256": "b" * 64,
+                }
+            ],
         }
     ]
 
@@ -653,6 +703,7 @@ async def test_processing_claim_reads_frozen_sources_without_live_joins(
     assert "source_filename" in source_sql
     assert "parser_name" in source_sql
     assert "snapshot_prefix" in source_sql
+    assert "asset_manifest" in source_sql
 
 
 @pytest.mark.asyncio
