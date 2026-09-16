@@ -107,7 +107,10 @@ export function useTeachingJob(jobId: string | undefined, enabled: boolean) {
     if (lastInvalidatedTerminalStatus.current === status) return;
 
     lastInvalidatedTerminalStatus.current = status;
-    void queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.education.all }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.documents.teachingUsages() }),
+    ]);
   }, [query.data?.status, queryClient]);
 
   return query;
@@ -188,15 +191,19 @@ export function useParentLearningTranscript(assignmentId: string | undefined, en
 export function useTextbookMutations() {
   const queryClient = useQueryClient();
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
+  const invalidateTeaching = () => Promise.all([
+    invalidate(),
+    queryClient.invalidateQueries({ queryKey: queryKeys.documents.teachingUsages() }),
+  ]);
   return {
     create: useMutation({ mutationFn: educationApi.createTextbook, onSuccess: invalidate }),
     start: useMutation({ mutationFn: ({ textbookId, sourceAssetIds }: { textbookId: string; sourceAssetIds: string[] }) => educationApi.startTextbookProcessing(textbookId, sourceAssetIds), onSuccess: invalidate }),
     run: useMutation({ mutationFn: educationApi.runTextbookProcessing, onSuccess: invalidate }),
     retry: useMutation({ mutationFn: educationApi.retryTextbookProcessing, onSuccess: invalidate }),
-    createTeaching: useMutation({ mutationFn: educationApi.createTeachingPackage, onSuccess: invalidate }),
-    cancelTeaching: useMutation({ mutationFn: educationApi.cancelTeachingJob, onSuccess: invalidate }),
-    resumeTeaching: useMutation({ mutationFn: educationApi.resumeTeachingJob, onSuccess: invalidate }),
-    publish: useMutation({ mutationFn: ({ textbookId, versionId, teachingPackageId }: { textbookId: string; versionId: string; teachingPackageId: string }) => educationApi.publishTextbookVersion(textbookId, versionId, teachingPackageId), onSuccess: invalidate }),
+    createTeaching: useMutation({ mutationFn: educationApi.createTeachingPackage, onSuccess: invalidateTeaching }),
+    cancelTeaching: useMutation({ mutationFn: educationApi.cancelTeachingJob, onSuccess: invalidateTeaching }),
+    resumeTeaching: useMutation({ mutationFn: educationApi.resumeTeachingJob, onSuccess: invalidateTeaching }),
+    publish: useMutation({ mutationFn: ({ textbookId, versionId, teachingPackageId }: { textbookId: string; versionId: string; teachingPackageId: string }) => educationApi.publishTextbookVersion(textbookId, versionId, teachingPackageId), onSuccess: invalidateTeaching }),
     assign: useMutation({ mutationFn: ({ publicationId, studentUserId }: { publicationId: string; studentUserId: string }) => educationApi.assignTextbookPublication(publicationId, studentUserId), onSuccess: invalidate }),
     progress: useMutation({ mutationFn: ({ assignmentId, chapterId, status }: { assignmentId: string; chapterId: string; status: 'learning' | 'read' | 'check_completed' | 'review_recommended' }) => educationApi.updateLearningProgress(assignmentId, chapterId, status), onSuccess: invalidate }),
     answer: useMutation({ mutationFn: ({ assignmentId, questionId, selectedOption }: { assignmentId: string; questionId: string; selectedOption: string }) => educationApi.answerLearningQuestion(assignmentId, questionId, selectedOption), onSuccess: invalidate }),

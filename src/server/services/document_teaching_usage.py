@@ -20,6 +20,8 @@ _SAFE_USAGE_FIELDS = (
     "teaching_package_id",
     "teaching_package_sequence",
     "status",
+    "publication_id",
+    "is_published",
     "has_asset_manifest",
     "created_at",
 )

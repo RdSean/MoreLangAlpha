@@ -184,6 +184,8 @@
         "empty": "This document has not been used to process a textbook.",
         "contentVersion": "Content version v{{sequence}}",
         "sourcePosition": "Source {{position}}",
+        "artifact": "Parse artifact {{id}}",
+        "job": "Parse job {{id}}",
         "unpackaged": "No teaching package",
         "unpackagedNote": "No teaching package has been generated for this content version.",
         "package": "Teaching package",

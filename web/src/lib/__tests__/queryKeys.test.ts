@@ -71,6 +71,15 @@ describe('queryKeys', () => {
         'detail',
         'doc-abc',
       ]);
+      expect(queryKeys.documents.teachingUsages()).toEqual([
+        'documents',
+        'teaching-usage',
+      ]);
+      expect(queryKeys.documents.teachingUsage('doc-abc')).toEqual([
+        'documents',
+        'teaching-usage',
+        'doc-abc',
+      ]);
       expect(queryKeys.documents.job('job-abc')).toEqual([
         'documents',
         'jobs',
@@ -90,6 +99,7 @@ describe('queryKeys', () => {
         queryKeys.documents.lists(),
         queryKeys.documents.datasets(),
         queryKeys.documents.tags(),
+        queryKeys.documents.teachingUsages(),
         queryKeys.documents.jobs('doc-abc'),
         queryKeys.documents.artifacts('doc-abc'),
       ];

@@ -155,6 +155,8 @@ async def list_document_teaching_usages(
                        packages.teaching_package_id,
                        packages.sequence AS teaching_package_sequence,
                        packages.status,
+                       publications.publication_id,
+                       publications.publication_id IS NOT NULL AS is_published,
                        COALESCE(
                            packages.asset_manifest <> '{}'::jsonb,
                            FALSE
@@ -175,6 +177,10 @@ async def list_document_teaching_usages(
                   ON packages.content_version_id = versions.version_id
                 LEFT JOIN education_teaching_jobs AS jobs
                   ON jobs.teaching_package_id = packages.teaching_package_id
+                LEFT JOIN education_textbook_publications AS publications
+                  ON publications.version_id = versions.version_id
+                 AND publications.teaching_package_id =
+                     packages.teaching_package_id
                 WHERE documents.document_id = %s
                   AND documents.owner_user_id = %s
                 ORDER BY sources.created_at,

@@ -50,8 +50,8 @@ export type DocumentTeachingPackageStatus =
   | 'building_skill'
   | 'generating_teaching'
   | 'validating'
+  | 'running'
   | 'review'
-  | 'published'
   | 'failed'
   | 'cancelled';
 
@@ -67,6 +67,8 @@ export interface DocumentTeachingUsage {
   teaching_package_id?: string | null;
   teaching_package_sequence?: number | null;
   status?: DocumentTeachingPackageStatus | null;
+  publication_id?: string | null;
+  is_published: boolean;
   has_asset_manifest: boolean;
   created_at?: string | null;
 }

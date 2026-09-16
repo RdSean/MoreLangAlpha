@@ -59,6 +59,8 @@ const usage = (overrides: Record<string, unknown> = {}) => ({
   teaching_package_id: 'package-1',
   teaching_package_sequence: 1,
   status: 'review',
+  publication_id: null,
+  is_published: false,
   has_asset_manifest: true,
   created_at: '2026-09-16T12:00:00Z',
   ...overrides,
@@ -144,7 +146,7 @@ describe('DocumentDetailPage', () => {
     expect(state.fetchArtifactText).toHaveBeenCalledWith('art-markdown');
   });
 
-  it('shows review and published usages and links formal assets to textbook detail', async () => {
+  it('shows review and publication-backed published usages and links formal assets to textbook detail', async () => {
     state.teachingUsage = {
       data: [
         usage(),
@@ -153,9 +155,13 @@ describe('DocumentDetailPage', () => {
           textbook_title: 'Published Reader',
           content_version_id: 'version-2',
           content_version_sequence: 3,
+          producer_job_id: 'job-2',
+          primary_artifact_id: 'art-published',
           teaching_package_id: 'package-2',
           teaching_package_sequence: 2,
-          status: 'published',
+          status: 'review',
+          publication_id: 'publication-2',
+          is_published: true,
         }),
       ],
       isLoading: false,
@@ -181,6 +187,10 @@ describe('DocumentDetailPage', () => {
     expect(screen.getByText('教学包 #2')).toBeInTheDocument();
     expect(screen.getByText('等待审阅')).toBeInTheDocument();
     expect(screen.getByText('已发布')).toBeInTheDocument();
+    expect(screen.getByText('解析产物 art-markdown')).toBeInTheDocument();
+    expect(screen.getByText('解析任务 job-1')).toBeInTheDocument();
+    expect(screen.getByText('解析产物 art-published')).toBeInTheDocument();
+    expect(screen.getByText('解析任务 job-2')).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: '查看正式教材资产' })).toHaveLength(2);
 
     await user.click(screen.getByRole('link', { name: 'Reading Explorer 3' }));
@@ -245,7 +255,35 @@ describe('DocumentDetailPage', () => {
 
     await user.click(screen.getByRole('tab', { name: '教材资产' }));
 
+    expect(screen.getByText('解析产物 art-markdown')).toBeInTheDocument();
+    expect(screen.getByText('解析任务 job-1')).toBeInTheDocument();
     expect(screen.queryByText(/education\/private|source-bundles|\/managed\/|minio\.invalid/i)).not.toBeInTheDocument();
+  });
+
+  it('supports arrow, Home, and End keyboard navigation across detail tabs', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const sourceTab = screen.getByRole('tab', { name: '原文' });
+    const parsedTab = screen.getByRole('tab', { name: '解析结果' });
+    const teachingTab = screen.getByRole('tab', { name: '教材资产' });
+
+    sourceTab.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(parsedTab).toHaveFocus();
+    expect(parsedTab).toHaveAttribute('aria-selected', 'true');
+
+    await user.keyboard('{End}');
+    expect(teachingTab).toHaveFocus();
+    expect(teachingTab).toHaveAttribute('aria-selected', 'true');
+
+    await user.keyboard('{Home}');
+    expect(sourceTab).toHaveFocus();
+    expect(sourceTab).toHaveAttribute('aria-selected', 'true');
+
+    await user.keyboard('{ArrowLeft}');
+    expect(teachingTab).toHaveFocus();
+    expect(teachingTab).toHaveAttribute('aria-selected', 'true');
   });
 
   it('shows the document loading state', () => {

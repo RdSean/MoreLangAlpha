@@ -2,6 +2,15 @@
 
 ## 2026-09-16
 
+### 图书馆文档详情发布状态与交互修正
+
+- `GET /api/v1/documents/{document_id}/teaching-usage` 现在按内容版本与教学包关联正式发布记录，并返回安全的 `publication_id`、`is_published`；前端仅在发布记录存在时显示“已发布”，否则展示真实教学包生命周期状态，不再使用并不存在的 `published` 教学包状态。
+- 文档详情的主标签支持 `ArrowLeft`、`ArrowRight`、`Home`、`End` 键盘导航，并在移动焦点时同步选择对应视图。
+- 教材用途查询会在教学包处于 `queued`、`preparing`、`building_skill`、`generating_teaching`、`validating` 或 `running` 时轮询，终态停止；创建教学包、取消、继续、发布以及教学任务进入终态时会失效文档用途查询。
+- 预览抽屉分隔条现在可聚焦并通过方向键调整宽度，提供 `aria-valuemin`、`aria-valuemax`、`aria-valuenow`，同时保留鼠标拖动期间禁用页面文本选择的行为。
+- 教材用途卡片补充安全的 `primary_artifact_id` 与 `producer_job_id` 来源信息，继续不展示快照前缀、存储键、sandbox 路径或对象 URL。
+- 验证：文档用途服务/API 测试 21 项、相关前端聚焦测试 69 项通过；`pnpm typecheck`、Ruff、改动文件 ESLint 与 `git diff --check` 通过。
+
 ### 图书馆独立文档详情页
 
 - 新增 `/documents/:documentId` 懒加载路由与独立详情页，保留 `/documents` 列表路由；页面提供“原文 / 解析结果 / 教材资产”三个视图，并继续使用 `/documents` 领域命名，用户可见产品名为“图书馆”。

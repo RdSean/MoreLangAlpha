@@ -9,12 +9,15 @@ interface TeachingUsagePanelProps {
   documentId: string;
 }
 
-const PACKAGE_STATUS_KEYS: Record<DocumentTeachingPackageStatus, string> = {
+type DisplayStatus = DocumentTeachingPackageStatus | 'published';
+
+const PACKAGE_STATUS_KEYS: Record<DisplayStatus, string> = {
   queued: 'queued',
   preparing: 'active',
   building_skill: 'active',
   generating_teaching: 'active',
   validating: 'active',
+  running: 'active',
   review: 'review',
   published: 'published',
   failed: 'failed',
@@ -70,8 +73,9 @@ function TeachingUsageItem({ usage }: { usage: DocumentTeachingUsage }) {
   const { t } = useTranslation();
   const textbookPath = `/education/textbooks/${encodeURIComponent(usage.textbook_id)}`;
   const canOpenAssets = usage.has_asset_manifest
-    && (usage.status === 'review' || usage.status === 'published');
-  const statusKey = usage.status ? PACKAGE_STATUS_KEYS[usage.status] : null;
+    && (usage.status === 'review' || usage.is_published);
+  const displayStatus: DisplayStatus | null = usage.is_published ? 'published' : (usage.status ?? null);
+  const statusKey = displayStatus ? PACKAGE_STATUS_KEYS[displayStatus] : null;
 
   return (
     <li className="documents-teaching-usage-item">
@@ -83,6 +87,8 @@ function TeachingUsageItem({ usage }: { usage: DocumentTeachingUsage }) {
           <div className="documents-teaching-usage-meta">
             <span>{t('documents.detail.teachingUsage.contentVersion', { sequence: usage.content_version_sequence })}</span>
             <span>{t('documents.detail.teachingUsage.sourcePosition', { position: usage.artifact_position })}</span>
+            <span>{t('documents.detail.teachingUsage.artifact', { id: usage.primary_artifact_id })}</span>
+            <span>{t('documents.detail.teachingUsage.job', { id: usage.producer_job_id })}</span>
           </div>
         </div>
         <span className={`documents-teaching-usage-status${statusKey ? ` is-${statusKey}` : ''}`}>

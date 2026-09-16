@@ -184,6 +184,8 @@
         "empty": "这份文档尚未用于教材加工。",
         "contentVersion": "内容版本 v{{sequence}}",
         "sourcePosition": "来源 {{position}}",
+        "artifact": "解析产物 {{id}}",
+        "job": "解析任务 {{id}}",
         "unpackaged": "尚未生成教学包",
         "unpackagedNote": "这个内容版本尚未生成教学包。",
         "package": "教学包",

@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+} from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { FileText, Maximize2, Minimize2, X } from 'lucide-react';
@@ -19,6 +22,10 @@ const PREVIEW_TABS = [
 
 /** Same spring the other segmented controls in the app use (AnimatedTabs). */
 const TAB_SPRING = { type: 'spring', bounce: 0.2, duration: 0.6 } as const;
+const MIN_PANEL_WIDTH = 420;
+const MAX_PANEL_WIDTH = 1100;
+const DEFAULT_PANEL_WIDTH = 680;
+const KEYBOARD_RESIZE_STEP = 20;
 
 interface DocumentPreviewDrawerProps {
   open: boolean;
@@ -84,6 +91,22 @@ export default function DocumentPreviewDrawer({
     setIsDragging(true);
   };
 
+  const handleDividerKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    let nextWidth: number | undefined;
+    const currentWidth = panelWidth ?? DEFAULT_PANEL_WIDTH;
+    if (event.key === 'ArrowLeft') {
+      nextWidth = currentWidth - KEYBOARD_RESIZE_STEP;
+    } else if (event.key === 'ArrowRight') {
+      nextWidth = currentWidth + KEYBOARD_RESIZE_STEP;
+    }
+    if (nextWidth === undefined) return;
+
+    event.preventDefault();
+    const maxWidth = Math.min(window.innerWidth - 24, MAX_PANEL_WIDTH);
+    const minWidth = Math.min(MIN_PANEL_WIDTH, window.innerWidth - 24);
+    setPanelWidth(Math.max(minWidth, Math.min(maxWidth, nextWidth)));
+  };
+
   const toggleFullscreen = async () => {
     if (document.fullscreenElement === drawerRef.current) {
       await document.exitFullscreen?.();
@@ -116,9 +139,14 @@ export default function DocumentPreviewDrawer({
         <div
           className={`chat-split-divider documents-preview-divider${isDragging ? ' dragging' : ''}`}
           onMouseDown={handleDividerMouseDown}
+          onKeyDown={handleDividerKeyDown}
           role="separator"
+          tabIndex={0}
           aria-orientation="vertical"
           aria-label={t('documents.preview.resize')}
+          aria-valuemin={MIN_PANEL_WIDTH}
+          aria-valuemax={MAX_PANEL_WIDTH}
+          aria-valuenow={Math.round(panelWidth ?? DEFAULT_PANEL_WIDTH)}
         />
         <header className="documents-preview-header">
           <div className="min-w-0">

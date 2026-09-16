@@ -163,6 +163,7 @@ describe('DocumentPreviewDrawer', () => {
 
     expect(viewer).toHaveAttribute('data-dragging', 'true');
     expect(screen.getByTestId('preview-drag-overlay')).toBeInTheDocument();
+    expect(document.body.style.userSelect).toBe('none');
 
     fireEvent.mouseMove(window, { clientX: 820 });
     expect(viewer).toHaveAttribute('data-dragging', 'true');
@@ -171,6 +172,25 @@ describe('DocumentPreviewDrawer', () => {
 
     expect(viewer).toHaveAttribute('data-dragging', 'false');
     expect(screen.queryByTestId('preview-drag-overlay')).not.toBeInTheDocument();
+    expect(document.body.style.userSelect).toBe('');
+  });
+
+  it('resizes the drawer from the keyboard without scrolling the page', async () => {
+    const user = userEvent.setup();
+    renderDrawer();
+
+    const divider = screen.getByRole('separator', { name: 'Resize preview' });
+    expect(divider).toHaveAttribute('tabindex', '0');
+    expect(divider).toHaveAttribute('aria-valuemin', '420');
+    expect(divider).toHaveAttribute('aria-valuemax', '1100');
+    expect(divider).toHaveAttribute('aria-valuenow', '680');
+
+    divider.focus();
+    await user.keyboard('{ArrowLeft}');
+    expect(divider).toHaveAttribute('aria-valuenow', '660');
+
+    await user.keyboard('{ArrowRight}');
+    expect(divider).toHaveAttribute('aria-valuenow', '680');
   });
 
   it('links to the independent document detail page', async () => {

@@ -29,6 +29,8 @@ def _usage_row(**overrides: object) -> dict[str, object]:
         "teaching_package_id": "pkg-A1b2C3d4E5f6",
         "teaching_package_sequence": 1,
         "status": "review",
+        "publication_id": None,
+        "is_published": False,
         "has_asset_manifest": True,
         "created_at": CREATED_AT,
     }
@@ -67,12 +69,23 @@ async def test_repository_reads_only_artifact_backed_usage_for_the_owner(
     )
     assert "LEFT JOIN education_teaching_packages AS packages" in normalized_sql
     assert "LEFT JOIN education_teaching_jobs AS jobs" in normalized_sql
+    assert (
+        "LEFT JOIN education_textbook_publications AS publications "
+        "ON publications.version_id = versions.version_id "
+        "AND publications.teaching_package_id = packages.teaching_package_id"
+        in normalized_sql
+    )
     assert "documents.owner_user_id = %s" in normalized_sql
     assert "sources.position AS artifact_position" in normalized_sql
     assert "COALESCE(" in normalized_sql
     assert "packages.asset_manifest <> '{}'::jsonb" in normalized_sql
     assert "FALSE" in normalized_sql
     assert "AS has_asset_manifest" in normalized_sql
+    assert "publications.publication_id" in normalized_sql
+    assert (
+        "publications.publication_id IS NOT NULL AS is_published"
+        in normalized_sql
+    )
     assert "education_textbook_sources" not in normalized_sql
     assert "education_assets" not in normalized_sql
     assert "snapshot_prefix" not in normalized_sql
@@ -192,6 +205,31 @@ async def test_service_keeps_review_failed_cancelled_and_unpackaged_usage(
         owner_user_id="owner-1",
         document_id="doc-A1b2C3d4E5f6",
     )
+
+
+@pytest.mark.asyncio
+async def test_service_marks_review_package_published_by_publication(
+    monkeypatch,
+) -> None:
+    published = _usage_row(
+        publication_id="publication-A1b2C3d4E5f6",
+        is_published=True,
+    )
+    repository = AsyncMock(return_value=[published])
+    monkeypatch.setattr(
+        document_teaching_usage.education_textbook_repository,
+        "list_document_teaching_usages",
+        repository,
+    )
+
+    usage = await document_teaching_usage.list_document_teaching_usages(
+        owner_user_id="owner-1",
+        document_id="doc-A1b2C3d4E5f6",
+    )
+
+    assert usage[0]["status"] == "review"
+    assert usage[0]["publication_id"] == "publication-A1b2C3d4E5f6"
+    assert usage[0]["is_published"] is True
 
 
 @pytest.mark.asyncio

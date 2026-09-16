@@ -142,6 +142,8 @@ describe('Documents API', () => {
       teaching_package_id: 'pkg-A1b2C3d4E5f6',
       teaching_package_sequence: 1,
       status: 'review' as const,
+      publication_id: 'publication-A1b2C3d4E5f6',
+      is_published: true,
       has_asset_manifest: true,
     }];
     mockGet.mockResolvedValue({ data: { items } });

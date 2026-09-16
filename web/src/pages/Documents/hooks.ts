@@ -2,7 +2,21 @@ import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 import * as documentsApi from './api';
-import type { CreateParseJobInput, DatasetFilters, DocumentFilters } from './types';
+import type {
+  CreateParseJobInput,
+  DatasetFilters,
+  DocumentFilters,
+  DocumentTeachingPackageStatus,
+} from './types';
+
+const ACTIVE_TEACHING_PACKAGE_STATUSES = new Set<DocumentTeachingPackageStatus>([
+  'queued',
+  'preparing',
+  'building_skill',
+  'generating_teaching',
+  'validating',
+  'running',
+]);
 
 export function useDocumentDatasets(filters: DatasetFilters = {}) {
   return useQuery({
@@ -39,6 +53,16 @@ export function useDocumentTeachingUsage(documentId?: string) {
     queryKey: queryKeys.documents.teachingUsage(documentId ?? ''),
     queryFn: () => documentsApi.getDocumentTeachingUsage(documentId ?? ''),
     enabled: Boolean(documentId),
+    refetchInterval: (query) => (
+      (query.state.data ?? []).some((usage) => (
+        usage.status !== null
+        && usage.status !== undefined
+        && ACTIVE_TEACHING_PACKAGE_STATUSES.has(usage.status)
+      ))
+        ? 5_000
+        : false
+    ),
+    refetchIntervalInBackground: true,
   });
 }
 

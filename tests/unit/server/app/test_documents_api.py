@@ -80,6 +80,8 @@ def _teaching_usage() -> dict[str, object]:
         "teaching_package_id": "pkg-A1b2C3d4E5f6",
         "teaching_package_sequence": 1,
         "status": "review",
+        "publication_id": "publication-A1b2C3d4E5f6",
+        "is_published": True,
         "has_asset_manifest": True,
         "created_at": "2026-09-16T12:00:00Z",
     }

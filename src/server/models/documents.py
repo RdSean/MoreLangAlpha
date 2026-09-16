@@ -86,6 +86,8 @@ class DocumentTeachingUsage(_RowModel):
     teaching_package_id: str | None = None
     teaching_package_sequence: int | None = None
     status: str | None = None
+    publication_id: str | None = None
+    is_published: bool = False
     has_asset_manifest: bool = False
     created_at: datetime | None = None
 

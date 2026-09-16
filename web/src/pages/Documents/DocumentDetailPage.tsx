@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, FileText, Loader2, RefreshCw } from 'lucide-react';
@@ -22,10 +23,32 @@ export default function DocumentDetailPage() {
   const { documentId } = useParams();
   const documentRecord = useDocument(documentId);
   const [activeTab, setActiveTab] = useState<DocumentDetailTab>('source');
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     setActiveTab('source');
   }, [documentId]);
+
+  const handleTabKeyDown = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
+    let nextIndex: number | undefined;
+    if (event.key === 'ArrowRight') {
+      nextIndex = (index + 1) % TABS.length;
+    } else if (event.key === 'ArrowLeft') {
+      nextIndex = (index - 1 + TABS.length) % TABS.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = TABS.length - 1;
+    }
+    if (nextIndex === undefined) return;
+
+    event.preventDefault();
+    setActiveTab(TABS[nextIndex].id);
+    tabRefs.current[nextIndex]?.focus();
+  };
 
   if (documentRecord.isLoading) {
     return (
@@ -87,7 +110,7 @@ export default function DocumentDetailPage() {
         </header>
 
         <div className="documents-detail-tabs" role="tablist" aria-label={t('documents.detail.tabsLabel')}>
-          {TABS.map((tab) => {
+          {TABS.map((tab, index) => {
             const selected = activeTab === tab.id;
             return (
               <button
@@ -98,8 +121,10 @@ export default function DocumentDetailPage() {
                 aria-selected={selected}
                 aria-controls={`document-detail-panel-${tab.id}`}
                 tabIndex={selected ? 0 : -1}
+                ref={(node) => { tabRefs.current[index] = node; }}
                 className={`documents-detail-tab${selected ? ' is-active' : ''}`}
                 onClick={() => setActiveTab(tab.id)}
+                onKeyDown={(event) => handleTabKeyDown(event, index)}
               >
                 {t(tab.labelKey)}
               </button>

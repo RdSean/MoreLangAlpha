@@ -1,20 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from '@testing-library/react';
-import { renderHookWithProviders } from '@/test/utils';
+import { createTestQueryClient, renderHookWithProviders } from '@/test/utils';
+import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from '../api';
-import { useEducationTaskCalendar, useEducationTaskDetail, useTeachingJob, useTextbook } from '../queries';
+import { useEducationTaskCalendar, useEducationTaskDetail, useTeachingJob, useTextbook, useTextbookMutations } from '../queries';
 
 vi.mock('../api', () => ({
   getTeachingJob: vi.fn(),
   getTextbook: vi.fn(),
   getEducationTaskCalendar: vi.fn(),
   getEducationTaskDetail: vi.fn(),
+  createTextbook: vi.fn(),
+  startTextbookProcessing: vi.fn(),
+  runTextbookProcessing: vi.fn(),
+  retryTextbookProcessing: vi.fn(),
+  createTeachingPackage: vi.fn(),
+  cancelTeachingJob: vi.fn(),
+  resumeTeachingJob: vi.fn(),
+  publishTextbookVersion: vi.fn(),
+  assignTextbookPublication: vi.fn(),
+  updateLearningProgress: vi.fn(),
+  answerLearningQuestion: vi.fn(),
 }));
 
 const getTeachingJob = educationApi.getTeachingJob as unknown as ReturnType<typeof vi.fn>;
 const getTextbook = educationApi.getTextbook as unknown as ReturnType<typeof vi.fn>;
 const getEducationTaskCalendar = educationApi.getEducationTaskCalendar as unknown as ReturnType<typeof vi.fn>;
 const getEducationTaskDetail = educationApi.getEducationTaskDetail as unknown as ReturnType<typeof vi.fn>;
+const createTeachingPackage = educationApi.createTeachingPackage as unknown as ReturnType<typeof vi.fn>;
 
 describe('education queries', () => {
   beforeEach(() => {
@@ -22,6 +35,7 @@ describe('education queries', () => {
     getTextbook.mockReset();
     getEducationTaskCalendar.mockReset();
     getEducationTaskDetail.mockReset();
+    createTeachingPackage.mockReset();
   });
 
   it('refreshes the active textbook after a teaching job reaches a terminal status', async () => {
@@ -48,10 +62,12 @@ describe('education queries', () => {
       }))
       .mockResolvedValue(completedJob);
 
+    const queryClient = createTestQueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
     const { result } = renderHookWithProviders(() => ({
       textbook: useTextbook('textbook-1'),
       job: useTeachingJob('teaching-job-1', true),
-    }));
+    }), { queryClient });
 
     await waitFor(() => expect(result.current.textbook.data?.title).toBe('教学包加工中'));
 
@@ -59,6 +75,22 @@ describe('education queries', () => {
 
     await waitFor(() => expect(result.current.textbook.data?.title).toBe('等待家长审阅'));
     expect(getTextbook).toHaveBeenCalledTimes(2);
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.documents.teachingUsages(),
+    });
+  });
+
+  it('invalidates document teaching usage after teaching package mutations', async () => {
+    createTeachingPackage.mockResolvedValue({ job_id: 'teaching-job-1' });
+    const queryClient = createTestQueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    const { result } = renderHookWithProviders(() => useTextbookMutations(), { queryClient });
+
+    await result.current.createTeaching.mutateAsync('version-1');
+
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.documents.teachingUsages(),
+    }));
   });
 
   it('loads the role-scoped task detail only when a task is selected', async () => {
