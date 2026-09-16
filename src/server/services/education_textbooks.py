@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import Mapping
 from io import BytesIO
 from pathlib import Path
@@ -51,6 +52,11 @@ from src.server.services.education_teaching_assets import (
 from src.server.services.education_teaching_storage import build_staged_teaching_input
 from src.utils.storage import get_bytes
 
+
+logger = logging.getLogger(__name__)
+
+_STATE_PROBE_ATTEMPTS = 3
+_STATE_PROBE_BACKOFF_SECONDS = 0.05
 
 _VALID_VERSION_TRANSITIONS = {
     ("draft", "processing"),
@@ -233,18 +239,12 @@ async def start_processing_from_parse_jobs(
         await cleanup_written_snapshots()
         raise
     except Exception:
-        durable_job_exists: bool | None = None
-        try:
-            durable_job_exists = await asyncio.shield(
-                textbook_processing_job_exists(
-                    job_id=job_id,
-                    version_id=version_id,
-                )
+        durable_job_exists = await asyncio.shield(
+            _probe_textbook_processing_job_state(
+                job_id=job_id,
+                version_id=version_id,
             )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            durable_job_exists = None
+        )
         if durable_job_exists is False:
             await cleanup_written_snapshots()
         raise
@@ -253,6 +253,32 @@ async def start_processing_from_parse_jobs(
         await cleanup_written_snapshots()
         raise TextbookNotFoundError("Textbook not found")
     return job
+
+
+async def _probe_textbook_processing_job_state(
+    *, job_id: str, version_id: str
+) -> bool | None:
+    """Best-effort exact-state probe; unknown never authorizes cleanup."""
+    for attempt in range(1, _STATE_PROBE_ATTEMPTS + 1):
+        try:
+            durable_state = await textbook_processing_job_exists(
+                job_id=job_id,
+                version_id=version_id,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            durable_state = None
+        if durable_state is not None:
+            return bool(durable_state)
+        if attempt < _STATE_PROBE_ATTEMPTS:
+            await asyncio.sleep(_STATE_PROBE_BACKOFF_SECONDS * attempt)
+
+    logger.warning(
+        "textbook_source_snapshot_state_indeterminate",
+        extra={"version_id": version_id, "job_id": job_id},
+    )
+    return None
 
 
 def build_local_fixture_package(job: dict[str, Any]) -> dict[str, Any]:

@@ -225,6 +225,14 @@ async def start_processing_from_parse_jobs(
 This method authorizes the parent, freezes all selected parse bundles, then
 calls `queue_textbook_processing_from_artifacts()`.
 
+**Snapshot cleanup invariant:** A known pre-commit failure with no durable
+queue row may delete only the exact keys written by this operation. An
+ambiguous queue failure must first run a bounded, shielded probe for the exact
+`job_id`/`version_id`; snapshots are deleted only when that probe confirms the
+row is absent. A present or indeterminate row retains the snapshots for later
+orphan reconciliation. A queued job must never exist with missing snapshot
+objects.
+
 **Step 5: Run focused tests**
 
 ```bash
