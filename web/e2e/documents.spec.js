@@ -245,7 +245,16 @@ function fulfillJSON(route, body, status = 200) {
   });
 }
 
-const sensitiveNetworkPattern = /storage_key|snapshot_prefix|bundle_prefix|sandbox_path|managed_path|object_url|minio|\/managed\//i;
+const sensitiveNetworkPatterns = [
+  /storage_key|snapshot_prefix|bundle_prefix|sandbox_path|managed_path|object_url|download_url|presigned|minio|\/managed\//i,
+  /(?:^|["'\s])(?:education|documents)\/[A-Za-z0-9][A-Za-z0-9_-]{5,}(?:\/|["'\s]|$)/i,
+  /https?:\/\/[^/"'\s]+\/(?:[^/"'\s]+\/)?(?:education|documents)\/[A-Za-z0-9][A-Za-z0-9_-]{5,}(?:\/|["'\s]|$)/i,
+  /(?:[?&](?:x-amz-|awsaccesskeyid|signature)|x-amz-|awsaccesskeyid|signature=)/i,
+];
+
+function findSensitiveNetworkValue(value) {
+  return sensitiveNetworkPatterns.find((pattern) => pattern.test(value));
+}
 
 function isRelevantApiPath(pathname) {
   return pathname.startsWith('/api/v1/documents')
@@ -694,22 +703,31 @@ test('library textbook formal assets mock flow renders without runtime', async (
   const networkFindings = [];
   const inspectedResponsePaths = [];
   const pendingResponseChecks = [];
+  const inspectedBodyCounts = { requests: 0, responses: 0 };
   page.on('request', (request) => {
     const url = new URL(request.url());
-    if (url.origin !== 'http://127.0.0.1:4100' || !isRelevantApiPath(url.pathname)) return;
+    if (!isRelevantApiPath(url.pathname)) return;
+    inspectedBodyCounts.requests += 1;
     const body = request.postData();
-    if (body && sensitiveNetworkPattern.test(body)) {
-      networkFindings.push(`request ${url.pathname}: ${body}`);
+    const requestText = `${request.method()} ${url.href}\n${body ?? ''}`;
+    const finding = findSensitiveNetworkValue(requestText);
+    if (finding) {
+      networkFindings.push(`request ${url.pathname}: ${finding} in ${requestText}`);
     }
   });
   page.on('response', (response) => {
     const url = new URL(response.url());
-    if (url.origin !== 'http://127.0.0.1:4100' || !isRelevantApiPath(url.pathname)) return;
-    if (!response.headers()['content-type']?.includes('application/json')) return;
+    if (!isRelevantApiPath(url.pathname)) return;
+    inspectedBodyCounts.responses += 1;
     inspectedResponsePaths.push(url.pathname);
+    const headers = Object.entries(response.headers())
+      .map(([name, value]) => `${name}: ${value}`)
+      .join('\n');
     pendingResponseChecks.push(response.text().then((body) => {
-      if (sensitiveNetworkPattern.test(body)) {
-        networkFindings.push(`response ${url.pathname}: ${body}`);
+      const responseText = `${response.status()} ${url.href}\n${headers}\n${body}`;
+      const finding = findSensitiveNetworkValue(responseText);
+      if (finding) {
+        networkFindings.push(`response ${url.pathname}: ${finding} in ${responseText}`);
       }
     }).catch((error) => {
       networkFindings.push(`response ${url.pathname}: ${String(error)}`);
@@ -845,6 +863,8 @@ test('library textbook formal assets mock flow renders without runtime', async (
   for (const path of requiredInspectedPaths) {
     expect(inspectedResponsePaths).toContain(path);
   }
+  expect(inspectedBodyCounts.requests).toBeGreaterThanOrEqual(20);
+  expect(inspectedBodyCounts.responses).toBeGreaterThanOrEqual(20);
   expect(networkFindings).toEqual([]);
 });
 

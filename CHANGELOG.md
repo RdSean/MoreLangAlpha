@@ -7,7 +7,7 @@
 - 新增 Playwright Chromium mock 回归，不代表真实服务 sandbox 验收：上传并完成模拟解析、在独立图书馆详情审阅 Markdown、以已完成解析任务创建教材、完成模拟教学包、审阅正式知识资产、发布并分配学生。
 - mock 回归使用精确的教材、版本、教学包、章节、文档和学生标识；断言候选来源、文档教学用途、正式资产读取、发布请求和分配请求都命中预期 ID 与 payload，错误 ID 会因无匹配路由而失败。教学运行抽屉在桌面用 Escape、在 `documents-mobile` 用真实 TouchEvent 下拉手势关闭。
 - 新增 API/服务读取回归：正式教学包摘要和章节资产在 managed PTC/运行服务不可用时仍通过 PostgreSQL 审阅投影与对象存储读取成功；测试断言只调用数据库和 MinIO 读取 seam，sandbox 启动、继续和取消路径均未调用。
-- 浏览器回归同时检查所有相关请求与 JSON 响应体，断言正文、教学用途、正式资产和教育 API 流量均不包含存储键、快照前缀、对象 URL、MinIO 地址或 sandbox 路径，而不只检查 DOM 文本。
+- 浏览器回归检查所有相关文档、教学用途、正式资产和教育 API 的请求 URL、查询参数与请求体，并读取全部响应体和响应头，包括非 JSON、`Location`、`Content-Disposition` 等 URL 承载字段；检测字段名、对象 key、签名 URL、预签名参数和 URL 载体，同时以显式请求/响应计数防止监听器静默失效。
 - 验证：指定 Playwright mock 回归在 Chromium 桌面与 `documents-mobile` 两个项目通过；正式资产 API/服务聚焦测试、相关 Vitest、`pnpm typecheck`、`pnpm build`、ESLint、Ruff 与 `git diff --check` 通过。
 
 ### 教材详情选择并审阅图书馆来源
