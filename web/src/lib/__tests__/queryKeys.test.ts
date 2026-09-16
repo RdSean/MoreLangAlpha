@@ -91,6 +91,11 @@ describe('queryKeys', () => {
         'doc-abc',
         'job-abc',
       ]);
+      expect(queryKeys.documents.completedParseJobs()).toEqual([
+        'documents',
+        'parse-jobs',
+        'completed',
+      ]);
     });
 
     it('keeps all document surfaces under the same invalidation prefix', () => {
@@ -102,6 +107,7 @@ describe('queryKeys', () => {
         queryKeys.documents.teachingUsages(),
         queryKeys.documents.jobs('doc-abc'),
         queryKeys.documents.artifacts('doc-abc'),
+        queryKeys.documents.completedParseJobs(),
       ];
       for (const key of keys) {
         expect(key.slice(0, prefix.length)).toEqual(prefix);

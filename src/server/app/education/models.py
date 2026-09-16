@@ -283,6 +283,7 @@ class ArtifactTextbookSourceResponse(BaseModel):
     parse_completed_at: datetime | None = None
     primary_sha256: str
     document_deleted: bool
+    document_accessible: bool
 
 
 class LegacyTextbookSourceResponse(BaseModel):

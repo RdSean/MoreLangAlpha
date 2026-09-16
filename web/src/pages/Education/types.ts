@@ -285,6 +285,7 @@ export interface ArtifactTextbookSource {
   parse_completed_at?: string | null;
   primary_sha256: string;
   document_deleted: boolean;
+  document_accessible: boolean;
 }
 
 export interface LegacyTextbookSource {

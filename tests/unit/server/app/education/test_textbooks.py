@@ -383,6 +383,7 @@ async def test_parent_detail_exposes_safe_frozen_artifact_sources(client):
                         "parse_completed_at": "2026-09-16T10:00:00Z",
                         "primary_sha256": "a" * 64,
                         "document_deleted": False,
+                        "document_accessible": True,
                         "snapshot_prefix": "education/private/secret/",
                         "storage_key": "documents/private/secret.md",
                     }
@@ -418,6 +419,7 @@ async def test_parent_detail_exposes_safe_frozen_artifact_sources(client):
             "parse_completed_at": "2026-09-16T10:00:00Z",
             "primary_sha256": "a" * 64,
             "document_deleted": False,
+            "document_accessible": True,
         }
     ]
     assert "snapshot_prefix" not in response.text

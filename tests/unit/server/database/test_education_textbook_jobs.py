@@ -978,6 +978,7 @@ async def test_parent_detail_projects_frozen_artifact_sources_without_storage_pa
             "parse_completed_at": None,
             "primary_sha256": "a" * 64,
             "document_deleted": False,
+            "document_accessible": True,
             "legacy": False,
             "asset_id": None,
             "original_filename": None,
@@ -998,6 +999,7 @@ async def test_parent_detail_projects_frozen_artifact_sources_without_storage_pa
             "parse_completed_at": None,
             "primary_sha256": "b" * 64,
             "document_deleted": True,
+            "document_accessible": False,
             "legacy": False,
             "asset_id": None,
             "original_filename": None,
@@ -1031,6 +1033,93 @@ async def test_parent_detail_projects_frozen_artifact_sources_without_storage_pa
     assert "education_textbook_artifact_sources" in source_sql
     assert "LEFT JOIN documents" in source_sql
     assert "documents.document_id IS NULL" in source_sql
+    assert "documents.owner_user_id = %s" in source_sql
     assert "snapshot_prefix" not in source_sql
     assert "asset_manifest" not in source_sql
     assert "storage_key" not in source_sql
+    assert mock_cursor.execute.call_args_list[2].args[1] == (
+        "parent-1",
+        "version-1",
+        "version-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_parent_detail_source_access_is_viewer_scoped_within_household(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    textbook = {
+        "textbook_id": "textbook-1",
+        "household_id": "household-1",
+        "title": "英语第二册",
+        "slug": "english-2",
+    }
+    version = {
+        "version_id": "version-1",
+        "sequence": 1,
+        "status": "review",
+        "chapter_count": 0,
+        "publication_id": None,
+        "is_published": False,
+    }
+
+    def source(*, accessible: bool) -> dict:
+        return {
+            "position": 1,
+            "document_id": "doc-1",
+            "producer_job_id": "job-parse-1",
+            "primary_artifact_id": "art-1",
+            "filename": "textbook.pdf",
+            "media_type": "application/pdf",
+            "format": "pdf",
+            "parser_id": "datalab",
+            "parser_name": "Datalab",
+            "parser_version": "2",
+            "parse_completed_at": None,
+            "primary_sha256": "a" * 64,
+            "document_deleted": False,
+            "document_accessible": accessible,
+            "legacy": False,
+            "asset_id": None,
+            "original_filename": None,
+            "content_type": None,
+            "size_bytes": None,
+        }
+
+    mock_cursor.fetchone.return_value = textbook
+    mock_cursor.fetchall.side_effect = [
+        [version],
+        [source(accessible=True)],
+        [],
+        [],
+        [version],
+        [source(accessible=False)],
+        [],
+        [],
+    ]
+
+    owner_detail = await education_textbooks.get_textbook_for_parent(
+        parent_user_id="parent-owner", textbook_id="textbook-1"
+    )
+    other_parent_detail = await education_textbooks.get_textbook_for_parent(
+        parent_user_id="parent-other", textbook_id="textbook-1"
+    )
+
+    assert owner_detail is not None
+    assert other_parent_detail is not None
+    assert owner_detail["versions"][0]["sources"][0]["document_accessible"] is True
+    assert other_parent_detail["versions"][0]["sources"][0]["document_accessible"] is False
+    source_calls = [
+        call
+        for call in mock_cursor.execute.call_args_list
+        if "FROM education_textbook_artifact_sources" in call.args[0]
+    ]
+    assert [call.args[1] for call in source_calls] == [
+        ("parent-owner", "version-1", "version-1"),
+        ("parent-other", "version-1", "version-1"),
+    ]

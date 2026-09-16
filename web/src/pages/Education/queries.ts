@@ -88,7 +88,7 @@ export function useTextbook(textbookId: string | undefined) {
 
 export function useCompletedParseJobs(enabled: boolean) {
   return useQuery({
-    queryKey: ['documents', 'parse-jobs', 'completed'],
+    queryKey: queryKeys.documents.completedParseJobs(),
     queryFn: educationApi.listCompletedParseJobs,
     enabled,
     staleTime: 10_000,

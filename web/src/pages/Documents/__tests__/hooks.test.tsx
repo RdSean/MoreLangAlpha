@@ -1,15 +1,30 @@
 import { act } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderHookWithProviders } from '@/test/utils';
+import { queryKeys } from '@/lib/queryKeys';
+import { createTestQueryClient, renderHookWithProviders } from '@/test/utils';
 import * as documentsApi from '../api';
-import { useDocumentTeachingUsage } from '../hooks';
+import { useDocumentMutations, useDocumentTeachingUsage } from '../hooks';
 
 vi.mock('../api', () => ({
   getDocumentTeachingUsage: vi.fn(),
+  createDataset: vi.fn(),
+  updateDataset: vi.fn(),
+  deleteDataset: vi.fn(),
+  createTag: vi.fn(),
+  deleteTag: vi.fn(),
+  uploadDocument: vi.fn(),
+  inspectDocument: vi.fn(),
+  createDocumentParseJob: vi.fn(),
+  cancelDocumentJob: vi.fn(),
+  updateDocument: vi.fn(),
+  deleteDocument: vi.fn(),
 }));
 
 const getDocumentTeachingUsage = documentsApi.getDocumentTeachingUsage as unknown as ReturnType<typeof vi.fn>;
+const createDocumentParseJob = documentsApi.createDocumentParseJob as unknown as ReturnType<typeof vi.fn>;
+const updateDocument = documentsApi.updateDocument as unknown as ReturnType<typeof vi.fn>;
+const deleteDocument = documentsApi.deleteDocument as unknown as ReturnType<typeof vi.fn>;
 
 function usage(status: string) {
   return {
@@ -33,6 +48,9 @@ function usage(status: string) {
 describe('document teaching usage query', () => {
   beforeEach(() => {
     getDocumentTeachingUsage.mockReset();
+    createDocumentParseJob.mockReset();
+    updateDocument.mockReset();
+    deleteDocument.mockReset();
   });
 
   it('polls while any package is active', async () => {
@@ -72,5 +90,34 @@ describe('document teaching usage query', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('document mutation invalidation', () => {
+  it('refreshes completed parse-job candidates when source availability changes', async () => {
+    createDocumentParseJob.mockResolvedValue({ job: { job_id: 'job-1' }, status: 202 });
+    updateDocument.mockResolvedValue({ document_id: 'doc-1' });
+    deleteDocument.mockResolvedValue(undefined);
+    const queryClient = createTestQueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    const { result } = renderHookWithProviders(() => useDocumentMutations(), { queryClient });
+
+    await result.current.createParseJob.mutateAsync({
+      documentId: 'doc-1',
+      input: { inspection_id: 'inspection-1', parser_id: 'datalab' },
+    });
+    await result.current.updateDocument.mutateAsync({
+      documentId: 'doc-1',
+      original_filename: 'renamed.pdf',
+    });
+    await result.current.deleteDocument.mutateAsync('doc-1');
+    await result.current.refreshDocument('doc-1');
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.documents.completedParseJobs(),
+    });
+    expect(invalidateQueries.mock.calls.filter(([options]) => (
+      JSON.stringify(options?.queryKey) === JSON.stringify(queryKeys.documents.completedParseJobs())
+    ))).toHaveLength(4);
   });
 });

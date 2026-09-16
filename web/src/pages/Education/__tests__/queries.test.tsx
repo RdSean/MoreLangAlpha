@@ -70,7 +70,7 @@ describe('education queries', () => {
 
     await waitFor(() => expect(result.current.completed.data?.[0]?.producer_job_id).toBe('job-parse-1'));
     expect(listCompletedParseJobs).toHaveBeenCalledTimes(1);
-    expect(queryClient.getQueryData(['documents', 'parse-jobs', 'completed'])).toEqual([
+    expect(queryClient.getQueryData(queryKeys.documents.completedParseJobs())).toEqual([
       expect.objectContaining({ producer_job_id: 'job-parse-1' }),
     ]);
   });

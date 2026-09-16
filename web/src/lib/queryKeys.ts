@@ -180,6 +180,7 @@ export const queryKeys = {
     tags: () => [...queryKeys.documents.all, 'tags'],
     inspections: (documentId: string) => [...queryKeys.documents.all, 'inspections', documentId],
     parseOptions: (documentId: string, inspectionId?: string) => [...queryKeys.documents.inspections(documentId), 'options', inspectionId ?? 'latest'],
+    completedParseJobs: () => [...queryKeys.documents.all, 'parse-jobs', 'completed'],
     jobs: (documentId?: string) => [...queryKeys.documents.all, 'jobs', ...(documentId ? [documentId] : [])],
     job: (id: string) => [...queryKeys.documents.all, 'jobs', id],
     artifacts: (documentId: string, jobId?: string) => [...queryKeys.documents.all, 'artifacts', documentId, ...(jobId ? [jobId] : [])],

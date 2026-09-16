@@ -59,6 +59,61 @@ test.describe('Family education roles', () => {
     await expect(page.getByText('待审阅')).toBeVisible();
   });
 
+  test('textbook sources do not overflow at mobile or desktop widths', async ({ page }) => {
+    const unbroken = `source-${'x'.repeat(240)}.pdf`;
+    await mockAPI(page, {
+      'GET /auth/me': parent,
+      'GET /education/textbooks/textbook-1': {
+        textbook_id: 'textbook-1',
+        household_id: 'household-1',
+        title: '英语第二册',
+        slug: 'english-2',
+        versions: [{
+          version_id: 'version-1',
+          sequence: 1,
+          status: 'review',
+          chapter_count: 1,
+          is_published: false,
+          publication_id: null,
+          teaching_packages: [],
+          sources: [{
+            legacy: false,
+            position: 1,
+            document_id: 'doc-A1b2C3d4E5f6',
+            producer_job_id: 'job-A1b2C3d4E5f6',
+            primary_artifact_id: 'art-A1b2C3d4E5f6',
+            filename: unbroken,
+            media_type: 'application/pdf',
+            format: 'pdf',
+            parser_id: 'datalab',
+            parser_name: 'Datalab',
+            parser_version: '2',
+            parse_completed_at: '2026-09-16T10:00:00Z',
+            primary_sha256: 'a'.repeat(64),
+            document_deleted: false,
+            document_accessible: true,
+          }],
+          chapters: [],
+          assignments: [],
+        }],
+      },
+    });
+
+    for (const width of [390, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto('/education/textbooks/textbook-1');
+      await page.getByRole('tab', { name: '来源' }).click();
+
+      const panel = page.getByTestId('textbook-sources-panel');
+      await expect(panel.getByText(unbroken)).toBeVisible();
+      const dimensions = await panel.evaluate((element) => ({
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+      }));
+      expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+    }
+  });
+
   test('a parent creates homework for a household student', async ({ page }) => {
     let created;
     await mockAPI(page, {

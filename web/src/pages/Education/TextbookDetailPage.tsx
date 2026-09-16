@@ -5,9 +5,10 @@ import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
+import { getEducationAssetDownloadUrl } from './api';
 import { useCompletedParseJobs, useEducationMembers, useParentLearningRecords, useParentLearningTranscript, useTeachingChapterAsset, useTeachingJob, useTeachingPackageAssets, useTextbook, useTextbookMutations } from './queries';
 import TeachingRunDrawer from './TeachingRunDrawer';
-import type { TeachingReviewAssetKind, TextbookVersion, TextbookVersionStatus } from './types';
+import type { LegacyTextbookSource, TeachingReviewAssetKind, TextbookVersion, TextbookVersionStatus } from './types';
 
 const statusLabels: Record<TextbookVersionStatus, string> = { draft: '草稿', processing: '加工中', review: '待审阅', published: '已发布', failed: '加工失败' };
 type ReviewTab = 'overview' | 'sources' | 'teaching' | 'knowledge' | 'students';
@@ -31,6 +32,23 @@ function formatCompletedAt(value: string | null | undefined) {
 
 function userMessage(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function LegacySourceOpenButton({ source }: { source: LegacyTextbookSource }) {
+  const [opening, setOpening] = useState(false);
+  const { toast } = useToast();
+  const open = async () => {
+    setOpening(true);
+    try {
+      const url = await getEducationAssetDownloadUrl(source.asset_id);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      toast({ variant: 'destructive', title: '无法打开来源文件', description: userMessage(error, '请稍后重试。') });
+    } finally {
+      setOpening(false);
+    }
+  };
+  return <Button size="sm" variant="ghost" onClick={() => void open()} disabled={opening} aria-label={`打开 ${source.original_filename}`}><ExternalLink className="mr-2 size-4" aria-hidden="true" />{opening ? '正在打开' : '打开'}</Button>;
 }
 
 function StartProcessingDialog({ textbookId }: { textbookId: string }) {
@@ -169,9 +187,9 @@ function VersionPanel({ textbookId, version }: { textbookId: string; version: Te
       <div className="flex flex-wrap gap-1 border-b px-4 pt-2" role="tablist" aria-label={`版本 ${version.sequence} 审阅`} style={{ borderColor: 'var(--color-border-muted)' }}>
         {tabs.map((item, index) => <Button key={item.id} id={tabId(item.id)} type="button" variant={tab === item.id ? 'secondary' : 'ghost'} size="sm" role="tab" aria-selected={tab === item.id} aria-controls={panelId(item.id)} tabIndex={tab === item.id ? 0 : -1} ref={(node) => { tabRefs.current[index] = node; }} onKeyDown={(event) => handleTabKeyDown(event, index)} onClick={() => setTab(item.id)}>{item.label}</Button>)}
       </div>
-      <section id={panelId(tab)} role="tabpanel" aria-labelledby={tabId(tab)} data-testid={tab === 'sources' ? 'textbook-sources-panel' : undefined} className="min-w-0 p-4">
-        {tab === 'overview' && <div className="grid gap-3"><p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>共 {version.chapter_count} 章，冻结 {version.sources.length} 份来源。</p><p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>教学包通过审阅后才可发布给学生。</p></div>}
-        {tab === 'sources' && <div className="grid min-w-0 gap-3">
+      {tabs.map((item) => <section key={item.id} id={panelId(item.id)} role="tabpanel" aria-labelledby={tabId(item.id)} hidden={tab !== item.id} data-testid={item.id === 'sources' ? 'textbook-sources-panel' : undefined} className="min-w-0 p-4">
+        {item.id === 'overview' && <div className="grid gap-3"><p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>共 {version.chapter_count} 章，冻结 {version.sources.length} 份来源。</p><p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>教学包通过审阅后才可发布给学生。</p></div>}
+        {item.id === 'sources' && <div className="grid min-w-0 gap-3">
           {version.sources.length === 0 ? <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>加工任务尚未锁定来源。</p> : <ul aria-label="冻结来源" className="grid min-w-0 grid-cols-1 divide-y border" style={{ borderColor: 'var(--color-border-muted)' }}>
             {version.sources.map((source) => source.legacy ? (
               <li key={`legacy-${source.asset_id}`} className="grid min-w-0 grid-cols-1 gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
@@ -179,7 +197,7 @@ function VersionPanel({ textbookId, version }: { textbookId: string; version: Te
                   <p className="break-words text-sm" style={{ color: 'var(--color-text-primary)' }}>{source.original_filename}</p>
                   <p className="mt-1 break-words font-mono text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{source.content_type} · {formatSize(source.size_bytes)}</p>
                 </div>
-                <span className="w-fit border px-2 py-1 font-mono text-[11px]" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-secondary)' }}>旧版资料</span>
+                <div className="flex flex-wrap items-center gap-2"><span className="w-fit border px-2 py-1 font-mono text-[11px]" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-secondary)' }}>旧版资料</span><LegacySourceOpenButton source={source} /></div>
               </li>
             ) : (
               <li key={`${source.producer_job_id}-${source.position}`} className="grid min-w-0 grid-cols-1 gap-3 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
@@ -187,19 +205,19 @@ function VersionPanel({ textbookId, version }: { textbookId: string; version: Te
                   <p className="break-words text-sm" style={{ color: 'var(--color-text-primary)' }}>{source.filename}</p>
                   <p className="mt-1 break-words font-mono text-[11px] leading-5" style={{ color: 'var(--color-text-tertiary)' }}>{source.parser_name}{source.parser_version ? ` ${source.parser_version}` : ''} · {formatCompletedAt(source.parse_completed_at)} · {source.media_type} · {source.format.toUpperCase()} · SHA-256 {source.primary_sha256.slice(0, 12)}…</p>
                 </div>
-                {source.document_deleted ? <span className="w-fit border px-2 py-1 text-xs" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-secondary)' }}>原文档已删除</span> : <Link to={`/documents/${encodeURIComponent(source.document_id)}`} aria-label={`查看 ${source.filename}`} className="inline-flex w-fit items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}><ExternalLink className="size-4" aria-hidden="true" />查看文档</Link>}
+                {source.document_deleted ? <span className="w-fit border px-2 py-1 text-xs" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-secondary)' }}>原文档已删除</span> : !source.document_accessible ? <span className="w-fit border px-2 py-1 text-xs" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-secondary)' }}>原文档不可访问</span> : <Link to={`/documents/${encodeURIComponent(source.document_id)}`} aria-label={`查看 ${source.filename}`} className="inline-flex w-fit items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}><ExternalLink className="size-4" aria-hidden="true" />查看文档</Link>}
               </li>
             ))}
           </ul>}
         </div>}
-        {tab === 'teaching' && <div className="grid divide-y border" style={{ borderColor: 'var(--color-border-muted)' }}>
+        {item.id === 'teaching' && <div className="grid divide-y border" style={{ borderColor: 'var(--color-border-muted)' }}>
           {version.chapters.length === 0 ? <p className="p-4 text-sm" style={{ color: 'var(--color-text-secondary)' }}>尚未生成教学内容。</p> : version.chapters.map((chapter) => <article key={chapter.chapter_id} className="px-4 py-4"><h3 className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{chapter.position}. {chapter.title}</h3>{chapter.teaching_material ? <><div className="mt-3 whitespace-pre-wrap text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{chapter.teaching_material}</div><div className="mt-4 grid gap-3">{chapter.questions.map((question) => <div key={question.question_id} className="border-l-2 pl-3 text-sm" style={{ borderColor: 'var(--color-border-muted)' }}><p style={{ color: 'var(--color-text-primary)' }}>{question.position}. {question.prompt}</p><p className="mt-1 font-mono text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{question.knowledge_point}</p></div>)}</div></> : <p className="mt-3 text-sm" style={{ color: 'var(--color-text-secondary)' }}>尚未生成教学包。</p>}</article>)}
         </div>}
-        {tab === 'knowledge' && <div className="grid gap-4">
+        {item.id === 'knowledge' && <div className="grid gap-4">
           {!reviewedPackage ? <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>教学包通过审阅后可查看知识资产。</p> : teachingAssets.isLoading ? <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>正在加载知识资产…</p> : !teachingAssets.data ? <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>暂无可审阅的知识资产。</p> : <><section className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b pb-4 text-sm" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-secondary)' }}><span>{teachingAssets.data.coverage_audit.status === 'complete' ? '覆盖审计通过' : '覆盖审计待确认'}</span><span>{teachingAssets.data.concept_index.concept_count} 个概念</span><span>{teachingAssets.data.chapters.length} 个章节</span></section><div className="grid divide-y border" style={{ borderColor: 'var(--color-border-muted)' }}>{teachingAssets.data.chapters.map((chapter) => <article key={chapter.chapter_id} className="grid gap-3 px-4 py-4"><div><h3 className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{chapter.position}. {chapter.title}</h3><p className="mt-1 font-mono text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{chapter.coverage_status === 'complete' ? '覆盖完整' : '等待覆盖审计'} · {chapter.concept_count} 个概念</p></div><div className="flex flex-wrap gap-2">{chapter.assets.map((asset) => <Button key={asset.kind} size="sm" variant="outline" onClick={() => setSelectedTeachingAsset({ chapterId: chapter.chapter_id, kind: asset.kind })}>{teachingAssetActions[asset.kind]}</Button>)}</div></article>)}</div>{selectedTeachingAsset && <section aria-label="知识资产内容" className="border p-4" style={{ borderColor: 'var(--color-border-muted)' }}><h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{teachingAssetActions[selectedTeachingAsset.kind]}</h3>{teachingAsset.isLoading ? <p className="mt-3 text-sm" style={{ color: 'var(--color-text-secondary)' }}>正在加载审阅内容…</p> : selectedAssetContent == null ? <p className="mt-3 text-sm" style={{ color: 'var(--color-text-secondary)' }}>暂时无法读取此资产。</p> : <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>{typeof selectedAssetContent === 'string' ? selectedAssetContent : JSON.stringify(selectedAssetContent, null, 2)}</pre>}</section>}</>}
         </div>}
-        {tab === 'students' && <div>{version.assignments.length === 0 ? <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>发布后可分配给家庭学生。</p> : <div className="flex flex-wrap gap-2">{version.assignments.map((assignment) => <AssignmentRecords key={assignment.assignment_id} assignmentId={assignment.assignment_id} studentName={assignment.student_name ?? assignment.student_user_id} />)}</div>}</div>}
-      </section>
+        {item.id === 'students' && <div>{version.assignments.length === 0 ? <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>发布后可分配给家庭学生。</p> : <div className="flex flex-wrap gap-2">{version.assignments.map((assignment) => <AssignmentRecords key={assignment.assignment_id} assignmentId={assignment.assignment_id} studentName={assignment.student_name ?? assignment.student_user_id} />)}</div>}</div>}
+      </section>)}
     </section>
   );
 }

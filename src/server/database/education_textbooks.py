@@ -2565,6 +2565,10 @@ async def get_textbook_for_parent(
                                sources.parser_version,
                                sources.parse_completed_at,
                                sources.primary_sha256,
+                               COALESCE(
+                                   documents.owner_user_id = %s,
+                                   FALSE
+                               ) AS document_accessible,
                                documents.document_id IS NULL AS document_deleted,
                                FALSE AS legacy,
                                NULL::uuid AS asset_id,
@@ -2589,6 +2593,7 @@ async def get_textbook_for_parent(
                                NULL::varchar AS parser_version,
                                NULL::timestamptz AS parse_completed_at,
                                NULL::varchar AS primary_sha256,
+                               NULL::boolean AS document_accessible,
                                NULL::boolean AS document_deleted,
                                TRUE AS legacy,
                                assets.asset_id,
@@ -2606,7 +2611,11 @@ async def get_textbook_for_parent(
                     WHERE NOT EXISTS (SELECT 1 FROM artifact_sources)
                     ORDER BY position
                     """,
-                    (version["version_id"], version["version_id"]),
+                    (
+                        parent_user_id,
+                        version["version_id"],
+                        version["version_id"],
+                    ),
                 )
                 version["sources"] = [dict(row) for row in await cur.fetchall()]
                 await cur.execute(

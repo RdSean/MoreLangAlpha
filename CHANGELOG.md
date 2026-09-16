@@ -11,7 +11,10 @@
 - 版本标签补齐完整键盘与读屏语义：稳定的 `id`/`aria-controls`、`tabpanel` 的 `aria-labelledby`、roving `tabIndex`，以及 `ArrowLeft`、`ArrowRight`、`Home`、`End` 的焦点与选中同步。
 - 来源列表改为有名称的语义列表，并在移动端单列、桌面端双列结构中使用可换行元数据和 `min-w-0` 约束；新增移动/桌面视口回归，避免长文件名导致横向溢出。
 - 已完成解析任务候选在 repository 边界再次按 `completed`、当前家长所有权和非空主 Artifact 过滤，并只投影安全字段；混合完成、失败、排队、他人和缺少主 Artifact 的任务均有行为测试覆盖。
-- 验证：后端数据库、服务与 API 聚焦测试 79 项通过；教材详情、查询与列表前端测试 17 项通过，`pnpm typecheck`、Ruff 和 `git diff --check` 通过。
+- 恢复历史 `education_assets` 来源的“打开”操作：继续通过受控下载接口获取地址，保留打开中禁用状态和失败提示；图书馆文档来源新增观看者敏感的 `document_accessible`，仅文档存在且当前家长拥有时才显示链接，同一家庭其他家长会看到冻结元数据但不会得到死链接。
+- 已完成解析任务候选查询键归入 `queryKeys.documents.completedParseJobs()`；解析任务完成刷新、文档更新/删除和创建新解析任务都会失效该查询。全部版本标签面板现在使用稳定 ID 和 `hidden` 同时挂载，确保每个 `aria-controls` 的 IDREF 均可解析。
+- 新增 Playwright 浏览器级来源列表回归：在 390px 与 1280px 视口下渲染超长不可断 token，断言来源容器 `scrollWidth <= clientWidth`。
+- 验证：后端数据库、服务与 API 聚焦测试 80 项、前端教材/查询/键/文档 hooks 聚焦测试 39 项、Playwright 浏览器溢出回归 1 项通过；`pnpm typecheck`、Ruff 和 `git diff --check` 通过。
 
 ### 图书馆文档详情发布状态与交互修正
 

@@ -110,10 +110,12 @@ export function useDocumentMutations() {
   const invalidateLists = () => client.invalidateQueries({ queryKey: queryKeys.documents.lists() });
   const invalidateDatasets = () => client.invalidateQueries({ queryKey: queryKeys.documents.datasets() });
   const invalidateTags = () => client.invalidateQueries({ queryKey: queryKeys.documents.tags() });
+  const invalidateCompletedParseJobs = () => client.invalidateQueries({ queryKey: queryKeys.documents.completedParseJobs() });
   const refreshDocument = useCallback(async (documentId: string) => {
     await Promise.all([
       client.invalidateQueries({ queryKey: queryKeys.documents.lists() }),
       client.invalidateQueries({ queryKey: queryKeys.documents.detail(documentId) }),
+      client.invalidateQueries({ queryKey: queryKeys.documents.completedParseJobs() }),
     ]);
   }, [client]);
 
@@ -154,14 +156,22 @@ export function useDocumentMutations() {
         tag_ids?: string[];
       }) => documentsApi.updateDocument(documentId, input),
       onSuccess: async (document) => {
-        await client.invalidateQueries({ queryKey: queryKeys.documents.detail(document.document_id) });
-        await invalidateLists();
+        await Promise.all([
+          client.invalidateQueries({ queryKey: queryKeys.documents.detail(document.document_id) }),
+          invalidateLists(),
+          invalidateCompletedParseJobs(),
+        ]);
       },
     }),
     createParseJob: useMutation({
       mutationFn: ({ documentId, input }: { documentId: string; input: CreateParseJobInput }) =>
         documentsApi.createDocumentParseJob(documentId, input),
-      onSuccess: (_result, { documentId }) => client.invalidateQueries({ queryKey: queryKeys.documents.jobs(documentId) }),
+      onSuccess: async (_result, { documentId }) => {
+        await Promise.all([
+          client.invalidateQueries({ queryKey: queryKeys.documents.jobs(documentId) }),
+          invalidateCompletedParseJobs(),
+        ]);
+      },
     }),
     refreshDocument,
     cancelJob: useMutation({
@@ -170,7 +180,14 @@ export function useDocumentMutations() {
     }),
     deleteDocument: useMutation({
       mutationFn: documentsApi.deleteDocument,
-      onSuccess: async () => { await invalidateLists(); await invalidateDatasets(); await invalidateTags(); },
+      onSuccess: async () => {
+        await Promise.all([
+          invalidateLists(),
+          invalidateDatasets(),
+          invalidateTags(),
+          invalidateCompletedParseJobs(),
+        ]);
+      },
     }),
   };
 }

@@ -24,6 +24,7 @@ function setViewport(width: number) {
 const state = vi.hoisted(() => ({
   textbook: null as Record<string, unknown> | null,
   parseJobs: [] as Array<Record<string, unknown>>,
+  getAssetUrl: vi.fn(),
   start: vi.fn(),
   run: vi.fn(),
   retry: vi.fn(),
@@ -39,6 +40,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('../api', () => ({
   uploadEducationAsset: vi.fn(),
+  getEducationAssetDownloadUrl: state.getAssetUrl,
 }));
 
 vi.mock('../queries', () => ({
@@ -76,6 +78,7 @@ beforeEach(() => {
     { producer_job_id: 'job-parse-2', document_id: 'doc-2', primary_artifact_id: 'art-2', filename: 'workbook.pdf', media_type: 'application/pdf', format: 'pdf', parser_id: 'datalab', parser_name: 'Datalab', parser_version: '2', parse_completed_at: '2026-08-13T00:01:00Z', size_bytes: 2048, artifact_count: 5 },
   ];
   state.start.mockReset().mockResolvedValue({ job_id: 'job-1' });
+  state.getAssetUrl.mockReset().mockResolvedValue('https://storage.test/legacy.pdf');
   state.run.mockReset();
   state.retry.mockReset();
   state.createTeaching.mockReset();
@@ -149,6 +152,7 @@ describe('TextbookDetailPage', () => {
             parse_completed_at: '2026-09-16T10:00:00Z',
             primary_sha256: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
             document_deleted: false,
+            document_accessible: true,
             snapshot_prefix: 'education/private/secret/',
           },
           {
@@ -166,11 +170,29 @@ describe('TextbookDetailPage', () => {
             parse_completed_at: '2026-09-16T10:01:00Z',
             primary_sha256: 'fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321',
             document_deleted: true,
+            document_accessible: false,
             storage_key: 'documents/private/deleted.md',
           },
           {
-            legacy: true,
+            legacy: false,
             position: 3,
+            document_id: 'doc-restricted',
+            producer_job_id: 'job-parse-3',
+            primary_artifact_id: 'art-3',
+            filename: 'restricted.pdf',
+            media_type: 'application/pdf',
+            format: 'pdf',
+            parser_id: 'datalab',
+            parser_name: 'Datalab',
+            parser_version: '2',
+            parse_completed_at: '2026-09-16T10:02:00Z',
+            primary_sha256: '1'.repeat(64),
+            document_deleted: false,
+            document_accessible: false,
+          },
+          {
+            legacy: true,
+            position: 4,
             asset_id: 'asset-1',
             original_filename: 'legacy.pdf',
             content_type: 'application/pdf',
@@ -201,10 +223,12 @@ describe('TextbookDetailPage', () => {
     expect(screen.queryByRole('tab', { name: '内容' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '来源' }));
     expect(screen.getByRole('link', { name: '查看 body.pdf' })).toHaveAttribute('href', '/documents/doc-1');
-    expect(screen.getAllByText(/Datalab/)).toHaveLength(2);
+    expect(screen.getAllByText(/Datalab/)).toHaveLength(3);
     expect(screen.getByText(/abcdef123456/)).toBeInTheDocument();
     expect(screen.getByText('原文档已删除')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '查看 deleted.pdf' })).not.toBeInTheDocument();
+    expect(screen.getByText('原文档不可访问')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '查看 restricted.pdf' })).not.toBeInTheDocument();
     expect(screen.getByText('legacy.pdf')).toBeInTheDocument();
     expect(screen.getByText('旧版资料')).toBeInTheDocument();
     expect(screen.queryByText(/education\/private|documents\/private|storage_key|snapshot_prefix/i)).not.toBeInTheDocument();
@@ -242,6 +266,7 @@ describe('TextbookDetailPage', () => {
           parse_completed_at: '2026-09-16T10:00:00Z',
           primary_sha256: 'a'.repeat(64),
           document_deleted: false,
+          document_accessible: true,
         }],
         assignments: [],
         teaching_packages: [],
@@ -258,6 +283,48 @@ describe('TextbookDetailPage', () => {
     expect(screen.getByText(/本地加工失败/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '来源' }));
     expect(screen.getByRole('link', { name: '查看 body.pdf' })).toHaveAttribute('href', '/documents/doc-1');
+  });
+
+  it('opens legacy sources through the existing download action', async () => {
+    state.textbook = {
+      textbook_id: 'textbook-1',
+      household_id: 'household-1',
+      title: '英语第二册',
+      slug: 'english-2',
+      versions: [{
+        version_id: 'version-1',
+        sequence: 1,
+        status: 'review',
+        chapter_count: 1,
+        is_published: false,
+        sources: [{
+          legacy: true,
+          position: 1,
+          asset_id: 'asset-legacy-1',
+          original_filename: 'legacy.pdf',
+          content_type: 'application/pdf',
+          size_bytes: 1024,
+        }],
+        assignments: [],
+        teaching_packages: [],
+        chapters: [],
+      }],
+    };
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={['/education/textbooks/textbook-1']}>
+        <Routes><Route path="/education/textbooks/:textbookId" element={<TextbookDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('tab', { name: '来源' }));
+    await user.click(screen.getByRole('button', { name: '打开 legacy.pdf' }));
+
+    await waitFor(() => expect(state.getAssetUrl).toHaveBeenCalledWith('asset-legacy-1'));
+    expect(open).toHaveBeenCalledWith('https://storage.test/legacy.pdf', '_blank', 'noopener,noreferrer');
+    open.mockRestore();
   });
 
   it('provides complete tab semantics and keyboard navigation', async () => {
@@ -296,6 +363,13 @@ describe('TextbookDetailPage', () => {
     expect(overviewPanel).toHaveAttribute('aria-labelledby', overviewTab.id);
     expect(overviewTab).toHaveAttribute('tabindex', '0');
     expect(sourcesTab).toHaveAttribute('tabindex', '-1');
+    for (const tab of [overviewTab, sourcesTab, teachingTab, screen.getByRole('tab', { name: '知识资产' }), studentsTab]) {
+      const controlledPanel = document.getElementById(tab.getAttribute('aria-controls') ?? '');
+      expect(controlledPanel).not.toBeNull();
+      expect(controlledPanel).toHaveAttribute('aria-labelledby', tab.id);
+    }
+    expect(overviewPanel).not.toHaveAttribute('hidden');
+    expect(document.getElementById(sourcesTab.getAttribute('aria-controls') ?? '')).toHaveAttribute('hidden');
 
     overviewTab.focus();
     await user.keyboard('{ArrowRight}');
@@ -352,6 +426,7 @@ describe('TextbookDetailPage', () => {
           parse_completed_at: '2026-09-16T10:00:00Z',
           primary_sha256: 'a'.repeat(64),
           document_deleted: false,
+          document_accessible: true,
         }],
         assignments: [],
         teaching_packages: [],
