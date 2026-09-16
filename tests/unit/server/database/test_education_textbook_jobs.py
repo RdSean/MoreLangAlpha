@@ -1,10 +1,72 @@
 """Durable processing-job persistence contracts."""
 
 from contextlib import asynccontextmanager
+from hashlib import sha256
 
 import pytest
 
 from src.server.database import education_textbooks
+
+
+@pytest.mark.asyncio
+async def test_teaching_input_returns_artifact_backed_complete_sources_in_order(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    first_markdown = "# First complete source\n"
+    second_markdown = "# Second complete source\n"
+    mock_cursor.fetchone.return_value = {
+        "content_version_id": "version-1",
+        "content_version_sequence": 2,
+        "household_id": "household-1",
+        "slug": "english-2",
+        "title": "英语第二册",
+        "artifact_backed": True,
+    }
+    mock_cursor.fetchall.return_value = [
+        {
+            "content_chapter_id": "f5761267-11d1-4977-8107-e2671c99a2f0",
+            "producer_job_id": "job-parse-1",
+            "document_id": "doc-1",
+            "position": 1,
+            "slug": "reading-explorer",
+            "title": "reading-explorer.pdf",
+            "markdown": first_markdown,
+        },
+        {
+            "content_chapter_id": "8a77d086-0b23-4a1e-89d0-f163fa23d5d1",
+            "producer_job_id": "job-parse-2",
+            "document_id": "doc-2",
+            "position": 2,
+            "slug": "workbook",
+            "title": "workbook.pdf",
+            "markdown": second_markdown,
+        },
+    ]
+
+    result = await education_textbooks.get_teaching_input_for_parent(
+        parent_user_id="parent-1",
+        content_version_id="version-1",
+    )
+
+    assert result is not None
+    assert "chapters" not in result
+    assert [source["position"] for source in result["sources"]] == [1, 2]
+    assert [source["source_id"] for source in result["sources"]] == [
+        "job-parse-1",
+        "job-parse-2",
+    ]
+    assert [source["content_sha256"] for source in result["sources"]] == [
+        sha256(first_markdown.encode()).hexdigest(),
+        sha256(second_markdown.encode()).hexdigest(),
+    ]
+    source_sql = mock_cursor.execute.call_args_list[1].args[0]
+    assert "education_textbook_artifact_sources" in source_sql
+    assert "ORDER BY chapters.position" in source_sql
 
 
 @pytest.mark.asyncio

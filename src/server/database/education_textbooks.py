@@ -1,5 +1,6 @@
 """Raw PostgreSQL persistence for versioned family textbook learning."""
 
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -383,7 +384,12 @@ async def get_teaching_input_for_parent(
                 """
                 SELECT versions.version_id AS content_version_id,
                        versions.sequence AS content_version_sequence,
-                       textbooks.household_id, textbooks.slug, textbooks.title
+                       textbooks.household_id, textbooks.slug, textbooks.title,
+                       EXISTS (
+                           SELECT 1
+                           FROM education_textbook_artifact_sources AS artifact_sources
+                           WHERE artifact_sources.version_id = versions.version_id
+                       ) AS artifact_backed
                 FROM education_textbook_versions AS versions
                 JOIN education_textbooks AS textbooks
                   ON textbooks.textbook_id = versions.textbook_id
@@ -400,16 +406,57 @@ async def get_teaching_input_for_parent(
             if not version:
                 return None
             result = dict(version)
+            artifact_backed = bool(result.pop("artifact_backed", False))
             await cur.execute(
                 """
-                SELECT chapter_id AS content_chapter_id, position, slug, title, markdown
-                FROM education_textbook_chapters
-                WHERE version_id = %s
-                ORDER BY position
+                SELECT chapters.chapter_id AS content_chapter_id,
+                       artifact_sources.producer_job_id,
+                       artifact_sources.document_id,
+                       chapters.position, chapters.slug, chapters.title, chapters.markdown
+                FROM education_textbook_chapters AS chapters
+                LEFT JOIN education_textbook_artifact_sources AS artifact_sources
+                  ON artifact_sources.version_id = chapters.version_id
+                 AND artifact_sources.position = chapters.position
+                WHERE chapters.version_id = %s
+                ORDER BY chapters.position
                 """,
                 (content_version_id,),
             )
-            result["chapters"] = [dict(row) for row in await cur.fetchall()]
+            rows = [dict(row) for row in await cur.fetchall()]
+            if artifact_backed:
+                result["sources"] = [
+                    {
+                        "source_id": str(
+                            row.get("producer_job_id")
+                            or row["content_chapter_id"]
+                        ),
+                        "content_chapter_id": str(row["content_chapter_id"]),
+                        "document_id": (
+                            str(row["document_id"])
+                            if row.get("document_id") is not None
+                            else None
+                        ),
+                        "position": row["position"],
+                        "slug": row["slug"],
+                        "title": row["title"],
+                        "content_sha256": hashlib.sha256(
+                            str(row["markdown"]).encode("utf-8")
+                        ).hexdigest(),
+                        "markdown": row["markdown"],
+                    }
+                    for row in rows
+                ]
+            else:
+                result["chapters"] = [
+                    {
+                        "content_chapter_id": row["content_chapter_id"],
+                        "position": row["position"],
+                        "slug": row["slug"],
+                        "title": row["title"],
+                        "markdown": row["markdown"],
+                    }
+                    for row in rows
+                ]
     return result
 
 
@@ -1219,7 +1266,12 @@ async def get_teaching_job_for_parent(
                        packages.teaching_package_id, packages.sequence AS teaching_package_sequence,
                        packages.content_version_id, packages.created_by_user_id,
                        versions.sequence AS content_version_sequence,
-                       textbooks.household_id, textbooks.slug, textbooks.title
+                       textbooks.household_id, textbooks.slug, textbooks.title,
+                       EXISTS (
+                           SELECT 1
+                           FROM education_textbook_artifact_sources AS artifact_sources
+                           WHERE artifact_sources.version_id = versions.version_id
+                       ) AS artifact_backed
                 FROM education_teaching_jobs AS jobs
                 JOIN education_teaching_packages AS packages
                   ON packages.teaching_package_id = jobs.teaching_package_id
@@ -1239,16 +1291,57 @@ async def get_teaching_job_for_parent(
             if not job:
                 return None
             result = dict(job)
+            artifact_backed = bool(result.pop("artifact_backed", False))
             await cur.execute(
                 """
-                SELECT chapter_id AS content_chapter_id, position, slug, title, markdown
-                FROM education_textbook_chapters
-                WHERE version_id = %s
-                ORDER BY position
+                SELECT chapters.chapter_id AS content_chapter_id,
+                       artifact_sources.producer_job_id,
+                       artifact_sources.document_id,
+                       chapters.position, chapters.slug, chapters.title, chapters.markdown
+                FROM education_textbook_chapters AS chapters
+                LEFT JOIN education_textbook_artifact_sources AS artifact_sources
+                  ON artifact_sources.version_id = chapters.version_id
+                 AND artifact_sources.position = chapters.position
+                WHERE chapters.version_id = %s
+                ORDER BY chapters.position
                 """,
                 (result["content_version_id"],),
             )
-            result["chapters"] = [dict(row) for row in await cur.fetchall()]
+            rows = [dict(row) for row in await cur.fetchall()]
+            if artifact_backed:
+                result["sources"] = [
+                    {
+                        "source_id": str(
+                            row.get("producer_job_id")
+                            or row["content_chapter_id"]
+                        ),
+                        "content_chapter_id": str(row["content_chapter_id"]),
+                        "document_id": (
+                            str(row["document_id"])
+                            if row.get("document_id") is not None
+                            else None
+                        ),
+                        "position": row["position"],
+                        "slug": row["slug"],
+                        "title": row["title"],
+                        "content_sha256": hashlib.sha256(
+                            str(row["markdown"]).encode("utf-8")
+                        ).hexdigest(),
+                        "markdown": row["markdown"],
+                    }
+                    for row in rows
+                ]
+            else:
+                result["chapters"] = [
+                    {
+                        "content_chapter_id": row["content_chapter_id"],
+                        "position": row["position"],
+                        "slug": row["slug"],
+                        "title": row["title"],
+                        "markdown": row["markdown"],
+                    }
+                    for row in rows
+                ]
     return result
 
 

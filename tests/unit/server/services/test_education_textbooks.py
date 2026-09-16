@@ -1,6 +1,7 @@
 """Contract tests for versioned family textbook learning."""
 
 import asyncio
+import json
 import logging
 from unittest.mock import AsyncMock
 from types import SimpleNamespace
@@ -11,6 +12,70 @@ from uuid import UUID
 import pytest
 
 from src.server.services import education_textbooks
+
+
+ARTIFACT_VERSION_ID = "f5761267-11d1-4977-8107-e2671c99a2f0"
+
+
+def _artifact_processing_job(*sources: dict) -> dict:
+    return {
+        "job_id": "job-1",
+        "version_id": ARTIFACT_VERSION_ID,
+        "textbook_id": "textbook-1",
+        "household_id": "household-1",
+        "title": "英语第二册",
+        "slug": "english-2",
+        "version_sequence": 1,
+        "attempt_count": 1,
+        "sources": list(sources),
+    }
+
+
+def _artifact_source(
+    *,
+    position: int,
+    filename: str,
+    markdown: bytes,
+    artifact_id: str | None = None,
+) -> tuple[dict, str, str]:
+    artifact_id = artifact_id or f"artifact-{position}"
+    prefix = (
+        "education/household-1/english-2/source-bundles/"
+        f"{ARTIFACT_VERSION_ID}/{position:02d}/"
+    )
+    manifest_key = f"{prefix}manifest.json"
+    artifact_key = f"{prefix}artifacts/document.md"
+    source = {
+        "document_id": f"doc-{position}",
+        "producer_job_id": f"job-parse-{position}",
+        "primary_artifact_id": artifact_id,
+        "position": position,
+        "source_filename": filename,
+        "source_media_type": "application/pdf",
+        "source_format": "pdf",
+        "primary_sha256": sha256(markdown).hexdigest(),
+        "snapshot_prefix": prefix,
+    }
+    return source, manifest_key, artifact_key
+
+
+def _artifact_manifest(source: dict, markdown: bytes) -> dict:
+    return {
+        "format": "langalpha-textbook-source-snapshot/v1",
+        "document_id": source["document_id"],
+        "producer_job_id": source["producer_job_id"],
+        "primary_artifact_id": source["primary_artifact_id"],
+        "artifacts": [
+            {
+                "artifact_id": source["primary_artifact_id"],
+                "artifact_kind": "primary_document",
+                "format": "gfm",
+                "media_type": "text/markdown",
+                "relative_path": "artifacts/document.md",
+                "sha256": sha256(markdown).hexdigest(),
+            }
+        ],
+    }
 
 
 def test_version_transition_requires_review_before_publication():
@@ -905,6 +970,220 @@ async def test_processing_job_writes_a_bundle_before_making_a_version_reviewable
         "name": "local_fixture",
         "version": "1",
     }
+
+
+@pytest.mark.asyncio
+async def test_artifact_processing_skips_pdf_pipeline_and_persists_complete_sources_in_order(
+    monkeypatch,
+):
+    first_markdown = "# First source\n\nComplete first Markdown.\n"
+    second_markdown = "# Second source\n\nComplete second Markdown.\n"
+    first, first_manifest_key, first_artifact_key = _artifact_source(
+        position=1,
+        filename="reading-explorer.pdf",
+        markdown=first_markdown.encode(),
+    )
+    second, second_manifest_key, second_artifact_key = _artifact_source(
+        position=2,
+        filename="workbook.pdf",
+        markdown=second_markdown.encode(),
+    )
+    objects = {
+        first_manifest_key: json.dumps(
+            _artifact_manifest(first, first_markdown.encode())
+        ).encode(),
+        first_artifact_key: first_markdown.encode(),
+        second_manifest_key: json.dumps(
+            {
+                **_artifact_manifest(second, second_markdown.encode()),
+                "artifacts": [
+                    {
+                        **_artifact_manifest(second, second_markdown.encode())[
+                            "artifacts"
+                        ][0],
+                        "format": "markdown",
+                        "media_type": "text/markdown; charset=utf-8",
+                    }
+                ],
+            }
+        ).encode(),
+        second_artifact_key: second_markdown.encode(),
+    }
+    job = _artifact_processing_job(first, second)
+    monkeypatch.setattr(
+        education_textbooks,
+        "claim_textbook_processing_job",
+        AsyncMock(return_value=job),
+    )
+    monkeypatch.setattr(education_textbooks, "get_bytes", objects.get)
+    build_pdf = AsyncMock(side_effect=AssertionError("pypdf path must not run"))
+    write_bundle = AsyncMock(side_effect=AssertionError("legacy bundle must not run"))
+    complete = AsyncMock(return_value={"job_id": "job-1", "status": "completed"})
+    monkeypatch.setattr(
+        education_textbooks, "build_local_pdf_package", build_pdf, raising=False
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "write_textbook_content_bundle",
+        write_bundle,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        education_textbooks, "complete_textbook_processing_job", complete
+    )
+
+    result = await education_textbooks.process_textbook_job(job_id="job-1")
+
+    assert result["status"] == "completed"
+    build_pdf.assert_not_awaited()
+    write_bundle.assert_not_awaited()
+    chapters = complete.await_args.kwargs["chapters"]
+    assert [chapter["position"] for chapter in chapters] == [1, 2]
+    assert [chapter["title"] for chapter in chapters] == [
+        "reading-explorer.pdf",
+        "workbook.pdf",
+    ]
+    assert [chapter["markdown"] for chapter in chapters] == [
+        first_markdown,
+        second_markdown,
+    ]
+    assert [chapter["markdown_key"] for chapter in chapters] == [
+        first_artifact_key,
+        second_artifact_key,
+    ]
+    assert complete.await_args.kwargs["bundle_prefix"] == (
+        "education/household-1/english-2/source-bundles/"
+        f"{ARTIFACT_VERSION_ID}"
+    )
+    assert complete.await_args.kwargs["extractor"] == {
+        "name": "managed_ptc",
+        "version": "1",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "missing_manifest",
+        "invalid_manifest",
+        "missing_primary",
+        "bad_digest",
+        "oversized",
+        "invalid_utf8",
+    ],
+)
+async def test_artifact_processing_fails_closed_on_invalid_snapshot(
+    monkeypatch, failure
+):
+    markdown = b"# Complete source\n"
+    source, manifest_key, artifact_key = _artifact_source(
+        position=1,
+        filename="reading-explorer.pdf",
+        markdown=markdown,
+    )
+    manifest = _artifact_manifest(source, markdown)
+    objects = {manifest_key: json.dumps(manifest).encode(), artifact_key: markdown}
+    if failure == "missing_manifest":
+        objects.pop(manifest_key)
+    elif failure == "invalid_manifest":
+        objects[manifest_key] = b"not-json"
+    elif failure == "missing_primary":
+        manifest["primary_artifact_id"] = "missing-artifact"
+    elif failure == "bad_digest":
+        objects[artifact_key] = b"# changed\n"
+    elif failure == "oversized":
+        objects[artifact_key] = b"x" * 65
+        manifest["artifacts"][0]["sha256"] = sha256(objects[artifact_key]).hexdigest()
+        source["primary_sha256"] = sha256(objects[artifact_key]).hexdigest()
+    elif failure == "invalid_utf8":
+        objects[artifact_key] = b"\xff\xfe"
+        manifest["artifacts"][0]["sha256"] = sha256(objects[artifact_key]).hexdigest()
+        source["primary_sha256"] = sha256(objects[artifact_key]).hexdigest()
+    if failure != "invalid_manifest":
+        objects[manifest_key] = json.dumps(manifest).encode()
+
+    monkeypatch.setattr(
+        education_textbooks,
+        "claim_textbook_processing_job",
+        AsyncMock(return_value=_artifact_processing_job(source)),
+    )
+    monkeypatch.setattr(education_textbooks, "get_bytes", objects.get)
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_document_parsing_config",
+        lambda: SimpleNamespace(max_upload_bytes=64),
+        raising=False,
+    )
+    complete = AsyncMock()
+    failed = AsyncMock()
+    monkeypatch.setattr(education_textbooks, "complete_textbook_processing_job", complete)
+    monkeypatch.setattr(education_textbooks, "fail_textbook_processing_job", failed)
+
+    with pytest.raises(education_textbooks.TextbookProcessingError):
+        await education_textbooks.process_textbook_job(job_id="job-1")
+
+    complete.assert_not_awaited()
+    failed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_legacy_processing_keeps_the_pdf_and_content_bundle_path(monkeypatch):
+    job = {
+        "job_id": "job-1",
+        "version_id": "version-1",
+        "textbook_id": "textbook-1",
+        "household_id": "household-1",
+        "title": "英语第二册",
+        "slug": "english-2",
+        "version_sequence": 1,
+        "attempt_count": 1,
+        "sources": [
+            {
+                "asset_id": "asset-1",
+                "storage_key": "education/household-1/source.pdf",
+                "content_type": "application/pdf",
+                "original_filename": "source.pdf",
+            }
+        ],
+    }
+    package = {
+        "extractor": {"name": "local_pypdf", "version": "1"},
+        "chapters": [
+            {
+                "position": 1,
+                "slug": "pages-1",
+                "title": "第 1 页",
+                "markdown_key": (
+                    "education/household-1/english-2/v1/chapters/pages-1.md"
+                ),
+                "markdown": "# 第 1 页",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        education_textbooks,
+        "claim_textbook_processing_job",
+        AsyncMock(return_value=job),
+    )
+    build_pdf = AsyncMock(return_value=package)
+    write_bundle = AsyncMock(return_value="education/household-1/english-2/v1")
+    complete = AsyncMock(return_value={"job_id": "job-1", "status": "completed"})
+    monkeypatch.setattr(education_textbooks, "build_local_pdf_package", build_pdf)
+    monkeypatch.setattr(
+        education_textbooks, "write_textbook_content_bundle", write_bundle
+    )
+    monkeypatch.setattr(
+        education_textbooks, "complete_textbook_processing_job", complete
+    )
+
+    await education_textbooks.process_textbook_job(job_id="job-1")
+
+    build_pdf.assert_awaited_once_with(job)
+    write_bundle.assert_awaited_once_with(job, package)
+    assert complete.await_args.kwargs["bundle_prefix"] == (
+        "education/household-1/english-2/v1"
+    )
 
 
 def test_local_fixture_processing_creates_content_without_teaching_material():

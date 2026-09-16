@@ -6,10 +6,11 @@ import json
 import logging
 from collections.abc import Mapping
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import uuid4
 
+from src.config.settings import get_document_parsing_config
 from src.server.database.education_tasks import get_household_context_for_parent
 from src.server.database.education_textbooks import (
     assign_textbook_publication,
@@ -57,6 +58,9 @@ logger = logging.getLogger(__name__)
 
 _STATE_PROBE_ATTEMPTS = 3
 _STATE_PROBE_BACKOFF_SECONDS = 0.05
+_SOURCE_SNAPSHOT_FORMAT = "langalpha-textbook-source-snapshot/v1"
+_MARKDOWN_MEDIA_TYPE = "text/markdown"
+_MARKDOWN_FORMATS = frozenset({"gfm", "markdown"})
 
 _VALID_VERSION_TRANSITIONS = {
     ("draft", "processing"),
@@ -110,6 +114,214 @@ def _slug(value: str, *, unique_suffix: str | None = None) -> str:
     if unique_suffix:
         return f"{base[: max(1, 80 - len(unique_suffix) - 1)]}-{unique_suffix}"
     return base[:80]
+
+
+def _uses_artifact_sources(job: Mapping[str, Any]) -> bool:
+    sources = job.get("sources")
+    return (
+        isinstance(sources, list)
+        and bool(sources)
+        and any(
+            isinstance(source, Mapping) and source.get("snapshot_prefix")
+            for source in sources
+        )
+    )
+
+
+def _snapshot_prefix(value: object) -> str:
+    if not isinstance(value, str) or not value.startswith("education/") or not value.endswith("/"):
+        raise TextbookProcessingError("A frozen textbook snapshot prefix is invalid")
+    path = PurePosixPath(value.rstrip("/"))
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise TextbookProcessingError("A frozen textbook snapshot prefix is invalid")
+    if "\\" in value or "\x00" in value:
+        raise TextbookProcessingError("A frozen textbook snapshot prefix is invalid")
+    return value
+
+
+def _snapshot_relative_path(value: object) -> str:
+    if not isinstance(value, str) or not value or "\\" in value or "\x00" in value:
+        raise TextbookProcessingError("A frozen textbook artifact path is invalid")
+    path = PurePosixPath(value)
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise TextbookProcessingError("A frozen textbook artifact path is invalid")
+    normalized = path.as_posix()
+    return normalized if normalized.startswith("artifacts/") else f"artifacts/{normalized}"
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _source_position(source: Mapping[str, Any]) -> int:
+    position = source.get("position")
+    if not isinstance(position, int) or isinstance(position, bool) or position <= 0:
+        raise TextbookProcessingError("A frozen textbook source position is invalid")
+    return position
+
+
+def _artifact_bundle_prefix(sources: list[Mapping[str, Any]]) -> str:
+    namespaces = {
+        "/".join(_snapshot_prefix(source.get("snapshot_prefix")).rstrip("/").split("/")[:-1])
+        for source in sources
+    }
+    if len(namespaces) != 1:
+        raise TextbookProcessingError("Frozen textbook sources do not share one bundle")
+    return namespaces.pop()
+
+
+async def build_frozen_artifact_package(job: dict[str, Any]) -> dict[str, Any]:
+    """Load each immutable source snapshot once into a complete Markdown source row."""
+    sources = job.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise TextbookProcessingError("Textbook processing has no frozen sources")
+    try:
+        ordered_sources = sorted(sources, key=_source_position)
+    except TypeError as exc:
+        raise TextbookProcessingError("A frozen textbook source is invalid") from exc
+    if len({_source_position(source) for source in ordered_sources}) != len(ordered_sources):
+        raise TextbookProcessingError("Frozen textbook source positions must be unique")
+
+    max_bytes = int(get_document_parsing_config().max_upload_bytes)
+    if max_bytes <= 0:
+        raise TextbookProcessingError("Textbook source size limit is invalid")
+
+    chapters: list[dict[str, Any]] = []
+    used_slugs: set[str] = set()
+    for source in ordered_sources:
+        if not isinstance(source, Mapping):
+            raise TextbookProcessingError("A frozen textbook source is invalid")
+        prefix = _snapshot_prefix(source.get("snapshot_prefix"))
+        primary_artifact_id = source.get("primary_artifact_id")
+        primary_sha256 = source.get("primary_sha256")
+        document_id = source.get("document_id")
+        producer_job_id = source.get("producer_job_id")
+        if not isinstance(primary_artifact_id, str) or not primary_artifact_id:
+            raise TextbookProcessingError("A frozen textbook primary artifact is invalid")
+        if not _is_sha256(primary_sha256):
+            raise TextbookProcessingError("A frozen textbook source digest is invalid")
+
+        manifest_bytes = await asyncio.to_thread(
+            get_bytes, f"{prefix}manifest.json"
+        )
+        if (
+            not isinstance(manifest_bytes, bytes)
+            or not manifest_bytes
+            or len(manifest_bytes) > max_bytes
+        ):
+            raise TextbookProcessingError("A frozen textbook snapshot manifest is invalid")
+        try:
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot manifest is invalid"
+            ) from exc
+        if not isinstance(manifest, Mapping) or manifest.get("format") != _SOURCE_SNAPSHOT_FORMAT:
+            raise TextbookProcessingError("A frozen textbook snapshot manifest is invalid")
+        if (
+            str(manifest.get("document_id") or "") != str(document_id or "")
+            or str(manifest.get("producer_job_id") or "") != str(producer_job_id or "")
+            or str(manifest.get("primary_artifact_id") or "") != primary_artifact_id
+        ):
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot manifest does not match its source"
+            )
+
+        artifacts = manifest.get("artifacts")
+        if not isinstance(artifacts, list) or not artifacts:
+            raise TextbookProcessingError("A frozen textbook snapshot has no artifacts")
+        if any(not isinstance(artifact, Mapping) for artifact in artifacts):
+            raise TextbookProcessingError("A frozen textbook snapshot artifact is invalid")
+        primary_matches = [
+            artifact
+            for artifact in artifacts
+            if str(artifact.get("artifact_id") or "") == primary_artifact_id
+        ]
+        if len(primary_matches) != 1:
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot primary artifact is missing"
+            )
+        primary = primary_matches[0]
+        if str(primary.get("artifact_kind") or "") != "primary_document":
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot primary artifact is invalid"
+            )
+        if str(primary.get("format") or "").strip().lower() not in _MARKDOWN_FORMATS:
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot Markdown format is invalid"
+            )
+        media_type = str(primary.get("media_type") or "").split(";", 1)[0].strip().lower()
+        if media_type != _MARKDOWN_MEDIA_TYPE:
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot Markdown media type is invalid"
+            )
+        manifest_sha256 = primary.get("sha256")
+        if not _is_sha256(manifest_sha256) or manifest_sha256 != primary_sha256:
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot primary digest is invalid"
+            )
+        relative_path = _snapshot_relative_path(primary.get("relative_path"))
+        artifact_key = f"{prefix}{relative_path}"
+        content = await asyncio.to_thread(get_bytes, artifact_key)
+        if (
+            not isinstance(content, bytes)
+            or not content
+            or len(content) > max_bytes
+        ):
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot primary artifact is invalid"
+            )
+        declared_size = primary.get("size_bytes")
+        if declared_size is not None and (
+            not isinstance(declared_size, int)
+            or isinstance(declared_size, bool)
+            or declared_size != len(content)
+        ):
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot primary size is invalid"
+            )
+        if hashlib.sha256(content).hexdigest() != primary_sha256:
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot primary digest does not match"
+            )
+        try:
+            markdown = content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot Markdown is not UTF-8"
+            ) from exc
+        if not markdown.strip():
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot Markdown is empty"
+            )
+
+        title = source.get("source_filename")
+        if not isinstance(title, str) or not title.strip():
+            raise TextbookProcessingError("A frozen textbook source filename is invalid")
+        title = title.strip()
+        slug = _slug(title)
+        if slug in used_slugs:
+            slug = _slug(f"{_source_position(source):02d}-{title}")
+        used_slugs.add(slug)
+        chapters.append(
+            {
+                "position": _source_position(source),
+                "slug": slug,
+                "title": title,
+                "page_start": None,
+                "page_end": None,
+                "markdown_key": artifact_key,
+                "markdown": markdown,
+            }
+        )
+    return {
+        "extractor": {"name": "managed_ptc", "version": "1"},
+        "chapters": chapters,
+    }
 
 
 async def create_textbook(*, parent_user_id: str, title: str) -> dict[str, Any]:
@@ -366,13 +578,17 @@ async def build_local_pdf_package(job: dict[str, Any]) -> dict[str, Any]:
 
 
 async def process_textbook_job(*, job_id: str) -> dict[str, Any]:
-    """Claim a persisted job, write its recoverable bundle, then make it reviewable."""
+    """Claim a persisted job and persist reviewable frozen Markdown content."""
     job = await claim_textbook_processing_job(job_id=job_id)
     if not job:
         raise TextbookNotFoundError("Textbook processing job is not queued")
     try:
-        package = await build_local_pdf_package(job)
-        prefix = await write_textbook_content_bundle(job, package)
+        if _uses_artifact_sources(job):
+            package = await build_frozen_artifact_package(job)
+            prefix = _artifact_bundle_prefix(job["sources"])
+        else:
+            package = await build_local_pdf_package(job)
+            prefix = await write_textbook_content_bundle(job, package)
         completed = await complete_textbook_processing_job(
             job_id=str(job["job_id"]),
             version_id=str(job["version_id"]),

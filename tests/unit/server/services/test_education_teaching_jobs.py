@@ -307,6 +307,9 @@ def test_managed_prompt_directs_one_root_to_read_staged_skills_without_forcing_o
         ".agents/skills/the-knowledge-guy/reference/managed-textbook-contract.md"
         in prompt
     )
+    assert "一个或多个完整来源文档" in prompt
+    assert "不保证标准 Unit/TOC 边界" in prompt
+    assert "inputs/sources/" in prompt
     assert "## Managed textbook mode" not in prompt
     assert "严格先完成" not in prompt
 

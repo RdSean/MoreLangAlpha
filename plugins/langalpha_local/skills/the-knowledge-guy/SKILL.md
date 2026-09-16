@@ -46,21 +46,24 @@ argument-hint: <question>  |  walk <topic>  |  course <book> [<ch>]  |  check <b
 When `$QUERY` begins `--managed-textbook <job>`, dispatch here before Step 0.
 This is a service-owned production stage, not a chat, walk or course request.
 
-1. Treat `<job>` as a UUID. Read only the staged manifest and chapter Markdown
-   at `/managed/textbook-job/<job>/inputs/manifest.json` and
-   `/managed/textbook-job/<job>/inputs/chapters/`.
+1. Treat `<job>` as a UUID. Read only the staged manifest and complete source
+   Markdown at `/managed/textbook-job/<job>/inputs/manifest.json` and
+   `/managed/textbook-job/<job>/inputs/sources/`. Historical jobs may instead
+   use `/inputs/chapters/`.
 2. Read the staged managed contract at
    `/managed/textbook-job/<job>/.agents/skills/the-knowledge-guy/reference/managed-textbook-contract.md`.
    Do not solicit input, fan out unrelated skills, dispatch other skills, use
    user memory, web access, ordinary workspace files or paths outside the job
    root. Do not create an HTML presentation, a course, a walk state or a chat
    response.
-3. For every frozen chapter, generate Chinese-student teaching material,
+3. For every frozen source bundle, generate Chinese-student teaching material,
    learning objectives, knowledge points, difficulties, prerequisites and
    auto-gradable questions, using the staged chapter knowledge, toolkit and
    practice candidates whenever they are available. The PTC root decides when
    to build, audit or revisit those assets. Preserve the staged
-   `content_chapter_id` and `content_sha256` exactly.
+   `content_chapter_id` and `content_sha256` exactly. The parser does not
+   guarantee standard Unit/TOC boundaries; produce the final learning
+   structure in the whitelisted outputs.
 4. Write only the v2 paths listed in the contract, including
    `/managed/textbook-job/<job>/outputs/knowledge/concept-index.json`,
    `/managed/textbook-job/<job>/outputs/knowledge/coverage-audit.json`, every

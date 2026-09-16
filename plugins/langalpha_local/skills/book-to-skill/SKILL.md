@@ -42,8 +42,10 @@ the regular source-ingest, cost confirmation and generated workspace skill
 flows do not apply.
 
 1. Treat `<job>` as a UUID and use only
-   `/managed/textbook-job/<job>/inputs/manifest.json` plus the staged Markdown
-   under `/managed/textbook-job/<job>/inputs/chapters/`. Do not read a binary source,
+   `/managed/textbook-job/<job>/inputs/manifest.json` plus each staged complete source bundle
+   under `/managed/textbook-job/<job>/inputs/sources/`.
+   Historical jobs may instead use
+   `/managed/textbook-job/<job>/inputs/chapters/`. Do not read a binary source,
    object store, home directory, normal workspace file or any path outside
    `/managed/textbook-job/<job>/`.
 2. Do not solicit input or confirmation, do not launch a user-directed
@@ -51,10 +53,12 @@ flows do not apply.
    memory or an HTML presentation file.
 3. Read the staged managed contract at
    `/managed/textbook-job/<job>/.agents/skills/book-to-skill/reference/managed-textbook-contract.md`,
-   then derive chapter-wise knowledge, concept links, coverage evidence and
+   then derive source-backed knowledge, concept links, coverage evidence and
    practice as the current frozen task needs. Coordinate with the staged
    `the-knowledge-guy` skill when Chinese teaching material needs those assets;
-   the PTC root chooses the ordering and may revisit a chapter for coverage.
+   the PTC root chooses the ordering and may revisit a source for coverage.
+   The parser does not guarantee standard Unit/TOC boundaries; produce the
+   final learning structure in whitelisted outputs.
 4. Write only the v2 candidate paths named by that contract:
    `/managed/textbook-job/<job>/outputs/knowledge/concept-index.json`,
    `/managed/textbook-job/<job>/outputs/knowledge/coverage-audit.json`,

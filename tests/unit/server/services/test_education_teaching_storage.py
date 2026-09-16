@@ -1,6 +1,7 @@
 """Sandbox staging and private archive contracts for teaching packages."""
 
 import json
+from hashlib import sha256
 from unittest.mock import AsyncMock
 
 import pytest
@@ -26,6 +27,40 @@ def _job() -> dict:
             }
         ],
         "sources": [{"storage_key": "education/household-1/secret.pdf"}],
+    }
+
+
+def _source_job() -> dict:
+    first_markdown = "# Complete first source\n\nFirst body.\n"
+    second_markdown = "# Complete second source\n\nSecond body.\n"
+    return {
+        "job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+        "household_id": "household-1",
+        "slug": "english-2",
+        "content_version_sequence": 1,
+        "teaching_package_sequence": 2,
+        "sources": [
+            {
+                "source_id": "job-parse-1",
+                "content_chapter_id": "f5761267-11d1-4977-8107-e2671c99a2f0",
+                "document_id": "doc-1",
+                "position": 1,
+                "slug": "reading-explorer",
+                "title": "reading-explorer.pdf",
+                "content_sha256": sha256(first_markdown.encode()).hexdigest(),
+                "markdown": first_markdown,
+            },
+            {
+                "source_id": "job-parse-2",
+                "content_chapter_id": "8a77d086-0b23-4a1e-89d0-f163fa23d5d1",
+                "document_id": "doc-2",
+                "position": 2,
+                "slug": "workbook",
+                "title": "workbook.pdf",
+                "content_sha256": sha256(second_markdown.encode()).hexdigest(),
+                "markdown": second_markdown,
+            },
+        ],
     }
 
 
@@ -55,6 +90,48 @@ async def test_stage_teaching_inputs_uploads_only_safe_manifest_and_frozen_chapt
     assert frozen["chapters"][0]["content_sha256"]
     manifest = json.loads(next(body for path, body in uploaded if path.endswith("manifest.json")))
     assert manifest["chapters"][0]["content_chapter_id"] == _job()["chapters"][0]["content_chapter_id"]
+
+
+@pytest.mark.asyncio
+async def test_stage_teaching_inputs_exposes_ordered_complete_source_bundles_without_storage_details():
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+    job = _source_job()
+
+    staged = await education_teaching_storage.stage_teaching_inputs(job, sandbox)
+
+    uploaded = {
+        call.args[0]: call.args[1]
+        for call in sandbox.aupload_file_bytes.await_args_list
+    }
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+    manifest = json.loads(uploaded[f"{root}inputs/manifest.json"])
+    assert manifest["format"] == "langalpha-managed-textbook-input/v2"
+    assert [source["position"] for source in manifest["sources"]] == [1, 2]
+    assert [source["path"] for source in manifest["sources"]] == [
+        "sources/01-reading-explorer.md",
+        "sources/02-workbook.md",
+    ]
+    assert [source["content_sha256"] for source in manifest["sources"]] == [
+        job["sources"][0]["content_sha256"],
+        job["sources"][1]["content_sha256"],
+    ]
+    assert uploaded[f"{root}inputs/sources/01-reading-explorer.md"] == (
+        job["sources"][0]["markdown"].encode()
+    )
+    assert uploaded[f"{root}inputs/sources/02-workbook.md"] == (
+        job["sources"][1]["markdown"].encode()
+    )
+    serialized = json.dumps(manifest)
+    for forbidden in (
+        "storage_key",
+        "https://",
+        "http://",
+        "education/",
+        "/managed/",
+    ):
+        assert forbidden not in serialized
+    assert [chapter["position"] for chapter in staged["chapters"]] == [1, 2]
 
 
 @pytest.mark.asyncio

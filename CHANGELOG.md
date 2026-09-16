@@ -2,6 +2,13 @@
 
 ## 2026-09-16
 
+### 教材加工消费冻结图书馆来源
+
+- `process_textbook_job()` 现在识别 `education_textbook_artifact_sources` 来源：逐来源读取服务生成的 `manifest.json`，按 `primary_artifact_id` 定位主 Markdown，并校验路径、格式、大小、UTF-8 与 `primary_sha256`；该路径不会调用 `pypdf`、旧 PDF 打包或重新复制源文件，失败时直接进入既有失败状态。
+- artifact-backed 版本按 `position` 把每份完整来源 Markdown 持久化为一个有序内容来源，标题使用来源文件名，slug 稳定且安全；`bundle_prefix` 固定指向版本的 `source-bundles/<version_id>` 命名空间。旧 `education_assets` 版本仍完整走 `build_local_pdf_package()` 与 `write_textbook_content_bundle()`。
+- 受管 PTC 的读取模型对 artifact-backed 版本返回 `sources`，历史版本继续返回 `chapters`；staging manifest v2 只暴露有序来源 ID、相对路径和哈希，不暴露 storage key、URL 或 sandbox 路径。prompt 与两份 managed contract 明确输入可能是一份或多份完整文档，解析器不保证标准 Unit/TOC 边界，最终学习结构由 PTC 写入白名单输出。
+- 新增服务、数据库与合同测试，覆盖跳过 PDF 链路、多来源顺序与完整 Markdown、manifest/主 artifact/大小/UTF-8/摘要失败关闭、旧链路兼容，以及 managed manifest 的安全投影。
+
 ### 设计：图书馆与教材正式资产打通
 
 - 确定图书馆只负责高精度解析，教材库消费完整的 Markdown/图片 Artifact，不再维护第二套 PDF 上传与 `pypdf` 分章链路。

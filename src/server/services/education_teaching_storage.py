@@ -17,6 +17,7 @@ from src.utils.storage import upload_bytes
 
 
 _SAFE_COMPONENT_RE = re.compile(r"[^0-9A-Za-z._-]+")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_CANDIDATE_BYTES = 4 * 1024 * 1024
 _MAX_ARCHIVE_STAGE_BYTES = 64 * 1024 * 1024
 _ARCHIVE_PUT_RETRY_DELAYS = (5, 10, 20, 40, 60)
@@ -97,6 +98,97 @@ def managed_job_root(job_id: str) -> str:
 def freeze_teaching_input(job: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize the service-authorized content used by every managed attempt."""
     job_id = str(UUID(str(job["job_id"])))
+    sources = job.get("sources")
+    if (
+        isinstance(sources, list)
+        and sources
+        and all(
+            isinstance(source, Mapping)
+            and source.get("markdown") is not None
+            and source.get("content_chapter_id") is not None
+            for source in sources
+        )
+    ):
+        normalized_sources: list[dict[str, Any]] = []
+        normalized_chapters: list[dict[str, Any]] = []
+        paths: set[str] = set()
+        positions: set[int] = set()
+        for source in sources:
+            if not isinstance(source, Mapping):
+                raise TeachingPackageStorageError("Frozen source is invalid")
+            source_id = str(
+                source.get("source_id") or source.get("content_chapter_id") or ""
+            )
+            if not source_id:
+                raise TeachingPackageStorageError("Frozen source identity is invalid")
+            content_chapter_id = str(
+                UUID(str(source.get("content_chapter_id") or source_id))
+            )
+            position = source.get("position")
+            if (
+                not isinstance(position, int)
+                or isinstance(position, bool)
+                or position <= 0
+                or position in positions
+            ):
+                raise TeachingPackageStorageError(
+                    "Frozen source position is invalid"
+                )
+            positions.add(position)
+            slug = _safe_component(source.get("slug"), "source")
+            markdown = source.get("markdown")
+            if not isinstance(markdown, str) or not markdown.strip():
+                raise TeachingPackageStorageError("Frozen source text is invalid")
+            content_sha256 = hashlib.sha256(markdown.encode("utf-8")).hexdigest()
+            provided_sha256 = source.get("content_sha256")
+            if provided_sha256 is not None and (
+                not isinstance(provided_sha256, str)
+                or not _SHA256_RE.fullmatch(provided_sha256)
+                or provided_sha256 != content_sha256
+            ):
+                raise TeachingPackageStorageError("Frozen source hash is invalid")
+            path = f"sources/{position:02d}-{slug}.md"
+            if path in paths:
+                raise TeachingPackageStorageError("Frozen source paths must be unique")
+            paths.add(path)
+            title = str(source.get("title") or slug)
+            normalized_sources.append(
+                {
+                    "source_id": source_id,
+                    "content_chapter_id": content_chapter_id,
+                    "document_id": (
+                        str(source["document_id"])
+                        if source.get("document_id") is not None
+                        else None
+                    ),
+                    "position": position,
+                    "slug": slug,
+                    "title": title,
+                    "content_sha256": content_sha256,
+                    "path": path,
+                    "asset_paths": [],
+                    "markdown": markdown,
+                }
+            )
+            normalized_chapters.append(
+                {
+                    "content_chapter_id": content_chapter_id,
+                    "position": position,
+                    "slug": slug,
+                    "title": title,
+                    "content_sha256": content_sha256,
+                    "markdown": markdown,
+                }
+            )
+        normalized_sources.sort(key=lambda source: source["position"])
+        normalized_chapters.sort(key=lambda chapter: chapter["position"])
+        return {
+            "format": "langalpha-managed-textbook-input/v2",
+            "job_id": job_id,
+            "sources": normalized_sources,
+            "chapters": normalized_chapters,
+        }
+
     chapters = job.get("chapters")
     if not isinstance(chapters, list) or not chapters:
         raise TeachingPackageStorageError("Teaching job has no frozen content chapters")
@@ -139,24 +231,47 @@ def freeze_teaching_input(job: Mapping[str, Any]) -> dict[str, Any]:
 def build_staged_teaching_input(job: Mapping[str, Any]) -> dict[str, Any]:
     """Build the exact safe manifest and hash before it enters a sandbox."""
     frozen = freeze_teaching_input(job)
-    manifest = {
-        "format": frozen["format"],
-        "job_id": frozen["job_id"],
-        "chapters": [
-            {
-                key: chapter[key]
-                for key in (
-                    "content_chapter_id",
-                    "position",
-                    "slug",
-                    "title",
-                    "content_sha256",
-                    "path",
-                )
-            }
-            for chapter in frozen["chapters"]
-        ],
-    }
+    if frozen["format"] == "langalpha-managed-textbook-input/v2":
+        manifest = {
+            "format": frozen["format"],
+            "job_id": frozen["job_id"],
+            "sources": [
+                {
+                    key: source[key]
+                    for key in (
+                        "source_id",
+                        "content_chapter_id",
+                        "document_id",
+                        "position",
+                        "slug",
+                        "title",
+                        "content_sha256",
+                        "path",
+                        "asset_paths",
+                    )
+                }
+                for source in frozen["sources"]
+            ],
+        }
+    else:
+        manifest = {
+            "format": frozen["format"],
+            "job_id": frozen["job_id"],
+            "chapters": [
+                {
+                    key: chapter[key]
+                    for key in (
+                        "content_chapter_id",
+                        "position",
+                        "slug",
+                        "title",
+                        "content_sha256",
+                        "path",
+                    )
+                }
+                for chapter in frozen["chapters"]
+            ],
+        }
     manifest_bytes = json.dumps(
         manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
@@ -197,10 +312,19 @@ async def stage_teaching_inputs(
         (f"{root}/outputs/knowledge/.keep", b""),
         (f"{root}/outputs/chapters/.keep", b""),
     ]
-    files.extend(
-        (f"{root}/inputs/{chapter['path']}", chapter["markdown"].encode("utf-8"))
-        for chapter in frozen["chapters"]
-    )
+    if frozen["format"] == "langalpha-managed-textbook-input/v2":
+        files.extend(
+            (
+                f"{root}/inputs/{source['path']}",
+                source["markdown"].encode("utf-8"),
+            )
+            for source in frozen["sources"]
+        )
+    else:
+        files.extend(
+            (f"{root}/inputs/{chapter['path']}", chapter["markdown"].encode("utf-8"))
+            for chapter in frozen["chapters"]
+        )
     await _upload_staged_files(sandbox, files)
     return {key: staged[key] for key in ("manifest", "manifest_sha256", "chapters")}
 

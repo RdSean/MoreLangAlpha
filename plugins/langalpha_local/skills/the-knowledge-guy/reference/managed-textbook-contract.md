@@ -4,11 +4,15 @@ This is the non-interactive `--managed-textbook` contract shared with
 `book-to-skill`. It applies inside one service-owned PTC root, not to the
 normal chat, course or HTML-artifact modes.
 
-Read only the frozen Markdown and manifest under `inputs/` plus staged static
-Skill documentation under `.agents/skills/`. The service has not supplied a
-raw PDF, object storage, user memory, credentials, a network, or a general
-workspace. PTC controls its own use of the two staged Skills and any permitted
-internal reasoning; do not impose a second fixed service workflow.
+Read only the manifest and frozen complete source Markdown under `inputs/`
+(`inputs/sources/`, or legacy `inputs/chapters/`) plus staged static Skill
+documentation under `.agents/skills/`. The input may contain one or more
+complete documents, and the parser does not guarantee standard Unit/TOC
+boundaries. The service has not supplied a raw PDF, object storage, user
+memory, credentials, a network, or a general workspace. PTC controls its own
+use of the two staged Skills and any permitted internal reasoning, and must
+produce the final learning structure in the whitelisted outputs below; do not
+impose a second fixed service workflow.
 
 Write only these service-derived candidate files:
 
@@ -21,7 +25,7 @@ outputs/chapters/<position>-<slug>-practice.json
 outputs/teaching-package.json
 ```
 
-For every frozen chapter, the knowledge and practice JSON repeat its exact
+For every frozen source bundle, the knowledge and practice JSON repeat its exact
 `content_chapter_id` and `content_sha256`; the toolkit is Markdown. Knowledge
 concept names exactly match its `knowledge_points`; every relation object uses
 the literal `from_concept_id` and `to_concept_id` keys, never `from` or `to`,
@@ -91,7 +95,7 @@ top-level shape:
 }
 ```
 
-The `chapters` array has exactly one item per frozen chapter. Do not use
+The `chapters` array has exactly one item per frozen source bundle. Do not use
 `coverage`, `items`, or another substitute top-level field. Each chapter has
 `status: "complete"`, `missing: []`, and `asset_kinds` equal to `knowledge`,
 `toolkit`, `practice`, and `teaching` only when the actual outputs exist and
@@ -101,7 +105,7 @@ Use the teaching package to write substantial Chinese learning material: clear
 objectives, prerequisite awareness, key difficulties, explanations calibrated
 for Chinese learners, examples, misconceptions and auto-graded review
 questions. It uses `langalpha-managed-teaching-package/v1` and must cover each
-frozen chapter exactly once. Each chapter is strict JSON with this minimum
+frozen source bundle exactly once. Each output chapter is strict JSON with this minimum
 shape:
 
 ```json

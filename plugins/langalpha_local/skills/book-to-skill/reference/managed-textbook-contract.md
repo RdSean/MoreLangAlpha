@@ -10,17 +10,21 @@ The service supplies only these files under one job root:
 
 ```text
 inputs/manifest.json
+inputs/sources/<position>-<slug>.md
 inputs/chapters/<position>-<slug>.md
 .agents/skills/book-to-skill/
 .agents/skills/the-knowledge-guy/
 ```
 
-The manifest contains only a frozen `content_chapter_id`, position, slug and
-`content_sha256` for each Markdown chapter. It contains no storage key, URL,
-credential, raw PDF, user memory or normal workspace state. Read the staged
-Skill documentation only when it helps the task. The PTC root decides its own
-map, reduce, audit and teaching order; this contract does not prescribe a
-service pipeline.
+The manifest describes one or more complete source documents. Each source has
+a frozen `content_chapter_id`, position, slug and `content_sha256`; the ID is
+the existing output identity, not a claim that the source is a Unit. The parser
+does not guarantee standard Unit/TOC boundaries. The manifest contains no
+storage key, URL, credential, raw PDF, user memory or normal workspace state.
+Read the staged Skill documentation only when it helps the task. The PTC root
+decides its own map, reduce, audit and teaching order, and must generate the
+final learning structure in the whitelisted outputs below; this contract does
+not prescribe a service pipeline.
 
 Only write the fixed candidate outputs below. Do not create other files, use
 scripts, access a network, enumerate directories, or make public artifacts:
@@ -34,7 +38,7 @@ outputs/chapters/<position>-<slug>-practice.json
 outputs/teaching-package.json
 ```
 
-Every frozen chapter must have exactly one `knowledge`, `toolkit` and
+Every frozen source must have exactly one `knowledge`, `toolkit` and
 `practice` file. Use the literal position and slug from `manifest.json`; never
 invent a path. Preserve the chapter ID and SHA-256 exactly in every chapter
 JSON. The service downloads only these paths directly, then validates every
@@ -66,7 +70,7 @@ Each `-knowledge.json` has this minimum shape:
 
 `concept_id` values are unique across the bundle. A concept name must equal a
 same-chapter `knowledge_points` value. Evidence ranges point into that frozen
-chapter Markdown; do not put a path, URL or quotation in them. Every relation
+source Markdown; do not put a path, URL or quotation in them. Every relation
 object must use the literal keys `from_concept_id` and `to_concept_id`, never
 `from` or `to`, and both values must be same-chapter `concept_id` values. The
 matching toolkit Markdown must contain learning objectives, key concepts,
@@ -124,7 +128,7 @@ shape:
 }
 ```
 
-The `chapters` array has exactly one item per frozen chapter. Do not use
+The `chapters` array has exactly one item per frozen source. Do not use
 `coverage`, `items`, or another substitute top-level field. Do not report
 complete coverage unless the actual outputs exist and agree with the frozen
 chapter.
@@ -178,7 +182,7 @@ exactly once. Each chapter is strict JSON with this minimum shape:
 ```
 
 `content_chapter_id`, `content_sha256` and every question's
-`knowledge_point` must exactly match the frozen input or its chapter
+`knowledge_point` must exactly match the frozen input or its source
 `knowledge_points`; that list must exactly match the corresponding knowledge
 asset's list. Write strict JSON and escape inner double quotes in every JSON
 string.

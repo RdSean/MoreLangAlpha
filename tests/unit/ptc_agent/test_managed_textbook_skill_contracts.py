@@ -21,10 +21,13 @@ def test_book_to_skill_managed_mode_accepts_only_staged_markdown_manifest():
 
     assert "--managed-textbook" in text
     assert "/managed/textbook-job/<job>/inputs/manifest.json" in managed
+    assert "/managed/textbook-job/<job>/inputs/sources/" in managed
     assert "/managed/textbook-job/<job>/inputs/chapters/" in managed
     assert "AskUserQuestion" not in managed
     assert "PDF" not in managed
     assert "artifacts/" not in managed
+    assert "complete source" in managed.lower()
+    assert "Unit/TOC" in managed
 
 
 def test_knowledge_guy_managed_mode_writes_only_schema_validated_outputs():
@@ -66,6 +69,10 @@ def test_managed_contracts_define_the_same_output_schema():
         assert required_field in knowledge_contract
     assert "must exactly match" in book_contract
     assert "must exactly match" in knowledge_contract
+    for contract in (book_contract, knowledge_contract):
+        assert "complete source" in contract.lower()
+        assert "does not guarantee" in contract
+        assert "Unit/TOC" in contract
 
 
 def test_managed_contracts_require_questions_for_each_practice_asset():
