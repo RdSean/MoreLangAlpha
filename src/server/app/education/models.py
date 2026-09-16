@@ -223,7 +223,24 @@ class CreateTextbookRequest(BaseModel):
 
 
 class StartTextbookProcessingRequest(BaseModel):
-    source_asset_ids: list[UUID] = Field(min_length=1, max_length=20)
+    source_asset_ids: list[UUID] = Field(default_factory=list, max_length=20)
+    source_parse_job_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("source_parse_job_ids")
+    @classmethod
+    def validate_parse_job_ids(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values]
+        if any(not value for value in normalized):
+            raise ValueError("source_parse_job_ids must not contain empty values")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_source_selection(self) -> "StartTextbookProcessingRequest":
+        if bool(self.source_asset_ids) == bool(self.source_parse_job_ids):
+            raise ValueError(
+                "provide exactly one of source_asset_ids or source_parse_job_ids"
+            )
+        return self
 
 
 class PublishTextbookVersionRequest(BaseModel):

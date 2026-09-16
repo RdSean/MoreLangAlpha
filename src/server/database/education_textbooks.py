@@ -1651,13 +1651,16 @@ async def queue_textbook_processing_from_artifacts(
     sources: list[dict[str, Any]],
     extractor_name: str,
     extractor_version: str,
+    version_id: str | None = None,
+    job_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Freeze completed library parse bundles into a fresh processing version.
 
     ``snapshot_prefix`` is deliberately not an input. This service boundary is
-    the only writer and derives it from the locked textbook identity and the
-    allocated version sequence. ``primary_sha256`` is the service-computed
-    digest of the frozen primary artifact.
+    the only writer and derives it from the locked textbook identity, the
+    pre-generated version ID when supplied, and each source position.
+    ``primary_sha256`` is the service-computed digest of the frozen primary
+    artifact.
     """
     if not sources:
         raise ValueError("At least one parse job source is required")
@@ -1678,8 +1681,9 @@ async def queue_textbook_processing_from_artifacts(
         if not _SHA256.fullmatch(str(source.get("primary_sha256") or "")):
             raise ValueError("primary_sha256 must be 64 lowercase hex characters")
 
-    version_id = str(uuid4())
-    job_id = str(uuid4())
+    supplied_version_id = version_id
+    version_id = str(UUID(version_id)) if version_id else str(uuid4())
+    job_id = str(UUID(job_id)) if job_id else str(uuid4())
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
@@ -1743,10 +1747,14 @@ async def queue_textbook_processing_from_artifacts(
                         )
 
                 await cur.execute(
-                    "SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM education_textbook_versions WHERE textbook_id = %s",
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence "
+                    "FROM education_textbook_versions WHERE textbook_id = %s",
                     (textbook_id,),
                 )
                 sequence = (await cur.fetchone())["sequence"]
+                version_component = (
+                    version_id if supplied_version_id else f"v{sequence}"
+                )
                 await cur.execute(
                     """
                     INSERT INTO education_textbook_versions (
@@ -1786,7 +1794,7 @@ async def queue_textbook_processing_from_artifacts(
                             str(source["primary_sha256"]),
                             (
                                 f"education/{household_component}/{textbook_component}/"
-                                f"v{sequence}/source-bundles/{index:02d}/"
+                                f"{version_component}/source-bundles/{index:02d}/"
                             ),
                         )
                     )
@@ -1813,6 +1821,36 @@ async def queue_textbook_processing_from_artifacts(
                 )
                 job = dict(await cur.fetchone())
     return job
+
+
+async def get_owned_parse_job(
+    *, owner_user_id: str, producer_job_id: str
+) -> dict[str, Any] | None:
+    """Return exact parse-job provenance only when its Document is owner-scoped."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT jobs.job_id AS producer_job_id,
+                       jobs.document_id,
+                       jobs.primary_artifact_id,
+                       jobs.status,
+                       jobs.parser_id,
+                       jobs.parser_name,
+                       jobs.parser_version,
+                       jobs.completed_at,
+                       documents.original_filename,
+                       documents.media_type,
+                       documents.document_format
+                FROM document_parse_jobs AS jobs
+                JOIN documents ON documents.document_id = jobs.document_id
+                WHERE jobs.job_id = %s
+                  AND documents.owner_user_id = %s
+                """,
+                (producer_job_id, owner_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
 
 
 async def claim_textbook_processing_job(*, job_id: str) -> dict[str, Any] | None:

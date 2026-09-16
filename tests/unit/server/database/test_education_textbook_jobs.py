@@ -193,12 +193,14 @@ async def test_queue_processing_from_completed_artifacts_freezes_safe_provenance
         yield mock_connection
 
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    version_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
+    job_id = "7bc1e58d-5a34-49d6-8c5c-70703e989bd4"
     mock_cursor.fetchone.side_effect = [
         {"textbook_id": "textbook-1", "slug": "reading-explorer-3"},
         {"sequence": 3},
         {
-            "job_id": "job-3",
-            "version_id": "version-3",
+            "job_id": job_id,
+            "version_id": version_id,
             "status": "queued",
             "attempt_count": 0,
             "created_at": None,
@@ -252,6 +254,8 @@ async def test_queue_processing_from_completed_artifacts_freezes_safe_provenance
         ],
         extractor_name="managed_ptc",
         extractor_version="1",
+        version_id=version_id,
+        job_id=job_id,
     )
 
     assert job is not None and job["status"] == "queued"
@@ -275,6 +279,7 @@ async def test_queue_processing_from_completed_artifacts_freezes_safe_provenance
     version_sql, version_params = mock_cursor.execute.call_args_list[3].args
     assert "INSERT INTO education_textbook_versions" in version_sql
     assert "'processing'" in version_sql
+    assert version_params[0] == version_id
     assert version_params[1:3] == ("textbook-1", 3)
 
     source_sql, source_rows = mock_cursor.executemany.call_args.args
@@ -291,16 +296,17 @@ async def test_queue_processing_from_completed_artifacts_freezes_safe_provenance
         "2",
         None,
         "a" * 64,
-        "education/household-1/reading-explorer-3/v3/source-bundles/01/",
+        f"education/household-1/reading-explorer-3/{version_id}/source-bundles/01/",
     )
     assert source_rows[1][5] == "workbook.pdf"
     assert (
         source_rows[1][-1]
-        == "education/household-1/reading-explorer-3/v3/source-bundles/02/"
+        == f"education/household-1/reading-explorer-3/{version_id}/source-bundles/02/"
     )
 
-    queue_sql = mock_cursor.execute.call_args_list[4].args[0]
+    queue_sql, queue_params = mock_cursor.execute.call_args_list[4].args
     assert "INSERT INTO education_processing_jobs" in queue_sql
+    assert queue_params == (job_id, version_id)
 
 
 @pytest.mark.asyncio

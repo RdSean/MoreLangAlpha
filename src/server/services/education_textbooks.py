@@ -20,20 +20,26 @@ from src.server.database.education_textbooks import (
     get_teaching_asset_review_for_parent,
     get_teaching_input_for_parent,
     get_teaching_job_projection_for_parent,
+    get_owned_parse_job,
+    get_textbook_for_parent,
     get_student_chapter_context_record,
     get_student_learning as get_student_learning_record,
-    get_textbook_for_parent,
     list_student_assignments,
     list_student_learning_records,
     list_textbooks_for_parent,
     publish_textbook_version,
     queue_teaching_package,
     queue_textbook_processing,
+    queue_textbook_processing_from_artifacts,
     retry_textbook_processing_job,
     submit_student_answer,
     update_student_progress,
 )
 from src.server.database.education_members import get_membership_for_user
+from src.server.services.education_textbook_source_snapshots import (
+    TextbookSourceSnapshotError,
+    freeze_parse_job_source,
+)
 from src.server.services.education_textbook_storage import write_textbook_content_bundle
 from src.server.services.education_teaching_assets import (
     TeachingAssetValidationError,
@@ -136,6 +142,78 @@ async def start_processing(
         extractor_name=extractor_name,
         extractor_version=extractor_version,
     )
+    if not job:
+        raise TextbookNotFoundError("Textbook not found")
+    return job
+
+
+async def start_processing_from_parse_jobs(
+    *,
+    parent_user_id: str,
+    textbook_id: str,
+    source_parse_job_ids: list[str],
+) -> dict[str, Any]:
+    """Freeze every completed library bundle before creating any processing job."""
+    context = await get_household_context_for_parent(parent_user_id)
+    if not context:
+        raise TextbookPermissionError(
+            "Only a parent can start textbook processing"
+        )
+    if not source_parse_job_ids:
+        raise TextbookError("At least one textbook source is required")
+    if len(set(source_parse_job_ids)) != len(source_parse_job_ids):
+        raise TextbookError("Duplicate parse job sources are not allowed")
+
+    textbook = await get_textbook_for_parent(
+        parent_user_id=parent_user_id,
+        textbook_id=textbook_id,
+    )
+    household_id = str(context["household_id"])
+    if not textbook or str(textbook["household_id"]) != household_id:
+        raise TextbookNotFoundError("Textbook not found")
+
+    version_id = str(uuid4())
+    job_id = str(uuid4())
+    sources: list[dict[str, Any]] = []
+    for position, producer_job_id in enumerate(source_parse_job_ids, start=1):
+        owned_job = await get_owned_parse_job(
+            owner_user_id=parent_user_id,
+            producer_job_id=producer_job_id,
+        )
+        if (
+            not owned_job
+            or str(owned_job.get("status") or "") != "completed"
+        ):
+            raise TextbookNotFoundError(
+                "One or more parse job sources are unavailable or incomplete"
+            )
+        try:
+            source = await freeze_parse_job_source(
+                owner_user_id=parent_user_id,
+                document_id=str(owned_job["document_id"]),
+                producer_job_id=producer_job_id,
+                household_id=household_id,
+                textbook_slug=str(textbook["slug"]),
+                version_id=version_id,
+                position=position,
+            )
+        except TextbookSourceSnapshotError as exc:
+            raise TextbookError(str(exc)) from exc
+        sources.append(source)
+
+    try:
+        job = await queue_textbook_processing_from_artifacts(
+            parent_user_id=parent_user_id,
+            household_id=household_id,
+            textbook_id=textbook_id,
+            sources=sources,
+            extractor_name="managed_ptc",
+            extractor_version="1",
+            version_id=version_id,
+            job_id=job_id,
+        )
+    except ValueError as exc:
+        raise TextbookError(str(exc)) from exc
     if not job:
         raise TextbookNotFoundError("Textbook not found")
     return job

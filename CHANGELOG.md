@@ -19,6 +19,13 @@
 - 修正冻结来源生命周期：不建立指向 live 文档、解析任务或 Artifact 的外键，而是在来源行中保存文件名、媒体类型、格式和解析器 provenance；删除图书馆文档后，claim 仍无需 join live 表即可读取。
 - snapshot 前缀改由服务端根据 household、教材 slug、版本序号和来源位置统一派生，不再接受调用方传入；household 与 slug 会校验为单段安全路径，SHA-256 保持严格 64 位小写十六进制。
 
+### 教材解析来源快照冻结
+
+- 新增 `education_textbook_source_snapshots` 服务：家长选择已完成的图书馆解析任务后，服务会校验任务、文档和全部 Artifact 的所有权，要求恰好一个 Markdown 主文档，并把主文档、图片、结构化数据和 manifest 按原相对路径复制到私有 `education/` 快照。
+- 快照前缀固定为 `education/{household_id}/{textbook_slug}/source-bundles/{version_id}/{position:02d}/`，其中 household、版本 UUID、教材 slug 和位置都会先校验；版本 ID 与加工任务 ID 在复制前生成，浏览器不能指定存储路径。
+- 每个快照对象都由服务端重新计算 SHA-256，并生成 `manifest.json`；`primary_sha256` 只取冻结后的主 Markdown 字节，不信任客户端或解析任务中的旧值。复制失败时仅删除本次已成功写入的精确对象键。
+- 新增 API 字段 `source_parse_job_ids`，请求必须且只能选择 `source_asset_ids` 或 `source_parse_job_ids` 其中一种；新服务会先冻结全部来源，再以预生成的版本和任务 ID 落入数据库，避免任务在快照完成前被 claim，旧教材附件链路继续兼容。
+
 ## 2026-09-15
 
 ### 微信通道：不再让 Agent 停在只有 Web 能回答的提问上

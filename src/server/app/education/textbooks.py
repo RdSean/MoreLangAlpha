@@ -48,6 +48,7 @@ from src.server.services.education_textbooks import (
     run_processing_for_parent,
     resume_teaching_job_for_parent,
     start_processing,
+    start_processing_from_parse_jobs,
 )
 from src.server.services.education_learning_chat import get_learning_chat_space
 from src.server.services.education_learning_transcript import (
@@ -192,6 +193,12 @@ async def queue_family_textbook_processing(
     textbook_id: UUID, body: StartTextbookProcessingRequest, user_id: CurrentUserId
 ):
     try:
+        if body.source_parse_job_ids:
+            return await start_processing_from_parse_jobs(
+                parent_user_id=user_id,
+                textbook_id=str(textbook_id),
+                source_parse_job_ids=body.source_parse_job_ids,
+            )
         return await start_processing(
             parent_user_id=user_id,
             textbook_id=str(textbook_id),

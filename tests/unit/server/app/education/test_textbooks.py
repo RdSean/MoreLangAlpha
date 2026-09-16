@@ -87,6 +87,70 @@ async def test_parent_creates_textbook_and_starts_explicit_processing(client):
 
 
 @pytest.mark.asyncio
+async def test_parent_starts_processing_from_parse_jobs_with_the_new_service(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    job = {
+        "job_id": "6eebf7fb-9579-4c5d-825a-2e595b7f1b18",
+        "version_id": "65f47c8c-f452-47bd-8619-58ccd2a1f10c",
+        "status": "queued",
+    }
+    with patch(
+        "src.server.app.education.textbooks.start_processing_from_parse_jobs",
+        new=AsyncMock(return_value=job),
+        create=True,
+    ) as start:
+        response = await client.post(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/processing",
+            json={"source_parse_job_ids": ["job-A1b2C3d4E5f6"]},
+        )
+
+    assert response.status_code == 202
+    start.assert_awaited_once_with(
+        parent_user_id="parent-1",
+        textbook_id=TEXTBOOK["textbook_id"],
+        source_parse_job_ids=["job-A1b2C3d4E5f6"],
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {
+            "source_asset_ids": ["bc5734a8-8a30-459f-a1f3-8551feb4c169"],
+            "source_parse_job_ids": ["job-A1b2C3d4E5f6"],
+        },
+    ],
+)
+async def test_textbook_processing_requires_exactly_one_source_selection(client, body):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    legacy = AsyncMock()
+    parse_jobs = AsyncMock()
+    with (
+        patch(
+            "src.server.app.education.textbooks.start_processing",
+            new=legacy,
+        ),
+        patch(
+            "src.server.app.education.textbooks.start_processing_from_parse_jobs",
+            new=parse_jobs,
+            create=True,
+        ),
+    ):
+        response = await client.post(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/processing",
+            json=body,
+        )
+
+    assert response.status_code == 422
+    legacy.assert_not_awaited()
+    parse_jobs.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_parent_create_serializes_uuid_identifiers_from_database(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-1"

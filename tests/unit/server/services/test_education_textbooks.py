@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 from types import SimpleNamespace
 import sys
 from hashlib import sha256
+from uuid import UUID
 
 import pytest
 
@@ -83,6 +84,124 @@ async def test_start_processing_freezes_sources_before_queueing(monkeypatch):
         "extractor_name": "local_fixture",
         "extractor_version": "1",
     }
+
+
+@pytest.mark.asyncio
+async def test_parse_job_processing_freezes_every_bundle_before_queueing(monkeypatch):
+    version_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
+    job_id = "7bc1e58d-5a34-49d6-8c5c-70703e989bd4"
+    textbook_id = "5e3a0b43-8378-4b6c-926f-0f053577501d"
+    events: list[str] = []
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_textbook_for_parent",
+        AsyncMock(
+            return_value={
+                "textbook_id": textbook_id,
+                "household_id": "household-1",
+                "slug": "reading-explorer-3",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_owned_parse_job",
+        AsyncMock(
+            side_effect=[
+                {"document_id": "doc-1", "status": "completed"},
+                {"document_id": "doc-2", "status": "completed"},
+            ]
+        ),
+    )
+
+    async def freeze(**kwargs):
+        events.append(f"freeze:{kwargs['position']}")
+        return {
+            "document_id": kwargs["document_id"],
+            "producer_job_id": kwargs["producer_job_id"],
+            "primary_artifact_id": f"art-{kwargs['position']}",
+            "primary_sha256": str(kwargs["position"]) * 64,
+        }
+
+    async def queue(**kwargs):
+        events.append("queue")
+        assert kwargs["version_id"] == version_id
+        assert kwargs["job_id"] == job_id
+        return {"job_id": job_id, "version_id": version_id, "status": "queued"}
+
+    monkeypatch.setattr(
+        education_textbooks, "freeze_parse_job_source", freeze, raising=False
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "queue_textbook_processing_from_artifacts",
+        queue,
+        raising=False,
+    )
+    generated_ids = iter([UUID(version_id), UUID(job_id)])
+    monkeypatch.setattr(education_textbooks, "uuid4", lambda: next(generated_ids))
+
+    result = await education_textbooks.start_processing_from_parse_jobs(
+        parent_user_id="parent-1",
+        textbook_id=textbook_id,
+        source_parse_job_ids=["job-parse-1", "job-parse-2"],
+    )
+
+    assert result["status"] == "queued"
+    assert events == ["freeze:1", "freeze:2", "queue"]
+
+
+@pytest.mark.asyncio
+async def test_parse_job_processing_does_not_queue_when_a_snapshot_fails(monkeypatch):
+    textbook_id = "5e3a0b43-8378-4b6c-926f-0f053577501d"
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_textbook_for_parent",
+        AsyncMock(
+            return_value={
+                "textbook_id": textbook_id,
+                "household_id": "household-1",
+                "slug": "reading-explorer-3",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_owned_parse_job",
+        AsyncMock(return_value={"document_id": "doc-1", "status": "completed"}),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "freeze_parse_job_source",
+        AsyncMock(side_effect=education_textbooks.TextbookError("snapshot failed")),
+        raising=False,
+    )
+    queue = AsyncMock()
+    monkeypatch.setattr(
+        education_textbooks,
+        "queue_textbook_processing_from_artifacts",
+        queue,
+        raising=False,
+    )
+
+    with pytest.raises(education_textbooks.TextbookError, match="snapshot failed"):
+        await education_textbooks.start_processing_from_parse_jobs(
+            parent_user_id="parent-1",
+            textbook_id=textbook_id,
+            source_parse_job_ids=["job-parse-1"],
+        )
+
+    queue.assert_not_awaited()
 
 
 @pytest.mark.asyncio
