@@ -674,8 +674,10 @@ test('library textbook formal assets survive sandbox absence', async ({ page }) 
   await page.getByRole('button', { name: '执行本地加工' }).click();
   await page.getByRole('button', { name: '生成教学包' }).click();
   await expect(page.getByText('教学包正在加工')).toBeVisible();
-  await expect(page.getByRole('dialog', { name: '教材教学包运行' })).toBeVisible();
-  await page.getByRole('button', { name: 'Close' }).click();
+  const teachingRunDialog = page.getByRole('dialog', { name: '教材教学包运行' });
+  await expect(teachingRunDialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(teachingRunDialog).toBeHidden();
   state.finishTeaching();
   await page.reload();
 

@@ -7,7 +7,7 @@
 - 新增 Playwright Chromium 闭环：上传并完成模拟解析、在独立图书馆详情审阅 Markdown、以已完成解析任务创建教材、完成模拟教学包、审阅正式知识资产、发布并分配学生。
 - 同一流程在明确将 sandbox 探针置为 503 后重新加载图书馆详情和教材详情，验证两页仍能读取同一教学包与正式资产，并断言页面本身没有发起 sandbox 请求。
 - 已完成解析任务候选与文档教学用途 mock 共用同一文档、解析任务、主 Artifact、教材、内容版本和教学包标识，且只包含安全字段；浏览器回归同时断言页面不渲染存储键、快照前缀、对象 URL 或 sandbox 路径。
-- 验证：指定 Playwright 闭环通过，文档详情与教材详情相关 Vitest、`pnpm typecheck`、`pnpm build` 与 `git diff --check` 通过。
+- 验证：指定 Playwright 闭环在 Chromium 桌面与 `documents-mobile` 两个项目通过；关闭教学运行抽屉改用 Escape，不再依赖仅桌面可访问的关闭按钮。文档详情与教材详情相关 Vitest、`pnpm typecheck`、`pnpm build`、ESLint 与 `git diff --check` 通过。
 
 ### 教材详情选择并审阅图书馆来源
 
