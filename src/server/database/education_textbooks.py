@@ -1,5 +1,6 @@
 """Raw PostgreSQL persistence for versioned family textbook learning."""
 
+import re
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
@@ -68,6 +69,15 @@ _TEACHING_PROGRESS_LABELS = {
     "generating_teaching": "已完成教学材料生成",
 }
 _TEACHING_ARCHIVE_CALLBACK_LEASE_SECONDS = 360
+_SAFE_PATH_COMPONENT = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,254}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _validated_path_component(value: str, label: str) -> str:
+    """Return a single safe storage-path component or reject it."""
+    if ".." in value or not _SAFE_PATH_COMPONENT.fullmatch(value):
+        raise ValueError(f"{label} must be a safe path component")
+    return value
 
 
 def advance_teaching_package_status(*, current: str, target: str) -> str:
@@ -1642,10 +1652,17 @@ async def queue_textbook_processing_from_artifacts(
     extractor_name: str,
     extractor_version: str,
 ) -> dict[str, Any] | None:
-    """Freeze completed library parse bundles into a fresh processing version."""
+    """Freeze completed library parse bundles into a fresh processing version.
+
+    ``snapshot_prefix`` is deliberately not an input. This service boundary is
+    the only writer and derives it from the locked textbook identity and the
+    allocated version sequence. ``primary_sha256`` is the service-computed
+    digest of the frozen primary artifact.
+    """
     if not sources:
         raise ValueError("At least one parse job source is required")
 
+    household_component = _validated_path_component(str(household_id), "household_id")
     producer_job_ids = [
         str(source.get("producer_job_id") or "") for source in sources
     ]
@@ -1653,6 +1670,13 @@ async def queue_textbook_processing_from_artifacts(
         raise ValueError("Every source requires a producer_job_id")
     if len(set(producer_job_ids)) != len(producer_job_ids):
         raise ValueError("Duplicate producer_job_id sources are not allowed")
+    for source in sources:
+        if not str(source.get("document_id") or ""):
+            raise ValueError("Every source requires a document_id")
+        if not str(source.get("primary_artifact_id") or ""):
+            raise ValueError("Every source requires a primary_artifact_id")
+        if not _SHA256.fullmatch(str(source.get("primary_sha256") or "")):
+            raise ValueError("primary_sha256 must be 64 lowercase hex characters")
 
     version_id = str(uuid4())
     job_id = str(uuid4())
@@ -1661,20 +1685,31 @@ async def queue_textbook_processing_from_artifacts(
             async with conn.cursor(row_factory=dict_row) as cur:
                 await cur.execute(
                     """
-                    SELECT textbook_id FROM education_textbooks
+                    SELECT textbook_id, slug FROM education_textbooks
                     WHERE textbook_id = %s AND household_id = %s
                     FOR UPDATE
                     """,
                     (textbook_id, household_id),
                 )
-                if not await cur.fetchone():
+                textbook = await cur.fetchone()
+                if not textbook:
                     return None
+                textbook_component = _validated_path_component(
+                    str(textbook["slug"]), "textbook slug"
+                )
 
                 await cur.execute(
                     """
                     SELECT jobs.job_id AS producer_job_id,
                            jobs.document_id,
-                           jobs.primary_artifact_id
+                           jobs.primary_artifact_id,
+                           documents.original_filename AS source_filename,
+                           documents.media_type AS source_media_type,
+                           documents.document_format AS source_format,
+                           jobs.parser_id,
+                           jobs.parser_name,
+                           jobs.parser_version,
+                           jobs.completed_at AS parse_completed_at
                     FROM document_parse_jobs AS jobs
                     JOIN documents ON documents.document_id = jobs.document_id
                     JOIN document_artifacts AS artifacts
@@ -1690,18 +1725,18 @@ async def queue_textbook_processing_from_artifacts(
                     (producer_job_ids, parent_user_id),
                 )
                 available = {
-                    str(row["producer_job_id"]): (
-                        str(row["document_id"]),
-                        str(row["primary_artifact_id"]),
-                    )
+                    str(row["producer_job_id"]): dict(row)
                     for row in await cur.fetchall()
                 }
                 for source in sources:
-                    requested = (
-                        str(source.get("document_id") or ""),
-                        str(source.get("primary_artifact_id") or ""),
-                    )
-                    if available.get(str(source["producer_job_id"])) != requested:
+                    row = available.get(str(source["producer_job_id"]))
+                    if row is None or (
+                        str(row["document_id"]),
+                        str(row["primary_artifact_id"]),
+                    ) != (
+                        str(source["document_id"]),
+                        str(source["primary_artifact_id"]),
+                    ):
                         raise ValueError(
                             "One or more parse job sources are unavailable "
                             "or not owned by the parent"
@@ -1727,25 +1762,46 @@ async def queue_textbook_processing_from_artifacts(
                         parent_user_id,
                     ),
                 )
+                source_rows: list[tuple[Any, ...]] = []
+                for index, source in enumerate(sources, start=1):
+                    row = available[str(source["producer_job_id"])]
+                    source_rows.append(
+                        (
+                            version_id,
+                            str(row["document_id"]),
+                            str(row["producer_job_id"]),
+                            str(row["primary_artifact_id"]),
+                            index,
+                            str(row["source_filename"]),
+                            str(row["source_media_type"]),
+                            str(row["source_format"]),
+                            str(row["parser_id"]),
+                            str(row["parser_name"]),
+                            (
+                                str(row["parser_version"])
+                                if row["parser_version"] is not None
+                                else None
+                            ),
+                            row["parse_completed_at"],
+                            str(source["primary_sha256"]),
+                            (
+                                f"education/{household_component}/{textbook_component}/"
+                                f"v{sequence}/source-bundles/{index:02d}/"
+                            ),
+                        )
+                    )
                 await cur.executemany(
                     """
                     INSERT INTO education_textbook_artifact_sources (
                         version_id, document_id, producer_job_id, primary_artifact_id,
-                        position, primary_sha256, snapshot_prefix
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        position, source_filename, source_media_type, source_format,
+                        parser_id, parser_name, parser_version, parse_completed_at,
+                        primary_sha256, snapshot_prefix
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
                     """,
-                    [
-                        (
-                            version_id,
-                            str(source["document_id"]),
-                            str(source["producer_job_id"]),
-                            str(source["primary_artifact_id"]),
-                            index,
-                            str(source["primary_sha256"]),
-                            str(source["snapshot_prefix"]),
-                        )
-                        for index, source in enumerate(sources, start=1)
-                    ],
+                    source_rows,
                 )
                 await cur.execute(
                     """
@@ -1793,18 +1849,14 @@ async def claim_textbook_processing_job(*, job_id: str) -> dict[str, Any] | None
                 claimed_attempt = await cur.fetchone()
                 await cur.execute(
                     """
-                    SELECT sources.document_id, documents.original_filename,
-                           documents.media_type, documents.document_format,
-                           sources.producer_job_id, sources.primary_artifact_id,
-                           sources.position, sources.primary_sha256,
-                           sources.snapshot_prefix, parse_jobs.parser_id,
-                           parse_jobs.parser_name, parse_jobs.parser_version,
-                           parse_jobs.completed_at
+                    SELECT sources.document_id, sources.producer_job_id,
+                           sources.primary_artifact_id, sources.position,
+                           sources.source_filename, sources.source_media_type,
+                           sources.source_format, sources.parser_id,
+                           sources.parser_name, sources.parser_version,
+                           sources.parse_completed_at, sources.primary_sha256,
+                           sources.snapshot_prefix
                     FROM education_textbook_artifact_sources AS sources
-                    JOIN documents ON documents.document_id = sources.document_id
-                    JOIN document_parse_jobs AS parse_jobs
-                      ON parse_jobs.job_id = sources.producer_job_id
-                     AND parse_jobs.document_id = sources.document_id
                     WHERE sources.version_id = %s
                     ORDER BY sources.position
                     """,

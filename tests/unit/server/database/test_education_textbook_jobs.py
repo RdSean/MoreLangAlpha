@@ -185,7 +185,7 @@ async def test_processing_claim_returns_an_attempt_fence(
 
 
 @pytest.mark.asyncio
-async def test_queue_processing_from_completed_artifacts_creates_ordered_sources(
+async def test_queue_processing_from_completed_artifacts_freezes_safe_provenance(
     mock_connection, mock_cursor, monkeypatch
 ):
     @asynccontextmanager
@@ -194,7 +194,7 @@ async def test_queue_processing_from_completed_artifacts_creates_ordered_sources
 
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
     mock_cursor.fetchone.side_effect = [
-        {"textbook_id": "textbook-1"},
+        {"textbook_id": "textbook-1", "slug": "reading-explorer-3"},
         {"sequence": 3},
         {
             "job_id": "job-3",
@@ -209,11 +209,25 @@ async def test_queue_processing_from_completed_artifacts_creates_ordered_sources
             "producer_job_id": "job-parse-2",
             "document_id": "doc-2",
             "primary_artifact_id": "art-2",
+            "source_filename": "workbook.pdf",
+            "source_media_type": "application/pdf",
+            "source_format": "pdf",
+            "parser_id": "datalab",
+            "parser_name": "Datalab",
+            "parser_version": "2",
+            "parse_completed_at": None,
         },
         {
             "producer_job_id": "job-parse-1",
             "document_id": "doc-1",
             "primary_artifact_id": "art-1",
+            "source_filename": "textbook.pdf",
+            "source_media_type": "application/pdf",
+            "source_format": "pdf",
+            "parser_id": "datalab",
+            "parser_name": "Datalab",
+            "parser_version": "2",
+            "parse_completed_at": None,
         },
     ]
 
@@ -227,14 +241,13 @@ async def test_queue_processing_from_completed_artifacts_creates_ordered_sources
                 "producer_job_id": "job-parse-1",
                 "primary_artifact_id": "art-1",
                 "primary_sha256": "a" * 64,
-                "snapshot_prefix": "education/household-1/textbook/v3/source-bundles/1/",
+                "snapshot_prefix": "education/attacker/other/v99/source-bundles/99/",
             },
             {
                 "document_id": "doc-2",
                 "producer_job_id": "job-parse-2",
                 "primary_artifact_id": "art-2",
                 "primary_sha256": "b" * 64,
-                "snapshot_prefix": "education/household-1/textbook/v3/source-bundles/2/",
             },
         ],
         extractor_name="managed_ptc",
@@ -269,9 +282,113 @@ async def test_queue_processing_from_completed_artifacts_creates_ordered_sources
     assert [row[4] for row in source_rows] == [1, 2]
     assert len({row[0] for row in source_rows}) == 1
     assert source_rows[0][0] == version_params[0]
+    assert source_rows[0][5:14] == (
+        "textbook.pdf",
+        "application/pdf",
+        "pdf",
+        "datalab",
+        "Datalab",
+        "2",
+        None,
+        "a" * 64,
+        "education/household-1/reading-explorer-3/v3/source-bundles/01/",
+    )
+    assert source_rows[1][5] == "workbook.pdf"
+    assert (
+        source_rows[1][-1]
+        == "education/household-1/reading-explorer-3/v3/source-bundles/02/"
+    )
 
     queue_sql = mock_cursor.execute.call_args_list[4].args[0]
     assert "INSERT INTO education_processing_jobs" in queue_sql
+
+
+@pytest.mark.asyncio
+async def test_queue_processing_from_artifacts_rejects_unsafe_path_components(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    source = {
+        "document_id": "doc-1",
+        "producer_job_id": "job-parse-1",
+        "primary_artifact_id": "art-1",
+        "primary_sha256": "a" * 64,
+    }
+
+    with pytest.raises(ValueError, match="household_id"):
+        await education_textbooks.queue_textbook_processing_from_artifacts(
+            parent_user_id="parent-1",
+            household_id="../other",
+            textbook_id="textbook-1",
+            sources=[source],
+            extractor_name="managed_ptc",
+            extractor_version="1",
+        )
+
+    mock_cursor.fetchone.side_effect = [
+        {"textbook_id": "textbook-1", "slug": "../other"},
+        {"sequence": 1},
+    ]
+    mock_cursor.fetchall.return_value = [
+        {
+            "producer_job_id": "job-parse-1",
+            "document_id": "doc-1",
+            "primary_artifact_id": "art-1",
+            "source_filename": "textbook.pdf",
+            "source_media_type": "application/pdf",
+            "source_format": "pdf",
+            "parser_id": "datalab",
+            "parser_name": "Datalab",
+            "parser_version": "2",
+            "parse_completed_at": None,
+        }
+    ]
+
+    with pytest.raises(ValueError, match="textbook slug"):
+        await education_textbooks.queue_textbook_processing_from_artifacts(
+            parent_user_id="parent-1",
+            household_id="household-1",
+            textbook_id="textbook-1",
+            sources=[source],
+            extractor_name="managed_ptc",
+            extractor_version="1",
+        )
+
+    assert mock_cursor.executemany.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_queue_processing_from_artifacts_rejects_invalid_primary_sha256(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+
+    with pytest.raises(ValueError, match="primary_sha256"):
+        await education_textbooks.queue_textbook_processing_from_artifacts(
+            parent_user_id="parent-1",
+            household_id="household-1",
+            textbook_id="textbook-1",
+            sources=[
+                {
+                    "document_id": "doc-1",
+                    "producer_job_id": "job-parse-1",
+                    "primary_artifact_id": "art-1",
+                    "primary_sha256": "not-a-sha",
+                }
+            ],
+            extractor_name="managed_ptc",
+            extractor_version="1",
+        )
+
+    assert mock_cursor.execute.await_count == 0
 
 
 @pytest.mark.asyncio
@@ -295,7 +412,6 @@ async def test_queue_processing_from_artifacts_rejects_foreign_household(
                 "producer_job_id": "job-parse-1",
                 "primary_artifact_id": "art-1",
                 "primary_sha256": "a" * 64,
-                "snapshot_prefix": "education/household-2/textbook/v1/source-bundles/1/",
             }
         ],
         extractor_name="managed_ptc",
@@ -321,7 +437,6 @@ async def test_queue_processing_from_artifacts_rejects_duplicate_parse_jobs(
         "producer_job_id": "job-parse-1",
         "primary_artifact_id": "art-1",
         "primary_sha256": "a" * 64,
-        "snapshot_prefix": "education/household-1/textbook/v1/source-bundles/1/",
     }
 
     with pytest.raises(ValueError, match="Duplicate producer_job_id"):
@@ -339,7 +454,7 @@ async def test_queue_processing_from_artifacts_rejects_duplicate_parse_jobs(
 
 
 @pytest.mark.asyncio
-async def test_processing_claim_returns_artifact_sources_when_present(
+async def test_processing_claim_reads_frozen_sources_without_live_joins(
     mock_connection, mock_cursor, monkeypatch
 ):
     @asynccontextmanager
@@ -357,6 +472,13 @@ async def test_processing_claim_returns_artifact_sources_when_present(
             "producer_job_id": "job-parse-1",
             "primary_artifact_id": "art-1",
             "position": 1,
+            "source_filename": "textbook.pdf",
+            "source_media_type": "application/pdf",
+            "source_format": "pdf",
+            "parser_id": "datalab",
+            "parser_name": "Datalab",
+            "parser_version": "2",
+            "parse_completed_at": None,
             "primary_sha256": "a" * 64,
             "snapshot_prefix": "education/household-1/textbook/v1/source-bundles/1/",
         }
@@ -369,6 +491,11 @@ async def test_processing_claim_returns_artifact_sources_when_present(
     source_sql = mock_cursor.execute.call_args_list[2].args[0]
     assert "FROM education_textbook_artifact_sources AS sources" in source_sql
     assert "ORDER BY sources.position" in source_sql
+    assert "JOIN documents" not in source_sql
+    assert "JOIN document_parse_jobs" not in source_sql
+    assert "source_filename" in source_sql
+    assert "parser_name" in source_sql
+    assert "snapshot_prefix" in source_sql
 
 
 @pytest.mark.asyncio

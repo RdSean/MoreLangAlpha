@@ -21,22 +21,30 @@ def test_artifact_source_migration_follows_document_usage_records() -> None:
 
 def test_artifact_source_schema_binds_versions_to_completed_parse_bundles() -> None:
     source = MIGRATION_PATH.read_text(encoding="utf-8")
+    table_block = source.split(
+        "CREATE TABLE education_textbook_artifact_sources", 1
+    )[1].split("CREATE INDEX", 1)[0]
 
     assert "CREATE TABLE education_textbook_artifact_sources" in source
     assert "PRIMARY KEY (version_id, producer_job_id)" in source
     assert "UNIQUE (version_id, position)" in source
     assert "REFERENCES education_textbook_versions(version_id) ON DELETE RESTRICT" in source
-    assert "REFERENCES documents(document_id) ON DELETE RESTRICT" in source
-    assert (
-        "REFERENCES document_parse_jobs(job_id, document_id)" in source
-        and "ON DELETE RESTRICT" in source
-    )
-    assert (
-        "REFERENCES document_artifacts(artifact_id, producer_job_id)" in source
-        and "ON DELETE RESTRICT" in source
-    )
+    assert "FOREIGN KEY" not in table_block
+    assert "REFERENCES documents" not in table_block
+    assert "REFERENCES document_parse_jobs" not in table_block
+    assert "REFERENCES document_artifacts" not in table_block
+    for column in (
+        "source_filename VARCHAR",
+        "source_media_type VARCHAR",
+        "source_format VARCHAR",
+        "parser_id VARCHAR",
+        "parser_name VARCHAR",
+        "parser_version VARCHAR",
+        "parse_completed_at TIMESTAMPTZ",
+    ):
+        assert column in table_block
     assert "primary_sha256 ~ '^[0-9a-f]{64}$'" in source
-    assert "snapshot_prefix LIKE 'education/%'" in source
+    assert "snapshot_prefix ~" in source
     assert (
         "idx_education_textbook_artifact_sources_document" in source
         and "(document_id, producer_job_id, version_id)" in source

@@ -15,7 +15,9 @@
 - 新增 `education_textbook_artifact_sources`：教材内容版本现在可以绑定到已完成、且由当前家长拥有的主文档 Artifact；来源包含解析任务、文档、Artifact、顺序、SHA-256 与私有快照前缀。
 - 新增 `queue_textbook_processing_from_artifacts()`：在同一事务内锁定并校验教材、创建 `processing` 版本、按顺序写入解析来源并投递一个加工任务；重复解析任务会直接拒绝。
 - `claim_textbook_processing_job()` 优先返回新的 Artifact 来源；没有新来源的历史版本继续读取 `education_textbook_sources` 与 `education_assets`，旧数据不需要回填或迁移。
-- 迁移约束禁止跨家庭引用和悬空来源，同时保留旧来源表不变；新增单元测试覆盖来源顺序、跨家庭拒绝、重复任务拒绝和新旧 claim 分流。
+- queue 阶段校验教材家庭归属和已完成解析任务的所有权，同时保留旧来源表不变；新增单元测试覆盖来源顺序、跨家庭拒绝、重复任务拒绝和新旧 claim 分流。
+- 修正冻结来源生命周期：不建立指向 live 文档、解析任务或 Artifact 的外键，而是在来源行中保存文件名、媒体类型、格式和解析器 provenance；删除图书馆文档后，claim 仍无需 join live 表即可读取。
+- snapshot 前缀改由服务端根据 household、教材 slug、版本序号和来源位置统一派生，不再接受调用方传入；household 与 slug 会校验为单段安全路径，SHA-256 保持严格 64 位小写十六进制。
 
 ## 2026-09-15
 

@@ -16,28 +16,39 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("""
+    # Document, parse-job and artifact IDs are immutable provenance only. The
+    # frozen source row must remain readable after those live rows are deleted.
+    op.execute(r"""
         CREATE TABLE education_textbook_artifact_sources (
             version_id UUID NOT NULL
                 REFERENCES education_textbook_versions(version_id) ON DELETE RESTRICT,
-            document_id VARCHAR(16) NOT NULL
-                REFERENCES documents(document_id) ON DELETE RESTRICT,
+            document_id VARCHAR(16) NOT NULL,
             producer_job_id VARCHAR(16) NOT NULL,
             primary_artifact_id VARCHAR(16) NOT NULL,
             position INTEGER NOT NULL CHECK (position > 0),
+            source_filename VARCHAR(255) NOT NULL
+                CHECK (length(btrim(source_filename)) > 0),
+            source_media_type VARCHAR(127) NOT NULL
+                CHECK (length(btrim(source_media_type)) > 0),
+            source_format VARCHAR(32) NOT NULL
+                CHECK (length(btrim(source_format)) > 0),
+            parser_id VARCHAR(100) NOT NULL
+                CHECK (length(btrim(parser_id)) > 0),
+            parser_name VARCHAR(160) NOT NULL
+                CHECK (length(btrim(parser_name)) > 0),
+            parser_version VARCHAR(64),
+            parse_completed_at TIMESTAMPTZ,
             primary_sha256 VARCHAR(64) NOT NULL
                 CHECK (primary_sha256 ~ '^[0-9a-f]{64}$'),
             snapshot_prefix TEXT NOT NULL
-                CHECK (snapshot_prefix LIKE 'education/%'),
+                CHECK (
+                    snapshot_prefix ~
+                    '^education/[0-9A-Za-z][0-9A-Za-z.-]*/[0-9A-Za-z][0-9A-Za-z._-]*/v[1-9][0-9]*/source-bundles/[0-9]{2,}/$'
+                    AND snapshot_prefix !~ '\.\.'
+                ),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (version_id, producer_job_id),
-            UNIQUE (version_id, position),
-            FOREIGN KEY (producer_job_id, document_id)
-                REFERENCES document_parse_jobs(job_id, document_id)
-                ON DELETE RESTRICT,
-            FOREIGN KEY (primary_artifact_id, producer_job_id)
-                REFERENCES document_artifacts(artifact_id, producer_job_id)
-                ON DELETE RESTRICT
+            UNIQUE (version_id, position)
         )
     """)
     op.execute("""
