@@ -6,7 +6,7 @@ Revises: 062
 
 from __future__ import annotations
 
-from alembic import op
+from migrations.textbook_ddl import execute_textbook_ddl
 
 
 revision = "063_textbook_artifact_source_prefix"
@@ -33,12 +33,8 @@ _COMPATIBILITY_REGEX = (
 )
 
 
-def _execute_ddl(sql: str) -> None:
-    op.get_bind().exec_driver_sql(sql)
-
-
 def _ensure_alembic_version_capacity() -> None:
-    _execute_ddl(
+    execute_textbook_ddl(
         "ALTER TABLE alembic_version "
         "ALTER COLUMN version_num TYPE VARCHAR(255)"
     )
@@ -47,12 +43,12 @@ def _ensure_alembic_version_capacity() -> None:
 def _replace_constraint(*, regex: str) -> None:
     # Earlier revisions used an unnamed auto-generated name, then a named
     # replacement. Dropping IF EXISTS makes this safe for both histories.
-    _execute_ddl(
+    execute_textbook_ddl(
         "ALTER TABLE education_textbook_artifact_sources "
         "DROP CONSTRAINT IF EXISTS "
         "education_textbook_artifact_sources_snapshot_prefix_check"
     )
-    _execute_ddl(
+    execute_textbook_ddl(
         f"""
         ALTER TABLE education_textbook_artifact_sources
         ADD CONSTRAINT education_textbook_artifact_sources_snapshot_prefix_check

@@ -6,7 +6,7 @@ Revises: 063
 
 from __future__ import annotations
 
-from alembic import op
+from migrations.textbook_ddl import execute_textbook_ddl
 
 
 revision = "064_textbook_source_prefix_constraint"
@@ -34,17 +34,13 @@ _COMPATIBILITY_REGEX = (
 _DOWNGRADE_REGEX = _COMPATIBILITY_REGEX
 
 
-def _execute_ddl(sql: str) -> None:
-    op.get_bind().exec_driver_sql(sql)
-
-
 def _replace_constraint(*, regex: str) -> None:
-    _execute_ddl(
+    execute_textbook_ddl(
         "ALTER TABLE education_textbook_artifact_sources "
         "DROP CONSTRAINT IF EXISTS "
         "education_textbook_artifact_sources_snapshot_prefix_check"
     )
-    _execute_ddl(
+    execute_textbook_ddl(
         f"""
         ALTER TABLE education_textbook_artifact_sources
         ADD CONSTRAINT education_textbook_artifact_sources_snapshot_prefix_check

@@ -4,9 +4,9 @@
 
 ### 修复教材来源迁移的真实执行路径
 
-- 迁移 `062`–`065` 的 DDL 统一改为 `op.get_bind().exec_driver_sql(...)`，正则中的 `(?:` 等字符不再被 SQLAlchemy 当作 bind 参数解析；新增执行路径测试，禁止这些迁移重新走 `op.execute()`，并校验约束 DDL 原样保留正则。
+- 迁移 `062`–`065` 共用同一个 DDL 执行 helper：在线模式走 `op.get_bind().exec_driver_sql(...)`，避免正则中的 `(?:` 等字符被 SQLAlchemy 当作 bind 参数；离线 `--sql` 模式走 `op.execute(DDL(...))`，避免 `MockConnection` 缺少 driver 执行接口。执行路径测试同时覆盖在线与离线分支，并校验约束 DDL 原样保留正则。
 - 迁移 `063` 在记录首个超过 32 字符的 revision 前扩展 `alembic_version.version_num`，避免真实升级在 `063_textbook_artifact_source_prefix` 更新版本号时被 `VARCHAR(32)` 截断。
-- 验证：本地开发库从 `061_document_usage_records` 升级到 `065_textbook_source_asset_manifest (head)`，再降级回 `061` 并重新升级成功。
+- 验证：`alembic upgrade 061_document_usage_records:head --sql` 成功生成完整 SQL；本地开发库反复完成降级到 `061` 与升级到 `065_textbook_source_asset_manifest (head)`。
 
 ### 教材正式资产集成最终审查修复
 

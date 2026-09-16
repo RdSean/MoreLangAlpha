@@ -6,7 +6,7 @@ Revises: 064
 
 from __future__ import annotations
 
-from alembic import op
+from migrations.textbook_ddl import execute_textbook_ddl
 
 
 revision = "065_textbook_source_asset_manifest"
@@ -15,12 +15,8 @@ branch_labels = None
 depends_on = None
 
 
-def _execute_ddl(sql: str) -> None:
-    op.get_bind().exec_driver_sql(sql)
-
-
 def upgrade() -> None:
-    _execute_ddl(
+    execute_textbook_ddl(
         "ALTER TABLE education_textbook_artifact_sources "
         "ADD COLUMN IF NOT EXISTS asset_manifest JSONB "
         "NOT NULL DEFAULT '[]'::jsonb"
@@ -28,7 +24,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    _execute_ddl(
+    execute_textbook_ddl(
         "ALTER TABLE education_textbook_artifact_sources "
         "DROP COLUMN IF EXISTS asset_manifest"
     )
