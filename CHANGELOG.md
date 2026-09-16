@@ -8,7 +8,10 @@
 - 教材版本的 `sources` 现在优先投影冻结的 Artifact provenance：文档、解析任务、主 Artifact、解析器、完成时间、SHA-256 与 `document_deleted`；历史 `education_assets` 来源继续返回带 `legacy` 标记的兼容字段。详情查询通过 live Document 左连接判断文档是否仍存在，但文件名和解析元数据始终读取冻结来源，因此删除文档后仍可审阅。
 - `开始加工`改为从图书馆一次加载已完成解析任务，可多选并提交 `source_parse_job_ids`；原 `source_asset_ids` 请求路径保留。版本标签调整为“概览 / 来源 / 教学 / 知识资产 / 学生”，“来源”展示真实文件、解析器、完成时间、SHA-256 前缀，并在文档仍存在时链接到 `/documents/:documentId`。
 - 来源列表独立于教学包与 sandbox 运行状态；加工失败不会隐藏来源或图书馆链接，知识资产仍只在教学包进入 `review` 且正式资产清单可用后展示。前端不渲染快照前缀、存储键、对象 URL 或 sandbox 路径。
-- 验证：后端数据库、服务与 API 聚焦测试 79 项通过；教材详情、查询与列表前端测试 14 项通过，`pnpm typecheck`、Ruff 和 `git diff --check` 通过。
+- 版本标签补齐完整键盘与读屏语义：稳定的 `id`/`aria-controls`、`tabpanel` 的 `aria-labelledby`、roving `tabIndex`，以及 `ArrowLeft`、`ArrowRight`、`Home`、`End` 的焦点与选中同步。
+- 来源列表改为有名称的语义列表，并在移动端单列、桌面端双列结构中使用可换行元数据和 `min-w-0` 约束；新增移动/桌面视口回归，避免长文件名导致横向溢出。
+- 已完成解析任务候选在 repository 边界再次按 `completed`、当前家长所有权和非空主 Artifact 过滤，并只投影安全字段；混合完成、失败、排队、他人和缺少主 Artifact 的任务均有行为测试覆盖。
+- 验证：后端数据库、服务与 API 聚焦测试 79 项通过；教材详情、查询与列表前端测试 17 项通过，`pnpm typecheck`、Ruff 和 `git diff --check` 通过。
 
 ### 图书馆文档详情发布状态与交互修正
 

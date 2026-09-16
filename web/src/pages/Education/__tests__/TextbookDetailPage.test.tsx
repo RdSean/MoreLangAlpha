@@ -1,8 +1,25 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TextbookDetailPage from '../TextbookDetailPage';
+
+const defaultMatchMedia = window.matchMedia;
+
+function setViewport(width: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: query === '(max-width: 767px)' ? width < 768 : false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })) as typeof window.matchMedia;
+}
 
 const state = vi.hoisted(() => ({
   textbook: null as Record<string, unknown> | null,
@@ -46,6 +63,7 @@ vi.mock('../queries', () => ({
 }));
 
 beforeEach(() => {
+  window.matchMedia = defaultMatchMedia;
   state.textbook = {
     textbook_id: 'textbook-1',
     household_id: 'household-1',
@@ -240,6 +258,124 @@ describe('TextbookDetailPage', () => {
     expect(screen.getByText(/本地加工失败/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '来源' }));
     expect(screen.getByRole('link', { name: '查看 body.pdf' })).toHaveAttribute('href', '/documents/doc-1');
+  });
+
+  it('provides complete tab semantics and keyboard navigation', async () => {
+    state.textbook = {
+      textbook_id: 'textbook-1',
+      household_id: 'household-1',
+      title: '英语第二册',
+      slug: 'english-2',
+      versions: [{
+        version_id: 'version-1',
+        sequence: 1,
+        status: 'review',
+        chapter_count: 1,
+        is_published: false,
+        sources: [],
+        assignments: [],
+        teaching_packages: [],
+        chapters: [],
+      }],
+    };
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={['/education/textbooks/textbook-1']}>
+        <Routes><Route path="/education/textbooks/:textbookId" element={<TextbookDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    const overviewTab = screen.getByRole('tab', { name: '概览' });
+    const sourcesTab = screen.getByRole('tab', { name: '来源' });
+    const teachingTab = screen.getByRole('tab', { name: '教学' });
+    const studentsTab = screen.getByRole('tab', { name: '学生' });
+    const overviewPanel = screen.getByRole('tabpanel', { name: '概览' });
+
+    expect(overviewTab).toHaveAttribute('aria-controls', overviewPanel.id);
+    expect(overviewPanel).toHaveAttribute('aria-labelledby', overviewTab.id);
+    expect(overviewTab).toHaveAttribute('tabindex', '0');
+    expect(sourcesTab).toHaveAttribute('tabindex', '-1');
+
+    overviewTab.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(sourcesTab).toHaveFocus();
+    expect(sourcesTab).toHaveAttribute('aria-selected', 'true');
+    expect(overviewTab).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByRole('tabpanel', { name: '来源' })).toHaveAttribute('aria-labelledby', sourcesTab.id);
+
+    await user.keyboard('{ArrowRight}');
+    expect(teachingTab).toHaveFocus();
+    expect(teachingTab).toHaveAttribute('aria-selected', 'true');
+
+    await user.keyboard('{End}');
+    expect(studentsTab).toHaveFocus();
+    expect(studentsTab).toHaveAttribute('aria-selected', 'true');
+
+    await user.keyboard('{Home}');
+    expect(overviewTab).toHaveFocus();
+    expect(overviewTab).toHaveAttribute('aria-selected', 'true');
+
+    await user.keyboard('{ArrowLeft}');
+    expect(studentsTab).toHaveFocus();
+    expect(studentsTab).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it.each([
+    { label: 'mobile', width: 375 },
+    { label: 'desktop', width: 1280 },
+  ])('keeps source structure accessible without horizontal overflow on $label', ({ width }) => {
+    setViewport(width);
+    state.textbook = {
+      textbook_id: 'textbook-1',
+      household_id: 'household-1',
+      title: '英语第二册',
+      slug: 'english-2',
+      versions: [{
+        version_id: 'version-1',
+        sequence: 1,
+        status: 'review',
+        chapter_count: 1,
+        is_published: false,
+        sources: [{
+          legacy: false,
+          position: 1,
+          document_id: 'doc-1',
+          producer_job_id: 'job-parse-1',
+          primary_artifact_id: 'art-1',
+          filename: 'a-very-long-textbook-filename-that-must-wrap-instead-of-overflowing.pdf',
+          media_type: 'application/pdf',
+          format: 'pdf',
+          parser_id: 'datalab',
+          parser_name: 'Datalab',
+          parser_version: '2',
+          parse_completed_at: '2026-09-16T10:00:00Z',
+          primary_sha256: 'a'.repeat(64),
+          document_deleted: false,
+        }],
+        assignments: [],
+        teaching_packages: [],
+        chapters: [],
+      }],
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/education/textbooks/textbook-1']}>
+        <Routes><Route path="/education/textbooks/:textbookId" element={<TextbookDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: '来源' }));
+    const panel = screen.getByTestId('textbook-sources-panel');
+    const list = screen.getByRole('list', { name: '冻结来源' });
+    const row = screen.getAllByRole('listitem')[0];
+
+    expect(panel).toHaveClass('min-w-0');
+    expect(panel).not.toHaveClass('overflow-x-auto');
+    expect(list).toHaveClass('grid-cols-1');
+    expect(row).toHaveClass('min-w-0', 'grid-cols-1', 'sm:grid-cols-[minmax(0,1fr)_auto]');
+    expect(screen.getByText(/a-very-long-textbook-filename/)).toHaveClass('break-words');
+    expect(screen.getByRole('link', { name: /查看 a-very-long-textbook-filename/ })).toBeInTheDocument();
   });
 
   it('starts a teaching package only after content extraction is reviewable', async () => {

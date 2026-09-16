@@ -898,10 +898,12 @@ async def test_completed_parse_job_candidates_are_safe_and_owner_scoped(
         yield mock_connection
 
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
-    candidate = {
+    completed = {
         "producer_job_id": "job-parse-1",
         "document_id": "doc-1",
         "primary_artifact_id": "art-1",
+        "status": "completed",
+        "owner_user_id": "parent-1",
         "filename": "textbook.pdf",
         "media_type": "application/pdf",
         "format": "pdf",
@@ -912,18 +914,36 @@ async def test_completed_parse_job_candidates_are_safe_and_owner_scoped(
         "size_bytes": 2048,
         "artifact_count": 4,
     }
-    mock_cursor.fetchall.return_value = [candidate]
+    mock_cursor.fetchall.return_value = [
+        completed,
+        {**completed, "producer_job_id": "job-failed", "status": "failed"},
+        {**completed, "producer_job_id": "job-queued", "status": "queued"},
+        {**completed, "producer_job_id": "job-foreign", "owner_user_id": "parent-2"},
+        {
+            **completed,
+            "producer_job_id": "job-no-artifact",
+            "primary_artifact_id": None,
+        },
+    ]
 
     result = await education_textbooks.list_completed_parse_jobs_for_parent(
         parent_user_id="parent-1"
     )
 
-    assert result == [candidate]
+    assert result == [
+        {
+            key: value
+            for key, value in completed.items()
+            if key not in {"status", "owner_user_id"}
+        }
+    ]
     sql, params = mock_cursor.execute.call_args.args
     assert "FROM document_parse_jobs AS jobs" in sql
     assert "JOIN document_artifacts AS primary_artifacts" in sql
     assert "jobs.status = 'completed'" in sql
     assert "documents.owner_user_id = %s" in sql
+    assert "jobs.status," in sql
+    assert "documents.owner_user_id," in sql
     assert "storage_key" not in sql
     assert params == ("parent-1",)
 

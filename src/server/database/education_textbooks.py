@@ -2139,6 +2139,35 @@ async def get_owned_parse_job(
     return dict(row) if row else None
 
 
+_PARSE_JOB_CANDIDATE_FIELDS = (
+    "producer_job_id",
+    "document_id",
+    "primary_artifact_id",
+    "filename",
+    "media_type",
+    "format",
+    "parser_id",
+    "parser_name",
+    "parser_version",
+    "parse_completed_at",
+    "size_bytes",
+    "artifact_count",
+)
+
+
+def _safe_completed_parse_job_candidates(
+    rows: list[dict[str, Any]], *, parent_user_id: str
+) -> list[dict[str, Any]]:
+    """Apply an explicit repository-boundary filter and safe projection."""
+    return [
+        {field: row.get(field) for field in _PARSE_JOB_CANDIDATE_FIELDS}
+        for row in rows
+        if row.get("status") == "completed"
+        and str(row.get("owner_user_id") or "") == str(parent_user_id)
+        and bool(row.get("primary_artifact_id"))
+    ]
+
+
 async def list_completed_parse_jobs_for_parent(
     *, parent_user_id: str
 ) -> list[dict[str, Any]]:
@@ -2150,6 +2179,8 @@ async def list_completed_parse_jobs_for_parent(
                 SELECT jobs.job_id AS producer_job_id,
                        jobs.document_id,
                        jobs.primary_artifact_id,
+                       jobs.status,
+                       documents.owner_user_id,
                        documents.original_filename AS filename,
                        documents.media_type,
                        documents.document_format AS format,
@@ -2185,7 +2216,10 @@ async def list_completed_parse_jobs_for_parent(
                 (parent_user_id,),
             )
             rows = await cur.fetchall()
-    return [dict(row) for row in rows]
+    return _safe_completed_parse_job_candidates(
+        [dict(row) for row in rows],
+        parent_user_id=parent_user_id,
+    )
 
 
 async def textbook_processing_job_exists(
