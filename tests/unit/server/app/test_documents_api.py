@@ -67,12 +67,31 @@ def _job(status: str = "queued", version: int = 0) -> dict[str, object]:
     }
 
 
+def _teaching_usage() -> dict[str, object]:
+    return {
+        "document_id": DOC_ID,
+        "producer_job_id": JOB_ID,
+        "primary_artifact_id": ART_ID,
+        "textbook_id": "book-A1b2C3d4E5f6",
+        "textbook_title": "Reading Explorer 3",
+        "content_version_id": "ver-A1b2C3d4E5f6",
+        "content_version_sequence": 2,
+        "artifact_position": 1,
+        "teaching_package_id": "pkg-A1b2C3d4E5f6",
+        "teaching_package_sequence": 1,
+        "status": "review",
+        "has_asset_manifest": True,
+        "created_at": "2026-09-16T12:00:00Z",
+    }
+
+
 class _Services:
     def __init__(self) -> None:
         self.library = AsyncMock()
         self.inspections = AsyncMock()
         self.jobs = AsyncMock()
         self.events = AsyncMock()
+        self.teaching_usage = AsyncMock(return_value=[])
         self.library.upload_pdf.return_value = _document()
         self.library.list_documents.return_value = ([_document()], 1)
         self.library.list_datasets.return_value = ([], 0)
@@ -88,7 +107,8 @@ class _Services:
 
 
 @pytest_asyncio.fixture
-async def api():
+async def api(monkeypatch):
+    from src.server.app import documents
     from src.server.app.documents import (
         get_document_event_service,
         get_document_inspection_service,
@@ -107,6 +127,11 @@ async def api():
     )
     app.dependency_overrides[get_document_job_service] = lambda: services.jobs
     app.dependency_overrides[get_document_event_service] = lambda: services.events
+    monkeypatch.setattr(
+        documents,
+        "list_document_teaching_usages",
+        services.teaching_usage,
+    )
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -283,6 +308,39 @@ async def test_artifact_download_streams_through_the_authenticated_api(api) -> N
 
 
 @pytest.mark.asyncio
+async def test_teaching_usage_returns_owned_safe_rows(api) -> None:
+    client, services = api
+    services.library.get_document.return_value = _document()
+    services.teaching_usage.return_value = [_teaching_usage()]
+
+    response = await client.get(f"/api/v1/documents/{DOC_ID}/teaching-usage")
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [_teaching_usage()]}
+    services.library.get_document.assert_awaited_once_with(
+        owner_user_id="owner-1",
+        document_id=DOC_ID,
+    )
+    services.teaching_usage.assert_awaited_once_with(
+        owner_user_id="owner-1",
+        document_id=DOC_ID,
+    )
+    for unsafe in ("snapshot_prefix", "storage_key", "object_url", "sandbox_path"):
+        assert unsafe not in response.text
+
+
+@pytest.mark.asyncio
+async def test_teaching_usage_returns_404_for_missing_or_foreign_document(api) -> None:
+    client, services = api
+    services.library.get_document.return_value = None
+
+    response = await client.get(f"/api/v1/documents/{DOC_ID}/teaching-usage")
+
+    assert response.status_code == 404
+    services.teaching_usage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_student_guard_rejects_all_document_routes(monkeypatch) -> None:
     from src.server.app import documents
 
@@ -296,9 +354,12 @@ async def test_student_guard_rejects_all_document_routes(monkeypatch) -> None:
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        response = await client.get("/api/v1/documents")
+        responses = [
+            await client.get("/api/v1/documents"),
+            await client.get(f"/api/v1/documents/{DOC_ID}/teaching-usage"),
+        ]
 
-    assert response.status_code == 403
+    assert [response.status_code for response in responses] == [403, 403]
 
 
 def test_router_exposes_complete_document_contract() -> None:
@@ -319,6 +380,7 @@ def test_router_exposes_complete_document_contract() -> None:
         ("/api/v1/documents", "POST"),
         ("/api/v1/documents", "GET"),
         ("/api/v1/documents/{document_id}", "GET"),
+        ("/api/v1/documents/{document_id}/teaching-usage", "GET"),
         ("/api/v1/documents/{document_id}/source", "GET"),
         ("/api/v1/documents/{document_id}", "PATCH"),
         ("/api/v1/documents/{document_id}", "DELETE"),

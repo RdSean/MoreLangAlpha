@@ -136,6 +136,56 @@ def advance_teaching_package_status(*, current: str, target: str) -> str:
     return target
 
 
+async def list_document_teaching_usages(
+    *, owner_user_id: str, document_id: str
+) -> list[dict[str, Any]]:
+    """Return safe artifact-backed textbook usages for one owned Document."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT documents.document_id,
+                       sources.producer_job_id,
+                       sources.primary_artifact_id,
+                       textbooks.textbook_id,
+                       textbooks.title AS textbook_title,
+                       versions.version_id AS content_version_id,
+                       versions.sequence AS content_version_sequence,
+                       sources.position AS artifact_position,
+                       packages.teaching_package_id,
+                       packages.sequence AS teaching_package_sequence,
+                       packages.status,
+                       COALESCE(
+                           packages.asset_manifest <> '{}'::jsonb,
+                           FALSE
+                       ) AS has_asset_manifest,
+                       sources.created_at
+                FROM documents
+                JOIN education_textbook_artifact_sources AS sources
+                  ON sources.document_id = documents.document_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = sources.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                LEFT JOIN education_teaching_packages AS packages
+                  ON packages.content_version_id = versions.version_id
+                LEFT JOIN education_teaching_jobs AS jobs
+                  ON jobs.teaching_package_id = packages.teaching_package_id
+                WHERE documents.document_id = %s
+                  AND documents.owner_user_id = %s
+                ORDER BY sources.created_at,
+                         textbooks.created_at,
+                         versions.sequence,
+                         sources.position,
+                         packages.sequence NULLS LAST,
+                         packages.teaching_package_id NULLS LAST
+                """,
+                (document_id, owner_user_id),
+            )
+            rows = await cur.fetchall()
+    return [dict(row) for row in rows]
+
+
 async def get_or_create_student_learning_space(
     *, student_user_id: str, assignment_id: str
 ) -> dict[str, Any] | None:

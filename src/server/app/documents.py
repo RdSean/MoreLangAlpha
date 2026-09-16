@@ -39,6 +39,8 @@ from src.server.models.documents import (
     DatasetUpdate,
     DocumentListResponse,
     DocumentResponse,
+    DocumentTeachingUsage,
+    DocumentTeachingUsageResponse,
     DocumentUpdate,
     InspectionOutcomeResponse,
     InspectionResponse,
@@ -52,6 +54,9 @@ from src.server.models.documents import (
 from src.server.services.document_job_events import (
     DocumentJobEventService,
     publish_document_job_hint,
+)
+from src.server.services.document_teaching_usage import (
+    list_document_teaching_usages,
 )
 from src.server.services.education_access import require_nonstudent_agent_features
 from src.server.utils.api import CurrentUserId
@@ -283,6 +288,30 @@ async def get_document(
     if row is None:
         raise _not_found("Document")
     return DocumentResponse.model_validate(row)
+
+
+@router.get(
+    "/documents/{document_id}/teaching-usage",
+    response_model=DocumentTeachingUsageResponse,
+)
+async def get_document_teaching_usage(
+    document_id: str, user_id: CurrentUserId, service: LibraryService
+) -> DocumentTeachingUsageResponse:
+    if (
+        await service.get_document(
+            owner_user_id=user_id,
+            document_id=document_id,
+        )
+        is None
+    ):
+        raise _not_found("Document")
+    rows = await list_document_teaching_usages(
+        owner_user_id=user_id,
+        document_id=document_id,
+    )
+    return DocumentTeachingUsageResponse(
+        items=[DocumentTeachingUsage.model_validate(row) for row in rows]
+    )
 
 
 @router.get("/documents/{document_id}/source")

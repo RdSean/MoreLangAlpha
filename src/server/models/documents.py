@@ -74,6 +74,26 @@ class DocumentResponse(_RowModel):
     updated_at: datetime | None = None
 
 
+class DocumentTeachingUsage(_RowModel):
+    document_id: str
+    producer_job_id: str
+    primary_artifact_id: str
+    textbook_id: str
+    textbook_title: str
+    content_version_id: str
+    content_version_sequence: int
+    artifact_position: int
+    teaching_package_id: str | None = None
+    teaching_package_sequence: int | None = None
+    status: str | None = None
+    has_asset_manifest: bool = False
+    created_at: datetime | None = None
+
+
+class DocumentTeachingUsageResponse(BaseModel):
+    items: list[DocumentTeachingUsage]
+
+
 class DocumentListResponse(BaseModel):
     items: list[DocumentResponse]
     total: int
