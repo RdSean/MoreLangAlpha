@@ -232,6 +232,8 @@ first run a bounded, shielded probe for the exact `job_id`/`version_id`;
 snapshots are deleted only when that probe confirms the row is absent. A
 present or indeterminate row retains the snapshots for later orphan
 reconciliation. A queued job must never exist with missing snapshot objects.
+Cancellation of an in-flight upload waits for the blocked worker to settle,
+then removes that operation's exact destination key before re-raising.
 
 **Step 5: Run focused tests**
 

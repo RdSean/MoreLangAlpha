@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from hashlib import sha256
 import json
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -572,7 +573,93 @@ async def test_snapshot_cancellation_cleans_the_completed_write(monkeypatch):
             f"{VERSION_ID}/01/artifacts/document.md"
         )
     ]
-    assert deleted == list(uploads)
+    assert deleted == [
+        (
+            f"education/{HOUSEHOLD_ID}/reading-explorer-3/source-bundles/"
+            f"{VERSION_ID}/01/artifacts/images/figure.png"
+        ),
+        next(iter(uploads)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_cancellation_waits_for_blocked_upload_then_deletes_key(
+    monkeypatch,
+):
+    primary_bytes = b"# Book\n"
+    primary = _artifact(
+        artifact_id=PRIMARY_ARTIFACT_ID,
+        artifact_kind="primary_document",
+        relative_path="document.md",
+        storage_key=f"documents/{DOCUMENT_ID}/document.md",
+    )
+    prefix = snapshots.build_snapshot_prefix(
+        household_id=HOUSEHOLD_ID,
+        textbook_slug="reading-explorer-3",
+        version_id=VERSION_ID,
+        position=1,
+    )
+    destination_key = f"{prefix}artifacts/document.md"
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    deleted: list[str] = []
+
+    def blocking_upload(
+        key: str,
+        data: bytes,
+        content_type: str | None = None,
+        max_size: int | None = None,
+    ) -> bool:
+        started.set()
+        release.wait(timeout=2)
+        finished.set()
+        return True
+
+    def record_delete(key: str) -> bool:
+        deleted.append(key)
+        return True
+
+    monkeypatch.setattr(
+        snapshots,
+        "get_owned_parse_job",
+        AsyncMock(return_value=_parse_job()),
+    )
+    monkeypatch.setattr(
+        snapshots,
+        "list_artifacts",
+        AsyncMock(return_value=[primary]),
+    )
+    monkeypatch.setattr(snapshots, "_read_object", AsyncMock(return_value=primary_bytes))
+    monkeypatch.setattr(snapshots, "upload_bytes", blocking_upload)
+    monkeypatch.setattr(snapshots, "delete_object", record_delete)
+    monkeypatch.setattr(
+        snapshots,
+        "get_document_parsing_config",
+        lambda: SimpleNamespace(max_upload_bytes=1024),
+    )
+
+    task = asyncio.create_task(
+        snapshots.freeze_parse_job_source(
+            owner_user_id="parent-1",
+            document_id=DOCUMENT_ID,
+            producer_job_id=PRODUCER_JOB_ID,
+            household_id=HOUSEHOLD_ID,
+            textbook_slug="reading-explorer-3",
+            version_id=VERSION_ID,
+            position=1,
+        )
+    )
+    assert await asyncio.to_thread(started.wait, 1)
+    task.cancel()
+    await asyncio.sleep(0)
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert await asyncio.to_thread(finished.wait, 1)
+    assert deleted == [destination_key]
 
 
 @pytest.mark.asyncio

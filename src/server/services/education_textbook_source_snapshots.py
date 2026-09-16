@@ -16,6 +16,7 @@ from uuid import UUID
 from src.config.settings import get_document_parsing_config
 from src.server.database.documents import list_artifacts
 from src.server.database.education_textbooks import get_owned_parse_job
+from src.server.database.session_lock import await_settled
 from src.utils.storage import delete_object, get_bytes, upload_bytes
 
 
@@ -94,13 +95,16 @@ async def _write_object(
     *,
     max_size: int,
 ) -> bool:
-    return await asyncio.to_thread(
-        upload_bytes,
-        key,
-        content,
-        content_type,
-        max_size=max_size,
+    upload_task = asyncio.ensure_future(
+        asyncio.to_thread(
+            upload_bytes,
+            key,
+            content,
+            content_type,
+            max_size=max_size,
+        )
     )
+    return await await_settled(upload_task)
 
 
 async def _delete_object(key: str) -> bool:
@@ -207,6 +211,7 @@ async def freeze_parse_job_source(
 
     written_keys: list[str] = []
     manifest_artifacts: list[dict[str, Any]] = []
+    reserved_destination_keys: set[str] = set()
     max_upload_bytes = get_document_parsing_config().max_upload_bytes
     try:
         for artifact in validated_artifacts:
@@ -219,12 +224,22 @@ async def freeze_parse_job_source(
             relative_path = artifact["relative_path"]
             destination_relative_path = f"artifacts/{relative_path}"
             destination_key = f"{prefix}{destination_relative_path}"
-            if not await _write_object(
-                destination_key,
-                content,
-                str(artifact.get("media_type") or "application/octet-stream"),
-                max_size=max_upload_bytes,
-            ):
+            if destination_key in reserved_destination_keys:
+                raise TextbookSourceSnapshotError(
+                    "A snapshot destination key would be reused"
+                )
+            reserved_destination_keys.add(destination_key)
+            try:
+                uploaded = await _write_object(
+                    destination_key,
+                    content,
+                    str(artifact.get("media_type") or "application/octet-stream"),
+                    max_size=max_upload_bytes,
+                )
+            except BaseException:
+                await cleanup_snapshot_objects([destination_key])
+                raise
+            if not uploaded:
                 raise TextbookSourceSnapshotError(
                     "A textbook source snapshot object could not be stored"
                 )
@@ -268,12 +283,22 @@ async def freeze_parse_job_source(
             sort_keys=True,
         ).encode("utf-8")
         manifest_key = f"{prefix}manifest.json"
-        if not await _write_object(
-            manifest_key,
-            manifest_bytes,
-            "application/json",
-            max_size=max_upload_bytes,
-        ):
+        if manifest_key in reserved_destination_keys:
+            raise TextbookSourceSnapshotError(
+                "A snapshot destination key would be reused"
+            )
+        reserved_destination_keys.add(manifest_key)
+        try:
+            uploaded_manifest = await _write_object(
+                manifest_key,
+                manifest_bytes,
+                "application/json",
+                max_size=max_upload_bytes,
+            )
+        except BaseException:
+            await cleanup_snapshot_objects([manifest_key])
+            raise
+        if not uploaded_manifest:
             raise TextbookSourceSnapshotError(
                 "A textbook source snapshot object could not be stored"
             )
