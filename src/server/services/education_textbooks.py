@@ -37,10 +37,10 @@ from src.server.database.education_textbooks import (
     retry_textbook_processing_job,
     submit_student_answer,
     TextbookQueueValidationError,
-    textbook_processing_job_exists,
     update_student_progress,
 )
 from src.server.database.education_members import get_membership_for_user
+from src.server.database.session_lock import await_settled
 from src.server.services.education_textbook_source_snapshots import (
     TextbookSourceSnapshotError,
     cleanup_snapshot_objects,
@@ -64,8 +64,6 @@ from src.utils.storage import get_bytes
 
 logger = logging.getLogger(__name__)
 
-_STATE_PROBE_ATTEMPTS = 3
-_STATE_PROBE_BACKOFF_SECONDS = 0.05
 _SOURCE_SNAPSHOT_FORMAT = "langalpha-textbook-source-snapshot/v1"
 _MARKDOWN_MEDIA_TYPE = "text/markdown"
 _MARKDOWN_FORMATS = frozenset({"gfm", "markdown"})
@@ -408,16 +406,6 @@ async def start_processing_from_parse_jobs(
         if written_keys:
             await asyncio.shield(cleanup_snapshot_objects(written_keys))
 
-    async def reconcile_ambiguous_queue_failure() -> None:
-        durable_job_exists = await asyncio.shield(
-            _probe_textbook_processing_job_state(
-                job_id=job_id,
-                version_id=version_id,
-            )
-        )
-        if durable_job_exists is False:
-            await cleanup_written_snapshots()
-
     try:
         for position, producer_job_id in enumerate(source_parse_job_ids, start=1):
             owned_job = await get_owned_parse_job(
@@ -449,8 +437,8 @@ async def start_processing_from_parse_jobs(
         await cleanup_written_snapshots()
         raise
 
-    try:
-        job = await queue_textbook_processing_from_artifacts(
+    queue_task = asyncio.create_task(
+        queue_textbook_processing_from_artifacts(
             parent_user_id=parent_user_id,
             household_id=household_id,
             textbook_id=textbook_id,
@@ -460,46 +448,29 @@ async def start_processing_from_parse_jobs(
             version_id=version_id,
             job_id=job_id,
         )
+    )
+    try:
+        job = await await_settled(queue_task)
     except TextbookQueueValidationError as exc:
         await cleanup_written_snapshots()
         raise TextbookError(str(exc)) from exc
     except asyncio.CancelledError:
-        await reconcile_ambiguous_queue_failure()
+        logger.warning(
+            "textbook_source_snapshot_queue_outcome_ambiguous",
+            extra={"version_id": version_id, "job_id": job_id},
+        )
         raise
     except Exception:
-        await reconcile_ambiguous_queue_failure()
+        logger.warning(
+            "textbook_source_snapshot_queue_outcome_ambiguous",
+            extra={"version_id": version_id, "job_id": job_id},
+        )
         raise
 
     if not job:
         await cleanup_written_snapshots()
         raise TextbookNotFoundError("Textbook not found")
     return job
-
-
-async def _probe_textbook_processing_job_state(
-    *, job_id: str, version_id: str
-) -> bool | None:
-    """Best-effort exact-state probe; unknown never authorizes cleanup."""
-    for attempt in range(1, _STATE_PROBE_ATTEMPTS + 1):
-        try:
-            durable_state = await textbook_processing_job_exists(
-                job_id=job_id,
-                version_id=version_id,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            durable_state = None
-        if durable_state is not None:
-            return bool(durable_state)
-        if attempt < _STATE_PROBE_ATTEMPTS:
-            await asyncio.sleep(_STATE_PROBE_BACKOFF_SECONDS * attempt)
-
-    logger.warning(
-        "textbook_source_snapshot_state_indeterminate",
-        extra={"version_id": version_id, "job_id": job_id},
-    )
-    return None
 
 
 def build_local_fixture_package(job: dict[str, Any]) -> dict[str, Any]:

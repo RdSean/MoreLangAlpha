@@ -524,175 +524,9 @@ async def test_parse_job_processing_cleans_snapshots_when_queue_returns_none(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("durable_state", "should_cleanup"),
-    [
-        (False, True),
-        (True, False),
-    ],
-)
-async def test_parse_job_processing_reconciles_unknown_queue_exception_with_durable_state(
-    monkeypatch, durable_state, should_cleanup
-):
-    textbook_id = "5e3a0b43-8378-4b6c-926f-0f053577501d"
-    version_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
-    job_id = "7bc1e58d-5a34-49d6-8c5c-70703e989bd4"
-    monkeypatch.setattr(
-        education_textbooks,
-        "get_household_context_for_parent",
-        AsyncMock(return_value={"household_id": "household-1"}),
-    )
-    monkeypatch.setattr(
-        education_textbooks,
-        "get_textbook_for_parent",
-        AsyncMock(
-            return_value={
-                "textbook_id": textbook_id,
-                "household_id": "household-1",
-                "slug": "reading-explorer-3",
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        education_textbooks,
-        "get_owned_parse_job",
-        AsyncMock(return_value={"document_id": "doc-1", "status": "completed"}),
-    )
-    monkeypatch.setattr(
-        education_textbooks,
-        "freeze_parse_job_source",
-        AsyncMock(
-            return_value=SimpleNamespace(
-                source={"document_id": "doc-1"},
-                written_keys=("snapshot-key-1", "snapshot-key-2"),
-            )
-        ),
-        raising=False,
-    )
-    cleanup = AsyncMock()
-    monkeypatch.setattr(
-        education_textbooks,
-        "cleanup_snapshot_objects",
-        cleanup,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        education_textbooks,
-        "queue_textbook_processing_from_artifacts",
-        AsyncMock(side_effect=RuntimeError("database unavailable")),
-        raising=False,
-    )
-    state_check = AsyncMock(return_value=durable_state)
-    monkeypatch.setattr(
-        education_textbooks,
-        "textbook_processing_job_exists",
-        state_check,
-        raising=False,
-    )
-    generated_ids = iter([UUID(version_id), UUID(job_id)])
-    monkeypatch.setattr(education_textbooks, "uuid4", lambda: next(generated_ids))
-
-    with pytest.raises(RuntimeError, match="database unavailable"):
-        await education_textbooks.start_processing_from_parse_jobs(
-            parent_user_id="parent-1",
-            textbook_id=textbook_id,
-            source_parse_job_ids=["job-parse-1"],
-        )
-
-    state_check.assert_awaited_once_with(job_id=job_id, version_id=version_id)
-    if should_cleanup:
-        cleanup.assert_awaited_once_with(["snapshot-key-1", "snapshot-key-2"])
-    else:
-        cleanup.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_parse_job_processing_retries_state_probe_before_cleanup(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        education_textbooks,
-        "_STATE_PROBE_BACKOFF_SECONDS",
-        0,
-        raising=False,
-    )
-    textbook_id = "5e3a0b43-8378-4b6c-926f-0f053577501d"
-    version_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
-    job_id = "7bc1e58d-5a34-49d6-8c5c-70703e989bd4"
-    monkeypatch.setattr(
-        education_textbooks,
-        "get_household_context_for_parent",
-        AsyncMock(return_value={"household_id": "household-1"}),
-    )
-    monkeypatch.setattr(
-        education_textbooks,
-        "get_textbook_for_parent",
-        AsyncMock(
-            return_value={
-                "textbook_id": textbook_id,
-                "household_id": "household-1",
-                "slug": "reading-explorer-3",
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        education_textbooks,
-        "get_owned_parse_job",
-        AsyncMock(return_value={"document_id": "doc-1", "status": "completed"}),
-    )
-    monkeypatch.setattr(
-        education_textbooks,
-        "freeze_parse_job_source",
-        AsyncMock(
-            return_value=SimpleNamespace(
-                source={"document_id": "doc-1"},
-                written_keys=("snapshot-key-1", "snapshot-key-2"),
-            )
-        ),
-        raising=False,
-    )
-    cleanup = AsyncMock()
-    monkeypatch.setattr(
-        education_textbooks,
-        "cleanup_snapshot_objects",
-        cleanup,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        education_textbooks,
-        "queue_textbook_processing_from_artifacts",
-        AsyncMock(side_effect=RuntimeError("database unavailable")),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        education_textbooks,
-        "textbook_processing_job_exists",
-        AsyncMock(side_effect=[RuntimeError("probe unavailable"), False]),
-        raising=False,
-    )
-    generated_ids = iter([UUID(version_id), UUID(job_id)])
-    monkeypatch.setattr(education_textbooks, "uuid4", lambda: next(generated_ids))
-
-    with pytest.raises(RuntimeError, match="database unavailable"):
-        await education_textbooks.start_processing_from_parse_jobs(
-            parent_user_id="parent-1",
-            textbook_id=textbook_id,
-            source_parse_job_ids=["job-parse-1"],
-        )
-
-    cleanup.assert_awaited_once_with(["snapshot-key-1", "snapshot-key-2"])
-
-
-@pytest.mark.asyncio
-async def test_parse_job_processing_warns_and_retains_when_state_probe_is_exhausted(
+async def test_parse_job_processing_retains_snapshots_on_unknown_queue_exception(
     monkeypatch, caplog
 ):
-    monkeypatch.setattr(
-        education_textbooks,
-        "_STATE_PROBE_BACKOFF_SECONDS",
-        0,
-        raising=False,
-    )
     textbook_id = "5e3a0b43-8378-4b6c-926f-0f053577501d"
     version_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
     job_id = "7bc1e58d-5a34-49d6-8c5c-70703e989bd4"
@@ -735,23 +569,11 @@ async def test_parse_job_processing_warns_and_retains_when_state_probe_is_exhaus
         cleanup,
         raising=False,
     )
+    queue = AsyncMock(side_effect=RuntimeError("database unavailable"))
     monkeypatch.setattr(
         education_textbooks,
         "queue_textbook_processing_from_artifacts",
-        AsyncMock(side_effect=RuntimeError("database unavailable")),
-        raising=False,
-    )
-    state_check = AsyncMock(
-        side_effect=[
-            RuntimeError("probe unavailable"),
-            RuntimeError("probe unavailable"),
-            RuntimeError("probe unavailable"),
-        ]
-    )
-    monkeypatch.setattr(
-        education_textbooks,
-        "textbook_processing_job_exists",
-        state_check,
+        queue,
         raising=False,
     )
     generated_ids = iter([UUID(version_id), UUID(job_id)])
@@ -769,45 +591,31 @@ async def test_parse_job_processing_warns_and_retains_when_state_probe_is_exhaus
             source_parse_job_ids=["job-parse-1"],
         )
 
-    assert state_check.await_count == 3
+    queue.assert_awaited_once()
     cleanup.assert_not_awaited()
     records = [
         record
         for record in caplog.records
-        if record.message == "textbook_source_snapshot_state_indeterminate"
+        if record.message
+        == "textbook_source_snapshot_queue_outcome_ambiguous"
     ]
     assert len(records) == 1
     assert records[0].version_id == version_id
     assert records[0].job_id == job_id
     assert "snapshot-key" not in caplog.text
+    assert "database unavailable" not in caplog.text
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("state_mode", "should_cleanup", "expected_probe_calls", "expect_warning"),
-    [
-        ("absent", True, 1, False),
-        ("present", False, 1, False),
-        ("indeterminate", False, 3, True),
-    ],
-)
-async def test_parse_job_processing_reconciles_cancellation_during_queueing(
-    monkeypatch,
-    caplog,
-    state_mode,
-    should_cleanup,
-    expected_probe_calls,
-    expect_warning,
+async def test_parse_job_processing_waits_for_cancelled_queue_task_to_settle(
+    monkeypatch, caplog
 ):
-    monkeypatch.setattr(
-        education_textbooks,
-        "_STATE_PROBE_BACKOFF_SECONDS",
-        0,
-        raising=False,
-    )
     textbook_id = "5e3a0b43-8378-4b6c-926f-0f053577501d"
     version_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
     job_id = "7bc1e58d-5a34-49d6-8c5c-70703e989bd4"
+    queue_started = asyncio.Event()
+    queue_release = asyncio.Event()
+    queue_finished = asyncio.Event()
     monkeypatch.setattr(
         education_textbooks,
         "get_household_context_for_parent",
@@ -847,59 +655,58 @@ async def test_parse_job_processing_reconciles_cancellation_during_queueing(
         cleanup,
         raising=False,
     )
+
+    async def queue(**_kwargs):
+        queue_started.set()
+        try:
+            await queue_release.wait()
+        finally:
+            queue_finished.set()
+        return {
+            "job_id": job_id,
+            "version_id": version_id,
+            "status": "queued",
+        }
+
     monkeypatch.setattr(
         education_textbooks,
         "queue_textbook_processing_from_artifacts",
-        AsyncMock(side_effect=asyncio.CancelledError()),
-        raising=False,
-    )
-    if state_mode == "absent":
-        state_check = AsyncMock(return_value=False)
-    elif state_mode == "present":
-        state_check = AsyncMock(return_value=True)
-    else:
-        state_check = AsyncMock(
-            side_effect=[
-                RuntimeError("probe unavailable"),
-                RuntimeError("probe unavailable"),
-                RuntimeError("probe unavailable"),
-            ]
-        )
-    monkeypatch.setattr(
-        education_textbooks,
-        "textbook_processing_job_exists",
-        state_check,
+        queue,
         raising=False,
     )
     generated_ids = iter([UUID(version_id), UUID(job_id)])
     monkeypatch.setattr(education_textbooks, "uuid4", lambda: next(generated_ids))
 
-    with (
-        caplog.at_level(
-            logging.WARNING, logger=education_textbooks.__name__
-        ),
-        pytest.raises(asyncio.CancelledError),
+    with caplog.at_level(
+        logging.WARNING, logger=education_textbooks.__name__
     ):
-        await education_textbooks.start_processing_from_parse_jobs(
-            parent_user_id="parent-1",
-            textbook_id=textbook_id,
-            source_parse_job_ids=["job-parse-1"],
+        service_task = asyncio.create_task(
+            education_textbooks.start_processing_from_parse_jobs(
+                parent_user_id="parent-1",
+                textbook_id=textbook_id,
+                source_parse_job_ids=["job-parse-1"],
+            )
         )
+        await asyncio.wait_for(queue_started.wait(), timeout=1)
+        service_task.cancel()
+        await asyncio.sleep(0)
 
-    assert state_check.await_count == expected_probe_calls
-    if should_cleanup:
-        cleanup.assert_awaited_once_with(["snapshot-key-1", "snapshot-key-2"])
-    else:
-        cleanup.assert_not_awaited()
-    warning_records = [
+        assert not service_task.done()
+        queue_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await service_task
+
+    assert queue_finished.is_set()
+    cleanup.assert_not_awaited()
+    records = [
         record
         for record in caplog.records
-        if record.message == "textbook_source_snapshot_state_indeterminate"
+        if record.message
+        == "textbook_source_snapshot_queue_outcome_ambiguous"
     ]
-    assert len(warning_records) == int(expect_warning)
-    if warning_records:
-        assert warning_records[0].version_id == version_id
-        assert warning_records[0].job_id == job_id
+    assert len(records) == 1
+    assert records[0].version_id == version_id
+    assert records[0].job_id == job_id
     assert "snapshot-key" not in caplog.text
 
 

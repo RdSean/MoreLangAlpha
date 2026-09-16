@@ -2222,26 +2222,6 @@ async def list_completed_parse_jobs_for_parent(
     )
 
 
-async def textbook_processing_job_exists(
-    *, job_id: str, version_id: str
-) -> bool:
-    """Return whether the exact processing row is durably visible."""
-    async with get_db_connection() as conn:
-        async with conn.cursor(row_factory=dict_row) as cur:
-            await cur.execute(
-                """
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM education_processing_jobs
-                    WHERE job_id = %s AND version_id = %s
-                ) AS exists
-                """,
-                (job_id, version_id),
-            )
-            row = await cur.fetchone()
-    return bool(row and row["exists"])
-
-
 async def claim_textbook_processing_job(*, job_id: str) -> dict[str, Any] | None:
     """Claim exactly one queued job with a row lock; a future PTC worker uses the same contract."""
     async with get_db_connection() as conn:

@@ -588,33 +588,6 @@ async def test_queue_processing_from_artifacts_rejects_unavailable_source_owners
 
 
 @pytest.mark.asyncio
-async def test_processing_state_probe_checks_the_exact_job_and_version(
-    mock_connection, mock_cursor, monkeypatch
-):
-    @asynccontextmanager
-    async def fake_connection():
-        yield mock_connection
-
-    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
-    mock_cursor.fetchone.return_value = {"exists": True}
-
-    exists = await education_textbooks.textbook_processing_job_exists(
-        job_id="7bc1e58d-5a34-49d6-8c5c-70703e989bd4",
-        version_id="f5761267-11d1-4977-8107-e2671c99a2f0",
-    )
-
-    assert exists is True
-    sql, params = mock_cursor.execute.call_args.args
-    assert "FROM education_processing_jobs" in sql
-    assert "job_id = %s" in sql
-    assert "version_id = %s" in sql
-    assert params == (
-        "7bc1e58d-5a34-49d6-8c5c-70703e989bd4",
-        "f5761267-11d1-4977-8107-e2671c99a2f0",
-    )
-
-
-@pytest.mark.asyncio
 async def test_queue_processing_from_artifacts_rejects_duplicate_parse_jobs(
     mock_connection, mock_cursor, monkeypatch
 ):

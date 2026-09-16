@@ -138,8 +138,9 @@ export default function DocumentPreviewDrawer({
   return (
     <div
       className={`documents-preview-panel${open ? ' is-open' : ''}`}
-      style={panelWidth ? { width: `${panelWidth}px`, flexBasis: `${panelWidth}px` } : undefined}
+      style={open && panelWidth ? { width: `${panelWidth}px`, flexBasis: `${panelWidth}px` } : undefined}
       aria-hidden={!open}
+      inert={!open}
     >
       <aside
         ref={drawerRef}
@@ -152,7 +153,7 @@ export default function DocumentPreviewDrawer({
           onFocus={measurePanelWidth}
           onKeyDown={handleDividerKeyDown}
           role="separator"
-          tabIndex={0}
+          tabIndex={open ? 0 : -1}
           aria-orientation="vertical"
           aria-label={t('documents.preview.resize')}
           aria-valuemin={MIN_PANEL_WIDTH}
@@ -169,14 +170,14 @@ export default function DocumentPreviewDrawer({
           </div>
           <div className="documents-preview-header-actions">
             {documentId && (
-              <Link className="documents-preview-detail-link" to={`/documents/${encodeURIComponent(documentId)}`}>
+              <Link className="documents-preview-detail-link" tabIndex={open ? undefined : -1} to={`/documents/${encodeURIComponent(documentId)}`}>
                 {t('documents.preview.viewDetail')}
               </Link>
             )}
-            <button type="button" className="file-panel-icon-btn" onClick={() => void toggleFullscreen()} aria-label={isFullscreen ? t('documents.preview.exitFullscreen') : t('documents.preview.fullscreen')} title={isFullscreen ? t('documents.preview.exitFullscreen') : t('documents.preview.fullscreen')}>
+            <button type="button" tabIndex={open ? undefined : -1} className="file-panel-icon-btn" onClick={() => void toggleFullscreen()} aria-label={isFullscreen ? t('documents.preview.exitFullscreen') : t('documents.preview.fullscreen')} title={isFullscreen ? t('documents.preview.exitFullscreen') : t('documents.preview.fullscreen')}>
               {isFullscreen ? <Minimize2 className="h-4 w-4" aria-hidden="true" /> : <Maximize2 className="h-4 w-4" aria-hidden="true" />}
             </button>
-            <button type="button" className="file-panel-icon-btn" onClick={() => onOpenChange(false)} aria-label={t('documents.preview.close')}>
+            <button type="button" tabIndex={open ? undefined : -1} className="file-panel-icon-btn" onClick={() => onOpenChange(false)} aria-label={t('documents.preview.close')}>
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
@@ -188,6 +189,7 @@ export default function DocumentPreviewDrawer({
               <button
                 key={id}
                 type="button"
+                tabIndex={open ? undefined : -1}
                 role="tab"
                 aria-selected={active}
                 className="documents-preview-tab"

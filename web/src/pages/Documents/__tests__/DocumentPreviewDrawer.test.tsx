@@ -37,13 +37,15 @@ vi.mock('@/pages/ChatAgent/components/viewers/PreviewViewer', () => ({
 
 import DocumentPreviewDrawer from '../components/DocumentPreviewDrawer';
 
-function renderDrawer(props: {
+interface DrawerProps {
   open?: boolean;
   documentId?: string;
   onOpenChange?: (open: boolean) => void;
   onOpenParser?: (documentId: string) => void;
-} = {}) {
-  return render(
+}
+
+function drawerTree(props: DrawerProps = {}) {
+  return (
     <MemoryRouter initialEntries={['/documents']}>
       <Routes>
         <Route
@@ -62,8 +64,12 @@ function renderDrawer(props: {
           element={<output data-testid="document-detail-route">document detail route</output>}
         />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderDrawer(props: DrawerProps = {}) {
+  return render(drawerTree(props));
 }
 
 describe('DocumentPreviewDrawer', () => {
@@ -209,6 +215,67 @@ describe('DocumentPreviewDrawer', () => {
     } finally {
       rect.mockRestore();
     }
+  });
+
+  it('removes measured inline dimensions when the drawer closes', () => {
+    const view = renderDrawer();
+    const drawer = screen.getByRole('complementary', { name: 'Document preview' });
+    const divider = screen.getByRole('separator', { name: 'Resize preview' });
+    const panel = drawer.parentElement;
+    expect(panel).not.toBeNull();
+    const rect = vi.spyOn(drawer, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 430,
+      height: 800,
+      top: 0,
+      right: 430,
+      bottom: 800,
+      left: 0,
+      toJSON: () => ({}),
+    });
+    try {
+      act(() => divider.focus());
+      expect(panel).toHaveStyle({ width: '430px', flexBasis: '430px' });
+      fireEvent.mouseDown(divider, { clientX: 900 });
+      fireEvent.mouseMove(window, { clientX: 820 });
+      fireEvent.mouseUp(window);
+
+      view.rerender(drawerTree({ open: false }));
+
+      expect(screen.queryByRole('complementary', { name: 'Document preview' })).not.toBeInTheDocument();
+      expect(screen.getByRole('complementary', { name: 'Document preview', hidden: true })).toBe(drawer);
+      expect(panel).not.toHaveClass('is-open');
+      expect(panel).toHaveAttribute('aria-hidden', 'true');
+      expect(panel).toHaveAttribute('inert');
+      expect(panel?.style.width).toBe('');
+      expect(panel?.style.flexBasis).toBe('');
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it('keeps closed drawer controls out of the keyboard tab order', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/documents']}>
+        <button type="button">Before drawer</button>
+        <DocumentPreviewDrawer
+          open={false}
+          documentId="doc-1"
+          onOpenChange={vi.fn()}
+        />
+        <button type="button">After drawer</button>
+      </MemoryRouter>,
+    );
+
+    const before = screen.getByRole('button', { name: 'Before drawer' });
+    const after = screen.getByRole('button', { name: 'After drawer' });
+    before.focus();
+    await user.tab();
+    expect(after).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(before).toHaveFocus();
   });
 
   it('links to the independent document detail page', async () => {

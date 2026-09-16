@@ -225,15 +225,17 @@ async def start_processing_from_parse_jobs(
 This method authorizes the parent, freezes all selected parse bundles, then
 calls `queue_textbook_processing_from_artifacts()`.
 
-**Snapshot cleanup invariant:** A known pre-commit failure with no durable
-queue row may delete only the exact keys written by this operation. An
-ambiguous queue failure, including cancellation during the queue call, must
-first run a bounded, shielded probe for the exact `job_id`/`version_id`;
-snapshots are deleted only when that probe confirms the row is absent. A
-present or indeterminate row retains the snapshots for later orphan
-reconciliation. A queued job must never exist with missing snapshot objects.
-Cancellation of an in-flight upload waits for the blocked worker to settle,
-then removes that operation's exact destination key before re-raising.
+**Snapshot cleanup invariant:** A known pre-commit
+`TextbookQueueValidationError` or a `None` queue result may delete only the
+exact keys written by this operation. The database queue call runs as an
+explicitly referenced task and is awaited through `await_settled`, so caller
+cancellation cannot cancel the database operation. Once that task settles, an
+unknown exception or cancellation retains the snapshots because the durable
+outcome is ambiguous; the log carries only `version_id` and `job_id` for later
+orphan reconciliation. There is no post-cancellation `EXISTS` probe. A queued
+job must never exist with missing snapshot objects. Cancellation of an
+in-flight upload waits for the blocked worker to settle, then removes that
+operation's exact destination key before re-raising.
 
 **Step 5: Run focused tests**
 

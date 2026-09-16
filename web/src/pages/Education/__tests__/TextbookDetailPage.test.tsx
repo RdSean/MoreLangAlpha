@@ -24,6 +24,8 @@ function setViewport(width: number) {
 const state = vi.hoisted(() => ({
   textbook: null as Record<string, unknown> | null,
   parseJobs: [] as Array<Record<string, unknown>>,
+  parseJobsError: false,
+  refetchParseJobs: vi.fn(),
   getAssetUrl: vi.fn(),
   start: vi.fn(),
   run: vi.fn(),
@@ -44,7 +46,12 @@ vi.mock('../api', () => ({
 }));
 
 vi.mock('../queries', () => ({
-  useCompletedParseJobs: () => ({ data: state.parseJobs, isLoading: false }),
+  useCompletedParseJobs: () => ({
+    data: state.parseJobs,
+    isLoading: false,
+    isError: state.parseJobsError,
+    refetch: state.refetchParseJobs,
+  }),
   useEducationMembers: () => ({ data: [] }),
   useParentLearningRecords: () => ({ data: { records: [] }, isLoading: false }),
   useParentLearningTranscript: () => ({ data: { messages: [] }, isLoading: false }),
@@ -77,6 +84,8 @@ beforeEach(() => {
     { producer_job_id: 'job-parse-1', document_id: 'doc-1', primary_artifact_id: 'art-1', filename: 'body.pdf', media_type: 'application/pdf', format: 'pdf', parser_id: 'datalab', parser_name: 'Datalab', parser_version: '2', parse_completed_at: '2026-08-13T00:00:00Z', size_bytes: 1024, artifact_count: 3 },
     { producer_job_id: 'job-parse-2', document_id: 'doc-2', primary_artifact_id: 'art-2', filename: 'workbook.pdf', media_type: 'application/pdf', format: 'pdf', parser_id: 'datalab', parser_name: 'Datalab', parser_version: '2', parse_completed_at: '2026-08-13T00:01:00Z', size_bytes: 2048, artifact_count: 5 },
   ];
+  state.parseJobsError = false;
+  state.refetchParseJobs.mockReset();
   state.start.mockReset().mockResolvedValue({ job_id: 'job-1' });
   state.getAssetUrl.mockReset().mockResolvedValue('https://storage.test/legacy.pdf');
   state.run.mockReset();
@@ -122,6 +131,25 @@ describe('TextbookDetailPage', () => {
       textbookId: 'textbook-1',
       sourceParseJobIds: ['job-parse-1', 'job-parse-2'],
     }));
+  });
+
+  it('shows a retry action when completed parse jobs fail to load', async () => {
+    state.parseJobs = [];
+    state.parseJobsError = true;
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={['/education/textbooks/textbook-1']}>
+        <Routes><Route path="/education/textbooks/:textbookId" element={<TextbookDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: '开始加工' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('无法加载已完成解析的资料');
+    expect(screen.queryByText('图书馆暂无已完成解析的文档。')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '重试' }));
+    expect(state.refetchParseJobs).toHaveBeenCalledOnce();
   });
 
   it('shows artifact and legacy sources truthfully in the source tab', () => {
