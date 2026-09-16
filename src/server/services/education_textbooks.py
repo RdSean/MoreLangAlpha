@@ -45,12 +45,19 @@ from src.server.services.education_textbook_source_snapshots import (
     cleanup_snapshot_objects,
     freeze_parse_job_source,
 )
+from src.server.services.education_textbook_snapshot_reads import (
+    TextbookSnapshotReadError,
+    read_snapshot_artifact_bytes,
+)
 from src.server.services.education_textbook_storage import write_textbook_content_bundle
 from src.server.services.education_teaching_assets import (
     TeachingAssetValidationError,
     expected_teaching_asset_paths,
 )
-from src.server.services.education_teaching_storage import build_staged_teaching_input
+from src.server.services.education_teaching_storage import (
+    build_staged_teaching_input,
+    hydrate_source_asset_manifests,
+)
 from src.utils.storage import get_bytes
 
 
@@ -265,16 +272,18 @@ async def build_frozen_artifact_package(job: dict[str, Any]) -> dict[str, Any]:
                 "A frozen textbook snapshot primary digest is invalid"
             )
         relative_path = _snapshot_relative_path(primary.get("relative_path"))
-        artifact_key = f"{prefix}{relative_path}"
-        content = await asyncio.to_thread(get_bytes, artifact_key)
-        if (
-            not isinstance(content, bytes)
-            or not content
-            or len(content) > max_bytes
-        ):
+        try:
+            content, artifact_key = await read_snapshot_artifact_bytes(
+                snapshot_prefix=prefix,
+                relative_path=relative_path,
+                expected_sha256=primary_sha256,
+                max_bytes=max_bytes,
+                read_bytes=get_bytes,
+            )
+        except TextbookSnapshotReadError as exc:
             raise TextbookProcessingError(
                 "A frozen textbook snapshot primary artifact is invalid"
-            )
+            ) from exc
         declared_size = primary.get("size_bytes")
         if declared_size is not None and (
             not isinstance(declared_size, int)
@@ -283,10 +292,6 @@ async def build_frozen_artifact_package(job: dict[str, Any]) -> dict[str, Any]:
         ):
             raise TextbookProcessingError(
                 "A frozen textbook snapshot primary size is invalid"
-            )
-        if hashlib.sha256(content).hexdigest() != primary_sha256:
-            raise TextbookProcessingError(
-                "A frozen textbook snapshot primary digest does not match"
             )
         try:
             markdown = content.decode("utf-8")
@@ -937,6 +942,7 @@ async def queue_teaching_package_for_parent(
     if not frozen_input:
         raise TextbookNotFoundError("Reviewable textbook content version not found")
 
+    frozen_input = await hydrate_source_asset_manifests(frozen_input)
     job_id = str(uuid4())
     frozen_input["job_id"] = job_id
     staged = build_staged_teaching_input(frozen_input)

@@ -1062,6 +1062,40 @@ async def test_artifact_processing_skips_pdf_pipeline_and_persists_complete_sour
 
 
 @pytest.mark.asyncio
+async def test_artifact_processing_reads_legacy_root_snapshot_layout(monkeypatch):
+    markdown = "# Legacy root source\n\nComplete Markdown.\n"
+    source, manifest_key, _current_artifact_key = _artifact_source(
+        position=1,
+        filename="legacy.pdf",
+        markdown=markdown.encode(),
+    )
+    legacy_artifact_key = f"{source['snapshot_prefix']}document.md"
+    manifest = _artifact_manifest(source, markdown.encode())
+    manifest["artifacts"][0]["relative_path"] = "document.md"
+    objects = {
+        manifest_key: json.dumps(manifest).encode(),
+        legacy_artifact_key: markdown.encode(),
+    }
+    monkeypatch.setattr(
+        education_textbooks,
+        "claim_textbook_processing_job",
+        AsyncMock(return_value=_artifact_processing_job(source)),
+    )
+    monkeypatch.setattr(education_textbooks, "get_bytes", objects.get)
+    complete = AsyncMock(return_value={"job_id": "job-1", "status": "completed"})
+    monkeypatch.setattr(
+        education_textbooks, "complete_textbook_processing_job", complete
+    )
+
+    await education_textbooks.process_textbook_job(job_id="job-1")
+
+    assert complete.await_args.kwargs["chapters"][0]["markdown"] == markdown
+    assert complete.await_args.kwargs["chapters"][0]["markdown_key"] == (
+        legacy_artifact_key
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "failure",
     [

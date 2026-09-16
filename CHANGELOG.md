@@ -2,6 +2,12 @@
 
 ## 2026-09-16
 
+### 兼容旧版教材快照布局与编码图片引用
+
+- 教材来源 object 读取现在优先尝试当前的 `{snapshot_prefix}artifacts/{relative_path}`，不存在时再回退旧的 `{snapshot_prefix}{relative_path}` 根布局；主 Markdown 与受管 staging 引用的图片都走同一套读取与 SHA-256 校验，选中旧路径时不会改写快照。
+- 对 `asset_manifest` 为空的历史来源，队列与 staging 会在进入 `freeze_teaching_input()` 前读取根 `manifest.json` 并重建仅含安全字段的 manifest；重建结果不包含 storage key，仍按引用关系决定是否上传图片。
+- Markdown 图片目标会先做 percent-decode，再检查绝对路径与 `..` 穿越，并继续支持精确相对路径和 basename 匹配；`http(s)`、`data:`、`blob:` 等外部引用仍被忽略。新增旧布局、空 manifest 回填、`%20`、混合编码和编码穿越测试。
+
 ### 补齐全来源图片资产的受管 PTC staging
 
 - 新增迁移 `065_add_textbook_source_asset_manifest`，在 `education_textbook_artifact_sources` 上增加 `asset_manifest JSONB NOT NULL DEFAULT '[]'::jsonb`；历史来源行自动保持空 manifest，不需要回填。

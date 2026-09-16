@@ -10,14 +10,23 @@ import re
 import zipfile
 from collections.abc import Mapping
 from typing import Any, Protocol
+from urllib.parse import unquote
 from uuid import UUID
 
 from src.server.services.education_teaching_assets import expected_teaching_asset_paths
+from src.server.services.education_textbook_snapshot_reads import (
+    TextbookSnapshotDigestError,
+    TextbookSnapshotReadError,
+    read_snapshot_artifact_bytes,
+    safe_asset_manifest_entry,
+    validated_snapshot_prefix,
+)
 from src.utils.storage import get_bytes, upload_bytes
 
 
 _SAFE_COMPONENT_RE = re.compile(r"[^0-9A-Za-z._-]+")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_SOURCE_SNAPSHOT_FORMAT = "langalpha-textbook-source-snapshot/v1"
 _MARKDOWN_IMAGE_RE = re.compile(
     r"""!\[[^\]]*\]\(\s*(?P<target><[^>\n]+>|[^\s)]+)"""
     r"""(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)""",
@@ -148,10 +157,15 @@ def _local_image_references(markdown: str) -> list[str]:
         target = match.group("target").strip()
         if target.startswith("<") and target.endswith(">"):
             target = target[1:-1].strip()
+        target = unquote(target)
         if not target or target.startswith(("#", "//")):
             continue
-        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target):
+        if re.match(r"^(?:https?|data|blob):", target, re.IGNORECASE):
             continue
+        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target):
+            raise TeachingPackageStorageError(
+                "A Markdown image reference uses an unsupported scheme"
+            )
         references.append(target)
     return references
 
@@ -180,6 +194,7 @@ def _referenced_source_assets(
         if (
             normalized.startswith("/")
             or "\\" in normalized
+            or "\x00" in normalized
             or any(part in {"", ".", ".."} for part in normalized.split("/"))
         ):
             raise TeachingPackageStorageError(
@@ -199,6 +214,78 @@ def _referenced_source_assets(
             "path": staged_path,
         }
     return [asset["path"] for asset in staged.values()], list(staged.values())
+
+
+async def hydrate_source_asset_manifests(job: Mapping[str, Any]) -> dict[str, Any]:
+    """Backfill empty v2 source manifests from each frozen root snapshot manifest."""
+    result = dict(job)
+    sources = job.get("sources")
+    if not isinstance(sources, list):
+        return result
+    hydrated_sources: list[Any] = []
+    for source in sources:
+        if not (
+            isinstance(source, Mapping)
+            and source.get("markdown") is not None
+            and source.get("content_chapter_id") is not None
+        ):
+            hydrated_sources.append(source)
+            continue
+        hydrated = dict(source)
+        if not hydrated.get("asset_manifest"):
+            snapshot_prefix = hydrated.get("snapshot_prefix")
+            if isinstance(snapshot_prefix, str) and snapshot_prefix:
+                try:
+                    prefix = validated_snapshot_prefix(snapshot_prefix)
+                except TextbookSnapshotReadError as exc:
+                    raise TeachingPackageStorageError(
+                        "Frozen source snapshot prefix is invalid"
+                    ) from exc
+                manifest_bytes = await asyncio.to_thread(
+                    get_bytes, f"{prefix}manifest.json"
+                )
+                if (
+                    not isinstance(manifest_bytes, bytes)
+                    or not manifest_bytes
+                    or len(manifest_bytes) > _MAX_CANDIDATE_BYTES
+                ):
+                    raise TeachingPackageStorageError(
+                        "Frozen source snapshot manifest is unavailable"
+                    )
+                try:
+                    manifest = json.loads(manifest_bytes.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise TeachingPackageStorageError(
+                        "Frozen source snapshot manifest is invalid"
+                    ) from exc
+                artifacts = (
+                    manifest.get("artifacts")
+                    if isinstance(manifest, Mapping)
+                    else None
+                )
+                if (
+                    not isinstance(manifest, Mapping)
+                    or manifest.get("format") != _SOURCE_SNAPSHOT_FORMAT
+                    or not isinstance(artifacts, list)
+                ):
+                    raise TeachingPackageStorageError(
+                        "Frozen source snapshot manifest is invalid"
+                    )
+                asset_manifest: list[dict[str, str]] = []
+                for artifact in artifacts:
+                    entry = safe_asset_manifest_entry(artifact)
+                    if entry is None:
+                        raise TeachingPackageStorageError(
+                            "Frozen source snapshot manifest artifact is invalid"
+                        )
+                    asset_manifest.append(entry)
+                hydrated["asset_manifest"] = asset_manifest
+            else:
+                hydrated["asset_manifest"] = []
+            hydrated["asset_manifest_hydrated"] = True
+        hydrated_sources.append(hydrated)
+    result["sources"] = hydrated_sources
+    return result
 
 
 def freeze_teaching_input(job: Mapping[str, Any]) -> dict[str, Any]:
@@ -248,11 +335,14 @@ def freeze_teaching_input(job: Mapping[str, Any]) -> dict[str, Any]:
             asset_manifest = _normalized_source_asset_manifest(
                 source.get("asset_manifest")
             )
-            asset_paths, staged_assets = _referenced_source_assets(
-                markdown=markdown,
-                asset_manifest=asset_manifest,
-                position=position,
-            )
+            if asset_manifest or source.get("asset_manifest_hydrated"):
+                asset_paths, staged_assets = _referenced_source_assets(
+                    markdown=markdown,
+                    asset_manifest=asset_manifest,
+                    position=position,
+                )
+            else:
+                asset_paths, staged_assets = [], []
             content_sha256 = hashlib.sha256(markdown.encode("utf-8")).hexdigest()
             provided_sha256 = source.get("content_sha256")
             if provided_sha256 is not None and (
@@ -416,6 +506,7 @@ async def stage_teaching_inputs(
     job: Mapping[str, Any], sandbox: ManagedTeachingSandbox
 ) -> dict[str, Any]:
     """Upload only frozen Markdown and a scrubbed manifest into one job root."""
+    job = await hydrate_source_asset_manifests(job)
     staged = build_staged_teaching_input(job)
     frozen = staged["frozen"]
     root = managed_job_root(frozen["job_id"])
@@ -438,33 +529,22 @@ async def stage_teaching_inputs(
         )
         for source in frozen["sources"]:
             snapshot_prefix = source.get("snapshot_prefix")
-            if source["staged_assets"] and (
-                not isinstance(snapshot_prefix, str)
-                or not snapshot_prefix.startswith("education/")
-                or not snapshot_prefix.endswith("/")
-                or "\\" in snapshot_prefix
-                or "\x00" in snapshot_prefix
-                or any(
-                    part in {"", ".", ".."}
-                    for part in snapshot_prefix.rstrip("/").split("/")
-                )
-            ):
-                raise TeachingPackageStorageError(
-                    "Frozen source snapshot prefix is invalid"
-                )
             for asset in source["staged_assets"]:
-                snapshot_key = (
-                    f"{snapshot_prefix}artifacts/{asset['relative_path']}"
-                )
-                content = await asyncio.to_thread(get_bytes, snapshot_key)
-                if not isinstance(content, bytes):
-                    raise TeachingPackageStorageError(
-                        "A referenced frozen source asset is unavailable"
+                try:
+                    content, _snapshot_key = await read_snapshot_artifact_bytes(
+                        snapshot_prefix=str(snapshot_prefix or ""),
+                        relative_path=asset["relative_path"],
+                        expected_sha256=asset["sha256"],
+                        read_bytes=get_bytes,
                     )
-                if hashlib.sha256(content).hexdigest() != asset["sha256"]:
+                except TextbookSnapshotDigestError as exc:
                     raise TeachingPackageStorageError(
                         "A referenced frozen source asset digest does not match"
-                    )
+                    ) from exc
+                except TextbookSnapshotReadError as exc:
+                    raise TeachingPackageStorageError(
+                        "A referenced frozen source asset is unavailable"
+                    ) from exc
                 files.append((f"{root}/inputs/{asset['path']}", content))
     else:
         files.extend(

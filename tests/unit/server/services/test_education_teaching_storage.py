@@ -172,6 +172,7 @@ async def test_stage_teaching_inputs_resolves_exact_and_basename_asset_refs(monk
         "![basename](figure.png)\n"
         "![external](https://example.test/figure.png)\n"
         "![data](data:image/png;base64,AAAA)\n"
+        "![blob](blob:https://example.test/figure.png)\n"
     )
     job = _source_asset_job(
         markdown=markdown,
@@ -207,6 +208,150 @@ async def test_stage_teaching_inputs_resolves_exact_and_basename_asset_refs(monk
     assert "storage_key" not in serialized
     assert "https://" not in serialized
     assert "data:image" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_stage_teaching_inputs_reads_legacy_root_image_layout(monkeypatch):
+    image = b"legacy-root-image"
+    markdown = "![figure](images/figure.png)\n"
+    job = _source_asset_job(
+        markdown=markdown,
+        asset_sha256=sha256(image).hexdigest(),
+    )
+    prefix = job["sources"][0]["snapshot_prefix"]
+    objects = {f"{prefix}images/figure.png": image}
+    monkeypatch.setattr(education_teaching_storage, "get_bytes", objects.get)
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    await education_teaching_storage.stage_teaching_inputs(job, sandbox)
+
+    uploaded = {
+        call.args[0]: call.args[1]
+        for call in sandbox.aupload_file_bytes.await_args_list
+    }
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+    assert uploaded[f"{root}inputs/assets/01/images/figure.png"] == image
+
+
+@pytest.mark.asyncio
+async def test_stage_teaching_inputs_backfills_empty_asset_manifest_from_snapshot(monkeypatch):
+    image = b"backfilled-image"
+    markdown = "![figure](images/figure.png)\n"
+    job = _source_job()
+    source = job["sources"][0]
+    source["markdown"] = markdown
+    source["content_sha256"] = sha256(markdown.encode()).hexdigest()
+    source["snapshot_prefix"] = (
+        "education/household-1/english-2/source-bundles/"
+        "f5761267-11d1-4977-8107-e2671c99a2f0/01/"
+    )
+    source["asset_manifest"] = []
+    prefix = source["snapshot_prefix"]
+    root_manifest = {
+        "format": "langalpha-textbook-source-snapshot/v1",
+        "document_id": source["document_id"],
+        "producer_job_id": source["source_id"],
+        "primary_artifact_id": "primary-1",
+        "artifacts": [
+            {
+                "artifact_id": "image-1",
+                "artifact_kind": "embedded_image",
+                "format": "png",
+                "media_type": "image/png",
+                "relative_path": "images/figure.png",
+                "sha256": sha256(image).hexdigest(),
+                "storage_key": "must-not-leak",
+            }
+        ],
+    }
+    objects = {
+        f"{prefix}manifest.json": json.dumps(root_manifest).encode(),
+        f"{prefix}images/figure.png": image,
+    }
+    monkeypatch.setattr(education_teaching_storage, "get_bytes", objects.get)
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    await education_teaching_storage.stage_teaching_inputs(job, sandbox)
+
+    uploaded = {
+        call.args[0]: call.args[1]
+        for call in sandbox.aupload_file_bytes.await_args_list
+    }
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+    manifest = json.loads(uploaded[f"{root}inputs/manifest.json"])
+    assert manifest["sources"][0]["asset_paths"] == ["assets/01/images/figure.png"]
+    assert uploaded[f"{root}inputs/assets/01/images/figure.png"] == image
+    assert "storage_key" not in json.dumps(manifest)
+    assert "must-not-leak" not in json.dumps(manifest)
+
+
+@pytest.mark.asyncio
+async def test_stage_teaching_inputs_percent_decodes_image_references(monkeypatch):
+    first_image = b"encoded-space"
+    second_image = b"encoded-unicode"
+    markdown = (
+        "![encoded](images/my%20figure-%E5%9B%BE.png)\n"
+        "![basename](%E5%9B%BE.png)\n"
+    )
+    job = _source_asset_job(
+        markdown=markdown,
+        asset_sha256=sha256(first_image).hexdigest(),
+        relative_path="images/my figure-图.png",
+    )
+    job["sources"][0]["asset_manifest"].append(
+        {
+            "artifact_id": "image-2",
+            "artifact_kind": "embedded_image",
+            "format": "png",
+            "media_type": "image/png",
+            "relative_path": "covers/图.png",
+            "sha256": sha256(second_image).hexdigest(),
+        }
+    )
+    prefix = job["sources"][0]["snapshot_prefix"]
+
+    def get_bytes(key: str) -> bytes | None:
+        return {
+            f"{prefix}artifacts/images/my figure-图.png": first_image,
+            f"{prefix}artifacts/covers/图.png": second_image,
+        }.get(key)
+
+    monkeypatch.setattr(
+        education_teaching_storage, "get_bytes", get_bytes, raising=False
+    )
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    await education_teaching_storage.stage_teaching_inputs(job, sandbox)
+
+    uploaded = {
+        call.args[0]: call.args[1]
+        for call in sandbox.aupload_file_bytes.await_args_list
+    }
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+    manifest = json.loads(uploaded[f"{root}inputs/manifest.json"])
+    assert manifest["sources"][0]["asset_paths"] == [
+        "assets/01/images/my figure-图.png",
+        "assets/01/covers/图.png",
+    ]
+    assert uploaded[f"{root}inputs/assets/01/images/my figure-图.png"] == first_image
+    assert uploaded[f"{root}inputs/assets/01/covers/图.png"] == second_image
+
+
+@pytest.mark.asyncio
+async def test_stage_teaching_inputs_rejects_encoded_traversal_reference():
+    job = _source_asset_job(
+        markdown="![unsafe](images/%2E%2E/secret.png)\n",
+        asset_sha256=sha256(b"secret").hexdigest(),
+        relative_path="images/secret.png",
+    )
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    with pytest.raises(education_teaching_storage.TeachingPackageStorageError):
+        await education_teaching_storage.stage_teaching_inputs(job, sandbox)
 
 
 @pytest.mark.asyncio
