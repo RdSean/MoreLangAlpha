@@ -13,6 +13,7 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID
 
+from src.config.settings import get_document_parsing_config
 from src.server.database.documents import list_artifacts
 from src.server.database.education_textbooks import get_owned_parse_job
 from src.utils.storage import delete_object, get_bytes, upload_bytes
@@ -86,8 +87,20 @@ async def _read_object(key: str) -> bytes | None:
     return await asyncio.to_thread(get_bytes, key)
 
 
-async def _write_object(key: str, content: bytes, content_type: str) -> bool:
-    return await asyncio.to_thread(upload_bytes, key, content, content_type)
+async def _write_object(
+    key: str,
+    content: bytes,
+    content_type: str,
+    *,
+    max_size: int,
+) -> bool:
+    return await asyncio.to_thread(
+        upload_bytes,
+        key,
+        content,
+        content_type,
+        max_size=max_size,
+    )
 
 
 async def _delete_object(key: str) -> bool:
@@ -96,11 +109,23 @@ async def _delete_object(key: str) -> bool:
 
 async def cleanup_snapshot_objects(keys: Iterable[str]) -> None:
     """Delete only explicitly tracked snapshot keys, newest first."""
-    for key in reversed(tuple(dict.fromkeys(keys))):
-        try:
-            await _delete_object(key)
-        except Exception:
-            logger.exception("Failed to remove textbook source snapshot object")
+    tracked_keys = tuple(dict.fromkeys(keys))
+    if not tracked_keys:
+        return
+
+    async def remove_keys() -> None:
+        for key in reversed(tracked_keys):
+            try:
+                await _delete_object(key)
+            except BaseException:
+                logger.exception("Failed to remove textbook source snapshot object")
+
+    cleanup_task = asyncio.create_task(remove_keys())
+    try:
+        await asyncio.shield(cleanup_task)
+    except asyncio.CancelledError:
+        await cleanup_task
+        raise
 
 
 async def freeze_parse_job_source(
@@ -182,6 +207,7 @@ async def freeze_parse_job_source(
 
     written_keys: list[str] = []
     manifest_artifacts: list[dict[str, Any]] = []
+    max_upload_bytes = get_document_parsing_config().max_upload_bytes
     try:
         for artifact in validated_artifacts:
             content = await _read_object(artifact["storage_key"])
@@ -197,6 +223,7 @@ async def freeze_parse_job_source(
                 destination_key,
                 content,
                 str(artifact.get("media_type") or "application/octet-stream"),
+                max_size=max_upload_bytes,
             ):
                 raise TextbookSourceSnapshotError(
                     "A textbook source snapshot object could not be stored"
@@ -242,7 +269,10 @@ async def freeze_parse_job_source(
         ).encode("utf-8")
         manifest_key = f"{prefix}manifest.json"
         if not await _write_object(
-            manifest_key, manifest_bytes, "application/json"
+            manifest_key,
+            manifest_bytes,
+            "application/json",
+            max_size=max_upload_bytes,
         ):
             raise TextbookSourceSnapshotError(
                 "A textbook source snapshot object could not be stored"
@@ -257,13 +287,15 @@ async def freeze_parse_job_source(
             raise TextbookSourceSnapshotError(
                 "A textbook source snapshot object failed verification"
             )
-    except Exception as exc:
+    except BaseException as exc:
         await cleanup_snapshot_objects(written_keys)
-        if isinstance(exc, TextbookSourceSnapshotError):
+        if isinstance(exc, (TextbookSourceSnapshotError, asyncio.CancelledError)):
             raise
-        raise TextbookSourceSnapshotError(
-            "A textbook source snapshot could not be stored"
-        ) from exc
+        if isinstance(exc, Exception):
+            raise TextbookSourceSnapshotError(
+                "A textbook source snapshot could not be stored"
+            ) from exc
+        raise
 
     primary_manifest = next(
         (

@@ -334,7 +334,9 @@ async def test_queue_processing_from_artifacts_rejects_unsafe_path_components(
         "primary_sha256": "a" * 64,
     }
 
-    with pytest.raises(ValueError, match="household_id"):
+    with pytest.raises(
+        education_textbooks.TextbookQueueValidationError, match="household_id"
+    ):
         await education_textbooks.queue_textbook_processing_from_artifacts(
             parent_user_id="parent-1",
             household_id="../other",
@@ -363,7 +365,9 @@ async def test_queue_processing_from_artifacts_rejects_unsafe_path_components(
         }
     ]
 
-    with pytest.raises(ValueError, match="textbook slug"):
+    with pytest.raises(
+        education_textbooks.TextbookQueueValidationError, match="textbook slug"
+    ):
         await education_textbooks.queue_textbook_processing_from_artifacts(
             parent_user_id="parent-1",
             household_id="household-1",
@@ -386,7 +390,9 @@ async def test_queue_processing_from_artifacts_rejects_invalid_primary_sha256(
 
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
 
-    with pytest.raises(ValueError, match="primary_sha256"):
+    with pytest.raises(
+        education_textbooks.TextbookQueueValidationError, match="primary_sha256"
+    ):
         await education_textbooks.queue_textbook_processing_from_artifacts(
             parent_user_id="parent-1",
             household_id="household-1",
@@ -417,24 +423,65 @@ async def test_queue_processing_from_artifacts_rejects_foreign_household(
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
     mock_cursor.fetchone.return_value = None
 
-    job = await education_textbooks.queue_textbook_processing_from_artifacts(
-        parent_user_id="parent-1",
-        household_id="household-2",
-        textbook_id="textbook-1",
-        sources=[
-            {
-                "document_id": "doc-1",
-                "producer_job_id": "job-parse-1",
-                "primary_artifact_id": "art-1",
-                "primary_sha256": "a" * 64,
-            }
-        ],
-        extractor_name="managed_ptc",
-        extractor_version="1",
-    )
+    with pytest.raises(
+        education_textbooks.TextbookQueueValidationError, match="Textbook not found"
+    ):
+        await education_textbooks.queue_textbook_processing_from_artifacts(
+            parent_user_id="parent-1",
+            household_id="household-2",
+            textbook_id="textbook-1",
+            sources=[
+                {
+                    "document_id": "doc-1",
+                    "producer_job_id": "job-parse-1",
+                    "primary_artifact_id": "art-1",
+                    "primary_sha256": "a" * 64,
+                }
+            ],
+            extractor_name="managed_ptc",
+            extractor_version="1",
+        )
 
-    assert job is None
     assert mock_cursor.execute.await_count == 1
+    assert mock_cursor.executemany.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_queue_processing_from_artifacts_rejects_unavailable_source_ownership(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {
+        "textbook_id": "textbook-1",
+        "slug": "reading-explorer-3",
+    }
+    mock_cursor.fetchall.return_value = []
+
+    with pytest.raises(
+        education_textbooks.TextbookQueueValidationError,
+        match="unavailable or not owned",
+    ):
+        await education_textbooks.queue_textbook_processing_from_artifacts(
+            parent_user_id="parent-1",
+            household_id="household-1",
+            textbook_id="textbook-1",
+            sources=[
+                {
+                    "document_id": "doc-1",
+                    "producer_job_id": "job-parse-1",
+                    "primary_artifact_id": "art-1",
+                    "primary_sha256": "a" * 64,
+                }
+            ],
+            extractor_name="managed_ptc",
+            extractor_version="1",
+        )
+
+    assert mock_cursor.execute.await_count == 2
     assert mock_cursor.executemany.await_count == 0
 
 
@@ -454,7 +501,10 @@ async def test_queue_processing_from_artifacts_rejects_duplicate_parse_jobs(
         "primary_sha256": "a" * 64,
     }
 
-    with pytest.raises(ValueError, match="Duplicate producer_job_id"):
+    with pytest.raises(
+        education_textbooks.TextbookQueueValidationError,
+        match="Duplicate producer_job_id",
+    ):
         await education_textbooks.queue_textbook_processing_from_artifacts(
             parent_user_id="parent-1",
             household_id="household-1",

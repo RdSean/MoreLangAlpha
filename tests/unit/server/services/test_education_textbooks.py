@@ -1,5 +1,6 @@
 """Contract tests for versioned family textbook learning."""
 
+import asyncio
 from unittest.mock import AsyncMock
 from types import SimpleNamespace
 import sys
@@ -285,9 +286,8 @@ async def test_parse_job_processing_cleans_prior_snapshots_when_a_later_source_f
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("queue_result", ["raises", "none"])
-async def test_parse_job_processing_cleans_snapshots_when_queueing_fails(
-    monkeypatch, queue_result
+async def test_parse_job_processing_cleans_snapshots_on_known_queue_validation_error(
+    monkeypatch,
 ):
     textbook_id = "5e3a0b43-8378-4b6c-926f-0f053577501d"
     version_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
@@ -331,10 +331,10 @@ async def test_parse_job_processing_cleans_snapshots_when_queueing_fails(
         cleanup,
         raising=False,
     )
-    queue = (
-        AsyncMock(side_effect=ValueError("queue failed"))
-        if queue_result == "raises"
-        else AsyncMock(return_value=None)
+    queue = AsyncMock(
+        side_effect=education_textbooks.TextbookQueueValidationError(
+            "invalid source"
+        )
     )
     monkeypatch.setattr(
         education_textbooks,
@@ -350,6 +350,199 @@ async def test_parse_job_processing_cleans_snapshots_when_queueing_fails(
             parent_user_id="parent-1",
             textbook_id=textbook_id,
             source_parse_job_ids=["job-parse-1"],
+        )
+
+    cleanup.assert_awaited_once_with(["snapshot-key-1", "snapshot-key-2"])
+
+
+@pytest.mark.asyncio
+async def test_parse_job_processing_cleans_snapshots_when_queue_returns_none(
+    monkeypatch,
+):
+    textbook_id = "5e3a0b43-8378-4b6c-926f-0f053577501d"
+    version_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
+    job_id = "7bc1e58d-5a34-49d6-8c5c-70703e989bd4"
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_textbook_for_parent",
+        AsyncMock(
+            return_value={
+                "textbook_id": textbook_id,
+                "household_id": "household-1",
+                "slug": "reading-explorer-3",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_owned_parse_job",
+        AsyncMock(return_value={"document_id": "doc-1", "status": "completed"}),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "freeze_parse_job_source",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                source={"document_id": "doc-1"},
+                written_keys=("snapshot-key-1", "snapshot-key-2"),
+            )
+        ),
+        raising=False,
+    )
+    cleanup = AsyncMock()
+    monkeypatch.setattr(
+        education_textbooks,
+        "cleanup_snapshot_objects",
+        cleanup,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "queue_textbook_processing_from_artifacts",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    generated_ids = iter([UUID(version_id), UUID(job_id)])
+    monkeypatch.setattr(education_textbooks, "uuid4", lambda: next(generated_ids))
+
+    with pytest.raises(education_textbooks.TextbookNotFoundError):
+        await education_textbooks.start_processing_from_parse_jobs(
+            parent_user_id="parent-1",
+            textbook_id=textbook_id,
+            source_parse_job_ids=["job-parse-1"],
+        )
+
+    cleanup.assert_awaited_once_with(["snapshot-key-1", "snapshot-key-2"])
+
+
+@pytest.mark.asyncio
+async def test_parse_job_processing_retains_snapshots_on_unknown_queue_exception(
+    monkeypatch,
+):
+    textbook_id = "5e3a0b43-8378-4b6c-926f-0f053577501d"
+    version_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
+    job_id = "7bc1e58d-5a34-49d6-8c5c-70703e989bd4"
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_textbook_for_parent",
+        AsyncMock(
+            return_value={
+                "textbook_id": textbook_id,
+                "household_id": "household-1",
+                "slug": "reading-explorer-3",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_owned_parse_job",
+        AsyncMock(return_value={"document_id": "doc-1", "status": "completed"}),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "freeze_parse_job_source",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                source={"document_id": "doc-1"},
+                written_keys=("snapshot-key-1", "snapshot-key-2"),
+            )
+        ),
+        raising=False,
+    )
+    cleanup = AsyncMock()
+    monkeypatch.setattr(
+        education_textbooks,
+        "cleanup_snapshot_objects",
+        cleanup,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "queue_textbook_processing_from_artifacts",
+        AsyncMock(side_effect=RuntimeError("database unavailable")),
+        raising=False,
+    )
+    generated_ids = iter([UUID(version_id), UUID(job_id)])
+    monkeypatch.setattr(education_textbooks, "uuid4", lambda: next(generated_ids))
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await education_textbooks.start_processing_from_parse_jobs(
+            parent_user_id="parent-1",
+            textbook_id=textbook_id,
+            source_parse_job_ids=["job-parse-1"],
+        )
+
+    cleanup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_parse_job_processing_cleans_prior_snapshots_on_cancellation(
+    monkeypatch,
+):
+    textbook_id = "5e3a0b43-8378-4b6c-926f-0f053577501d"
+    version_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
+    job_id = "7bc1e58d-5a34-49d6-8c5c-70703e989bd4"
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_textbook_for_parent",
+        AsyncMock(
+            return_value={
+                "textbook_id": textbook_id,
+                "household_id": "household-1",
+                "slug": "reading-explorer-3",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_owned_parse_job",
+        AsyncMock(
+            side_effect=[
+                {"document_id": "doc-1", "status": "completed"},
+                {"document_id": "doc-2", "status": "completed"},
+            ]
+        ),
+    )
+    first = SimpleNamespace(
+        source={"document_id": "doc-1"},
+        written_keys=("snapshot-key-1", "snapshot-key-2"),
+    )
+    monkeypatch.setattr(
+        education_textbooks,
+        "freeze_parse_job_source",
+        AsyncMock(side_effect=[first, asyncio.CancelledError()]),
+        raising=False,
+    )
+    cleanup = AsyncMock()
+    monkeypatch.setattr(
+        education_textbooks,
+        "cleanup_snapshot_objects",
+        cleanup,
+        raising=False,
+    )
+    generated_ids = iter([UUID(version_id), UUID(job_id)])
+    monkeypatch.setattr(education_textbooks, "uuid4", lambda: next(generated_ids))
+
+    with pytest.raises(asyncio.CancelledError):
+        await education_textbooks.start_processing_from_parse_jobs(
+            parent_user_id="parent-1",
+            textbook_id=textbook_id,
+            source_parse_job_ids=["job-parse-1", "job-parse-2"],
         )
 
     cleanup.assert_awaited_once_with(["snapshot-key-1", "snapshot-key-2"])

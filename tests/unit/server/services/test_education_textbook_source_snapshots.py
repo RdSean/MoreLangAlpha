@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from hashlib import sha256
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -67,9 +69,13 @@ def _configure_store(
     objects: dict[str, bytes],
     fail_manifest: bool = False,
     readback_overrides: dict[str, bytes | None] | None = None,
+    max_upload_bytes: int | None = None,
+    captured_max_sizes: list[int] | None = None,
+    cancel_write_number: int | None = None,
 ) -> tuple[dict[str, bytes], list[str]]:
     uploads: dict[str, bytes] = {}
     deleted: list[str] = []
+    write_count = 0
     monkeypatch.setattr(
         snapshots, "get_owned_parse_job", AsyncMock(return_value=job)
     )
@@ -82,7 +88,21 @@ def _configure_store(
             return readback_overrides[key]
         return objects.get(key)
 
-    async def write_object(key: str, content: bytes, _content_type: str) -> bool:
+    async def write_object(
+        key: str,
+        content: bytes,
+        _content_type: str,
+        *,
+        max_size: int,
+    ) -> bool:
+        nonlocal write_count
+        write_count += 1
+        if captured_max_sizes is not None:
+            captured_max_sizes.append(max_size)
+        if cancel_write_number == write_count:
+            raise asyncio.CancelledError
+        if max_upload_bytes is not None and len(content) > max_upload_bytes:
+            return False
         if fail_manifest and key.endswith("/manifest.json"):
             return False
         uploads[key] = content
@@ -422,6 +442,137 @@ async def test_snapshot_failure_when_destination_hash_differs_cleans_exact_key(
 
     assert list(uploads) == [destination_key]
     assert deleted == [destination_key]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_upload_just_below_document_cap_succeeds(monkeypatch):
+    cap = 1024
+    primary = _artifact(
+        artifact_id=PRIMARY_ARTIFACT_ID,
+        artifact_kind="primary_document",
+        relative_path="document.md",
+        storage_key=f"documents/{DOCUMENT_ID}/document.md",
+    )
+    max_sizes: list[int] = []
+    uploads, _deleted = _configure_store(
+        monkeypatch,
+        job=_parse_job(),
+        artifacts=[primary],
+        objects={str(primary["storage_key"]): b"x" * (cap - 1)},
+        max_upload_bytes=cap,
+        captured_max_sizes=max_sizes,
+    )
+    monkeypatch.setattr(
+        snapshots,
+        "get_document_parsing_config",
+        lambda: SimpleNamespace(max_upload_bytes=cap),
+    )
+
+    await snapshots.freeze_parse_job_source(
+        owner_user_id="parent-1",
+        document_id=DOCUMENT_ID,
+        producer_job_id=PRODUCER_JOB_ID,
+        household_id=HOUSEHOLD_ID,
+        textbook_slug="reading-explorer-3",
+        version_id=VERSION_ID,
+        position=1,
+    )
+
+    assert uploads
+    assert max_sizes and set(max_sizes) == {cap}
+
+
+@pytest.mark.asyncio
+async def test_snapshot_upload_above_document_cap_is_rejected(monkeypatch):
+    cap = 1024
+    primary = _artifact(
+        artifact_id=PRIMARY_ARTIFACT_ID,
+        artifact_kind="primary_document",
+        relative_path="document.md",
+        storage_key=f"documents/{DOCUMENT_ID}/document.md",
+    )
+    max_sizes: list[int] = []
+    uploads, _deleted = _configure_store(
+        monkeypatch,
+        job=_parse_job(),
+        artifacts=[primary],
+        objects={str(primary["storage_key"]): b"x" * (cap + 1)},
+        max_upload_bytes=cap,
+        captured_max_sizes=max_sizes,
+    )
+    monkeypatch.setattr(
+        snapshots,
+        "get_document_parsing_config",
+        lambda: SimpleNamespace(max_upload_bytes=cap),
+    )
+
+    with pytest.raises(
+        snapshots.TextbookSourceSnapshotError, match="could not be stored"
+    ):
+        await snapshots.freeze_parse_job_source(
+            owner_user_id="parent-1",
+            document_id=DOCUMENT_ID,
+            producer_job_id=PRODUCER_JOB_ID,
+            household_id=HOUSEHOLD_ID,
+            textbook_slug="reading-explorer-3",
+            version_id=VERSION_ID,
+            position=1,
+        )
+
+    assert uploads == {}
+    assert max_sizes == [cap]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_cancellation_cleans_the_completed_write(monkeypatch):
+    primary = _artifact(
+        artifact_id=PRIMARY_ARTIFACT_ID,
+        artifact_kind="primary_document",
+        relative_path="document.md",
+        storage_key=f"documents/{DOCUMENT_ID}/document.md",
+    )
+    image = _artifact(
+        artifact_id=IMAGE_ARTIFACT_ID,
+        artifact_kind="embedded_image",
+        relative_path="images/figure.png",
+        storage_key=f"documents/{DOCUMENT_ID}/figure.png",
+        format="png",
+        media_type="image/png",
+    )
+    uploads, deleted = _configure_store(
+        monkeypatch,
+        job=_parse_job(),
+        artifacts=[primary, image],
+        objects={
+            str(primary["storage_key"]): b"# Book\n",
+            str(image["storage_key"]): b"image",
+        },
+        cancel_write_number=2,
+    )
+    monkeypatch.setattr(
+        snapshots,
+        "get_document_parsing_config",
+        lambda: SimpleNamespace(max_upload_bytes=1024),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await snapshots.freeze_parse_job_source(
+            owner_user_id="parent-1",
+            document_id=DOCUMENT_ID,
+            producer_job_id=PRODUCER_JOB_ID,
+            household_id=HOUSEHOLD_ID,
+            textbook_slug="reading-explorer-3",
+            version_id=VERSION_ID,
+            position=1,
+        )
+
+    assert list(uploads) == [
+        (
+            f"education/{HOUSEHOLD_ID}/reading-explorer-3/source-bundles/"
+            f"{VERSION_ID}/01/artifacts/document.md"
+        )
+    ]
+    assert deleted == list(uploads)
 
 
 @pytest.mark.asyncio

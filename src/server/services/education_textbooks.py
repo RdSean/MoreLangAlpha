@@ -33,6 +33,7 @@ from src.server.database.education_textbooks import (
     queue_textbook_processing_from_artifacts,
     retry_textbook_processing_job,
     submit_student_answer,
+    TextbookQueueValidationError,
     update_student_progress,
 )
 from src.server.database.education_members import get_membership_for_user
@@ -177,6 +178,11 @@ async def start_processing_from_parse_jobs(
     job_id = str(uuid4())
     sources: list[dict[str, Any]] = []
     written_keys: list[str] = []
+
+    async def cleanup_written_snapshots() -> None:
+        if written_keys:
+            await asyncio.shield(cleanup_snapshot_objects(written_keys))
+
     try:
         for position, producer_job_id in enumerate(source_parse_job_ids, start=1):
             owned_job = await get_owned_parse_job(
@@ -204,27 +210,36 @@ async def start_processing_from_parse_jobs(
                 raise TextbookError(str(exc)) from exc
             sources.append(frozen.source)
             written_keys.extend(frozen.written_keys)
-
-        try:
-            job = await queue_textbook_processing_from_artifacts(
-                parent_user_id=parent_user_id,
-                household_id=household_id,
-                textbook_id=textbook_id,
-                sources=sources,
-                extractor_name="managed_ptc",
-                extractor_version="1",
-                version_id=version_id,
-                job_id=job_id,
-            )
-        except ValueError as exc:
-            raise TextbookError(str(exc)) from exc
-        if not job:
-            raise TextbookNotFoundError("Textbook not found")
-        return job
-    except Exception:
-        if written_keys:
-            await cleanup_snapshot_objects(written_keys)
+    except BaseException:
+        await cleanup_written_snapshots()
         raise
+
+    try:
+        job = await queue_textbook_processing_from_artifacts(
+            parent_user_id=parent_user_id,
+            household_id=household_id,
+            textbook_id=textbook_id,
+            sources=sources,
+            extractor_name="managed_ptc",
+            extractor_version="1",
+            version_id=version_id,
+            job_id=job_id,
+        )
+    except TextbookQueueValidationError as exc:
+        await cleanup_written_snapshots()
+        raise TextbookError(str(exc)) from exc
+    except asyncio.CancelledError:
+        await cleanup_written_snapshots()
+        raise
+    except Exception:
+        # A database exception may be raised after COMMIT. Keep the snapshots
+        # because deleting them could strand a queued processing job.
+        raise
+
+    if not job:
+        await cleanup_written_snapshots()
+        raise TextbookNotFoundError("Textbook not found")
+    return job
 
 
 def build_local_fixture_package(job: dict[str, Any]) -> dict[str, Any]:

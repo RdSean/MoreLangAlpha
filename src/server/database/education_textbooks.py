@@ -73,6 +73,10 @@ _SAFE_PATH_COMPONENT = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,254}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
+class TextbookQueueValidationError(ValueError):
+    """A textbook queue request failed before any database write."""
+
+
 def _validated_path_component(value: str, label: str) -> str:
     """Return a single safe storage-path component or reject it."""
     if ".." in value or not _SAFE_PATH_COMPONENT.fullmatch(value):
@@ -1663,26 +1667,48 @@ async def queue_textbook_processing_from_artifacts(
     artifact.
     """
     if not sources:
-        raise ValueError("At least one parse job source is required")
+        raise TextbookQueueValidationError(
+            "At least one parse job source is required"
+        )
 
-    household_component = _validated_path_component(str(household_id), "household_id")
+    try:
+        household_component = _validated_path_component(
+            str(household_id), "household_id"
+        )
+    except ValueError as exc:
+        raise TextbookQueueValidationError(str(exc)) from exc
     producer_job_ids = [
         str(source.get("producer_job_id") or "") for source in sources
     ]
     if any(not job_id for job_id in producer_job_ids):
-        raise ValueError("Every source requires a producer_job_id")
+        raise TextbookQueueValidationError(
+            "Every source requires a producer_job_id"
+        )
     if len(set(producer_job_ids)) != len(producer_job_ids):
-        raise ValueError("Duplicate producer_job_id sources are not allowed")
+        raise TextbookQueueValidationError(
+            "Duplicate producer_job_id sources are not allowed"
+        )
     for source in sources:
         if not str(source.get("document_id") or ""):
-            raise ValueError("Every source requires a document_id")
+            raise TextbookQueueValidationError(
+                "Every source requires a document_id"
+            )
         if not str(source.get("primary_artifact_id") or ""):
-            raise ValueError("Every source requires a primary_artifact_id")
+            raise TextbookQueueValidationError(
+                "Every source requires a primary_artifact_id"
+            )
         if not _SHA256.fullmatch(str(source.get("primary_sha256") or "")):
-            raise ValueError("primary_sha256 must be 64 lowercase hex characters")
+            raise TextbookQueueValidationError(
+                "primary_sha256 must be 64 lowercase hex characters"
+            )
 
-    version_id = str(UUID(version_id)) if version_id else str(uuid4())
-    job_id = str(UUID(job_id)) if job_id else str(uuid4())
+    try:
+        version_id = str(UUID(version_id)) if version_id else str(uuid4())
+        job_id = str(UUID(job_id)) if job_id else str(uuid4())
+    except ValueError as exc:
+        raise TextbookQueueValidationError(
+            "version_id and job_id must be UUIDs"
+        ) from exc
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
@@ -1696,10 +1722,13 @@ async def queue_textbook_processing_from_artifacts(
                 )
                 textbook = await cur.fetchone()
                 if not textbook:
-                    return None
-                textbook_component = _validated_path_component(
-                    str(textbook["slug"]), "textbook slug"
-                )
+                    raise TextbookQueueValidationError("Textbook not found")
+                try:
+                    textbook_component = _validated_path_component(
+                        str(textbook["slug"]), "textbook slug"
+                    )
+                except ValueError as exc:
+                    raise TextbookQueueValidationError(str(exc)) from exc
 
                 await cur.execute(
                     """
@@ -1740,7 +1769,7 @@ async def queue_textbook_processing_from_artifacts(
                         str(source["document_id"]),
                         str(source["primary_artifact_id"]),
                     ):
-                        raise ValueError(
+                        raise TextbookQueueValidationError(
                             "One or more parse job sources are unavailable "
                             "or not owned by the parent"
                         )
