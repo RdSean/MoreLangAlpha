@@ -27,6 +27,12 @@ const MAX_PANEL_WIDTH = 1100;
 const DEFAULT_PANEL_WIDTH = 680;
 const KEYBOARD_RESIZE_STEP = 20;
 
+function clampPanelWidth(width: number): number {
+  const maxWidth = Math.min(window.innerWidth - 24, MAX_PANEL_WIDTH);
+  const minWidth = Math.min(MIN_PANEL_WIDTH, window.innerWidth - 24);
+  return Math.max(minWidth, Math.min(maxWidth, Math.round(width)));
+}
+
 interface DocumentPreviewDrawerProps {
   open: boolean;
   documentId?: string;
@@ -63,9 +69,7 @@ export default function DocumentPreviewDrawer({
   useEffect(() => {
     if (!isDragging) return;
     const onMouseMove = (event: MouseEvent) => {
-      const maxWidth = Math.min(window.innerWidth - 24, 1100);
-      const minWidth = Math.min(420, window.innerWidth - 24);
-      setPanelWidth(Math.max(minWidth, Math.min(maxWidth, window.innerWidth - event.clientX)));
+      setPanelWidth(clampPanelWidth(window.innerWidth - event.clientX));
     };
     const onMouseUp = () => setIsDragging(false);
     document.body.style.userSelect = 'none';
@@ -87,13 +91,21 @@ export default function DocumentPreviewDrawer({
   const handleDividerMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     const width = drawerRef.current?.getBoundingClientRect().width ?? panelWidth ?? 760;
-    setPanelWidth(width);
+    setPanelWidth(clampPanelWidth(width));
     setIsDragging(true);
+  };
+
+  const measurePanelWidth = () => {
+    const renderedWidth = drawerRef.current?.getBoundingClientRect().width;
+    if (!renderedWidth || !Number.isFinite(renderedWidth)) return undefined;
+    const width = clampPanelWidth(renderedWidth);
+    setPanelWidth(width);
+    return width;
   };
 
   const handleDividerKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     let nextWidth: number | undefined;
-    const currentWidth = panelWidth ?? DEFAULT_PANEL_WIDTH;
+    const currentWidth = panelWidth ?? measurePanelWidth() ?? DEFAULT_PANEL_WIDTH;
     if (event.key === 'ArrowLeft') {
       nextWidth = currentWidth - KEYBOARD_RESIZE_STEP;
     } else if (event.key === 'ArrowRight') {
@@ -102,9 +114,7 @@ export default function DocumentPreviewDrawer({
     if (nextWidth === undefined) return;
 
     event.preventDefault();
-    const maxWidth = Math.min(window.innerWidth - 24, MAX_PANEL_WIDTH);
-    const minWidth = Math.min(MIN_PANEL_WIDTH, window.innerWidth - 24);
-    setPanelWidth(Math.max(minWidth, Math.min(maxWidth, nextWidth)));
+    setPanelWidth(clampPanelWidth(nextWidth));
   };
 
   const toggleFullscreen = async () => {
@@ -139,6 +149,7 @@ export default function DocumentPreviewDrawer({
         <div
           className={`chat-split-divider documents-preview-divider${isDragging ? ' dragging' : ''}`}
           onMouseDown={handleDividerMouseDown}
+          onFocus={measurePanelWidth}
           onKeyDown={handleDividerKeyDown}
           role="separator"
           tabIndex={0}

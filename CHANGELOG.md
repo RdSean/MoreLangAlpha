@@ -8,8 +8,9 @@
 - 文档详情的主标签支持 `ArrowLeft`、`ArrowRight`、`Home`、`End` 键盘导航，并在移动焦点时同步选择对应视图。
 - 教材用途查询会在教学包处于 `queued`、`preparing`、`building_skill`、`generating_teaching`、`validating` 或 `running` 时轮询，终态停止；创建教学包、取消、继续、发布以及教学任务进入终态时会失效文档用途查询。
 - 预览抽屉分隔条现在可聚焦并通过方向键调整宽度，提供 `aria-valuemin`、`aria-valuemax`、`aria-valuenow`，同时保留鼠标拖动期间禁用页面文本选择的行为。
+- 修复键盘调整宽度从固定 680px 起步的问题：分隔条聚焦或首次键盘交互时会读取实际渲染宽度并应用与鼠标拖动一致的最小/最大宽度约束，`aria-valuenow` 在测量后同步显示真实宽度。
 - 教材用途卡片补充安全的 `primary_artifact_id` 与 `producer_job_id` 来源信息，继续不展示快照前缀、存储键、sandbox 路径或对象 URL。
-- 验证：文档用途服务/API 测试 21 项、相关前端聚焦测试 69 项通过；`pnpm typecheck`、Ruff、改动文件 ESLint 与 `git diff --check` 通过。
+- 验证：文档用途服务/API 测试 21 项、相关前端聚焦测试 69 项通过；测量宽度修复后预览抽屉/详情页键盘回归 21 项再次通过，`pnpm typecheck`、Ruff、改动文件 ESLint 与 `git diff --check` 通过。
 
 ### 图书馆独立文档详情页
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
@@ -175,22 +175,40 @@ describe('DocumentPreviewDrawer', () => {
     expect(document.body.style.userSelect).toBe('');
   });
 
-  it('resizes the drawer from the keyboard without scrolling the page', async () => {
+  it('resizes from the rendered drawer width on first keyboard interaction', async () => {
     const user = userEvent.setup();
     renderDrawer();
 
+    const drawer = screen.getByRole('complementary', { name: 'Document preview' });
     const divider = screen.getByRole('separator', { name: 'Resize preview' });
     expect(divider).toHaveAttribute('tabindex', '0');
     expect(divider).toHaveAttribute('aria-valuemin', '420');
     expect(divider).toHaveAttribute('aria-valuemax', '1100');
     expect(divider).toHaveAttribute('aria-valuenow', '680');
 
-    divider.focus();
-    await user.keyboard('{ArrowLeft}');
-    expect(divider).toHaveAttribute('aria-valuenow', '660');
+    const rect = vi.spyOn(drawer, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 430,
+      height: 800,
+      top: 0,
+      right: 430,
+      bottom: 800,
+      left: 0,
+      toJSON: () => ({}),
+    });
+    try {
+      act(() => divider.focus());
+      expect(divider).toHaveAttribute('aria-valuenow', '430');
 
-    await user.keyboard('{ArrowRight}');
-    expect(divider).toHaveAttribute('aria-valuenow', '680');
+      await user.keyboard('{ArrowLeft}');
+      expect(divider).toHaveAttribute('aria-valuenow', '420');
+
+      await user.keyboard('{ArrowRight}');
+      expect(divider).toHaveAttribute('aria-valuenow', '440');
+    } finally {
+      rect.mockRestore();
+    }
   });
 
   it('links to the independent document detail page', async () => {
