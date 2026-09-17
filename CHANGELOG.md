@@ -2,6 +2,14 @@
 
 ## 2026-09-17
 
+### 修复：教材加工环境无法启动
+
+- **现象**：点击教材“继续运行”后，界面提示“教材教学加工环境无法启动”；后端日志显示 Docker sandbox 已成功创建，但随后立即被清理，任务没有产生 root run。
+- **根因一**：managed textbook 沙箱初始化调用了已不接受 `sandbox_id` 参数的 `update_workspace_status()`，sandbox 就绪后触发 `TypeError` 并回滚。改为通过 `try_bind_workspace_sandbox()` 原子绑定 workspace 与 sandbox，保持平台密钥版本为 `0`，不再走普通状态更新接口。
+- **根因二**：`build_ptc_graph_with_session()` 接到了 managed execution policy，却没有继续传给 `create_agent()`；受管 subagent 注册表因此没有生效，随后 root run 报 `textbook-chapter-worker` 未定义。
+- **根因三**：当前 `LocalRunExecutor.start_run()` 已移除 `terminal_callback`，教材加工仍按旧接口传入该参数，导致 root run 在启动阶段报 `unexpected keyword argument`。执行器恢复可选终态回调，并在完成、失败和取消后调用；回调异常只记录日志，不会反向污染 run 的最终状态。
+- **验证**：新增 managed graph policy 透传和 executor terminal callback 回归；`tests/unit/ptc_agent/test_managed_textbook_execution_policy.py`、`tests/unit/server/services/test_education_managed_ptc.py`、`test_education_teaching_jobs.py` 和 `test_executor.py` 聚焦测试通过。真实本地任务已从失败状态重新进入 PTC root run，sandbox 保持运行并开始读取 `/managed/textbook-job/<job>/`。
+
 ### 修复教材来源迁移的真实执行路径
 
 - 迁移 `062`–`065` 共用同一个 DDL 执行 helper：在线模式走 `op.get_bind().exec_driver_sql(...)`，避免正则中的 `(?:` 等字符被 SQLAlchemy 当作 bind 参数；离线 `--sql` 模式走 `op.execute(DDL(...))`，避免 `MockConnection` 缺少 driver 执行接口。执行路径测试同时覆盖在线与离线分支，并校验约束 DDL 原样保留正则。

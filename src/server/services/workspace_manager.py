@@ -1176,10 +1176,15 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             sandbox_id = getattr(sandbox, "sandbox_id", None) if sandbox else None
             if not sandbox_id:
                 raise RuntimeError("Managed textbook sandbox is missing its runtime identity")
-            self._sessions[workspace_id] = session
-            await update_workspace_status(
-                workspace_id=workspace_id, status="running", sandbox_id=sandbox_id
+            bound = await try_bind_workspace_sandbox(
+                workspace_id,
+                sandbox_id=sandbox_id,
+                expected_previous_sandbox_id=None,
+                platform_secret_version=0,
             )
+            if bound is None:
+                raise SandboxIdentityLostError(workspace_id, sandbox_id)
+            self._sessions[workspace_id] = session
             return session
         except Exception:
             await self._clear_session(workspace_id, evict_session=session)

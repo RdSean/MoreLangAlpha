@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from importlib import import_module
 from importlib.util import find_spec
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -255,6 +255,7 @@ async def test_managed_graph_keeps_the_root_guard_for_allowed_builtin_subagents(
     )
 
     assert captured["namespace_owner"] is guard
+    assert captured["managed_policy"] is policy
 
 
 def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypatch):

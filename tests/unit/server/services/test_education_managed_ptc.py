@@ -46,11 +46,8 @@ async def test_managed_workspace_provision_skips_normal_workspace_sync(monkeypat
         "get_session",
         lambda *_args: session,
     )
-    monkeypatch.setattr(
-        workspace_manager_module,
-        "update_workspace_status",
-        AsyncMock(return_value={"workspace_id": "workspace-1", "status": "running"}),
-    )
+    bind = AsyncMock(return_value={"workspace_id": "workspace-1", "status": "running"})
+    monkeypatch.setattr(workspace_manager_module, "try_bind_workspace_sandbox", bind)
 
     provisioned = await manager.provision_managed_textbook_session(
         workspace_id="workspace-1", policy=policy
@@ -58,6 +55,12 @@ async def test_managed_workspace_provision_skips_normal_workspace_sync(monkeypat
 
     assert provisioned is session
     session.initialize_managed_textbook.assert_awaited_once_with(policy)
+    bind.assert_awaited_once_with(
+        "workspace-1",
+        sandbox_id="sandbox-1",
+        expected_previous_sandbox_id=None,
+        platform_secret_version=0,
+    )
     manager._provision_sandbox_session.assert_not_awaited()
     manager._sync_sandbox_assets.assert_not_awaited()
 

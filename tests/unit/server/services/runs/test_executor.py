@@ -1664,6 +1664,32 @@ class TestStartWorkflowHandoffCancelIntent:
                     await ti.task
 
 
+@pytest.mark.asyncio
+async def test_terminal_callback_runs_after_failed_finalize_and_does_not_propagate_errors():
+    btm = _make_btm()
+    btm.append_run_end_event = AsyncMock()
+    terminal_callback = AsyncMock()
+    task_info = _make_task_info(status=LocalRunStatus.FAILED)
+
+    await btm._apply_post_terminal_effects(
+        "thread-1",
+        "run-1",
+        kind="failed",
+        status="error",
+        task_info=task_info,
+        completion_callback=None,
+        terminal_callback=terminal_callback,
+        execution_time=0.1,
+        interrupt_reason=None,
+        error="managed failure",
+        metadata={},
+        workspace_id=None,
+        user_id=None,
+    )
+
+    terminal_callback.assert_awaited_once_with(task_info, "error")
+
+
 # ---------------------------------------------------------------------------
 # Compaction admission guard
 # ---------------------------------------------------------------------------

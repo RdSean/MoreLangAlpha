@@ -297,6 +297,7 @@ async def build_ptc_graph_with_session(
         # byte-stable. None → create_agent computes from the registry.
         tool_summary=getattr(session, "mcp_tool_summary", None),
         direct_mcp=direct_mcp,
+        managed_policy=managed_policy,
     )
 
     logger.debug(
