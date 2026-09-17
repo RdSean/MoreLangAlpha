@@ -295,7 +295,7 @@ async function dismissTeachingRunDialog(page, dialog) {
   await expect(dialog).toBeHidden();
 }
 
-async function mockDocumentLibrary(page) {
+async function mockDocumentLibrary(page, artifactItems = artifacts) {
   let parseJobCreates = 0;
   const documentQueries = [];
   const completed = parseJob('completed', 3, { completed_at: '2026-09-05T00:03:00Z' });
@@ -338,7 +338,7 @@ async function mockDocumentLibrary(page) {
       parseJobCreates += 1;
       return fulfillJSON(route, parseJob('queued', 1), 202);
     },
-    'GET /documents/*/artifacts': { items: artifacts, total: artifacts.length, limit: 100, offset: 0 },
+    'GET /documents/*/artifacts': { items: artifactItems, total: artifactItems.length, limit: 100, offset: 0 },
     'GET /document-artifacts/*/download': (route) => route.fulfill({
       status: 200,
       contentType: 'text/markdown',
@@ -694,6 +694,40 @@ test('waits for an explicit method choice, then shows progress and extensible ar
   }
   await expect(page.getByRole('heading', { name: 'Previous runs' })).toBeVisible();
   await expect(page.getByText('Legacy PDF text', { exact: true })).toBeVisible();
+});
+
+test('keeps the completion action visible when a parse produces many artifacts', async ({ page }) => {
+  const manyArtifacts = [
+    artifacts[0],
+    ...Array.from({ length: 80 }, (_, index) => ({
+      ...artifacts[2],
+      artifact_id: `art-${String(index).padStart(12, '0')}`,
+      relative_path: `images/page-${String(index + 1).padStart(3, '0')}.jpg`,
+    })),
+  ];
+  await mockDocumentLibrary(page, manyArtifacts);
+  await page.goto('/documents');
+  await page.getByRole('button', { name: 'Upload file' }).click();
+  await page.getByLabel('PDF file').setInputFiles({
+    name: document.original_filename,
+    mimeType: 'application/pdf',
+    buffer: Buffer.from('%PDF-1.7\nfixture\n%%EOF\n'),
+  });
+  await page.getByRole('button', { name: 'Upload and inspect' }).click();
+  await page.getByRole('button', { name: 'Choose method' }).click();
+  await page.getByRole('radio', { name: /AnyDoc Local/ }).check();
+  await page.getByRole('button', { name: 'Start parsing' }).click();
+
+  const complete = page.getByRole('button', { name: 'Complete' });
+  await expect(complete).toBeVisible();
+  const list = page.locator('.documents-artifact-list');
+  await expect.poll(() => list.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  const [buttonBox, viewport] = await Promise.all([
+    complete.boundingBox(),
+    page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
+  ]);
+  expect(buttonBox).not.toBeNull();
+  expect(buttonBox.y + buttonBox.height).toBeLessThanOrEqual(viewport.height);
 });
 
 test('library textbook formal assets mock flow renders without runtime', async ({ page }) => {
