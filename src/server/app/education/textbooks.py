@@ -12,17 +12,27 @@ from src.server.app.education.models import (
     LearningProgressResponse,
     PublishTextbookVersionRequest,
     StartTextbookProcessingRequest,
+    StructureGenerationJobResponse,
     TextbookAssignmentResponse,
     TextbookDetailResponse,
     TextbookParseJobCandidateResponse,
     TextbookProcessingResponse,
     TextbookPublicationResponse,
     TextbookResponse,
+    TextbookStructureResponse,
     TeachingJobResponse,
     TeachingPackageAssetSummaryResponse,
     TeachingChapterAssetResponse,
     TeachingReviewAssetKind,
     UpdateLearningProgressRequest,
+    UpdateTextbookStructureRequest,
+)
+from src.server.services.education_structure_review import (
+    accept_structure_for_parent,
+    get_structure_for_parent,
+    get_structure_generation_job,
+    queue_structure_for_parent,
+    replace_structure_for_parent,
 )
 from src.server.services.education_textbooks import (
     TextbookError,
@@ -107,6 +117,102 @@ async def get_family_textbook(textbook_id: UUID, user_id: CurrentUserId):
 async def list_completed_parse_jobs(user_id: CurrentUserId):
     try:
         return await list_completed_textbook_parse_jobs(parent_user_id=user_id)
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/textbook-versions/{content_version_id}/structures",
+    response_model=StructureGenerationJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def queue_family_textbook_structure(
+    content_version_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await queue_structure_for_parent(
+            parent_user_id=user_id,
+            content_version_id=str(content_version_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/structure-generation-jobs/{generation_job_id}",
+    response_model=StructureGenerationJobResponse,
+)
+async def get_family_structure_generation_job(
+    generation_job_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_structure_generation_job(
+            parent_user_id=user_id,
+            generation_job_id=str(generation_job_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/textbook-structures/{structure_id}",
+    response_model=TextbookStructureResponse,
+)
+async def get_family_textbook_structure(
+    structure_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_structure_for_parent(
+            parent_user_id=user_id,
+            structure_id=str(structure_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.put(
+    "/textbook-structures/{structure_id}",
+    response_model=TextbookStructureResponse,
+)
+async def update_family_textbook_structure(
+    structure_id: UUID,
+    body: UpdateTextbookStructureRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        await replace_structure_for_parent(
+            parent_user_id=user_id,
+            structure_id=str(structure_id),
+            units=[unit.model_dump(mode="python") for unit in body.units],
+        )
+        return await get_structure_for_parent(
+            parent_user_id=user_id,
+            structure_id=str(structure_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/textbook-structures/{structure_id}/review",
+    response_model=TextbookStructureResponse,
+)
+async def accept_family_textbook_structure(
+    structure_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        await accept_structure_for_parent(
+            parent_user_id=user_id,
+            structure_id=str(structure_id),
+        )
+        return await get_structure_for_parent(
+            parent_user_id=user_id,
+            structure_id=str(structure_id),
+        )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
 

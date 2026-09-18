@@ -1110,6 +1110,67 @@ async def complete_structure_generation(
     return result
 
 
+async def accept_textbook_structure(
+    *, parent_user_id: str, structure_id: str
+) -> dict[str, Any] | None:
+    """Accept one parent-owned structure and all of its reviewable children."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT structures.structure_id
+                    FROM education_textbook_structures AS structures
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = structures.version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE structures.structure_id = %s
+                      AND structures.status = 'review'
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                    FOR UPDATE OF structures
+                    """,
+                    (structure_id, parent_user_id),
+                )
+                if not await cur.fetchone():
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_structure_knowledge_points
+                    SET status = 'accepted'
+                    WHERE unit_id IN (
+                        SELECT unit_id
+                        FROM education_structure_units
+                        WHERE structure_id = %s
+                    )
+                    """,
+                    (structure_id,),
+                )
+                await cur.execute(
+                    """
+                    UPDATE education_structure_units
+                    SET status = 'accepted'
+                    WHERE structure_id = %s
+                    """,
+                    (structure_id,),
+                )
+                await cur.execute(
+                    """
+                    UPDATE education_textbook_structures
+                    SET status = 'accepted', reviewed_at = NOW()
+                    WHERE structure_id = %s AND status = 'review'
+                    RETURNING structure_id, version_id, sequence, status,
+                              reviewed_at
+                    """,
+                    (structure_id,),
+                )
+                structure = await cur.fetchone()
+    return dict(structure) if structure else None
+
+
 async def fail_structure_generation(
     *,
     generation_job_id: str,

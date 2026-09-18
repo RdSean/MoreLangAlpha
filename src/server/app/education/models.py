@@ -316,6 +316,89 @@ class TextbookParseJobCandidateResponse(BaseModel):
     artifact_count: int
 
 
+class StructureSourceRefResponse(BaseModel):
+    source_id: str = Field(min_length=1, max_length=255)
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    quote: str | None = Field(default=None, max_length=500)
+    heading_path: list[str] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "StructureSourceRefResponse":
+        if self.end <= self.start:
+            raise ValueError("source reference end must be greater than start")
+        return self
+
+
+class StructureKnowledgePointWrite(BaseModel):
+    position: int = Field(gt=0)
+    slug: str = Field(min_length=1, max_length=255)
+    title: str = Field(min_length=1, max_length=255)
+    summary: str = Field(default="", max_length=30_000)
+    source_refs: list[StructureSourceRefResponse] = Field(min_length=1, max_length=32)
+    confidence: float = Field(ge=0, le=1)
+
+
+class StructureUnitWrite(BaseModel):
+    position: int = Field(gt=0)
+    slug: str = Field(min_length=1, max_length=255)
+    title: str = Field(min_length=1, max_length=255)
+    summary: str = Field(default="", max_length=30_000)
+    unit_type: Literal["teaching", "front_matter", "reference", "appendix"]
+    source_refs: list[StructureSourceRefResponse] = Field(min_length=1, max_length=32)
+    confidence: float = Field(ge=0, le=1)
+    knowledge_points: list[StructureKnowledgePointWrite] = Field(
+        default_factory=list,
+        max_length=200,
+    )
+
+
+class UpdateTextbookStructureRequest(BaseModel):
+    units: list[StructureUnitWrite] = Field(min_length=1, max_length=500)
+
+
+class StructureKnowledgePointResponse(StructureKnowledgePointWrite):
+    knowledge_point_id: UUID
+    status: str
+
+
+class StructureUnitResponse(StructureUnitWrite):
+    unit_id: UUID
+    status: str
+    knowledge_points: list[StructureKnowledgePointResponse]
+
+
+class TextbookStructureResponse(BaseModel):
+    structure_id: UUID
+    version_id: UUID
+    sequence: int
+    status: str
+    schema_version: str
+    processing_profile_id: UUID | None = None
+    processing_profile_sha256: str
+    input_manifest_sha256: str
+    source_revision: str
+    created_at: datetime | None = None
+    reviewed_at: datetime | None = None
+    units: list[StructureUnitResponse]
+
+
+class StructureGenerationJobResponse(BaseModel):
+    generation_job_id: UUID
+    version_id: UUID
+    scope: Literal["structure"]
+    structure_id: UUID | None = None
+    status: str
+    attempt_count: int
+    error_code: str | None = None
+    error_message: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    structure_sequence: int | None = None
+    structure_status: str | None = None
+    structure_bundle_prefix: str | None = None
+
+
 class TextbookQuestionResponse(BaseModel):
     question_id: UUID
     position: int

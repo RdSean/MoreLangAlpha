@@ -275,3 +275,30 @@ async def test_mark_and_complete_generation_attempt_fence_the_root_run(
     assert "root_run_id = %s" in running_sql
     complete_sql = mock_cursor.execute.call_args_list[2].args[0]
     assert "status = 'review'" in complete_sql
+
+
+@pytest.mark.asyncio
+async def test_accept_structure_authorizes_parent_and_updates_children(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"structure_id": "structure-1"},
+        {"structure_id": "structure-1", "status": "accepted"},
+    ]
+
+    accepted = await education_textbooks.accept_textbook_structure(
+        parent_user_id="parent-1",
+        structure_id="structure-1",
+    )
+
+    assert accepted["status"] == "accepted"
+    authorization_sql = mock_cursor.execute.call_args_list[0].args[0]
+    assert "memberships.role = 'parent'" in authorization_sql
+    assert "status = 'review'" in authorization_sql
+    child_sql = mock_cursor.execute.call_args_list[1].args[0]
+    assert "education_structure_knowledge_points" in child_sql
