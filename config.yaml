@@ -45,6 +45,9 @@ features:
   market_watch:
     enabled: true
     gate: opt_in
+  education_structure_lessons:
+    enabled: true
+    gate: none
 
 # SSE Event Logging
 sse_event_log_enabled: false

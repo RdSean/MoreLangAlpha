@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { BookOpen, ChevronLeft, ListTree } from 'lucide-react';
+import { BookOpen, ChevronLeft, ListTree, NotebookPen } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -61,7 +61,10 @@ export default function StudentTextbookLearningPage() {
         <section className="min-w-0 px-5 py-6 lg:px-10 lg:py-8">
           <div className="mb-5 flex items-center justify-between gap-3 lg:hidden">
             <Link to="/education" className="inline-flex items-center gap-2 text-sm text-muted-foreground"><ChevronLeft className="size-4" />我的学习</Link>
-            <Dialog><DialogTrigger asChild><Button size="sm" variant="outline"><ListTree className="mr-2 size-4" />目录</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>知识点目录</DialogTitle></DialogHeader><Outline assignmentId={assignmentId} structure={data} activeUnitId={activeUnit.unit_id} activeKnowledgePointId={knowledgePointId} /></DialogContent></Dialog>
+            <div className="flex gap-2">
+              <Dialog><DialogTrigger asChild><Button size="sm" variant="outline"><ListTree className="mr-2 size-4" />目录</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>知识点目录</DialogTitle></DialogHeader><Outline assignmentId={assignmentId} structure={data} activeUnitId={activeUnit.unit_id} activeKnowledgePointId={knowledgePointId} /></DialogContent></Dialog>
+              <Dialog><DialogTrigger asChild><Button size="sm" variant="outline"><NotebookPen className="mr-2 size-4" />笔记</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>便携笔记本</DialogTitle></DialogHeader><PersonalNotebook assignmentId={assignmentId} unitId={activeUnit.unit_id} knowledgePointId={knowledgePointId} /></DialogContent></Dialog>
+            </div>
           </div>
           {knowledgePointId ? (
             lesson.isLoading ? <p className="text-sm text-muted-foreground">正在加载课程…</p> : lesson.data ? (

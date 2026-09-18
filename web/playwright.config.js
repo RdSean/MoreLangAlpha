@@ -36,7 +36,7 @@ export default defineConfig({
     { name: 'chromium', use: { browserName: 'chromium' } },
     {
       name: 'documents-mobile',
-      testMatch: /documents\.spec\.js/,
+      testMatch: /(documents|education-textbook-learning)\.spec\.js/,
       use: { ...devices['iPhone 13'], browserName: 'chromium' },
     },
   ],
