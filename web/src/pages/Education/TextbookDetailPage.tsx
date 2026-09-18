@@ -134,6 +134,7 @@ function VersionPanel({ textbookId, version }: { textbookId: string; version: Te
   const { toast } = useToast();
   const canRun = version.processing_job_status === 'queued' && Boolean(version.processing_job_id);
   const canRetry = version.status === 'failed' && version.processing_job_status === 'failed' && Boolean(version.processing_job_id);
+  const canOpenStructure = version.status === 'review' || version.status === 'published';
   const teachingPackages = version.teaching_packages ?? [];
   const reviewedPackage = teachingPackages.find((item) => item.status === 'review');
   const teachingAssets = useTeachingPackageAssets(reviewedPackage?.teaching_package_id, tab === 'knowledge');
@@ -176,7 +177,7 @@ function VersionPanel({ textbookId, version }: { textbookId: string; version: Te
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="border px-2 py-1 font-mono text-[11px]" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-secondary)' }}>{statusLabels[version.status]}</span>
-          <Link to={`/education/textbooks/${textbookId}/versions/${version.version_id}/structure`} className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-[var(--color-bg-hover)]"><GitBranch className="mr-2 size-4" aria-hidden="true" />结构与知识点</Link>
+          {canOpenStructure && <Link to={`/education/textbooks/${textbookId}/versions/${version.version_id}/structure`} className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-[var(--color-bg-hover)]"><GitBranch className="mr-2 size-4" aria-hidden="true" />结构与知识点</Link>}
           {canRun && <Button size="sm" variant="outline" onClick={() => void act(() => mutations.run.mutateAsync(version.processing_job_id!), '无法执行加工')} disabled={mutations.run.isPending}><Play className="mr-2 size-4" aria-hidden="true" />执行本地加工</Button>}
           {canRetry && <Button size="sm" variant="outline" onClick={() => void act(() => mutations.retry.mutateAsync(version.processing_job_id!), '无法重试加工')} disabled={mutations.retry.isPending}><RotateCcw className="mr-2 size-4" aria-hidden="true" />重试加工</Button>}
           {canPublish && <Button size="sm" onClick={() => void act(() => mutations.publish.mutateAsync({ textbookId, versionId: version.version_id, teachingPackageId: reviewedPackage!.teaching_package_id }), '无法发布版本')} disabled={mutations.publish.isPending}>{mutations.publish.isPending ? '正在发布' : '发布版本'}</Button>}

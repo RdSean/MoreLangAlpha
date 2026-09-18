@@ -512,6 +512,65 @@ describe('TextbookDetailPage', () => {
     await waitFor(() => expect(state.createTeaching).toHaveBeenCalledWith('version-1'));
   });
 
+  it('hides structure review until content is reviewable', () => {
+    state.textbook = {
+      textbook_id: 'textbook-1',
+      household_id: 'household-1',
+      title: '测试教材',
+      slug: 'test-textbook',
+      versions: [{
+        version_id: 'version-1',
+        sequence: 1,
+        status: 'processing',
+        chapter_count: 0,
+        is_published: false,
+        sources: [],
+        assignments: [],
+        teaching_packages: [],
+        chapters: [],
+      }],
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/education/textbooks/textbook-1']}>
+        <Routes><Route path="/education/textbooks/:textbookId" element={<TextbookDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole('link', { name: '结构与知识点' })).not.toBeInTheDocument();
+  });
+
+  it('links to structure review after content is reviewable', () => {
+    state.textbook = {
+      textbook_id: 'textbook-1',
+      household_id: 'household-1',
+      title: '测试教材',
+      slug: 'test-textbook',
+      versions: [{
+        version_id: 'version-1',
+        sequence: 1,
+        status: 'review',
+        chapter_count: 1,
+        is_published: false,
+        sources: [],
+        assignments: [],
+        teaching_packages: [],
+        chapters: [{ chapter_id: 'chapter-1', position: 1, slug: 'overview', title: '导读', markdown: '# 导读', questions: [] }],
+      }],
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/education/textbooks/textbook-1']}>
+        <Routes><Route path="/education/textbooks/:textbookId" element={<TextbookDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: '结构与知识点' })).toHaveAttribute(
+      'href',
+      '/education/textbooks/textbook-1/versions/version-1/structure',
+    );
+  });
+
   it('reviews complete knowledge assets without rendering storage details', () => {
     state.textbook = {
       textbook_id: 'textbook-1', household_id: 'household-1', title: '英语第二册', slug: 'english-2',
