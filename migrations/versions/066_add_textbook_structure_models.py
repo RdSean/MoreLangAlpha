@@ -117,6 +117,7 @@ def upgrade() -> None:
             ),
             attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
             latest_attempt_id UUID,
+            auto_grading BOOLEAN NOT NULL DEFAULT FALSE,
             processing_profile_sha256 VARCHAR(64) NOT NULL,
             error_code VARCHAR(64),
             error_message TEXT,

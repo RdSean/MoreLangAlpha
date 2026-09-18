@@ -625,6 +625,57 @@ async def test_write_kp_lesson_revision_uses_private_revision_path(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_stage_kp_lesson_inputs_contains_only_target_context():
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    await education_teaching_storage.stage_kp_lesson_inputs(
+        {
+            "job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+            "knowledge_point_id": "kp-1",
+            "knowledge_point_title": "世界运动",
+            "unit_title": "Unit 1",
+            "auto_grading": False,
+            "source_refs": [{"source_id": "source-1", "start": 0, "end": 40}],
+        },
+        "# Unit 1\n\nsource excerpt",
+        sandbox,
+    )
+
+    uploaded = {
+        call.args[0]: call.args[1]
+        for call in sandbox.aupload_file_bytes.await_args_list
+    }
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+    assert uploaded[f"{root}inputs/lesson-context.md"] == b"# Unit 1\n\nsource excerpt"
+    manifest = json.loads(uploaded[f"{root}inputs/manifest.json"])
+    assert manifest["knowledge_point_id"] == "kp-1"
+    assert manifest["auto_grading"] is False
+
+
+@pytest.mark.asyncio
+async def test_download_kp_lesson_outputs_uses_only_fixed_paths():
+    sandbox = AsyncMock()
+    sandbox.adownload_file_bytes.side_effect = [
+        b"# lesson\n",
+        None,
+    ]
+
+    lesson, practice = await education_teaching_storage.download_kp_lesson_outputs(
+        "5e3a0b43-8378-4b6c-926f-0f053577501d",
+        sandbox,
+        auto_grading=False,
+    )
+
+    assert lesson == b"# lesson\n"
+    assert practice is None
+    assert [call.args[0] for call in sandbox.adownload_file_bytes.await_args_list] == [
+        "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/outputs/lesson.md",
+        "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/outputs/practice.json",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_download_complete_teaching_outputs_uses_only_all_service_derived_paths():
     sandbox = AsyncMock()
     paths = expected_teaching_asset_paths(education_teaching_storage.freeze_teaching_input(_job()))

@@ -41,6 +41,25 @@ argument-hint: <question>  |  walk <topic>  |  course <book> [<ch>]  |  check <b
 
 # the-knowledge-guy — knowledge router + interactive teacher
 
+## Managed knowledge-point lesson mode
+
+When `$QUERY` begins `--managed-textbook-lesson <job>`, run only this
+non-interactive lesson mode.
+
+1. Read only `/managed/textbook-job/<job>/inputs/manifest.json` and
+   `/managed/textbook-job/<job>/inputs/lesson-context.md`, plus the staged
+   `the-knowledge-guy` skill documentation.
+2. The manifest identifies one accepted knowledge point and includes its source
+   ranges. Do not read the whole book and do not ask the user for clarification.
+3. Write `outputs/lesson.md` as the primary course. Markdown may contain
+   headings, tables, quotations, vocabulary, formulas, worked examples, common
+   mistakes, and ordinary exercises.
+4. Only when the manifest enables auto-grading, also write
+   `outputs/practice.json`. Do not create `vocabulary.json`, `evidence.json`,
+   course HTML, memory, or any other file.
+5. Keep explanations grounded in the supplied context. External enrichment must
+   be clearly marked and must not be presented as textbook text.
+
 ## Managed textbook mode
 
 When `$QUERY` begins `--managed-textbook <job>`, dispatch here before Step 0.

@@ -12,8 +12,10 @@
 - `book-to-skill` 增加独立的 managed structure mode，明确允许教学 Unit 暂时没有知识点，禁止非教学 Unit 编造知识点，并禁止在结构阶段生成课程或教学包。
 - 新增家长结构审阅 API：创建结构任务、读取结构树、整树替换编辑，以及接受结构进入后续逐知识点课程生成；整树替换可承载重命名、合并、拆分、删除和新增知识点。
 - 新增知识点 lesson 身份、不可变 Markdown revision、私有 revision 存储路径，以及发布快照到具体 revision 的冻结关系；重新生成课程只创建新 revision，不覆盖旧课程。
+- 新增单知识点 Markdown 课程生成链路：每个任务只注入目标知识点的来源片段，只加载 `the-knowledge-guy`，主输出为 `lesson.md`；只有开启自动判题时才要求 `practice.json`。
+- 删除 lesson 对 `vocabulary.json`、`evidence.json` 等固定 JSON 的依赖，英语词汇、数学公式和语文知识点都可在 Markdown 中按学科 Profile 自然表达。
 - 新结构模型不承担旧教学包双读、回填或迁移兼容；历史格式无法转换时直接重新加工。
-- 验证：迁移在线降级/升级与离线 SQL 生成通过；使用真实 `bbb` 内容版本完成结构任务排队、读取和清理；结构调整、验证、生成、lesson revision、存储、API 与 PTC 边界聚焦测试 122 项通过，Ruff 通过。
+- 验证：迁移在线降级/升级与离线 SQL 生成通过；使用真实 `bbb` 内容版本完成结构任务排队、读取和清理；结构调整、验证、lesson revision、单知识点生成、存储、API 与 PTC 边界聚焦测试 189 项通过，Ruff 通过。
 
 ### 修复：图书馆“教材资产”接口遇到真实 UUID 返回 500
 

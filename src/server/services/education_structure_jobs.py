@@ -143,7 +143,9 @@ async def queue_structure_generation_for_parent(
     return queued
 
 
-async def _create_workspace(*, parent_user_id: str, job_id: str) -> dict[str, Any]:
+async def create_generation_workspace(
+    *, parent_user_id: str, job_id: str
+) -> dict[str, Any]:
     return await create_workspace(
         user_id=parent_user_id,
         name="家庭教材结构分析",
@@ -158,7 +160,7 @@ async def _create_workspace(*, parent_user_id: str, job_id: str) -> dict[str, An
     )
 
 
-async def _create_thread(
+async def create_generation_thread(
     *, job_id: str, workspace_id: str
 ) -> dict[str, Any]:
     return await create_thread(
@@ -177,7 +179,7 @@ async def _create_thread(
     )
 
 
-async def _managed_workflow_events(
+async def managed_generation_workflow_events(
     workflow: AsyncGenerator[str, None],
     *,
     generation_job_id: str,
@@ -398,7 +400,7 @@ async def _dispatch_structure_root_run(
                 terminal_error=getattr(task_info, "error", None),
             )
 
-        workflow = _managed_workflow_events(
+        workflow = managed_generation_workflow_events(
             handler.stream_workflow(
                 graph=graph,
                 input_state=input_state,
@@ -457,12 +459,12 @@ async def launch_structure_generation(
     if job.get("scope") != "structure" or job.get("status") != "queued":
         raise RuntimeError("Textbook structure generation job cannot start")
     generation_job_id = str(job["generation_job_id"])
-    workspace = await _create_workspace(
+    workspace = await create_generation_workspace(
         parent_user_id=parent_user_id,
         job_id=generation_job_id,
     )
     workspace_id = str(workspace["workspace_id"])
-    thread = await _create_thread(
+    thread = await create_generation_thread(
         job_id=generation_job_id,
         workspace_id=workspace_id,
     )

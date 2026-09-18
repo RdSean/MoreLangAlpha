@@ -605,6 +605,78 @@ async def download_structure_output(
     return output
 
 
+async def stage_kp_lesson_inputs(
+    job: Mapping[str, Any],
+    source_context: str,
+    sandbox: ManagedTeachingSandbox,
+) -> None:
+    """Stage only the selected knowledge-point context for one lesson job."""
+    if not isinstance(source_context, str) or not source_context.strip():
+        raise TeachingPackageStorageError(
+            "Knowledge-point lesson context is unavailable"
+        )
+    root = managed_job_root(str(job["job_id"]))
+    source_refs = job.get("source_refs")
+    if not isinstance(source_refs, list) or not source_refs:
+        raise TeachingPackageStorageError(
+            "Knowledge-point lesson source refs are unavailable"
+        )
+    manifest = {
+        "format": "langalpha-managed-kp-lesson-input/v1",
+        "job_id": str(job["job_id"]),
+        "knowledge_point_id": str(job["knowledge_point_id"]),
+        "knowledge_point_title": str(job.get("knowledge_point_title") or ""),
+        "unit_title": str(job.get("unit_title") or ""),
+        "auto_grading": bool(job.get("auto_grading")),
+        "source_refs": source_refs,
+        "context_path": "inputs/lesson-context.md",
+    }
+    files = [
+        (
+            f"{root}/inputs/manifest.json",
+            json.dumps(
+                manifest,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8"),
+        ),
+        (f"{root}/inputs/lesson-context.md", source_context.encode("utf-8")),
+        (f"{root}/outputs/.keep", b""),
+    ]
+    await _upload_staged_files(sandbox, files)
+
+
+async def download_kp_lesson_outputs(
+    job_id: str,
+    sandbox: ManagedTeachingSandbox,
+    *,
+    auto_grading: bool,
+) -> tuple[bytes, bytes | None]:
+    """Download only lesson.md and the optional practice.json candidate."""
+    root = managed_job_root(job_id)
+    lesson = await sandbox.adownload_file_bytes(f"{root}/outputs/lesson.md")
+    if not isinstance(lesson, bytes) or not lesson.strip():
+        raise TeachingPackageStorageError("Knowledge-point lesson output is unavailable")
+    if len(lesson) > _MAX_CANDIDATE_BYTES:
+        raise TeachingPackageStorageError("Knowledge-point lesson output is too large")
+    practice = await sandbox.adownload_file_bytes(f"{root}/outputs/practice.json")
+    if practice is not None:
+        if not isinstance(practice, bytes):
+            raise TeachingPackageStorageError(
+                "Knowledge-point practice output is invalid"
+            )
+        if len(practice) > _MAX_CANDIDATE_BYTES:
+            raise TeachingPackageStorageError(
+                "Knowledge-point practice output is too large"
+            )
+    elif auto_grading:
+        raise TeachingPackageStorageError(
+            "Knowledge-point practice output is unavailable"
+        )
+    return lesson, practice
+
+
 async def download_teaching_asset_outputs(
     job_id: str, frozen_input: Mapping[str, Any], sandbox: ManagedTeachingSandbox
 ) -> dict[str, bytes]:

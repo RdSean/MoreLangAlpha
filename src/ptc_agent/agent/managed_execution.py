@@ -44,6 +44,17 @@ def education_structure_policy(job_id: str) -> ManagedExecutionPolicy:
     )
 
 
+def education_lesson_policy(job_id: str) -> ManagedExecutionPolicy:
+    """Return the fixed policy for one knowledge-point lesson job."""
+    normalized_job_id = str(UUID(job_id))
+    return ManagedExecutionPolicy(
+        allowed_skill_names=frozenset({"the-knowledge-guy"}),
+        filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
+        purpose="lesson",
+        allow_subagents=False,
+    )
+
+
 def managed_core_config(core_config: Any, policy: ManagedExecutionPolicy) -> Any:
     """Clone and strip a CoreConfig for a service-owned managed run.
 
@@ -122,6 +133,20 @@ def validate_managed_textbook_write(
         if not isinstance(decoded, dict):
             return "managed teaching candidate must be a JSON object"
         return None
+    if policy.purpose == "lesson":
+        if relative == PurePosixPath("outputs/lesson.md"):
+            if not content.strip():
+                return "managed lesson Markdown must not be empty"
+            return None
+        if relative == PurePosixPath("outputs/practice.json"):
+            try:
+                decoded = json.loads(content)
+            except json.JSONDecodeError:
+                return "managed lesson practice must be valid JSON before writing"
+            if not isinstance(decoded, dict):
+                return "managed lesson practice must be a JSON object"
+            return None
+        return "managed teaching candidate path is not allowed"
     allowed_json = {
         PurePosixPath("outputs/knowledge/concept-index.json"),
         PurePosixPath("outputs/knowledge/coverage-audit.json"),

@@ -65,6 +65,37 @@ def test_structure_policy_allows_only_one_json_candidate_path():
     )
 
 
+def test_lesson_policy_allows_markdown_and_optional_practice_only():
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_lesson_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+
+    assert policy.allowed_skill_names == frozenset({"the-knowledge-guy"})
+    assert policy.purpose == "lesson"
+    assert (
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/outputs/lesson.md",
+            "# Lesson",
+            policy,
+        )
+        is None
+    )
+    assert (
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/outputs/practice.json",
+            '{"questions":[]}',
+            policy,
+        )
+        is None
+    )
+    assert managed_execution.validate_managed_textbook_write(
+        f"{policy.filesystem_root}/outputs/lesson.json",
+        "{}",
+        policy,
+    )
+
+
 def test_managed_core_config_removes_mcp_secrets_and_other_filesystem_roots():
     managed_execution = import_module("ptc_agent.agent.managed_execution")
     policy = managed_execution.education_teaching_policy(

@@ -699,11 +699,22 @@ async def get_generation_job_for_parent(
                 SELECT jobs.generation_job_id, jobs.version_id, jobs.scope,
                        jobs.structure_id, jobs.knowledge_point_id, jobs.status,
                        jobs.attempt_count, jobs.latest_attempt_id,
+                       jobs.auto_grading,
                        jobs.processing_profile_sha256, jobs.error_code,
                        jobs.error_message, jobs.created_at, jobs.updated_at,
                        versions.sequence AS content_version_sequence,
                        textbooks.textbook_id, textbooks.household_id,
                        textbooks.slug, textbooks.title,
+                       knowledge_points.unit_id,
+                       knowledge_points.position AS knowledge_point_position,
+                       knowledge_points.slug AS knowledge_point_slug,
+                       knowledge_points.title AS knowledge_point_title,
+                       knowledge_points.summary AS knowledge_point_summary,
+                       knowledge_points.source_refs AS knowledge_point_source_refs,
+                       units.unit_id,
+                       units.position AS unit_position,
+                       units.slug AS unit_slug,
+                       units.title AS unit_title,
                        structures.sequence AS structure_sequence,
                        structures.status AS structure_status,
                        structures.bundle_prefix AS structure_bundle_prefix
@@ -714,13 +725,68 @@ async def get_generation_job_for_parent(
                   ON textbooks.textbook_id = versions.textbook_id
                 JOIN education_memberships AS memberships
                   ON memberships.household_id = textbooks.household_id
+                LEFT JOIN education_structure_knowledge_points AS knowledge_points
+                  ON knowledge_points.knowledge_point_id =
+                     jobs.knowledge_point_id
+                LEFT JOIN education_structure_units AS units
+                  ON units.unit_id = knowledge_points.unit_id
                 LEFT JOIN education_textbook_structures AS structures
-                  ON structures.structure_id = jobs.structure_id
+                  ON structures.structure_id =
+                     COALESCE(jobs.structure_id, units.structure_id)
                 WHERE jobs.generation_job_id = %s
                   AND memberships.user_id = %s
                   AND memberships.role = 'parent'
                 """,
                 (generation_job_id, parent_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_knowledge_point_for_parent(
+    *, parent_user_id: str, knowledge_point_id: str
+) -> dict[str, Any] | None:
+    """Read one accepted knowledge point with its Unit and structure context."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT knowledge_points.knowledge_point_id,
+                       knowledge_points.position AS knowledge_point_position,
+                       knowledge_points.slug AS knowledge_point_slug,
+                       knowledge_points.title AS knowledge_point_title,
+                       knowledge_points.summary AS knowledge_point_summary,
+                       knowledge_points.source_refs AS knowledge_point_source_refs,
+                       units.unit_id,
+                       units.position AS unit_position,
+                       units.slug AS unit_slug,
+                       units.title AS unit_title,
+                       structures.structure_id,
+                       structures.sequence AS structure_sequence,
+                       structures.status AS structure_status,
+                       versions.version_id,
+                       versions.sequence AS content_version_sequence,
+                       textbooks.textbook_id, textbooks.household_id,
+                       textbooks.slug, textbooks.title
+                FROM education_structure_knowledge_points AS knowledge_points
+                JOIN education_structure_units AS units
+                  ON units.unit_id = knowledge_points.unit_id
+                JOIN education_textbook_structures AS structures
+                  ON structures.structure_id = units.structure_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = structures.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                WHERE knowledge_points.knowledge_point_id = %s
+                  AND knowledge_points.status = 'accepted'
+                  AND units.status = 'accepted'
+                  AND structures.status = 'accepted'
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (knowledge_point_id, parent_user_id),
             )
             row = await cur.fetchone()
     return dict(row) if row else None
@@ -834,6 +900,7 @@ async def create_generation_job(
     structure_id: str | None,
     knowledge_point_id: str | None,
     processing_profile_sha256: str,
+    auto_grading: bool = False,
 ) -> dict[str, Any]:
     """Queue one structure or lesson generation job."""
     structure_target = str(structure_id) if structure_id is not None else None
@@ -860,10 +927,11 @@ async def create_generation_job(
                 """
                 INSERT INTO education_generation_jobs (
                     generation_job_id, version_id, scope, structure_id,
-                    knowledge_point_id, status, processing_profile_sha256
-                ) VALUES (%s, %s, %s, %s, %s, 'queued', %s)
+                    knowledge_point_id, status, auto_grading,
+                    processing_profile_sha256
+                ) VALUES (%s, %s, %s, %s, %s, 'queued', %s, %s)
                 RETURNING generation_job_id, version_id, scope, structure_id,
-                          knowledge_point_id, status
+                          knowledge_point_id, status, auto_grading
                 """,
                 (
                     generation_job_id,
@@ -871,6 +939,7 @@ async def create_generation_job(
                     scope,
                     structure_target,
                     knowledge_point_target,
+                    auto_grading,
                     processing_profile_sha256,
                 ),
             )

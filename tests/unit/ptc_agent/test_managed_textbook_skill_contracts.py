@@ -121,3 +121,17 @@ def test_book_to_skill_managed_structure_mode_is_non_interactive_and_source_grou
     assert "langalpha-managed-textbook-structure/v1" in contract
     assert "non-teaching Unit" in contract
     assert "must not invent knowledge points" in contract
+
+
+def test_knowledge_guy_managed_lesson_mode_uses_markdown_as_primary_output():
+    text = (SKILLS_ROOT / "the-knowledge-guy/SKILL.md").read_text()
+    contract = (
+        SKILLS_ROOT / "the-knowledge-guy/reference/managed-textbook-contract.md"
+    ).read_text()
+
+    assert "--managed-textbook-lesson" in text
+    assert "outputs/lesson.md" in text
+    assert "outputs/practice.json" in text
+    assert "vocabulary.json" in contract
+    assert "evidence.json" in contract
+    assert "Markdown" in contract
