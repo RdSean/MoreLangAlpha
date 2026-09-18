@@ -1352,6 +1352,128 @@ async def create_kp_lesson_revision(
     }
 
 
+async def get_kp_lesson_for_parent(
+    *, parent_user_id: str, lesson_id: str
+) -> dict[str, Any] | None:
+    """Read one stable lesson identity and its immutable revisions."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT lessons.lesson_id, lessons.status,
+                       lessons.latest_revision_id, lessons.created_at,
+                       lessons.reviewed_at,
+                       knowledge_points.knowledge_point_id,
+                       knowledge_points.position AS knowledge_point_position,
+                       knowledge_points.slug AS knowledge_point_slug,
+                       knowledge_points.title AS knowledge_point_title,
+                       units.unit_id,
+                       units.position AS unit_position,
+                       units.slug AS unit_slug,
+                       units.title AS unit_title,
+                       structures.structure_id,
+                       structures.sequence AS structure_sequence,
+                       versions.version_id,
+                       versions.sequence AS content_version_sequence,
+                       textbooks.textbook_id, textbooks.household_id,
+                       textbooks.slug, textbooks.title
+                FROM education_kp_lessons AS lessons
+                JOIN education_structure_knowledge_points AS knowledge_points
+                  ON knowledge_points.knowledge_point_id =
+                     lessons.knowledge_point_id
+                JOIN education_structure_units AS units
+                  ON units.unit_id = knowledge_points.unit_id
+                JOIN education_textbook_structures AS structures
+                  ON structures.structure_id = units.structure_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = structures.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                WHERE lessons.lesson_id = %s
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (lesson_id, parent_user_id),
+            )
+            lesson = await cur.fetchone()
+            if not lesson:
+                return None
+            result = dict(lesson)
+            await cur.execute(
+                """
+                SELECT revision_id, revision, format, content_key,
+                       content_sha256, size_bytes,
+                       processing_profile_sha256, created_at
+                FROM education_kp_lesson_revisions
+                WHERE lesson_id = %s
+                ORDER BY revision DESC
+                """,
+                (lesson_id,),
+            )
+            result["revisions"] = [dict(row) for row in await cur.fetchall()]
+    return result
+
+
+async def approve_kp_lesson_revision(
+    *, parent_user_id: str, lesson_id: str, revision_id: str
+) -> dict[str, Any] | None:
+    """Approve one exact revision without mutating its content."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT lessons.lesson_id
+                    FROM education_kp_lessons AS lessons
+                    JOIN education_structure_knowledge_points AS knowledge_points
+                      ON knowledge_points.knowledge_point_id =
+                         lessons.knowledge_point_id
+                    JOIN education_structure_units AS units
+                      ON units.unit_id = knowledge_points.unit_id
+                    JOIN education_textbook_structures AS structures
+                      ON structures.structure_id = units.structure_id
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = structures.version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE lessons.lesson_id = %s
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                    FOR UPDATE OF lessons
+                    """,
+                    (lesson_id, parent_user_id),
+                )
+                if not await cur.fetchone():
+                    return None
+                await cur.execute(
+                    """
+                    SELECT revision_id
+                    FROM education_kp_lesson_revisions
+                    WHERE revision_id = %s AND lesson_id = %s
+                    """,
+                    (revision_id, lesson_id),
+                )
+                if not await cur.fetchone():
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_kp_lessons
+                    SET latest_revision_id = %s, status = 'approved',
+                        reviewed_at = NOW()
+                    WHERE lesson_id = %s
+                    RETURNING lesson_id, knowledge_point_id,
+                              latest_revision_id, status, reviewed_at
+                    """,
+                    (revision_id, lesson_id),
+                )
+                approved = await cur.fetchone()
+    return dict(approved) if approved else None
+
+
 async def freeze_publication_lessons(
     *,
     publication_id: str,
@@ -3792,6 +3914,136 @@ async def publish_textbook_version(
                 publication = dict(await cur.fetchone())
                 await cur.execute(
                     "UPDATE education_textbook_versions SET status = 'published', published_at = NOW() WHERE version_id = %s",
+                    (version_id,),
+                )
+    return publication
+
+
+async def publish_textbook_structure(
+    *,
+    parent_user_id: str,
+    version_id: str,
+    structure_id: str,
+) -> dict[str, Any] | None:
+    """Freeze one accepted structure and every approved lesson revision."""
+    publication_id = str(uuid4())
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT versions.version_id, structures.structure_id
+                    FROM education_textbook_structures AS structures
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = structures.version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE versions.version_id = %s
+                      AND structures.structure_id = %s
+                      AND structures.status = 'accepted'
+                      AND versions.status = 'review'
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                    FOR UPDATE OF versions, structures
+                    """,
+                    (
+                        version_id,
+                        structure_id,
+                        parent_user_id,
+                    ),
+                )
+                if not await cur.fetchone():
+                    return None
+                await cur.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM education_structure_knowledge_points AS knowledge_points
+                    JOIN education_structure_units AS units
+                      ON units.unit_id = knowledge_points.unit_id
+                    WHERE units.structure_id = %s
+                    """,
+                    (structure_id,),
+                )
+                total_count = int((await cur.fetchone())["count"])
+                if total_count <= 0:
+                    return None
+                await cur.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM education_structure_knowledge_points AS knowledge_points
+                    JOIN education_structure_units AS units
+                      ON units.unit_id = knowledge_points.unit_id
+                    JOIN education_kp_lessons AS lessons
+                      ON lessons.knowledge_point_id =
+                         knowledge_points.knowledge_point_id
+                    JOIN education_kp_lesson_revisions AS revisions
+                      ON revisions.revision_id = lessons.latest_revision_id
+                    WHERE units.structure_id = %s
+                      AND knowledge_points.status = 'accepted'
+                      AND lessons.status = 'approved'
+                    """,
+                    (structure_id,),
+                )
+                approved_count = int((await cur.fetchone())["count"])
+                if approved_count != total_count:
+                    return None
+                await cur.execute(
+                    """
+                    SELECT knowledge_points.knowledge_point_id,
+                           lessons.latest_revision_id AS lesson_revision_id
+                    FROM education_structure_knowledge_points AS knowledge_points
+                    JOIN education_structure_units AS units
+                      ON units.unit_id = knowledge_points.unit_id
+                    JOIN education_kp_lessons AS lessons
+                      ON lessons.knowledge_point_id =
+                         knowledge_points.knowledge_point_id
+                    WHERE units.structure_id = %s
+                      AND knowledge_points.status = 'accepted'
+                      AND lessons.status = 'approved'
+                    ORDER BY units.position, knowledge_points.position
+                    """,
+                    (structure_id,),
+                )
+                lessons = [dict(row) for row in await cur.fetchall()]
+                await cur.execute(
+                    """
+                    INSERT INTO education_textbook_publications (
+                        publication_id, version_id, teaching_package_id,
+                        structure_id, published_by_user_id
+                    ) VALUES (%s, %s, NULL, %s, %s)
+                    RETURNING publication_id, version_id, structure_id,
+                              published_by_user_id, created_at
+                    """,
+                    (
+                        publication_id,
+                        version_id,
+                        structure_id,
+                        parent_user_id,
+                    ),
+                )
+                publication = dict(await cur.fetchone())
+                for lesson in lessons:
+                    await cur.execute(
+                        """
+                        INSERT INTO education_publication_kp_lessons (
+                            publication_id, knowledge_point_id,
+                            lesson_revision_id
+                        ) VALUES (%s, %s, %s)
+                        """,
+                        (
+                            publication_id,
+                            lesson["knowledge_point_id"],
+                            lesson["lesson_revision_id"],
+                        ),
+                    )
+                await cur.execute(
+                    """
+                    UPDATE education_textbook_versions
+                    SET status = 'published', published_at = NOW()
+                    WHERE version_id = %s AND status = 'review'
+                    """,
                     (version_id,),
                 )
     return publication

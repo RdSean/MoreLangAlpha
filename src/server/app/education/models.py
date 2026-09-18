@@ -386,7 +386,7 @@ class TextbookStructureResponse(BaseModel):
 class StructureGenerationJobResponse(BaseModel):
     generation_job_id: UUID
     version_id: UUID
-    scope: Literal["structure"]
+    scope: Literal["structure", "lesson"]
     structure_id: UUID | None = None
     status: str
     attempt_count: int
@@ -397,6 +397,44 @@ class StructureGenerationJobResponse(BaseModel):
     structure_sequence: int | None = None
     structure_status: str | None = None
     structure_bundle_prefix: str | None = None
+
+
+class GenerateKnowledgePointLessonRequest(BaseModel):
+    auto_grading: bool = False
+
+
+class KnowledgePointLessonRevisionResponse(BaseModel):
+    revision_id: UUID
+    revision: int
+    format: Literal["markdown"]
+    content_sha256: str
+    size_bytes: int
+    processing_profile_sha256: str
+    created_at: datetime | None = None
+
+
+class KnowledgePointLessonResponse(BaseModel):
+    lesson_id: UUID
+    status: str
+    latest_revision_id: UUID | None = None
+    knowledge_point_id: UUID
+    knowledge_point_title: str
+    unit_id: UUID
+    unit_title: str
+    content_markdown: str
+    revisions: list[KnowledgePointLessonRevisionResponse]
+
+
+class CreateKnowledgePointLessonRevisionRequest(BaseModel):
+    content_markdown: str = Field(min_length=1, max_length=200_000)
+
+
+class ApproveKnowledgePointLessonRequest(BaseModel):
+    revision_id: UUID
+
+
+class PublishTextbookStructureRequest(BaseModel):
+    structure_id: UUID
 
 
 class TextbookQuestionResponse(BaseModel):
@@ -555,6 +593,14 @@ class TextbookPublicationResponse(BaseModel):
     publication_id: UUID
     version_id: UUID
     teaching_package_id: UUID
+    published_by_user_id: str | None = None
+    created_at: datetime | None = None
+
+
+class TextbookStructurePublicationResponse(BaseModel):
+    publication_id: UUID
+    version_id: UUID
+    structure_id: UUID
     published_by_user_id: str | None = None
     created_at: datetime | None = None
 

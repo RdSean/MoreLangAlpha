@@ -183,3 +183,101 @@ async def test_structure_update_rejects_missing_units(client):
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_parent_generates_reviews_and_publishes_lesson(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    lesson_id = uuid4()
+    revision_id = uuid4()
+    knowledge_point_id = uuid4()
+    unit_id = uuid4()
+    lesson = {
+        "lesson_id": lesson_id,
+        "status": "review",
+        "latest_revision_id": revision_id,
+        "knowledge_point_id": knowledge_point_id,
+        "knowledge_point_title": "世界运动",
+        "unit_id": unit_id,
+        "unit_title": "Unit 1",
+        "content_markdown": "# 世界运动\n",
+        "revisions": [
+            {
+                "revision_id": revision_id,
+                "revision": 1,
+                "format": "markdown",
+                "content_sha256": "a" * 64,
+                "size_bytes": 20,
+                "processing_profile_sha256": "b" * 64,
+                "created_at": None,
+            }
+        ],
+    }
+    job = {
+        "generation_job_id": uuid4(),
+        "version_id": uuid4(),
+        "scope": "lesson",
+        "knowledge_point_id": knowledge_point_id,
+        "status": "queued",
+        "attempt_count": 0,
+        "auto_grading": False,
+    }
+    publication = {
+        "publication_id": uuid4(),
+        "version_id": job["version_id"],
+        "structure_id": uuid4(),
+    }
+    with (
+        patch(
+            "src.server.app.education.textbooks.queue_lesson_for_parent",
+            new=AsyncMock(return_value=job),
+        ) as queue,
+        patch(
+            "src.server.app.education.textbooks.get_lesson_for_parent",
+            new=AsyncMock(return_value=lesson),
+        ),
+        patch(
+            "src.server.app.education.textbooks.create_manual_lesson_revision",
+            new=AsyncMock(return_value={"revision_id": revision_id}),
+        ) as revise,
+        patch(
+            "src.server.app.education.textbooks.approve_lesson_for_parent",
+            new=AsyncMock(return_value={"status": "approved"}),
+        ) as approve,
+        patch(
+            "src.server.app.education.textbooks.publish_structure_for_parent",
+            new=AsyncMock(return_value=publication),
+        ) as publish,
+    ):
+        queued = await client.post(
+            f"/api/v1/education/knowledge-points/{knowledge_point_id}/lessons",
+            json={"auto_grading": False},
+        )
+        loaded = await client.get(
+            f"/api/v1/education/knowledge-point-lessons/{lesson_id}"
+        )
+        revised = await client.post(
+            f"/api/v1/education/knowledge-point-lessons/{lesson_id}/revisions",
+            json={"content_markdown": "# 修订版\n"},
+        )
+        approved = await client.post(
+            f"/api/v1/education/knowledge-point-lessons/{lesson_id}/review",
+            json={"revision_id": str(revision_id)},
+        )
+        published = await client.post(
+            f"/api/v1/education/textbook-versions/{job['version_id']}/structure-publications",
+            json={"structure_id": str(publication["structure_id"])},
+        )
+
+    assert queued.status_code == 202
+    assert loaded.status_code == 200
+    assert revised.status_code == 200
+    assert approved.status_code == 200
+    assert published.status_code == 201
+    assert queue.await_args.kwargs["knowledge_point_id"] == str(knowledge_point_id)
+    assert revise.await_args.kwargs["content_markdown"] == "# 修订版\n"
+    assert approve.await_args.kwargs["revision_id"] == str(revision_id)
+    assert publish.await_args.kwargs["structure_id"] == str(
+        publication["structure_id"]
+    )

@@ -14,8 +14,10 @@
 - 新增知识点 lesson 身份、不可变 Markdown revision、私有 revision 存储路径，以及发布快照到具体 revision 的冻结关系；重新生成课程只创建新 revision，不覆盖旧课程。
 - 新增单知识点 Markdown 课程生成链路：每个任务只注入目标知识点的来源片段，只加载 `the-knowledge-guy`，主输出为 `lesson.md`；只有开启自动判题时才要求 `practice.json`。
 - 删除 lesson 对 `vocabulary.json`、`evidence.json` 等固定 JSON 的依赖，英语词汇、数学公式和语文知识点都可在 Markdown 中按学科 Profile 自然表达。
+- 新增 lesson 生成、读取、人工修订、审批 API，以及结构发布接口；发布必须为每个 accepted 知识点冻结一份 approved lesson revision。
+- publication 现在明确支持 teaching package 或 structure 二选一，结构发布不再伪装成旧教学包。
 - 新结构模型不承担旧教学包双读、回填或迁移兼容；历史格式无法转换时直接重新加工。
-- 验证：迁移在线降级/升级与离线 SQL 生成通过；使用真实 `bbb` 内容版本完成结构任务排队、读取和清理；结构调整、验证、lesson revision、单知识点生成、存储、API 与 PTC 边界聚焦测试 189 项通过，Ruff 通过。
+- 验证：迁移在线降级/升级与离线 SQL 生成通过；使用真实 `bbb` 内容版本完成结构任务排队、读取和清理；结构调整、验证、lesson revision、单知识点生成、审阅、发布、存储、API 与 PTC 边界聚焦测试 202 项通过，Ruff 通过。
 
 ### 修复：图书馆“教材资产”接口遇到真实 UUID 返回 500
 

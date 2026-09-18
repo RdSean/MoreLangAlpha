@@ -7,10 +7,15 @@ from fastapi import APIRouter, HTTPException, status
 from src.server.app.education.models import (
     AnswerLearningQuestionRequest,
     AssignTextbookPublicationRequest,
+    ApproveKnowledgePointLessonRequest,
+    CreateKnowledgePointLessonRevisionRequest,
     CreateTextbookRequest,
+    GenerateKnowledgePointLessonRequest,
+    KnowledgePointLessonResponse,
     LearningAnswerResponse,
     LearningProgressResponse,
     PublishTextbookVersionRequest,
+    PublishTextbookStructureRequest,
     StartTextbookProcessingRequest,
     StructureGenerationJobResponse,
     TextbookAssignmentResponse,
@@ -19,6 +24,7 @@ from src.server.app.education.models import (
     TextbookProcessingResponse,
     TextbookPublicationResponse,
     TextbookResponse,
+    TextbookStructurePublicationResponse,
     TextbookStructureResponse,
     TeachingJobResponse,
     TeachingPackageAssetSummaryResponse,
@@ -33,6 +39,13 @@ from src.server.services.education_structure_review import (
     get_structure_generation_job,
     queue_structure_for_parent,
     replace_structure_for_parent,
+)
+from src.server.services.education_lesson_review import (
+    approve_lesson_for_parent,
+    create_manual_lesson_revision,
+    get_lesson_for_parent,
+    publish_structure_for_parent,
+    queue_lesson_for_parent,
 )
 from src.server.services.education_textbooks import (
     TextbookError,
@@ -212,6 +225,109 @@ async def accept_family_textbook_structure(
         return await get_structure_for_parent(
             parent_user_id=user_id,
             structure_id=str(structure_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/knowledge-points/{knowledge_point_id}/lessons",
+    response_model=StructureGenerationJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def generate_family_knowledge_point_lesson(
+    knowledge_point_id: UUID,
+    body: GenerateKnowledgePointLessonRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        return await queue_lesson_for_parent(
+            parent_user_id=user_id,
+            knowledge_point_id=str(knowledge_point_id),
+            auto_grading=body.auto_grading,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/knowledge-point-lessons/{lesson_id}",
+    response_model=KnowledgePointLessonResponse,
+)
+async def get_family_knowledge_point_lesson(
+    lesson_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_lesson_for_parent(
+            parent_user_id=user_id,
+            lesson_id=str(lesson_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/knowledge-point-lessons/{lesson_id}/revisions",
+    response_model=KnowledgePointLessonResponse,
+)
+async def create_family_knowledge_point_lesson_revision(
+    lesson_id: UUID,
+    body: CreateKnowledgePointLessonRevisionRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        await create_manual_lesson_revision(
+            parent_user_id=user_id,
+            lesson_id=str(lesson_id),
+            content_markdown=body.content_markdown,
+        )
+        return await get_lesson_for_parent(
+            parent_user_id=user_id,
+            lesson_id=str(lesson_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/knowledge-point-lessons/{lesson_id}/review",
+    response_model=KnowledgePointLessonResponse,
+)
+async def approve_family_knowledge_point_lesson(
+    lesson_id: UUID,
+    body: ApproveKnowledgePointLessonRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        await approve_lesson_for_parent(
+            parent_user_id=user_id,
+            lesson_id=str(lesson_id),
+            revision_id=str(body.revision_id),
+        )
+        return await get_lesson_for_parent(
+            parent_user_id=user_id,
+            lesson_id=str(lesson_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/textbook-versions/{version_id}/structure-publications",
+    response_model=TextbookStructurePublicationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def publish_family_textbook_structure(
+    version_id: UUID,
+    body: PublishTextbookStructureRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        return await publish_structure_for_parent(
+            parent_user_id=user_id,
+            version_id=str(version_id),
+            structure_id=str(body.structure_id),
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
