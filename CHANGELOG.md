@@ -7,8 +7,11 @@
 - 新增可审阅的教材结构版本、Unit、知识点及单元内知识点持久化模型，来源证据、置信度和审阅状态保存在结构层。
 - 新增通用 `structure` / `lesson` generation job 与 attempt 账本，为后续逐知识点 Markdown 课程生成、失败隔离和独立重试提供持久化基础。
 - 新增结构候选纯验证器：Unit 和知识点必须带有效来源范围，Unit 位置与 slug 唯一；教学 Unit 允许审阅前暂时没有知识点，非教学 Unit 禁止硬造知识点。
+- 新增结构生成服务：复用受管 PTC 的 workspace、sandbox、run ledger、心跳与终态回调，但只加载 `book-to-skill`，只允许写 `outputs/structure.json`，通过验证后进入 `review`。
+- 结构版本和原始结构 JSON 归档到私有 `education/.../structures/vN/`，沙盒关闭后仍可从数据库和 MinIO 查看。
+- `book-to-skill` 增加独立的 managed structure mode，明确允许教学 Unit 暂时没有知识点，禁止非教学 Unit 编造知识点，并禁止在结构阶段生成课程或教学包。
 - 新结构模型不承担旧教学包双读、回填或迁移兼容；历史格式无法转换时直接重新加工。
-- 验证：迁移在线升级与离线 SQL 生成通过，结构调整、验证和生成任务聚焦测试 16 项通过，Ruff 通过。
+- 验证：迁移在线降级/升级与离线 SQL 生成通过；使用真实 `bbb` 内容版本完成结构任务排队、读取和清理；结构调整、验证、生成、存储与 PTC 边界聚焦测试 67 项通过，Ruff 通过。
 
 ### 修复：图书馆“教材资产”接口遇到真实 UUID 返回 500
 

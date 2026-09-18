@@ -37,6 +37,34 @@ def test_managed_textbook_policy_rejects_non_uuid_job_ids():
         education_teaching_policy("job-1")
 
 
+def test_structure_policy_allows_only_one_json_candidate_path():
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_structure_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+
+    assert policy.allowed_skill_names == frozenset({"book-to-skill"})
+    assert policy.purpose == "structure"
+    assert (
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/outputs/structure.json",
+            '{"format":"langalpha-managed-textbook-structure/v1","units":[]}',
+            policy,
+        )
+        is None
+    )
+    assert managed_execution.validate_managed_textbook_write(
+        f"{policy.filesystem_root}/outputs/teaching-package.json",
+        "{}",
+        policy,
+    )
+    assert managed_execution.validate_managed_textbook_write(
+        f"{policy.filesystem_root}/outputs/structure.json",
+        "[]",
+        policy,
+    )
+
+
 def test_managed_core_config_removes_mcp_secrets_and_other_filesystem_roots():
     managed_execution = import_module("ptc_agent.agent.managed_execution")
     policy = managed_execution.education_teaching_policy(

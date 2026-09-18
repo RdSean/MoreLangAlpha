@@ -30,11 +30,12 @@ def upgrade() -> None:
                     'failed', 'cancelled'
                 )
             ),
-            schema_version VARCHAR(32) NOT NULL,
+            schema_version VARCHAR(64) NOT NULL,
             processing_profile_id UUID,
             processing_profile_sha256 VARCHAR(64) NOT NULL,
             input_manifest_sha256 VARCHAR(64) NOT NULL,
             source_revision VARCHAR(64) NOT NULL,
+            bundle_prefix TEXT,
             created_by_user_id VARCHAR(255) NOT NULL
                 REFERENCES users(user_id) ON DELETE RESTRICT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -232,6 +233,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    execute_textbook_ddl(
+        """
+        ALTER TABLE education_generation_jobs
+        DROP CONSTRAINT IF EXISTS fk_education_generation_jobs_latest_attempt
+        """
+    )
     execute_textbook_ddl(
         "DROP TABLE IF EXISTS education_generation_attempts"
     )

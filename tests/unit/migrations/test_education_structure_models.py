@@ -37,6 +37,7 @@ def test_structure_migration_persists_reviewable_unit_and_knowledge_identity() -
     assert "UNIQUE (unit_id, slug)" in source
     assert "source_refs JSONB NOT NULL DEFAULT '[]'::jsonb" in source
     assert "confidence REAL NOT NULL" in source
+    assert "schema_version VARCHAR(64) NOT NULL" in source
 
 
 def test_generation_job_scope_requires_exactly_one_target() -> None:
@@ -57,4 +58,8 @@ def test_structure_migration_downgrades_only_its_own_tables() -> None:
     assert "DROP TABLE IF EXISTS education_structure_knowledge_points" in source
     assert "DROP TABLE IF EXISTS education_structure_units" in source
     assert "DROP TABLE IF EXISTS education_textbook_structures" in source
+    assert (
+        "DROP CONSTRAINT IF EXISTS fk_education_generation_jobs_latest_attempt"
+        in source
+    )
     assert "DROP TABLE IF EXISTS education_textbook_versions" not in source

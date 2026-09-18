@@ -535,10 +535,12 @@ async def queue_textbook_structure(
     processing_profile_sha256: str,
     input_manifest_sha256: str,
     source_revision: str,
+    generation_job_id: str | None = None,
+    structure_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Create one reviewable structure and its queued generation job."""
-    structure_id = str(uuid4())
-    generation_job_id = str(uuid4())
+    structure_id = str(structure_id or uuid4())
+    generation_job_id = str(generation_job_id or uuid4())
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
@@ -684,6 +686,44 @@ async def get_textbook_structure_for_parent(
                 unit["knowledge_points"] = by_unit.get(str(unit["unit_id"]), [])
             result["units"] = units
     return result
+
+
+async def get_generation_job_for_parent(
+    *, parent_user_id: str, generation_job_id: str
+) -> dict[str, Any] | None:
+    """Read one generation job with the frozen context required to dispatch it."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT jobs.generation_job_id, jobs.version_id, jobs.scope,
+                       jobs.structure_id, jobs.knowledge_point_id, jobs.status,
+                       jobs.attempt_count, jobs.latest_attempt_id,
+                       jobs.processing_profile_sha256, jobs.error_code,
+                       jobs.error_message, jobs.created_at, jobs.updated_at,
+                       versions.sequence AS content_version_sequence,
+                       textbooks.textbook_id, textbooks.household_id,
+                       textbooks.slug, textbooks.title,
+                       structures.sequence AS structure_sequence,
+                       structures.status AS structure_status,
+                       structures.bundle_prefix AS structure_bundle_prefix
+                FROM education_generation_jobs AS jobs
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = jobs.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                LEFT JOIN education_textbook_structures AS structures
+                  ON structures.structure_id = jobs.structure_id
+                WHERE jobs.generation_job_id = %s
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (generation_job_id, parent_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
 
 
 async def replace_structure_contents(
@@ -948,6 +988,196 @@ async def settle_generation_job(
                 )
                 job = await cur.fetchone()
     return dict(job) if job else None
+
+
+async def mark_generation_attempt_running(
+    *,
+    generation_job_id: str,
+    attempt_id: str,
+    root_run_id: str,
+) -> dict[str, Any] | None:
+    """Bind the dispatched root run to its reserved generation attempt."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_generation_attempts
+                    SET status = 'running', root_run_id = %s,
+                        heartbeat_at = NOW()
+                    WHERE attempt_id = %s AND generation_job_id = %s
+                      AND status = 'preparing' AND root_run_id IS NULL
+                    RETURNING attempt_id, generation_job_id, root_run_id, status
+                    """,
+                    (root_run_id, attempt_id, generation_job_id),
+                )
+                attempt = await cur.fetchone()
+                if not attempt:
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs
+                    SET status = 'running', updated_at = NOW()
+                    WHERE generation_job_id = %s
+                      AND latest_attempt_id = %s
+                      AND status = 'preparing'
+                    RETURNING generation_job_id, status
+                    """,
+                    (generation_job_id, attempt_id),
+                )
+                job = await cur.fetchone()
+    return {**dict(attempt), **dict(job)} if job else None
+
+
+async def touch_generation_attempt(
+    *, generation_job_id: str, attempt_id: str, root_run_id: str
+) -> bool:
+    """Refresh a running generation attempt without reviving stale runs."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                UPDATE education_generation_attempts AS attempts
+                SET heartbeat_at = NOW()
+                FROM education_generation_jobs AS jobs
+                WHERE attempts.attempt_id = %s
+                  AND attempts.generation_job_id = %s
+                  AND attempts.root_run_id = %s
+                  AND attempts.status = 'running'
+                  AND jobs.generation_job_id = attempts.generation_job_id
+                  AND jobs.latest_attempt_id = attempts.attempt_id
+                RETURNING attempts.attempt_id
+                """,
+                (attempt_id, generation_job_id, root_run_id),
+            )
+            return await cur.fetchone() is not None
+
+
+async def complete_structure_generation(
+    *,
+    generation_job_id: str,
+    attempt_id: str,
+    structure_id: str,
+    bundle_prefix: str,
+) -> dict[str, Any] | None:
+    """Atomically publish a validated structure projection into review."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_textbook_structures
+                    SET status = 'review', bundle_prefix = %s
+                    WHERE structure_id = %s AND status = 'running'
+                    RETURNING structure_id, version_id, sequence, status,
+                              bundle_prefix
+                    """,
+                    (bundle_prefix, structure_id),
+                )
+                structure = await cur.fetchone()
+                if not structure:
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_generation_attempts
+                    SET status = 'completed', completed_at = NOW()
+                    WHERE attempt_id = %s AND generation_job_id = %s
+                      AND status = 'running'
+                    RETURNING attempt_id
+                    """,
+                    (attempt_id, generation_job_id),
+                )
+                if not await cur.fetchone():
+                    raise RuntimeError("Generation attempt completion was lost")
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs
+                    SET status = 'completed', error_code = NULL,
+                        error_message = NULL, updated_at = NOW()
+                    WHERE generation_job_id = %s
+                      AND latest_attempt_id = %s
+                    RETURNING generation_job_id, status
+                    """,
+                    (generation_job_id, attempt_id),
+                )
+                job = await cur.fetchone()
+    if not job:
+        return None
+    result = dict(structure)
+    result["structure_status"] = result.pop("status")
+    result["generation_job_id"] = job["generation_job_id"]
+    result["job_status"] = job["status"]
+    return result
+
+
+async def fail_structure_generation(
+    *,
+    generation_job_id: str,
+    attempt_id: str,
+    structure_id: str,
+    status: str,
+    error_code: str,
+    error_message: str | None,
+) -> dict[str, Any] | None:
+    """Fail one structure attempt without touching completed structures."""
+    if status not in {"failed", "cancelled"}:
+        raise ValueError("Invalid structure generation failure status")
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_generation_attempts
+                    SET status = %s, error_code = %s, error_message = %s,
+                        completed_at = NOW()
+                    WHERE attempt_id = %s AND generation_job_id = %s
+                      AND status IN ('preparing', 'running')
+                    RETURNING attempt_id
+                    """,
+                    (
+                        status,
+                        error_code,
+                        error_message,
+                        attempt_id,
+                        generation_job_id,
+                    ),
+                )
+                if not await cur.fetchone():
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs
+                    SET status = %s, error_code = %s, error_message = %s,
+                        updated_at = NOW()
+                    WHERE generation_job_id = %s
+                      AND latest_attempt_id = %s
+                    RETURNING generation_job_id, status
+                    """,
+                    (
+                        status,
+                        error_code,
+                        error_message,
+                        generation_job_id,
+                        attempt_id,
+                    ),
+                )
+                job = await cur.fetchone()
+                await cur.execute(
+                    """
+                    UPDATE education_textbook_structures
+                    SET status = %s
+                    WHERE structure_id = %s AND status IN ('queued', 'running')
+                    RETURNING structure_id, status
+                    """,
+                    (status, structure_id),
+                )
+                structure = await cur.fetchone()
+    if not job:
+        return None
+    result = dict(job)
+    if structure:
+        result.update(dict(structure))
+    return result
 
 
 async def get_teaching_input_for_parent(

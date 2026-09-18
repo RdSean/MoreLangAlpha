@@ -201,3 +201,77 @@ async def test_create_lesson_generation_job_persists_one_target(
     assert "INSERT INTO education_generation_jobs" in insert_sql
     assert "scope" in insert_sql
     assert mock_cursor.execute.call_args.args[1][2] == "lesson"
+
+
+@pytest.mark.asyncio
+async def test_generation_job_parent_projection_includes_frozen_dispatch_context(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {
+        "generation_job_id": "generation-1",
+        "version_id": "version-1",
+        "scope": "structure",
+        "structure_id": "structure-1",
+        "status": "queued",
+        "content_version_sequence": 1,
+        "structure_sequence": 1,
+        "slug": "textbook",
+    }
+
+    job = await education_textbooks.get_generation_job_for_parent(
+        parent_user_id="parent-1",
+        generation_job_id="generation-1",
+    )
+
+    assert job["structure_sequence"] == 1
+    sql = mock_cursor.execute.call_args.args[0]
+    assert "education_generation_jobs" in sql
+    assert "memberships.role = 'parent'" in sql
+
+
+@pytest.mark.asyncio
+async def test_mark_and_complete_generation_attempt_fence_the_root_run(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {
+            "attempt_id": "attempt-1",
+            "generation_job_id": "generation-1",
+            "root_run_id": "run-1",
+            "status": "running",
+        },
+        {"generation_job_id": "generation-1", "status": "running"},
+        {"structure_id": "structure-1", "status": "review"},
+        {"attempt_id": "attempt-1"},
+        {"generation_job_id": "generation-1", "status": "completed"},
+    ]
+
+    running = await education_textbooks.mark_generation_attempt_running(
+        generation_job_id="generation-1",
+        attempt_id="attempt-1",
+        root_run_id="run-1",
+    )
+    completed = await education_textbooks.complete_structure_generation(
+        generation_job_id="generation-1",
+        attempt_id="attempt-1",
+        structure_id="structure-1",
+        bundle_prefix="education/household/textbook/v1/structures/v1",
+    )
+
+    assert running["root_run_id"] == "run-1"
+    assert completed["structure_status"] == "review"
+    assert completed["job_status"] == "completed"
+    running_sql = mock_cursor.execute.call_args_list[0].args[0]
+    assert "root_run_id = %s" in running_sql
+    complete_sql = mock_cursor.execute.call_args_list[2].args[0]
+    assert "status = 'review'" in complete_sql

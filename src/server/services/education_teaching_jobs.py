@@ -357,6 +357,9 @@ async def build_managed_teaching_graph(
     policy: ManagedExecutionPolicy,
     agent_config: Any | None = None,
     operation_callback: Any | None = None,
+    prompt: str | None = None,
+    tags: tuple[str, ...] = ("managed", "education", "teaching"),
+    managed_kind: str = _MANAGED_KIND,
 ) -> tuple[Any, dict[str, Any], dict[str, Any]]:
     """Build the constrained graph and its fixed input/configuration.
 
@@ -393,22 +396,27 @@ async def build_managed_teaching_graph(
         "configurable": {
             "thread_id": thread_id,
             "agent_mode": "ptc",
-            "managed_execution": {"kind": _MANAGED_KIND, "job_id": job_id},
+            "managed_execution": {"kind": managed_kind, "job_id": job_id},
         },
         # Teaching packages can span many chapters. Their durable root run
         # must use the configured operational limit rather than chat's former
         # short-turn cap, while cancellation and heartbeats remain shared.
         "recursion_limit": get_ptc_recursion_limit(),
-        "tags": ["managed", "education", "teaching"],
+        "tags": list(tags),
         "metadata": {
-            "managed_execution": {"kind": _MANAGED_KIND, "job_id": job_id},
+            "managed_execution": {"kind": managed_kind, "job_id": job_id},
             "run_id": run_handle.run_id,
             "turn_index": run_handle.turn_index,
         },
         "run_id": run_handle.run_id,
     }
     input_state = {
-        "messages": [{"role": "user", "content": managed_teaching_prompt(job_id)}],
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt or managed_teaching_prompt(job_id),
+            }
+        ],
         "current_agent": "ptc",
     }
     return graph, input_state, graph_config

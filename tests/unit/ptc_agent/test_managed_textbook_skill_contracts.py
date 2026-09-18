@@ -108,3 +108,16 @@ def test_managed_contracts_require_concept_index_to_copy_chapter_concepts_verbat
             re.DOTALL,
         )
         assert "Do not rename, merge, substitute or add concepts." in contract
+
+
+def test_book_to_skill_managed_structure_mode_is_non_interactive_and_source_grounded():
+    text = (SKILLS_ROOT / "book-to-skill/SKILL.md").read_text()
+    contract = (
+        SKILLS_ROOT / "book-to-skill/reference/managed-textbook-contract.md"
+    ).read_text()
+
+    assert "--managed-textbook-structure" in text
+    assert "outputs/structure.json" in text
+    assert "langalpha-managed-textbook-structure/v1" in contract
+    assert "non-teaching Unit" in contract
+    assert "must not invent knowledge points" in contract

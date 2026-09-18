@@ -4,6 +4,46 @@ This contract is for the server-owned `--managed-textbook` mode only. It does
 not run the normal interactive conversion workflow and it does not publish an
 asset by itself.
 
+## Managed textbook structure mode
+
+When the service invokes `--managed-textbook-structure <job>`, the only allowed
+output is:
+
+```text
+outputs/structure.json
+```
+
+The file uses `langalpha-managed-textbook-structure/v1`:
+
+```json
+{
+  "format": "langalpha-managed-textbook-structure/v1",
+  "units": [{
+    "position": 1,
+    "slug": "unit-1-sports",
+    "title": "Unit 1: Sports and Fitness",
+    "summary": "short summary",
+    "unit_type": "teaching",
+    "confidence": 0.96,
+    "source_refs": [{
+      "source_id": "source identity from manifest.json",
+      "start": 0,
+      "end": 500,
+      "quote": "short source excerpt"
+    }],
+    "knowledge_points": []
+  }]
+}
+```
+
+`unit_type` is one of `teaching`, `front_matter`, `reference`, or `appendix`.
+Every Unit must have at least one source reference. Every knowledge point must
+have a title, confidence, and source reference. A non-teaching Unit must not invent knowledge points. A teaching Unit may have an empty knowledge-point list
+until content supports a teachable point or until parent review adds one.
+
+Do not generate lessons, practice files, teaching packages, HTML artifacts,
+memory, or any path other than `outputs/structure.json`.
+
 ## Frozen inputs and capability boundary
 
 The service supplies only these files under one job root:

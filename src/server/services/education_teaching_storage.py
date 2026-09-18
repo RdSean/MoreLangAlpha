@@ -73,14 +73,17 @@ async def _upload_staged_files(
 
 
 async def stage_managed_teaching_skills(
-    job_id: str, sandbox: ManagedTeachingSandbox
+    job_id: str,
+    sandbox: ManagedTeachingSandbox,
+    *,
+    skill_names: tuple[str, ...] = _MANAGED_SKILL_NAMES,
 ) -> None:
-    """Stage the two complete static built-in skills, never executable helpers."""
+    """Stage the selected complete static built-in skills, never executable helpers."""
     root = managed_job_root(job_id)
     from ptc_agent.config.agent import host_skill_dirs
 
     files: list[tuple[str, bytes]] = []
-    for skill_name in _MANAGED_SKILL_NAMES:
+    for skill_name in skill_names:
         source_root = next(
             (
                 root_dir / skill_name
@@ -516,6 +519,7 @@ async def stage_teaching_inputs(
         # directories through the sandbox API so later relative Bash commands
         # do not fail on its ownership boundary.
         (f"{root}/work/knowledge-skill/.keep", b""),
+        (f"{root}/outputs/.keep", b""),
         (f"{root}/outputs/knowledge/.keep", b""),
         (f"{root}/outputs/chapters/.keep", b""),
     ]
@@ -571,6 +575,33 @@ async def download_teaching_output(
         raise TeachingPackageStorageError("Managed teaching package output is invalid") from exc
     if not isinstance(output, dict):
         raise TeachingPackageStorageError("Managed teaching package output is invalid")
+    return output
+
+
+async def download_structure_output(
+    job_id: str, sandbox: ManagedTeachingSandbox
+) -> dict[str, Any]:
+    """Download the one fixed structure candidate without listing paths."""
+    path = f"{managed_job_root(job_id)}/outputs/structure.json"
+    content = await sandbox.adownload_file_bytes(path)
+    if content is None:
+        raise TeachingPackageStorageError(
+            "Managed textbook structure output is unavailable"
+        )
+    if len(content) > _MAX_CANDIDATE_BYTES:
+        raise TeachingPackageStorageError(
+            "Managed textbook structure output is too large"
+        )
+    try:
+        output = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TeachingPackageStorageError(
+            "Managed textbook structure output is invalid"
+        ) from exc
+    if not isinstance(output, dict):
+        raise TeachingPackageStorageError(
+            "Managed textbook structure output is invalid"
+        )
     return output
 
 
@@ -730,6 +761,72 @@ def teaching_package_bundle_prefix(job: Mapping[str, Any]) -> str:
         content_sequence,
         package_sequence,
     )
+
+
+def structure_bundle_prefix(job: Mapping[str, Any]) -> str:
+    """Return the private object prefix for one immutable structure candidate."""
+    try:
+        content_sequence = int(job["content_version_sequence"])
+        structure_sequence = int(job["structure_sequence"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TeachingPackageStorageError(
+            "Textbook structure version sequence is invalid"
+        ) from exc
+    if content_sequence <= 0 or structure_sequence <= 0:
+        raise TeachingPackageStorageError(
+            "Textbook structure version sequence is invalid"
+        )
+    return "education/{}/{}/v{}/structures/v{}".format(
+        _safe_component(job.get("household_id"), "household"),
+        _safe_component(job.get("slug"), "textbook"),
+        content_sequence,
+        structure_sequence,
+    )
+
+
+async def write_structure_bundle(
+    job: Mapping[str, Any], structure: Mapping[str, Any]
+) -> str:
+    """Archive one validated structure under a service-generated key."""
+    prefix = structure_bundle_prefix(job)
+    content = json.dumps(
+        structure,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(content) > _MAX_CANDIDATE_BYTES:
+        raise TeachingPackageStorageError("Textbook structure bundle is too large")
+    manifest = {
+        "format": "langalpha-family-textbook-structure/v1",
+        "content_version": int(job["content_version_sequence"]),
+        "structure_version": int(job["structure_sequence"]),
+        "structure_sha256": hashlib.sha256(content).hexdigest(),
+        "size_bytes": len(content),
+    }
+    await _put(
+        f"{prefix}/structure.json",
+        content,
+        "application/json",
+    )
+    await _put(
+        f"{prefix}/manifest.json",
+        json.dumps(
+            manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        ).encode("utf-8"),
+        "application/json",
+    )
+    await _put(
+        f"{prefix}/README.md",
+        "# 教材结构版本\n\n本目录由受管教材任务生成，须经家长审阅后才能用于课程加工。\n".encode(
+            "utf-8"
+        ),
+        "text/markdown; charset=utf-8",
+    )
+    return prefix
 
 
 async def write_teaching_asset_bundle(

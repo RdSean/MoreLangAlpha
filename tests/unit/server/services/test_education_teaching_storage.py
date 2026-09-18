@@ -111,6 +111,7 @@ async def test_stage_teaching_inputs_uploads_only_safe_manifest_and_frozen_chapt
         f"{root}inputs/manifest.json",
         f"{root}inputs/chapters/01-01-overview.md",
         f"{root}work/knowledge-skill/.keep",
+        f"{root}outputs/.keep",
         f"{root}outputs/knowledge/.keep",
         f"{root}outputs/chapters/.keep",
     } == set(paths)
@@ -431,6 +432,7 @@ async def test_stage_teaching_inputs_precreates_the_fixed_v2_output_directories(
     }
     root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
     assert uploaded[f"{root}work/knowledge-skill/.keep"] == b""
+    assert uploaded[f"{root}outputs/.keep"] == b""
     assert uploaded[f"{root}outputs/knowledge/.keep"] == b""
     assert uploaded[f"{root}outputs/chapters/.keep"] == b""
 
@@ -450,6 +452,23 @@ async def test_stage_managed_teaching_skills_stages_complete_static_builtin_skil
     assert f"{root}the-knowledge-guy/SKILL.md" in paths
     assert f"{root}the-knowledge-guy/design-system/layouts.md" in paths
     assert all("/scripts/" not in path for path in paths)
+
+
+@pytest.mark.asyncio
+async def test_structure_staging_loads_only_book_to_skill():
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    await education_teaching_storage.stage_managed_teaching_skills(
+        _job()["job_id"],
+        sandbox,
+        skill_names=("book-to-skill",),
+    )
+
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/.agents/skills/"
+    paths = {call.args[0] for call in sandbox.aupload_file_bytes.await_args_list}
+    assert f"{root}book-to-skill/SKILL.md" in paths
+    assert f"{root}the-knowledge-guy/SKILL.md" not in paths
 
 
 @pytest.mark.asyncio
@@ -515,6 +534,55 @@ async def test_download_teaching_output_uses_the_single_fixed_candidate_path():
     sandbox.adownload_file_bytes.assert_awaited_once_with(
         "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/outputs/teaching-package.json"
     )
+
+
+@pytest.mark.asyncio
+async def test_download_structure_output_uses_only_the_fixed_structure_path():
+    sandbox = AsyncMock()
+    sandbox.adownload_file_bytes.return_value = (
+        b'{"format":"langalpha-managed-textbook-structure/v1","units":[]}'
+    )
+
+    output = await education_teaching_storage.download_structure_output(
+        "5e3a0b43-8378-4b6c-926f-0f053577501d",
+        sandbox,
+    )
+
+    assert output["units"] == []
+    sandbox.adownload_file_bytes.assert_awaited_once_with(
+        "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/outputs/structure.json"
+    )
+
+
+@pytest.mark.asyncio
+async def test_write_structure_bundle_uses_only_private_education_keys(monkeypatch):
+    uploads: list[tuple[str, bytes]] = []
+
+    async def put(key: str, content: bytes, _content_type: str) -> None:
+        uploads.append((key, content))
+
+    monkeypatch.setattr(education_teaching_storage, "_put", put)
+    job = {
+        **_job(),
+        "structure_sequence": 1,
+    }
+
+    prefix = await education_teaching_storage.write_structure_bundle(
+        job,
+        {"format": "langalpha-managed-textbook-structure/v1", "units": []},
+    )
+
+    assert prefix == "education/household-1/english-2/v1/structures/v1"
+    assert {key for key, _content in uploads} == {
+        f"{prefix}/README.md",
+        f"{prefix}/manifest.json",
+        f"{prefix}/structure.json",
+    }
+    manifest = json.loads(
+        next(content for key, content in uploads if key.endswith("manifest.json"))
+    )
+    assert "education/" not in json.dumps(manifest)
+    assert manifest["structure_version"] == 1
 
 
 @pytest.mark.asyncio

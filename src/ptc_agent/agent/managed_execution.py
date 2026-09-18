@@ -15,6 +15,7 @@ class ManagedExecutionPolicy:
 
     allowed_skill_names: frozenset[str]
     filesystem_root: str
+    purpose: str = "teaching"
     enable_mcp: bool = False
     enable_web: bool = False
     enable_vault: bool = False
@@ -28,6 +29,17 @@ def education_teaching_policy(job_id: str) -> ManagedExecutionPolicy:
     return ManagedExecutionPolicy(
         allowed_skill_names=frozenset({"book-to-skill", "the-knowledge-guy"}),
         filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
+        allow_subagents=True,
+    )
+
+
+def education_structure_policy(job_id: str) -> ManagedExecutionPolicy:
+    """Return the fixed policy for one reviewable textbook-structure job."""
+    normalized_job_id = str(UUID(job_id))
+    return ManagedExecutionPolicy(
+        allowed_skill_names=frozenset({"book-to-skill"}),
+        filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
+        purpose="structure",
         allow_subagents=True,
     )
 
@@ -100,6 +112,16 @@ def validate_managed_textbook_write(
         relative = candidate_path.relative_to(root)
     except ValueError:
         return "managed teaching candidate path is not allowed"
+    if policy.purpose == "structure":
+        if relative != PurePosixPath("outputs/structure.json"):
+            return "managed teaching candidate path is not allowed"
+        try:
+            decoded = json.loads(content)
+        except json.JSONDecodeError:
+            return "managed teaching candidate must be valid JSON before writing"
+        if not isinstance(decoded, dict):
+            return "managed teaching candidate must be a JSON object"
+        return None
     allowed_json = {
         PurePosixPath("outputs/knowledge/concept-index.json"),
         PurePosixPath("outputs/knowledge/coverage-audit.json"),

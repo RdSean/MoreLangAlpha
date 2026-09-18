@@ -34,6 +34,29 @@ effort: high
 
 # Book-to-Skill Converter
 
+## Managed textbook structure mode
+
+When the invocation includes `--managed-textbook-structure <job>`, run only
+this non-interactive structure stage before every normal conversion step.
+
+1. Treat `<job>` as a UUID and read only
+   `/managed/textbook-job/<job>/inputs/manifest.json`,
+   `/managed/textbook-job/<job>/inputs/sources/`, staged image assets and the
+   complete static `book-to-skill` skill directory. Do not read a binary source,
+   object store, home directory or normal workspace.
+2. Read
+   `/managed/textbook-job/<job>/.agents/skills/book-to-skill/reference/managed-textbook-contract.md`
+   and follow its `Managed textbook structure mode` section.
+3. Produce exactly one candidate:
+   `/managed/textbook-job/<job>/outputs/structure.json`.
+4. Classify teaching Units separately from front matter, references and
+   appendices. A non-teaching Unit must not invent knowledge points. A teaching
+   Unit may also have an empty knowledge-point list when the frozen content does
+   not yet support a teachable point.
+5. Preserve source-grounded evidence for every Unit and knowledge point. Never
+   emit lessons, practice assets, teaching packages, HTML artifacts or public
+   files from this mode.
+
 ## Managed textbook mode
 
 When the invocation includes `--managed-textbook <job>`, run this mode before
