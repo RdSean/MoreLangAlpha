@@ -130,7 +130,18 @@ async def test_parent_queues_reads_edits_and_accepts_structure(client):
         ) as accept,
     ):
         queued = await client.post(
-            f"/api/v1/education/textbook-versions/{structure['version_id']}/structures"
+            f"/api/v1/education/textbook-versions/{structure['version_id']}/structures",
+            json={
+                "profile": {
+                    "subject": "english",
+                    "grade_band": "middle",
+                    "language": "zh-CN",
+                    "depth": "deep",
+                    "question_types": ["choice", "fill"],
+                    "prompt_fragment": "强调阅读策略",
+                    "allowed_skills": ["book-to-skill"],
+                }
+            },
         )
         loaded = await client.get(
             f"/api/v1/education/textbook-structures/{structure['structure_id']}"
@@ -148,6 +159,7 @@ async def test_parent_queues_reads_edits_and_accepts_structure(client):
     assert updated.status_code == 200
     assert accepted.status_code == 200
     queue.assert_awaited_once()
+    assert queue.await_args.kwargs["profile_input"]["subject"] == "english"
     assert replace.await_args.kwargs["units"][0]["slug"] == "unit-1-sports"
     assert accept.await_args.kwargs["structure_id"] == str(structure["structure_id"])
 

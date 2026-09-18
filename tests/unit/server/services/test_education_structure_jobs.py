@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -122,8 +123,13 @@ async def test_queue_structure_generation_persists_frozen_hashes(monkeypatch) ->
     )
     monkeypatch.setattr(
         education_structure_jobs,
-        "_managed_skill_hash",
-        lambda _name: "c" * 64,
+        "resolve_processing_profile",
+        AsyncMock(
+            return_value={
+                "profile_id": "profile-1",
+                "profile_sha256": "c" * 64,
+            }
+        ),
     )
 
     queued = await education_structure_jobs.queue_structure_generation_for_parent(

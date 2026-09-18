@@ -61,6 +61,11 @@ vi.mock('../queries', () => ({
     },
     isLoading: false,
   }),
+  useStudentLearningItems: () => ({ data: [], isLoading: false }),
+  useLearningAssetMutations: () => ({
+    add: { mutateAsync: vi.fn(), isPending: false },
+    progress: { mutateAsync: vi.fn(), isPending: false },
+  }),
 }));
 
 function renderAt(path: string) {

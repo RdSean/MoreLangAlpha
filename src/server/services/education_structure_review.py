@@ -32,7 +32,11 @@ from src.server.services.education_textbooks import (
 
 
 async def queue_structure_for_parent(
-    *, parent_user_id: str, content_version_id: str
+    *,
+    parent_user_id: str,
+    content_version_id: str,
+    profile_input: Mapping[str, Any] | None = None,
+    profile_id: str | None = None,
 ) -> dict[str, Any]:
     """Queue and immediately launch one structure generation job."""
     if not await get_household_context_for_parent(parent_user_id):
@@ -42,6 +46,8 @@ async def queue_structure_for_parent(
         queued = await queue_structure_generation_for_parent(
             parent_user_id=parent_user_id,
             content_version_id=content_version_id,
+            profile_input=profile_input,
+            profile_id=profile_id,
         )
         await launch_structure_generation(
             parent_user_id=parent_user_id,

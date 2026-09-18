@@ -357,6 +357,23 @@ class UpdateTextbookStructureRequest(BaseModel):
     units: list[StructureUnitWrite] = Field(min_length=1, max_length=500)
 
 
+class ProcessingProfileRequest(BaseModel):
+    subject: Literal["english", "math", "chinese", "science", "other"] = "other"
+    grade_band: Literal["primary", "middle", "high", "adult"] = "middle"
+    language: Literal["zh-CN", "en", "bilingual"] = "zh-CN"
+    depth: Literal["overview", "standard", "deep"] = "standard"
+    question_types: list[
+        Literal["choice", "fill", "short_answer", "mixed"]
+    ] = Field(default_factory=lambda: ["choice", "mixed"], max_length=4)
+    prompt_fragment: str = Field(default="", max_length=2_000)
+    allowed_skills: list[str] = Field(default_factory=list, max_length=8)
+
+
+class CreateTextbookStructureRequest(BaseModel):
+    profile_id: UUID | None = None
+    profile: ProcessingProfileRequest | None = None
+
+
 class StructureKnowledgePointResponse(StructureKnowledgePointWrite):
     knowledge_point_id: UUID
     status: str
@@ -481,6 +498,41 @@ class StudentKnowledgePointLessonResponse(BaseModel):
     content_sha256: str
     size_bytes: int
     content_markdown: str
+
+
+class LearningItemResponse(BaseModel):
+    item_id: UUID
+    assignment_id: UUID
+    unit_id: UUID | None = None
+    knowledge_point_id: UUID | None = None
+    kind: Literal["question", "highlight", "note", "summary"]
+    content: str
+    source_anchor: dict[str, Any] | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class CreateLearningItemRequest(BaseModel):
+    unit_id: UUID | None = None
+    knowledge_point_id: UUID | None = None
+    kind: Literal["question", "highlight", "note"]
+    content: str = Field(min_length=1, max_length=20_000)
+    source_anchor: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "CreateLearningItemRequest":
+        if self.unit_id is None and self.knowledge_point_id is None:
+            raise ValueError("a Unit or knowledge point is required")
+        return self
+
+
+class UpdateLearningItemRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=20_000)
+    source_anchor: dict[str, Any] | None = None
+
+
+class UpdateKnowledgePointProgressRequest(BaseModel):
+    status: Literal["not_started", "learning", "read", "review_recommended"]
 
 
 class TextbookQuestionResponse(BaseModel):

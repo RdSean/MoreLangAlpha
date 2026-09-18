@@ -3,6 +3,7 @@ import { BookOpenCheck, CheckCircle2, GitMerge, Plus, Save, Scissors, Trash2, Wa
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
+import ProcessingProfileDialog, { type ProcessingProfileValue } from './components/ProcessingProfileDialog';
 import { useLatestTextbookStructure, useStructureGenerationJob, useStructureMutations } from './queries';
 import type { TextbookKnowledgePoint, TextbookStructureUnit } from './types';
 
@@ -24,6 +25,7 @@ function cloneUnits(units: TextbookStructureUnit[]): TextbookStructureUnit[] {
 export default function TextbookStructurePage() {
   const { textbookId, versionId } = useParams();
   const [jobId, setJobId] = useState<string>();
+  const [profileOpen, setProfileOpen] = useState(false);
   const [units, setUnits] = useState<TextbookStructureUnit[]>([]);
   const [selectedUnitId, setSelectedUnitId] = useState<string>();
   const structure = useLatestTextbookStructure(versionId, true);
@@ -116,10 +118,11 @@ export default function TextbookStructurePage() {
     updateUnit({ knowledge_points: knowledge_points.map((point, position) => ({ ...point, position: position + 1 })) });
   };
 
-  const createStructure = async () => {
+  const createStructure = async (profile: ProcessingProfileValue) => {
     if (!versionId) return;
     try {
-      const job = await mutations.create.mutateAsync(versionId);
+      const job = await mutations.create.mutateAsync({ versionId, profile: profile as unknown as Record<string, unknown> });
+      setProfileOpen(false);
       setJobId(job.generation_job_id);
     } catch (error) {
       toast({ variant: 'destructive', title: '无法生成教材结构', description: messageOf(error, '请稍后重试。') });
@@ -151,7 +154,7 @@ export default function TextbookStructurePage() {
   }
 
   if (!structure.data && !jobId) {
-    return <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page"><div className="mx-auto max-w-3xl px-6 py-12"><Link to={`/education/textbooks/${textbookId}`} className="text-sm text-muted-foreground">返回教材</Link><h1 className="title-font mt-6 text-2xl font-semibold">生成教材结构</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">先从 Markdown 中识别 Unit、知识点和来源定位。非教学单元可以没有知识点，生成后再由你审阅。</p><Button className="mt-6" onClick={() => void createStructure()} disabled={mutations.create.isPending}><WandSparkles className="mr-2 size-4" />{mutations.create.isPending ? '正在创建任务' : '开始结构分析'}</Button></div></main>;
+    return <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page"><div className="mx-auto max-w-3xl px-6 py-12"><Link to={`/education/textbooks/${textbookId}`} className="text-sm text-muted-foreground">返回教材</Link><h1 className="title-font mt-6 text-2xl font-semibold">生成教材结构</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">先从 Markdown 中识别 Unit、知识点和来源定位。非教学单元可以没有知识点，生成后再由你审阅。</p><Button className="mt-6" onClick={() => setProfileOpen(true)} disabled={mutations.create.isPending}><WandSparkles className="mr-2 size-4" />{mutations.create.isPending ? '正在创建任务' : '开始结构分析'}</Button><ProcessingProfileDialog open={profileOpen} onOpenChange={setProfileOpen} onConfirm={createStructure} /></div></main>;
   }
 
   if (!structure.data && generation.data) {

@@ -23,12 +23,16 @@ from src.server.database.education_textbooks import (
     get_knowledge_point_for_parent,
     get_teaching_input_for_parent,
     mark_generation_attempt_running,
+    requeue_generation_job,
     settle_generation_job,
 )
 from src.server.database.runs.lifecycle import QuerySpec
 from src.server.services.education_lesson_validation import (
     KnowledgePointLessonValidationError,
     validate_kp_lesson_outputs,
+)
+from src.server.services.education_processing_profiles import (
+    processing_profile_prompt,
 )
 from src.server.services.education_structure_jobs import (
     create_generation_thread,
@@ -56,6 +60,7 @@ from src.server.utils.error_sanitization import sanitize_error_text
 logger = logging.getLogger(__name__)
 _MANAGED_KIND = "education_lesson"
 _PROFILE_VERSION = "kp-lesson-v1"
+MAX_LESSON_GENERATION_ATTEMPTS = 3
 
 
 def _processing_profile_sha256(*, auto_grading: bool) -> str:
@@ -94,6 +99,28 @@ def managed_lesson_prompt(job: Mapping[str, Any]) -> str:
         "易错点和普通练习。不要为了统一格式生成 vocabulary.json 或 evidence.json。"
         f"{practice_instruction}"
         f"唯一允许的课程输出是 {root}/outputs/lesson.md。"
+        + (
+            "\n\n"
+            + processing_profile_prompt(
+                {
+                    "subject": job.get("processing_profile_subject"),
+                    "grade_band": job.get("processing_profile_grade_band"),
+                    "language": job.get("processing_profile_language"),
+                    "depth": job.get("processing_profile_depth"),
+                    "question_types": job.get(
+                        "processing_profile_question_types"
+                    ),
+                    "prompt_fragment": job.get(
+                        "processing_profile_prompt_fragment"
+                    ),
+                    "allowed_skills": job.get(
+                        "processing_profile_allowed_skills"
+                    ),
+                }
+            )
+            if job.get("processing_profile_id")
+            else ""
+        )
     )
 
 
@@ -198,6 +225,7 @@ async def finalize_kp_lesson_generation(
     sandbox: Any,
     terminal_status: str,
     terminal_error: str | None,
+    parent_user_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Validate one lesson candidate and persist a new immutable revision."""
     del root_run_id, terminal_error
@@ -256,13 +284,27 @@ async def finalize_kp_lesson_generation(
             "job_status": settled["status"],
         }
     except KnowledgePointLessonValidationError:
-        return await _fail_lesson_attempt(
+        failed = await _fail_lesson_attempt(
             job=job,
             attempt_id=attempt_id,
             status="failed",
             error_code="managed_lesson_invalid",
             error_message="单知识点课程格式无效，请重新生成。",
         )
+        attempt_count = int(job.get("attempt_count") or 0)
+        if (
+            parent_user_id
+            and attempt_count < MAX_LESSON_GENERATION_ATTEMPTS
+            and await requeue_generation_job(
+                generation_job_id=str(job["generation_job_id"])
+            )
+        ):
+            await launch_kp_lesson_generation(
+                parent_user_id=parent_user_id,
+                generation_job_id=str(job["generation_job_id"]),
+            )
+            return {"status": "retrying", "attempt_count": attempt_count + 1}
+        return failed
     except Exception:
         logger.exception("Managed knowledge-point lesson finalization failed")
         return await _fail_lesson_attempt(
@@ -283,6 +325,7 @@ async def _dispatch_kp_lesson_root_run(
     workspace_id: str,
     thread_id: str,
     agent_config: Any,
+    parent_user_id: str,
 ) -> dict[str, str]:
     generation_job_id = str(job["generation_job_id"])
     run_id = str(uuid4())
@@ -348,6 +391,7 @@ async def _dispatch_kp_lesson_root_run(
                 sandbox=session.sandbox,
                 terminal_status=status,
                 terminal_error=getattr(task_info, "error", None),
+                parent_user_id=parent_user_id,
             )
 
         workflow = managed_generation_workflow_events(
@@ -467,6 +511,7 @@ async def launch_kp_lesson_generation(
             workspace_id=workspace_id,
             thread_id=thread_id,
             agent_config=agent_config,
+            parent_user_id=parent_user_id,
         )
     except BaseException:
         await _fail_lesson_attempt(

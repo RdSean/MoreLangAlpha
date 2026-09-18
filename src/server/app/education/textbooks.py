@@ -9,11 +9,14 @@ from src.server.app.education.models import (
     AssignTextbookPublicationRequest,
     ApproveKnowledgePointLessonRequest,
     CreateKnowledgePointLessonRevisionRequest,
+    CreateLearningItemRequest,
     CreateTextbookRequest,
+    CreateTextbookStructureRequest,
     GenerateKnowledgePointLessonRequest,
     KnowledgePointLessonResponse,
     LearningAnswerResponse,
     LearningProgressResponse,
+    LearningItemResponse,
     PublishTextbookVersionRequest,
     PublishTextbookStructureRequest,
     StartTextbookProcessingRequest,
@@ -33,6 +36,8 @@ from src.server.app.education.models import (
     TeachingChapterAssetResponse,
     TeachingReviewAssetKind,
     UpdateLearningProgressRequest,
+    UpdateLearningItemRequest,
+    UpdateKnowledgePointProgressRequest,
     UpdateTextbookStructureRequest,
 )
 from src.server.services.education_structure_review import (
@@ -50,6 +55,14 @@ from src.server.services.education_lesson_review import (
     get_lesson_for_knowledge_point,
     publish_structure_for_parent,
     queue_lesson_for_parent,
+)
+from src.server.services.education_learning_assets import (
+    add_learning_item,
+    edit_learning_item,
+    generate_unit_summary,
+    get_learning_items,
+    remove_learning_item,
+    update_learning_progress,
 )
 from src.server.services.education_textbooks import (
     TextbookError,
@@ -148,11 +161,14 @@ async def list_completed_parse_jobs(user_id: CurrentUserId):
 async def queue_family_textbook_structure(
     content_version_id: UUID,
     user_id: CurrentUserId,
+    body: CreateTextbookStructureRequest | None = None,
 ):
     try:
         return await queue_structure_for_parent(
             parent_user_id=user_id,
             content_version_id=str(content_version_id),
+            profile_input=body.profile.model_dump(mode="python") if body and body.profile else None,
+            profile_id=str(body.profile_id) if body and body.profile_id else None,
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
@@ -588,6 +604,137 @@ async def get_student_assignment_knowledge_point_lesson(
             student_user_id=user_id,
             assignment_id=str(assignment_id),
             knowledge_point_id=str(knowledge_point_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/learning/{assignment_id}/knowledge-points/{knowledge_point_id}/progress",
+    response_model=dict,
+)
+async def update_student_kp_progress(
+    assignment_id: UUID,
+    knowledge_point_id: UUID,
+    body: UpdateKnowledgePointProgressRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        return await update_learning_progress(
+            student_user_id=user_id,
+            assignment_id=str(assignment_id),
+            knowledge_point_id=str(knowledge_point_id),
+            status=body.status,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/learning/{assignment_id}/items",
+    response_model=list[LearningItemResponse],
+)
+async def list_student_learning_items(
+    assignment_id: UUID,
+    user_id: CurrentUserId,
+    unit_id: UUID | None = None,
+    knowledge_point_id: UUID | None = None,
+):
+    try:
+        return await get_learning_items(
+            student_user_id=user_id,
+            assignment_id=str(assignment_id),
+            unit_id=str(unit_id) if unit_id else None,
+            knowledge_point_id=(
+                str(knowledge_point_id) if knowledge_point_id else None
+            ),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/learning/{assignment_id}/knowledge-points/{knowledge_point_id}/items",
+    response_model=LearningItemResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_student_learning_item(
+    assignment_id: UUID,
+    knowledge_point_id: UUID,
+    body: CreateLearningItemRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        return await add_learning_item(
+            student_user_id=user_id,
+            assignment_id=str(assignment_id),
+            unit_id=str(body.unit_id) if body.unit_id else None,
+            knowledge_point_id=str(knowledge_point_id),
+            kind=body.kind,
+            content=body.content,
+            source_anchor=body.source_anchor,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.patch(
+    "/learning/{assignment_id}/items/{item_id}",
+    response_model=LearningItemResponse,
+)
+async def update_student_learning_item(
+    assignment_id: UUID,
+    item_id: UUID,
+    body: UpdateLearningItemRequest,
+    user_id: CurrentUserId,
+):
+    del assignment_id
+    try:
+        return await edit_learning_item(
+            student_user_id=user_id,
+            item_id=str(item_id),
+            content=body.content,
+            source_anchor=body.source_anchor,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.delete(
+    "/learning/{assignment_id}/items/{item_id}",
+    response_model=dict,
+)
+async def delete_student_learning_item(
+    assignment_id: UUID,
+    item_id: UUID,
+    user_id: CurrentUserId,
+):
+    del assignment_id
+    try:
+        await remove_learning_item(
+            student_user_id=user_id,
+            item_id=str(item_id),
+        )
+        return {"deleted": True}
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/learning/{assignment_id}/units/{unit_id}/summaries",
+    response_model=LearningItemResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_student_unit_summary(
+    assignment_id: UUID,
+    unit_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await generate_unit_summary(
+            student_user_id=user_id,
+            assignment_id=str(assignment_id),
+            unit_id=str(unit_id),
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc

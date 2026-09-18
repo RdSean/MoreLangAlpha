@@ -289,6 +289,20 @@ export interface StudentKnowledgePointLesson {
   content_markdown: string;
 }
 
+export type LearningItemKind = 'question' | 'highlight' | 'note' | 'summary';
+
+export interface LearningItem {
+  item_id: string;
+  assignment_id: string;
+  unit_id?: string | null;
+  knowledge_point_id?: string | null;
+  kind: LearningItemKind;
+  content: string;
+  source_anchor?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface TextbookQuestion {
   question_id: string;
   position: number;

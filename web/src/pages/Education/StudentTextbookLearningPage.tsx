@@ -4,8 +4,9 @@ import { Link, useParams } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import EducationMarkdown from './components/EducationMarkdown';
+import PersonalNotebook from './components/PersonalNotebook';
 import StudentLessonFollowUp from './components/StudentLessonFollowUp';
-import { useStudentKnowledgePointLesson, useStudentTextbookStructure } from './queries';
+import { useLearningAssetMutations, useStudentKnowledgePointLesson, useStudentTextbookStructure } from './queries';
 
 function Outline({
   assignmentId,
@@ -38,6 +39,7 @@ export default function StudentTextbookLearningPage() {
   const { assignmentId, unitId, knowledgePointId } = useParams();
   const structure = useStudentTextbookStructure(assignmentId);
   const lesson = useStudentKnowledgePointLesson(assignmentId, knowledgePointId);
+  const learningAssets = useLearningAssetMutations();
   const data = structure.data;
   const activeUnit = useMemo(
     () => data?.units.find((unit) => unit.unit_id === unitId) ?? data?.units.find((unit) => unit.knowledge_points.some((point) => point.knowledge_point_id === knowledgePointId)) ?? data?.units[0],
@@ -85,9 +87,8 @@ export default function StudentTextbookLearningPage() {
           )}
         </section>
         <aside className="hidden border-l px-5 py-7 lg:block" style={{ borderColor: 'var(--color-border-muted)' }}>
-          <p className="font-mono text-xs text-muted-foreground">学习笔记</p>
-          <p className="mt-3 text-sm text-muted-foreground">追问、划重点和批注会在这里汇总。</p>
-          <div className="mt-6 grid grid-cols-2 gap-2 text-sm"><div className="border p-3"><p className="font-mono text-lg">{activeUnit.knowledge_points.length}</p><p className="mt-1 text-muted-foreground">知识点</p></div><div className="border p-3"><p className="font-mono text-lg">{activeUnit.knowledge_points.filter((point) => point.has_lesson).length}</p><p className="mt-1 text-muted-foreground">已发布</p></div></div>
+          {knowledgePointId && lesson.data && <Button className="mb-6 w-full" size="sm" onClick={() => void learningAssets.progress.mutateAsync({ assignmentId, knowledgePointId, status: 'read' })} disabled={learningAssets.progress.isPending}>标记已学</Button>}
+          <PersonalNotebook assignmentId={assignmentId} unitId={activeUnit.unit_id} knowledgePointId={knowledgePointId} />
         </aside>
       </div>
     </main>

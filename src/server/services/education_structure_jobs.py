@@ -6,8 +6,6 @@ import asyncio
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import suppress
 from datetime import datetime
-import hashlib
-import json
 import logging
 from time import monotonic
 from typing import Any
@@ -36,6 +34,10 @@ from src.server.services.education_structure_validation import (
     TextbookStructureValidationError,
     validate_textbook_structure,
 )
+from src.server.services.education_processing_profiles import (
+    processing_profile_prompt,
+    resolve_processing_profile,
+)
 from src.server.services.education_teaching_jobs import (
     build_managed_teaching_graph,
     resolve_managed_teaching_agent_config,
@@ -60,42 +62,9 @@ logger = logging.getLogger(__name__)
 
 _MANAGED_KIND = "education_structure"
 _HEARTBEAT_INTERVAL_SECONDS = 15.0
-_DEFAULT_PROFILE_NAME = "default-structure-v1"
-
-
-def _managed_skill_source_root(skill_name: str) -> Any:
-    from ptc_agent.config.agent import host_skill_dirs
-
-    for root in host_skill_dirs():
-        candidate = root / skill_name
-        if (candidate / "SKILL.md").is_file():
-            return candidate
-    raise RuntimeError("Managed textbook structure skill is unavailable")
-
-
-def _managed_skill_hash(skill_name: str) -> str:
-    source = _managed_skill_source_root(skill_name) / "SKILL.md"
-    try:
-        return hashlib.sha256(source.read_bytes()).hexdigest()
-    except OSError as exc:
-        raise RuntimeError("Managed textbook structure skill is unavailable") from exc
-
-
-def _processing_profile_sha256() -> str:
-    payload = {
-        "profile": _DEFAULT_PROFILE_NAME,
-        "skills": {"book-to-skill": _managed_skill_hash("book-to-skill")},
-    }
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def managed_structure_prompt(job_id: str) -> str:
+def managed_structure_prompt(
+    job_id: str, profile: Mapping[str, Any] | None = None
+) -> str:
     """Describe a non-interactive structure-only managed run."""
     root = f"/managed/textbook-job/{UUID(job_id)}"
     return (
@@ -111,11 +80,20 @@ def managed_structure_prompt(job_id: str) -> str:
         f"只写 {root}/outputs/structure.json，输出格式必须是 "
         "langalpha-managed-textbook-structure/v1。不要生成课程、练习或教学包。"
         "不要访问网络、MCP、Vault、普通工作区或发布任何资产。"
+        + (
+            "\n\n" + processing_profile_prompt(profile)
+            if profile
+            else ""
+        )
     )
 
 
 async def queue_structure_generation_for_parent(
-    *, parent_user_id: str, content_version_id: str
+    *,
+    parent_user_id: str,
+    content_version_id: str,
+    profile_input: Mapping[str, Any] | None = None,
+    profile_id: str | None = None,
 ) -> dict[str, Any]:
     """Freeze one content version and create its structure generation job."""
     generation_job_id = str(uuid4())
@@ -126,14 +104,20 @@ async def queue_structure_generation_for_parent(
     if not frozen_input:
         raise LookupError("Reviewable textbook content version not found")
     frozen_input = await hydrate_source_asset_manifests(frozen_input)
+    profile = await resolve_processing_profile(
+        parent_user_id=parent_user_id,
+        version_id=content_version_id,
+        profile_input=profile_input,
+        profile_id=profile_id,
+    )
     frozen_input = dict(frozen_input)
     frozen_input["job_id"] = generation_job_id
     staged = build_staged_teaching_input(frozen_input)
     queued = await queue_textbook_structure(
         parent_user_id=parent_user_id,
         content_version_id=content_version_id,
-        processing_profile_id=None,
-        processing_profile_sha256=_processing_profile_sha256(),
+        processing_profile_id=str(profile["profile_id"]),
+        processing_profile_sha256=str(profile["profile_sha256"]),
         input_manifest_sha256=staged["manifest_sha256"],
         source_revision=staged["manifest_sha256"],
         generation_job_id=generation_job_id,
@@ -335,7 +319,21 @@ async def _dispatch_structure_root_run(
     del parent_user_id
     generation_job_id = str(job["generation_job_id"])
     run_id = str(uuid4())
-    prompt = managed_structure_prompt(generation_job_id)
+    profile = (
+        {
+            "profile_id": job.get("processing_profile_id"),
+            "subject": job.get("processing_profile_subject"),
+            "grade_band": job.get("processing_profile_grade_band"),
+            "language": job.get("processing_profile_language"),
+            "depth": job.get("processing_profile_depth"),
+            "question_types": job.get("processing_profile_question_types"),
+            "prompt_fragment": job.get("processing_profile_prompt_fragment"),
+            "allowed_skills": job.get("processing_profile_allowed_skills"),
+        }
+        if job.get("processing_profile_id")
+        else None
+    )
+    prompt = managed_structure_prompt(generation_job_id, profile)
     run_handle = await RunCoordinator.get_instance().start_run(
         thread_id=thread_id,
         run_id=run_id,

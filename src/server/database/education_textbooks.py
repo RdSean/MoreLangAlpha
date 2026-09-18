@@ -615,6 +615,115 @@ async def queue_textbook_structure(
     return {**structure, **job}
 
 
+async def create_processing_profile(
+    *,
+    parent_user_id: str,
+    version_id: str,
+    subject: str,
+    grade_band: str,
+    language: str,
+    depth: str,
+    question_types: list[str],
+    prompt_fragment: str,
+    allowed_skills: list[str],
+    profile_sha256: str,
+) -> dict[str, Any] | None:
+    """Create a new immutable profile revision for one parent-owned version."""
+    profile_id = str(uuid4())
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT versions.version_id, textbooks.household_id
+                    FROM education_textbook_versions AS versions
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE versions.version_id = %s
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                    FOR UPDATE OF versions
+                    """,
+                    (version_id, parent_user_id),
+                )
+                version = await cur.fetchone()
+                if not version:
+                    return None
+                await cur.execute(
+                    """
+                    SELECT COALESCE(MAX(version), 0) + 1 AS version
+                    FROM education_processing_profiles
+                    WHERE version_id = %s
+                    """,
+                    (version_id,),
+                )
+                profile_version = (await cur.fetchone())["version"]
+                await cur.execute(
+                    """
+                    INSERT INTO education_processing_profiles (
+                        profile_id, household_id, version_id, version, subject,
+                        grade_band, language, depth, question_types,
+                        prompt_fragment, allowed_skills, profile_sha256,
+                        created_by_user_id
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    RETURNING profile_id, household_id, version_id, version,
+                              subject, grade_band, language, depth,
+                              question_types, prompt_fragment, allowed_skills,
+                              profile_sha256, created_at
+                    """,
+                    (
+                        profile_id,
+                        version["household_id"],
+                        version_id,
+                        profile_version,
+                        subject,
+                        grade_band,
+                        language,
+                        depth,
+                        Json(question_types),
+                        prompt_fragment,
+                        Json(allowed_skills),
+                        profile_sha256,
+                        parent_user_id,
+                    ),
+                )
+                row = dict(await cur.fetchone())
+    return row
+
+
+async def get_processing_profile_for_parent(
+    *, parent_user_id: str, profile_id: str
+) -> dict[str, Any] | None:
+    """Read one profile revision for its owning parent."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT profiles.profile_id, profiles.household_id,
+                       profiles.version_id, profiles.version, profiles.subject,
+                       profiles.grade_band, profiles.language, profiles.depth,
+                       profiles.question_types, profiles.prompt_fragment,
+                       profiles.allowed_skills, profiles.profile_sha256,
+                       profiles.created_at
+                FROM education_processing_profiles AS profiles
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.household_id = profiles.household_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                WHERE profiles.profile_id = %s
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (profile_id, parent_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def get_textbook_structure_for_parent(
     *, parent_user_id: str, structure_id: str
 ) -> dict[str, Any] | None:
@@ -750,7 +859,15 @@ async def get_generation_job_for_parent(
                        units.title AS unit_title,
                        structures.sequence AS structure_sequence,
                        structures.status AS structure_status,
-                       structures.bundle_prefix AS structure_bundle_prefix
+                       structures.bundle_prefix AS structure_bundle_prefix,
+                       profiles.profile_id AS processing_profile_id,
+                       profiles.subject AS processing_profile_subject,
+                       profiles.grade_band AS processing_profile_grade_band,
+                       profiles.language AS processing_profile_language,
+                       profiles.depth AS processing_profile_depth,
+                       profiles.question_types AS processing_profile_question_types,
+                       profiles.prompt_fragment AS processing_profile_prompt_fragment,
+                       profiles.allowed_skills AS processing_profile_allowed_skills
                 FROM education_generation_jobs AS jobs
                 JOIN education_textbook_versions AS versions
                   ON versions.version_id = jobs.version_id
@@ -766,6 +883,8 @@ async def get_generation_job_for_parent(
                 LEFT JOIN education_textbook_structures AS structures
                   ON structures.structure_id =
                      COALESCE(jobs.structure_id, units.structure_id)
+                LEFT JOIN education_processing_profiles AS profiles
+                  ON profiles.profile_id = structures.processing_profile_id
                 WHERE jobs.generation_job_id = %s
                   AND memberships.user_id = %s
                   AND memberships.role = 'parent'
@@ -1034,6 +1153,24 @@ async def claim_generation_job(
                     (attempt_id, generation_job_id),
                 )
     return {**dict(job), **attempt}
+
+
+async def requeue_generation_job(*, generation_job_id: str) -> bool:
+    """Requeue one failed generation job for another attempt without a new job."""
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE education_generation_jobs
+                SET status = 'queued', error_code = NULL, error_message = NULL,
+                    updated_at = NOW()
+                WHERE generation_job_id = %s AND status = 'failed'
+                  AND attempt_count < 3
+                RETURNING generation_job_id
+                """,
+                (generation_job_id,),
+            )
+            return await cur.fetchone() is not None
 
 
 async def settle_generation_job(
@@ -4387,6 +4524,226 @@ async def get_student_published_kp_lesson(
                   AND memberships.role = 'student'
                 """,
                 (knowledge_point_id, assignment_id, student_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def upsert_kp_progress(
+    *,
+    student_user_id: str,
+    assignment_id: str,
+    knowledge_point_id: str,
+    status: str,
+) -> dict[str, Any] | None:
+    """Upsert progress only when the knowledge point is in the assignment snapshot."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                INSERT INTO education_learning_kp_progress (
+                    assignment_id, knowledge_point_id, status, started_at,
+                    completed_at, updated_at
+                )
+                SELECT assignments.assignment_id, frozen.knowledge_point_id,
+                       %s,
+                       CASE WHEN %s = 'learning' THEN NOW() ELSE NULL END,
+                       CASE WHEN %s IN ('read', 'review_recommended')
+                            THEN NOW() ELSE NULL END,
+                       NOW()
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbook_publications AS publications
+                  ON publications.publication_id = assignments.publication_id
+                JOIN education_publication_kp_lessons AS frozen
+                  ON frozen.publication_id = publications.publication_id
+                 AND frozen.knowledge_point_id = %s
+                WHERE assignments.assignment_id = %s
+                  AND assignments.student_user_id = %s
+                ON CONFLICT (assignment_id, knowledge_point_id) DO UPDATE
+                SET status = EXCLUDED.status,
+                    started_at = COALESCE(
+                        education_learning_kp_progress.started_at,
+                        EXCLUDED.started_at
+                    ),
+                    completed_at = COALESCE(
+                        EXCLUDED.completed_at,
+                        education_learning_kp_progress.completed_at
+                    ),
+                    updated_at = NOW()
+                RETURNING assignment_id, knowledge_point_id, status,
+                          started_at, completed_at, updated_at
+                """,
+                (
+                    status,
+                    status,
+                    status,
+                    knowledge_point_id,
+                    assignment_id,
+                    student_user_id,
+                ),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def list_learning_items(
+    *,
+    student_user_id: str,
+    assignment_id: str,
+    unit_id: str | None = None,
+    knowledge_point_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """List student-owned learning items within one assignment."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT items.item_id, items.assignment_id, items.unit_id,
+                       items.knowledge_point_id, items.kind, items.content,
+                       items.source_anchor, items.created_at, items.updated_at
+                FROM education_learning_items AS items
+                JOIN education_textbook_assignments AS assignments
+                  ON assignments.assignment_id = items.assignment_id
+                WHERE items.assignment_id = %s
+                  AND assignments.student_user_id = %s
+                  AND (%s IS NULL OR items.unit_id = %s)
+                  AND (
+                      %s IS NULL
+                      OR items.knowledge_point_id = %s
+                  )
+                ORDER BY items.created_at DESC, items.item_id
+                """,
+                (
+                    assignment_id,
+                    student_user_id,
+                    unit_id,
+                    unit_id,
+                    knowledge_point_id,
+                    knowledge_point_id,
+                ),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def create_learning_item(
+    *,
+    student_user_id: str,
+    assignment_id: str,
+    unit_id: str | None,
+    knowledge_point_id: str | None,
+    kind: str,
+    content: str,
+    source_anchor: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Create one item only when its target belongs to the published assignment."""
+    item_id = str(uuid4())
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                INSERT INTO education_learning_items (
+                    item_id, assignment_id, unit_id, knowledge_point_id,
+                    kind, content, source_anchor
+                )
+                SELECT %s, assignments.assignment_id, %s, %s, %s, %s, %s
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbook_publications AS publications
+                  ON publications.publication_id = assignments.publication_id
+                JOIN education_textbook_structures AS structures
+                  ON structures.structure_id = publications.structure_id
+                WHERE assignments.assignment_id = %s
+                  AND assignments.student_user_id = %s
+                  AND (
+                      %s IS NULL
+                      OR EXISTS (
+                          SELECT 1
+                          FROM education_structure_units AS units
+                          WHERE units.unit_id = %s
+                            AND units.structure_id = structures.structure_id
+                      )
+                  )
+                  AND (
+                      %s IS NULL
+                      OR EXISTS (
+                          SELECT 1
+                          FROM education_structure_knowledge_points AS knowledge_points
+                          JOIN education_structure_units AS units
+                            ON units.unit_id = knowledge_points.unit_id
+                          WHERE knowledge_points.knowledge_point_id = %s
+                            AND units.structure_id = structures.structure_id
+                      )
+                  )
+                RETURNING item_id, assignment_id, unit_id, knowledge_point_id,
+                          kind, content, source_anchor, created_at, updated_at
+                """,
+                (
+                    item_id,
+                    unit_id,
+                    knowledge_point_id,
+                    kind,
+                    content,
+                    Json(source_anchor) if source_anchor is not None else None,
+                    assignment_id,
+                    student_user_id,
+                    unit_id,
+                    unit_id,
+                    knowledge_point_id,
+                    knowledge_point_id,
+                ),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def update_learning_item(
+    *,
+    student_user_id: str,
+    item_id: str,
+    content: str,
+    source_anchor: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Update item content without allowing assignment ownership changes."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                UPDATE education_learning_items AS items
+                SET content = %s, source_anchor = %s, updated_at = NOW()
+                FROM education_textbook_assignments AS assignments
+                WHERE items.item_id = %s
+                  AND assignments.assignment_id = items.assignment_id
+                  AND assignments.student_user_id = %s
+                RETURNING items.item_id, items.assignment_id, items.unit_id,
+                          items.knowledge_point_id, items.kind, items.content,
+                          items.source_anchor, items.created_at, items.updated_at
+                """,
+                (
+                    content,
+                    Json(source_anchor) if source_anchor is not None else None,
+                    item_id,
+                    student_user_id,
+                ),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def delete_learning_item(
+    *, student_user_id: str, item_id: str
+) -> dict[str, Any] | None:
+    """Delete one student-owned item."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                DELETE FROM education_learning_items AS items
+                USING education_textbook_assignments AS assignments
+                WHERE items.item_id = %s
+                  AND assignments.assignment_id = items.assignment_id
+                  AND assignments.student_user_id = %s
+                RETURNING items.item_id
+                """,
+                (item_id, student_user_id),
             )
             row = await cur.fetchone()
     return dict(row) if row else None

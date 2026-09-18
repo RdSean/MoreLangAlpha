@@ -191,6 +191,61 @@ export function useStudentKnowledgePointLesson(
   });
 }
 
+export function useStudentLearningItems(
+  assignmentId: string | undefined,
+  filters: { unitId?: string; knowledgePointId?: string } = {},
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.education.assignmentLearningItems(assignmentId ?? '', filters),
+    queryFn: () => educationApi.listStudentLearningItems(assignmentId ?? '', filters),
+    enabled: Boolean(assignmentId) && enabled,
+    staleTime: 5_000,
+  });
+}
+
+export function useLearningAssetMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
+  return {
+    add: useMutation({
+      mutationFn: ({
+        assignmentId,
+        knowledgePointId,
+        ...input
+      }: {
+        assignmentId: string;
+        knowledgePointId: string;
+        unitId?: string;
+        kind: 'question' | 'highlight' | 'note';
+        content: string;
+        sourceAnchor?: Record<string, unknown> | null;
+      }) => educationApi.createStudentLearningItem(assignmentId, knowledgePointId, input),
+      onSuccess: invalidate,
+    }),
+    update: useMutation({
+      mutationFn: ({ assignmentId, itemId, content, sourceAnchor }: { assignmentId: string; itemId: string; content: string; sourceAnchor?: Record<string, unknown> | null }) =>
+        educationApi.updateStudentLearningItem(assignmentId, itemId, { content, sourceAnchor }),
+      onSuccess: invalidate,
+    }),
+    remove: useMutation({
+      mutationFn: ({ assignmentId, itemId }: { assignmentId: string; itemId: string }) =>
+        educationApi.deleteStudentLearningItem(assignmentId, itemId),
+      onSuccess: invalidate,
+    }),
+    summarize: useMutation({
+      mutationFn: ({ assignmentId, unitId }: { assignmentId: string; unitId: string }) =>
+        educationApi.generateStudentUnitSummary(assignmentId, unitId),
+      onSuccess: invalidate,
+    }),
+    progress: useMutation({
+      mutationFn: ({ assignmentId, knowledgePointId, status }: { assignmentId: string; knowledgePointId: string; status: 'learning' | 'read' | 'review_recommended' }) =>
+        educationApi.updateStudentKpProgress(assignmentId, knowledgePointId, status),
+      onSuccess: invalidate,
+    }),
+  };
+}
+
 export function useLearningChatSpace(assignmentId: string | undefined) {
   return useQuery({
     queryKey: [...queryKeys.education.assignment(assignmentId ?? ''), 'chat-space'],
@@ -287,7 +342,8 @@ export function useStructureMutations() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
   return {
     create: useMutation({
-      mutationFn: educationApi.createTextbookStructure,
+      mutationFn: ({ versionId, profile }: { versionId: string; profile?: Record<string, unknown> }) =>
+        educationApi.createTextbookStructure(versionId, profile),
       onSuccess: invalidate,
     }),
     save: useMutation({
