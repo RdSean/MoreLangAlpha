@@ -18,6 +18,8 @@ from src.server.app.education.models import (
     PublishTextbookStructureRequest,
     StartTextbookProcessingRequest,
     StructureGenerationJobResponse,
+    StudentKnowledgePointLessonResponse,
+    StudentTextbookStructureResponse,
     TextbookAssignmentResponse,
     TextbookDetailResponse,
     TextbookParseJobCandidateResponse,
@@ -65,6 +67,8 @@ from src.server.services.education_textbooks import (
     get_teaching_job_projection,
     get_student_chapter_context,
     get_student_learning,
+    get_student_kp_lesson,
+    get_student_structure,
     list_learning_assignments,
     list_completed_textbook_parse_jobs,
     list_parent_textbooks,
@@ -549,6 +553,42 @@ async def assign_family_textbook_publication(
 async def list_student_learning(user_id: CurrentUserId):
     try:
         return await list_learning_assignments(student_user_id=user_id)
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/learning/{assignment_id}/structure",
+    response_model=StudentTextbookStructureResponse,
+)
+async def get_student_assignment_structure(
+    assignment_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_student_structure(
+            student_user_id=user_id,
+            assignment_id=str(assignment_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/learning/{assignment_id}/knowledge-points/{knowledge_point_id}",
+    response_model=StudentKnowledgePointLessonResponse,
+)
+async def get_student_assignment_knowledge_point_lesson(
+    assignment_id: UUID,
+    knowledge_point_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_student_kp_lesson(
+            student_user_id=user_id,
+            assignment_id=str(assignment_id),
+            knowledge_point_id=str(knowledge_point_id),
+        )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
 

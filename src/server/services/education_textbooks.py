@@ -26,6 +26,8 @@ from src.server.database.education_textbooks import (
     get_textbook_for_parent,
     get_student_chapter_context_record,
     get_student_learning as get_student_learning_record,
+    get_student_published_kp_lesson,
+    get_student_published_structure,
     list_completed_parse_jobs_for_parent,
     list_student_assignments,
     list_student_learning_records,
@@ -58,6 +60,7 @@ from src.server.services.education_teaching_assets import (
 from src.server.services.education_teaching_storage import (
     build_staged_teaching_input,
     hydrate_source_asset_manifests,
+    read_kp_lesson_revision,
 )
 from src.utils.storage import get_bytes
 
@@ -1086,6 +1089,41 @@ async def get_student_learning(
     if not learning:
         raise TextbookNotFoundError("Learning assignment not found")
     return learning
+
+
+async def get_student_structure(
+    *, student_user_id: str, assignment_id: str
+) -> dict[str, Any]:
+    membership = await get_membership_for_user(student_user_id)
+    if not membership or membership["role"] != "student":
+        raise TextbookPermissionError("Only a student can access learning assignments")
+    structure = await get_student_published_structure(
+        student_user_id=student_user_id,
+        assignment_id=assignment_id,
+    )
+    if not structure:
+        raise TextbookNotFoundError("Published textbook structure not found")
+    return structure
+
+
+async def get_student_kp_lesson(
+    *, student_user_id: str, assignment_id: str, knowledge_point_id: str
+) -> dict[str, Any]:
+    membership = await get_membership_for_user(student_user_id)
+    if not membership or membership["role"] != "student":
+        raise TextbookPermissionError("Only a student can access learning lessons")
+    lesson = await get_student_published_kp_lesson(
+        student_user_id=student_user_id,
+        assignment_id=assignment_id,
+        knowledge_point_id=knowledge_point_id,
+    )
+    if not lesson:
+        raise TextbookNotFoundError("Published knowledge-point lesson not found")
+    content = await read_kp_lesson_revision(str(lesson["content_key"]))
+    return {
+        **lesson,
+        "content_markdown": content.decode("utf-8"),
+    }
 
 
 async def get_student_chapter_context(

@@ -244,6 +244,51 @@ export interface KnowledgePointLesson {
   revisions: KnowledgePointLessonRevision[];
 }
 
+export interface StudentKnowledgePoint {
+  knowledge_point_id: string;
+  position: number;
+  slug: string;
+  title: string;
+  summary: string;
+  has_lesson: boolean;
+}
+
+export interface StudentStructureUnit {
+  unit_id: string;
+  position: number;
+  slug: string;
+  title: string;
+  summary: string;
+  unit_type: string;
+  knowledge_points: StudentKnowledgePoint[];
+}
+
+export interface StudentTextbookStructure {
+  assignment_id: string;
+  publication_id: string;
+  textbook_id: string;
+  textbook_title: string;
+  textbook_slug: string;
+  version_sequence: number;
+  structure_id: string;
+  structure_sequence: number;
+  units: StudentStructureUnit[];
+}
+
+export interface StudentKnowledgePointLesson {
+  assignment_id: string;
+  knowledge_point_id: string;
+  knowledge_point_title: string;
+  unit_id: string;
+  unit_title: string;
+  revision_id: string;
+  revision: number;
+  format: 'markdown';
+  content_sha256: string;
+  size_bytes: number;
+  content_markdown: string;
+}
+
 export interface TextbookQuestion {
   question_id: string;
   position: number;

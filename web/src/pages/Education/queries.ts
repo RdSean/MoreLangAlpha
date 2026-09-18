@@ -170,6 +170,27 @@ export function useStudentLearning(assignmentId: string | undefined) {
   });
 }
 
+export function useStudentTextbookStructure(assignmentId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.education.assignmentStructure(assignmentId ?? ''),
+    queryFn: () => educationApi.getStudentTextbookStructure(assignmentId ?? ''),
+    enabled: Boolean(assignmentId),
+    staleTime: 15_000,
+  });
+}
+
+export function useStudentKnowledgePointLesson(
+  assignmentId: string | undefined,
+  knowledgePointId: string | undefined,
+) {
+  return useQuery({
+    queryKey: queryKeys.education.assignmentKnowledgePoint(assignmentId ?? '', knowledgePointId ?? ''),
+    queryFn: () => educationApi.getStudentKnowledgePointLesson(assignmentId ?? '', knowledgePointId ?? ''),
+    enabled: Boolean(assignmentId && knowledgePointId),
+    staleTime: 30_000,
+  });
+}
+
 export function useLearningChatSpace(assignmentId: string | undefined) {
   return useQuery({
     queryKey: [...queryKeys.education.assignment(assignmentId ?? ''), 'chat-space'],

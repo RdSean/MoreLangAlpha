@@ -1,5 +1,5 @@
 import { api } from '@/api/client';
-import type { CompletedParseJob, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, LearningAnswer, LearningAssignment, LearningChatSpace, ParentLearningRecords, ParentLearningTranscript, StructureGenerationJob, StudentLearning, SubmitEducationTaskInput, TeachingChapterAsset, TeachingJob, TeachingPackageAssets, TeachingReviewAssetKind, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookPublication, TextbookStructure, TextbookStructureUnit } from './types';
+import type { CompletedParseJob, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, LearningAnswer, LearningAssignment, LearningChatSpace, ParentLearningRecords, ParentLearningTranscript, StructureGenerationJob, StudentKnowledgePointLesson, StudentLearning, StudentTextbookStructure, SubmitEducationTaskInput, TeachingChapterAsset, TeachingJob, TeachingPackageAssets, TeachingReviewAssetKind, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookPublication, TextbookStructure, TextbookStructureUnit } from './types';
 
 export async function listEducationTasks(): Promise<EducationTask[]> {
   const { data } = await api.get<EducationTask[]>('/api/v1/education/tasks');
@@ -226,6 +226,16 @@ export async function listLearningAssignments(): Promise<LearningAssignment[]> {
 
 export async function getStudentLearning(assignmentId: string): Promise<StudentLearning> {
   const { data } = await api.get<StudentLearning>(`/api/v1/education/learning/${assignmentId}`);
+  return data;
+}
+
+export async function getStudentTextbookStructure(assignmentId: string): Promise<StudentTextbookStructure> {
+  const { data } = await api.get<StudentTextbookStructure>(`/api/v1/education/learning/${assignmentId}/structure`);
+  return data;
+}
+
+export async function getStudentKnowledgePointLesson(assignmentId: string, knowledgePointId: string): Promise<StudentKnowledgePointLesson> {
+  const { data } = await api.get<StudentKnowledgePointLesson>(`/api/v1/education/learning/${assignmentId}/knowledge-points/${knowledgePointId}`);
   return data;
 }
 

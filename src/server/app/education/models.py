@@ -438,6 +438,51 @@ class PublishTextbookStructureRequest(BaseModel):
     structure_id: UUID
 
 
+class StudentKnowledgePointResponse(BaseModel):
+    knowledge_point_id: UUID
+    position: int
+    slug: str
+    title: str
+    summary: str
+    has_lesson: bool
+
+
+class StudentStructureUnitResponse(BaseModel):
+    unit_id: UUID
+    position: int
+    slug: str
+    title: str
+    summary: str
+    unit_type: str
+    knowledge_points: list[StudentKnowledgePointResponse]
+
+
+class StudentTextbookStructureResponse(BaseModel):
+    assignment_id: UUID
+    publication_id: UUID
+    textbook_id: UUID
+    textbook_title: str
+    textbook_slug: str
+    version_sequence: int
+    structure_id: UUID
+    structure_sequence: int
+    units: list[StudentStructureUnitResponse]
+
+
+class StudentKnowledgePointLessonResponse(BaseModel):
+    assignment_id: UUID
+    knowledge_point_id: UUID
+    knowledge_point_title: str
+    unit_id: UUID
+    unit_title: str
+    revision_id: UUID
+    revision: int
+    format: Literal["markdown"]
+    content_sha256: str
+    size_bytes: int
+    content_markdown: str
+
+
 class TextbookQuestionResponse(BaseModel):
     question_id: UUID
     position: int

@@ -15,6 +15,7 @@ export const routeChunks = {
   textbookStructure: () => import('../../pages/Education/TextbookStructurePage'),
   knowledgePointLessonReview: () => import('../../pages/Education/KnowledgePointLessonReviewPage'),
   studentLearning: () => import('../../pages/Education/StudentLearningPage'),
+  studentTextbookLearning: () => import('../../pages/Education/StudentTextbookLearningPage'),
   settings: () => import('../../pages/Settings/Settings'),
 };
 

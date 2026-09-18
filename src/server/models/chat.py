@@ -329,6 +329,9 @@ class ChatRequest(BaseModel):
     # context.
     education_assignment_id: Optional[str] = Field(default=None, max_length=64)
     education_chapter_id: Optional[str] = Field(default=None, max_length=64)
+    education_knowledge_point_id: Optional[str] = Field(
+        default=None, max_length=64
+    )
 
     # LLM selection (optional - defaults to agent_config.yaml setting)
     llm_model: Optional[str] = Field(
@@ -467,4 +470,3 @@ class SubagentMessageRequest(BaseModel):
     """Request model for sending a message to a running subagent."""
 
     content: str = Field(..., description="The instruction/message to send to the subagent")
-

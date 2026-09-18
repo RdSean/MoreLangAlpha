@@ -4260,6 +4260,138 @@ async def get_student_learning(
     return result
 
 
+async def get_student_published_structure(
+    *, student_user_id: str, assignment_id: str
+) -> dict[str, Any] | None:
+    """Return only the structure frozen by the student's assignment publication."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT assignments.assignment_id,
+                       assignments.publication_id,
+                       textbooks.textbook_id,
+                       textbooks.title AS textbook_title,
+                       textbooks.slug AS textbook_slug,
+                       versions.sequence AS version_sequence,
+                       structures.structure_id,
+                       structures.sequence AS structure_sequence
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbook_publications AS publications
+                  ON publications.publication_id = assignments.publication_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = publications.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_textbook_structures AS structures
+                  ON structures.structure_id = publications.structure_id
+                JOIN education_memberships AS memberships
+                  ON memberships.user_id = assignments.student_user_id
+                 AND memberships.household_id = textbooks.household_id
+                WHERE assignments.assignment_id = %s
+                  AND assignments.student_user_id = %s
+                  AND memberships.role = 'student'
+                """,
+                (assignment_id, student_user_id),
+            )
+            assignment = await cur.fetchone()
+            if not assignment:
+                return None
+            result = dict(assignment)
+            await cur.execute(
+                """
+                SELECT units.unit_id, units.position, units.slug, units.title,
+                       units.summary, units.unit_type
+                FROM education_structure_units AS units
+                WHERE units.structure_id = %s
+                ORDER BY units.position
+                """,
+                (result["structure_id"],),
+            )
+            units = [dict(row) for row in await cur.fetchall()]
+            await cur.execute(
+                """
+                SELECT knowledge_points.knowledge_point_id,
+                       knowledge_points.unit_id,
+                       knowledge_points.position,
+                       knowledge_points.slug,
+                       knowledge_points.title,
+                       knowledge_points.summary,
+                       CASE WHEN frozen.lesson_revision_id IS NULL
+                            THEN FALSE ELSE TRUE END AS has_lesson
+                FROM education_structure_knowledge_points AS knowledge_points
+                JOIN education_structure_units AS units
+                  ON units.unit_id = knowledge_points.unit_id
+                LEFT JOIN education_publication_kp_lessons AS frozen
+                  ON frozen.publication_id = %s
+                 AND frozen.knowledge_point_id =
+                     knowledge_points.knowledge_point_id
+                WHERE units.structure_id = %s
+                ORDER BY units.position, knowledge_points.position
+                """,
+                (result["publication_id"], result["structure_id"]),
+            )
+            knowledge_points = [dict(row) for row in await cur.fetchall()]
+            by_unit: dict[str, list[dict[str, Any]]] = {}
+            for knowledge_point in knowledge_points:
+                by_unit.setdefault(str(knowledge_point["unit_id"]), []).append(
+                    knowledge_point
+                )
+            for unit in units:
+                unit["knowledge_points"] = by_unit.get(str(unit["unit_id"]), [])
+            result["units"] = units
+    return result
+
+
+async def get_student_published_kp_lesson(
+    *, student_user_id: str, assignment_id: str, knowledge_point_id: str
+) -> dict[str, Any] | None:
+    """Return one lesson revision frozen by the student's assignment."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT assignments.assignment_id,
+                       knowledge_points.knowledge_point_id,
+                       knowledge_points.title AS knowledge_point_title,
+                       units.unit_id,
+                       units.title AS unit_title,
+                       revisions.revision_id,
+                       revisions.revision,
+                       revisions.format,
+                       revisions.content_key,
+                       revisions.content_sha256,
+                       revisions.size_bytes
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbook_publications AS publications
+                  ON publications.publication_id = assignments.publication_id
+                JOIN education_publication_kp_lessons AS frozen
+                  ON frozen.publication_id = publications.publication_id
+                 AND frozen.knowledge_point_id = %s
+                JOIN education_kp_lesson_revisions AS revisions
+                  ON revisions.revision_id = frozen.lesson_revision_id
+                JOIN education_structure_knowledge_points AS knowledge_points
+                  ON knowledge_points.knowledge_point_id =
+                     frozen.knowledge_point_id
+                JOIN education_structure_units AS units
+                  ON units.unit_id = knowledge_points.unit_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = publications.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.user_id = assignments.student_user_id
+                 AND memberships.household_id = textbooks.household_id
+                WHERE assignments.assignment_id = %s
+                  AND assignments.student_user_id = %s
+                  AND memberships.role = 'student'
+                """,
+                (knowledge_point_id, assignment_id, student_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def get_student_chapter_context_record(
     *, student_user_id: str, assignment_id: str, chapter_id: str
 ) -> dict[str, Any] | None:

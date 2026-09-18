@@ -312,3 +312,78 @@ async def test_parent_reads_latest_structure_and_lesson_by_knowledge_point(clien
     assert lesson_response.json() is None
     latest.assert_awaited_once()
     lesson.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_student_reads_only_published_structure_and_lesson(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "student-1"
+    assignment_id = uuid4()
+    structure_id = uuid4()
+    unit_id = uuid4()
+    knowledge_point_id = uuid4()
+    revision_id = uuid4()
+    structure = {
+        "assignment_id": assignment_id,
+        "publication_id": uuid4(),
+        "textbook_id": uuid4(),
+        "textbook_title": "Reading Explorer 3",
+        "textbook_slug": "re3",
+        "version_sequence": 1,
+        "structure_id": structure_id,
+        "structure_sequence": 1,
+        "units": [
+            {
+                "unit_id": unit_id,
+                "position": 1,
+                "slug": "unit-1",
+                "title": "Unit 1",
+                "summary": "",
+                "unit_type": "teaching",
+                "knowledge_points": [
+                    {
+                        "knowledge_point_id": knowledge_point_id,
+                        "position": 1,
+                        "slug": "world-game",
+                        "title": "世界运动",
+                        "summary": "",
+                        "has_lesson": True,
+                    }
+                ],
+            }
+        ],
+    }
+    lesson = {
+        "assignment_id": assignment_id,
+        "knowledge_point_id": knowledge_point_id,
+        "knowledge_point_title": "世界运动",
+        "unit_id": unit_id,
+        "unit_title": "Unit 1",
+        "revision_id": revision_id,
+        "revision": 1,
+        "format": "markdown",
+        "content_sha256": "a" * 64,
+        "size_bytes": 20,
+        "content_markdown": "# 世界运动\n",
+    }
+    with (
+        patch(
+            "src.server.app.education.textbooks.get_student_structure",
+            new=AsyncMock(return_value=structure),
+        ),
+        patch(
+            "src.server.app.education.textbooks.get_student_kp_lesson",
+            new=AsyncMock(return_value=lesson),
+        ),
+    ):
+        structure_response = await client.get(
+            f"/api/v1/education/learning/{assignment_id}/structure"
+        )
+        lesson_response = await client.get(
+            f"/api/v1/education/learning/{assignment_id}/knowledge-points/{knowledge_point_id}"
+        )
+
+    assert structure_response.status_code == 200
+    assert lesson_response.status_code == 200
+    assert structure_response.json()["units"][0]["knowledge_points"][0]["has_lesson"] is True
+    assert lesson_response.json()["content_markdown"] == "# 世界运动\n"

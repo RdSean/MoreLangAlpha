@@ -171,6 +171,8 @@ export const queryKeys = {
     teachingChapterAsset: (packageId: string, chapterId: string, kind: string) => [...queryKeys.education.all, 'teaching-packages', packageId, 'chapters', chapterId, 'assets', kind],
     learning: () => [...queryKeys.education.all, 'learning'],
     assignment: (id: string) => [...queryKeys.education.learning(), id],
+    assignmentStructure: (id: string) => [...queryKeys.education.assignment(id), 'structure'],
+    assignmentKnowledgePoint: (assignmentId: string, knowledgePointId: string) => [...queryKeys.education.assignment(assignmentId), 'knowledge-points', knowledgePointId],
   },
   documents: {
     all: ['documents'],
