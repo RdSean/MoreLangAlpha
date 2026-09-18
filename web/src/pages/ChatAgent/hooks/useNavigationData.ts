@@ -33,6 +33,15 @@ export interface NavWorkspace {
   [key: string]: unknown;
 }
 
+function isManagedExecutionWorkspace(workspace: NavWorkspace): boolean {
+  const config = workspace.config;
+  return (
+    typeof config === 'object'
+    && config !== null
+    && 'managed_execution' in config
+  );
+}
+
 // Re-exported so nav-tree consumers keep importing the hook's row types from
 // the hook rather than reaching into the store module.
 export type { ThreadRecord, ThreadsData } from '@/lib/navThreadsStore';
@@ -249,6 +258,10 @@ export function useNavigationData(currentWorkspaceId: string, { enabled = true }
     () => (wsData as WorkspacesResponse | undefined)?.workspaces || [],
     [wsData],
   );
+  const visibleFetched = useMemo(
+    () => allFetched.filter((workspace) => !isManagedExecutionWorkspace(workspace)),
+    [allFetched],
+  );
   const totalCount = (wsData as WorkspacesResponse | undefined)?.total || 0;
 
   // Loaded thread lists, read from the session-global shared store so every
@@ -307,7 +320,7 @@ export function useNavigationData(currentWorkspaceId: string, { enabled = true }
   // effect-commit before they can tear the snapshot; the THREAD tier already
   // works that way (orderThreads + absorbThreadOrder).
   const workspaces = useMemo(() => {
-    if (!allFetched.length) return [];
+    if (!visibleFetched.length) return [];
 
     let ordered: NavWorkspace[];
     if (orderBy === 'custom') {
@@ -317,7 +330,7 @@ export function useNavigationData(currentWorkspaceId: string, { enabled = true }
       // fresh server order, keeping the nav in sync with the gallery's 'custom'
       // sort. Recency bumps and paged-in workspaces don't change these fields.
       let manualOrderChanged = false;
-      for (const ws of allFetched) {
+      for (const ws of visibleFetched) {
         const sortOrder = (ws.sort_order as number | null | undefined) ?? null;
         const pinned = Boolean(ws.is_pinned);
         const prev = _lastWorkspaceArrangement.get(ws.workspace_id);
@@ -326,7 +339,7 @@ export function useNavigationData(currentWorkspaceId: string, { enabled = true }
       }
       if (manualOrderChanged) _frozenWorkspaceOrder = null;
 
-      const { order, items: stable } = applyStableOrderBy(_frozenWorkspaceOrder, allFetched, (ws) => ws.workspace_id);
+      const { order, items: stable } = applyStableOrderBy(_frozenWorkspaceOrder, visibleFetched, (ws) => ws.workspace_id);
       _frozenWorkspaceOrder = order;
       ordered = stable;
     } else {
@@ -335,7 +348,7 @@ export function useNavigationData(currentWorkspaceId: string, { enabled = true }
       // the point of 'activity'. Drop any custom snapshot so switching back to
       // 'custom' re-snapshots fresh from the server's manual order.
       _frozenWorkspaceOrder = null;
-      ordered = allFetched;
+      ordered = visibleFetched;
     }
 
     // Pinned block first (Flash counts as always-pinned), preserving relative
@@ -353,7 +366,7 @@ export function useNavigationData(currentWorkspaceId: string, { enabled = true }
 
     const sliced = ordered.slice(0, workspaceLimit as number);
     if (currentWorkspaceId && !sliced.some((ws) => ws.workspace_id === currentWorkspaceId)) {
-      const currentWs = allFetched.find((ws) => ws.workspace_id === currentWorkspaceId);
+      const currentWs = visibleFetched.find((ws) => ws.workspace_id === currentWorkspaceId);
       // Keep the current workspace in view without hoisting it to the top —
       // it joins at the bottom of the visible slice, holding the list stable.
       if (currentWs) sliced.push(currentWs);
@@ -362,7 +375,7 @@ export function useNavigationData(currentWorkspaceId: string, { enabled = true }
     // orderVersion isn't read in the body, but drag-reorder rewrites the frozen
     // workspace order this memo reads — it must recompute when the version ticks.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allFetched, showAll, workspaceLimit, currentWorkspaceId, orderVersion, orderBy]);
+  }, [visibleFetched, showAll, workspaceLimit, currentWorkspaceId, orderVersion, orderBy]);
 
   // Drag-reorder a workspace in the nav list. Optimistically rewrites the
   // frozen nav order, then persists sequential sort_order values so the
@@ -373,7 +386,7 @@ export function useNavigationData(currentWorkspaceId: string, { enabled = true }
   const reorderWorkspace = useCallback(async (activeId: string, overId: string) => {
     const frozen = _frozenWorkspaceOrder;
     if (!frozen || !activeId || !overId || activeId === overId) return;
-    const byId = new Map(allFetched.map((ws) => [ws.workspace_id, ws]));
+    const byId = new Map(visibleFetched.map((ws) => [ws.workspace_id, ws]));
     const active = byId.get(activeId);
     const over = byId.get(overId);
     if (!active || !over) return;
@@ -405,7 +418,7 @@ export function useNavigationData(currentWorkspaceId: string, { enabled = true }
       _frozenWorkspaceOrder = snapshot;
       bumpNavOrder();
     }
-  }, [allFetched, queryClient]);
+  }, [visibleFetched, queryClient]);
 
   // Pin/unpin a workspace through the canonical row action — the gallery calls
   // the same one, so an unpin made there releases this tree's freeze too.

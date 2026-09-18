@@ -10,6 +10,15 @@ interface UseWorkspacesOptions {
   enabled?: boolean;
 }
 
+function isManagedExecutionWorkspace(workspace: { config?: unknown }): boolean {
+  const config = workspace.config;
+  return (
+    typeof config === 'object'
+    && config !== null
+    && 'managed_execution' in config
+  );
+}
+
 /**
  * Shared hook for workspace list queries.
  * Uses keepPreviousData for smooth pagination transitions.
@@ -20,6 +29,16 @@ export function useWorkspaces({ limit = 20, offset = 0, sortBy = 'custom', inclu
   return useQuery({
     queryKey: queryKeys.workspaces.list(params),
     queryFn: () => getWorkspaces(limit, offset, sortBy, includeFlash),
+    select: (data) => {
+      const workspaces = data.workspaces.filter(
+        (workspace) => !isManagedExecutionWorkspace(workspace),
+      );
+      return {
+        ...data,
+        workspaces,
+        total: Math.max(0, (data.total ?? workspaces.length) - (data.workspaces.length - workspaces.length)),
+      };
+    },
     enabled,
     staleTime: 30_000,
     placeholderData: keepPreviousData,

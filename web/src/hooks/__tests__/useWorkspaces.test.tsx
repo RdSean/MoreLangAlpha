@@ -57,6 +57,25 @@ describe('useWorkspaces', () => {
     expect(result.current.error).toBeInstanceOf(Error);
   });
 
+  it('hides service-owned managed execution workspaces', async () => {
+    mockGetWorkspaces.mockResolvedValue({
+      workspaces: [
+        { workspace_id: 'ws-1' },
+        {
+          workspace_id: 'managed-1',
+          config: { managed_execution: { kind: 'education_teaching', job_id: 'job-1' } },
+        },
+      ],
+      total: 2,
+    });
+
+    const { result } = renderHookWithProviders(() => useWorkspaces());
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.workspaces).toEqual([{ workspace_id: 'ws-1' }]);
+    expect(result.current.data?.total).toBe(1);
+  });
+
   it('uses the correct query key structure', async () => {
     mockGetWorkspaces.mockResolvedValue({ workspaces: [], total: 0 });
 

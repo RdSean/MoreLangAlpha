@@ -139,6 +139,26 @@ describe('useNavigationData — stable thread ordering', () => {
     return { ...rendered, queryClient, idsFor };
   }
 
+  it('hides service-owned managed execution workspaces from the navigation tree', async () => {
+    mockGetWorkspaces.mockResolvedValue({
+      workspaces: [
+        { workspace_id: 'ws-1' },
+        {
+          workspace_id: 'managed-1',
+          config: { managed_execution: { kind: 'education_teaching', job_id: 'job-1' } },
+        },
+        { workspace_id: 'ws-2' },
+      ],
+      total: 3,
+    });
+
+    const rendered = setup();
+
+    await waitFor(() => expect(rendered.result.current.workspaces.length).toBe(2));
+    expect(rendered.result.current.workspaces.map((workspace) => workspace.workspace_id))
+      .toEqual(['ws-1', 'ws-2']);
+  });
+
   it('first load preserves server (recency) order', async () => {
     const { idsFor } = setup();
 
