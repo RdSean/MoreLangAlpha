@@ -26,6 +26,8 @@
 - UI interaction follows Mentrix's chapter tree, knowledge-point course, follow-up, personalized-summary, highlight, and annotation patterns.
 - Visual theme stays native to LangAlpha; Mentrix is an interaction reference, not a visual-design source.
 - Markdown rendering is behind an education-specific component so the rendering style can be replaced without changing lesson pages or API contracts.
+- Historical teaching packages and chapter learning rows are not a compatibility contract for the new structure model.
+- Do not build dual-read, dual-write, or historical backfill paths. Incompatible textbook data may be deleted and regenerated.
 
 ## Target Flow
 
@@ -77,7 +79,7 @@ Student learning:
 /education/learn/:assignmentId/summary
 ```
 
-The existing `/education/learn/:assignmentId/:chapterId?` route redirects to the unit route for backward compatibility.
+The old `/education/learn/:assignmentId/:chapterId?` route may redirect to the Unit route, but historical chapter data does not need to remain readable.
 
 ## UI Interaction Specification
 
@@ -920,7 +922,7 @@ class CreateLessonRevisionRequest(BaseModel):
 
 **Step 4: Update publication**
 
-Extend `publish_textbook_version()` to require either a compatible legacy teaching package or an accepted structure with approved lessons for every publishable knowledge point.
+Change `publish_textbook_version()` to require an accepted structure with approved lessons for every publishable knowledge point. Do not retain the old teaching-package publication fallback.
 
 **Step 5: Run tests and commit**
 
@@ -1597,7 +1599,7 @@ git add migrations/versions/069_add_processing_profiles.py \
 git commit -m "feat(education): configure textbook processing profiles"
 ```
 
-### Task 16: Compatibility, Feature Flag, and End-to-End Acceptance
+### Task 16: Cutover, Feature Flag, and End-to-End Acceptance
 
 **Files:**
 
@@ -1623,13 +1625,13 @@ FEATURE_CATALOG["education_structure_lessons"] = FeatureSpec(
 
 Set it true only in the local development config used for acceptance.
 
-**Step 2: Preserve legacy reading**
+**Step 2: Cut over and remove incompatible data**
 
-When a publication has frozen structure lessons, student routes use the new model.
+Student routes use only publication-frozen structure lessons.
 
-When it does not, existing chapter Markdown and teaching-package questions remain readable through the old route.
+Delete or invalidate incompatible legacy teaching packages, chapter publications, learning progress, and answer rows instead of translating them. The implementation may either remove the old tables after cutover or leave them unread.
 
-Do not delete or rewrite legacy learning progress and answers.
+The migration must not fail because historical rows cannot be represented in the new model.
 
 **Step 3: Add end-to-end coverage**
 
@@ -1709,7 +1711,7 @@ Add a Chinese changelog entry describing:
 - Per-knowledge-point Markdown lessons.
 - The Mentrix-style learning interactions.
 - The separate student personal learning assets.
-- Backward compatibility and the feature flag.
+- The cutover from legacy textbook data and the feature flag.
 
 Commit:
 
@@ -1736,5 +1738,5 @@ git commit -m "feat(education): ship structure-based textbook learning"
 - Regenerating an official lesson after publication does not change a student snapshot.
 - The page interaction mirrors Mentrix while retaining LangAlpha styling.
 - `EducationMarkdown` is the only business-facing Markdown rendering boundary.
-- Legacy textbooks and assignments remain readable.
+- Incompatible legacy textbook data is removed or unread, not translated.
 - `0.0.0.0:5177` and `0.0.0.0:8000` pass a real parent-to-student acceptance run.

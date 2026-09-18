@@ -527,6 +527,429 @@ async def queue_teaching_package(
     return package
 
 
+async def queue_textbook_structure(
+    *,
+    parent_user_id: str,
+    content_version_id: str,
+    processing_profile_id: str | None,
+    processing_profile_sha256: str,
+    input_manifest_sha256: str,
+    source_revision: str,
+) -> dict[str, Any] | None:
+    """Create one reviewable structure and its queued generation job."""
+    structure_id = str(uuid4())
+    generation_job_id = str(uuid4())
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT versions.version_id
+                    FROM education_textbook_versions AS versions
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE versions.version_id = %s
+                      AND versions.status = 'review'
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                    FOR UPDATE OF versions
+                    """,
+                    (content_version_id, parent_user_id),
+                )
+                if not await cur.fetchone():
+                    return None
+                await cur.execute(
+                    """
+                    SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
+                    FROM education_textbook_structures
+                    WHERE version_id = %s
+                    """,
+                    (content_version_id,),
+                )
+                sequence = (await cur.fetchone())["sequence"]
+                await cur.execute(
+                    """
+                    INSERT INTO education_textbook_structures (
+                        structure_id, version_id, sequence, status, schema_version,
+                        processing_profile_id, processing_profile_sha256,
+                        input_manifest_sha256, source_revision, created_by_user_id
+                    ) VALUES (
+                        %s, %s, %s, 'queued',
+                        'langalpha-managed-textbook-structure/v1',
+                        %s, %s, %s, %s, %s
+                    )
+                    RETURNING structure_id, version_id, sequence, status
+                    """,
+                    (
+                        structure_id,
+                        content_version_id,
+                        sequence,
+                        processing_profile_id,
+                        processing_profile_sha256,
+                        input_manifest_sha256,
+                        source_revision,
+                        parent_user_id,
+                    ),
+                )
+                structure = dict(await cur.fetchone())
+                await cur.execute(
+                    """
+                    INSERT INTO education_generation_jobs (
+                        generation_job_id, version_id, scope, structure_id, status,
+                        processing_profile_sha256
+                    ) VALUES (%s, %s, 'structure', %s, 'queued', %s)
+                    RETURNING generation_job_id, scope, status
+                    """,
+                    (
+                        generation_job_id,
+                        content_version_id,
+                        structure_id,
+                        processing_profile_sha256,
+                    ),
+                )
+                job = dict(await cur.fetchone())
+    return {**structure, **job}
+
+
+async def get_textbook_structure_for_parent(
+    *, parent_user_id: str, structure_id: str
+) -> dict[str, Any] | None:
+    """Read one structure with its Unit and knowledge-point projection."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT structures.structure_id, structures.version_id,
+                       structures.sequence, structures.status,
+                       structures.schema_version, structures.processing_profile_id,
+                       structures.processing_profile_sha256,
+                       structures.input_manifest_sha256, structures.source_revision,
+                       structures.created_at, structures.reviewed_at
+                FROM education_textbook_structures AS structures
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = structures.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                WHERE structures.structure_id = %s
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (structure_id, parent_user_id),
+            )
+            structure = await cur.fetchone()
+            if not structure:
+                return None
+            result = dict(structure)
+            await cur.execute(
+                """
+                SELECT unit_id, position, slug, title, summary, unit_type,
+                       source_refs, confidence, status
+                FROM education_structure_units
+                WHERE structure_id = %s
+                ORDER BY position
+                """,
+                (structure_id,),
+            )
+            units = [dict(row) for row in await cur.fetchall()]
+            await cur.execute(
+                """
+                SELECT knowledge_points.knowledge_point_id,
+                       knowledge_points.unit_id,
+                       knowledge_points.position,
+                       knowledge_points.slug,
+                       knowledge_points.title,
+                       knowledge_points.summary,
+                       knowledge_points.source_refs,
+                       knowledge_points.confidence,
+                       knowledge_points.status
+                FROM education_structure_knowledge_points AS knowledge_points
+                JOIN education_structure_units AS units
+                  ON units.unit_id = knowledge_points.unit_id
+                WHERE units.structure_id = %s
+                ORDER BY units.position, knowledge_points.position
+                """,
+                (structure_id,),
+            )
+            knowledge_points = [dict(row) for row in await cur.fetchall()]
+            by_unit: dict[str, list[dict[str, Any]]] = {}
+            for knowledge_point in knowledge_points:
+                by_unit.setdefault(
+                    str(knowledge_point["unit_id"]), []
+                ).append(knowledge_point)
+            for unit in units:
+                unit["knowledge_points"] = by_unit.get(str(unit["unit_id"]), [])
+            result["units"] = units
+    return result
+
+
+async def replace_structure_contents(
+    *, structure_id: str, units: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Replace a mutable structure projection with service-owned IDs."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT structure_id
+                    FROM education_textbook_structures
+                    WHERE structure_id = %s
+                      AND status IN ('queued', 'running', 'failed', 'review')
+                    FOR UPDATE
+                    """,
+                    (structure_id,),
+                )
+                if not await cur.fetchone():
+                    raise ValueError("Textbook structure is not mutable")
+                await cur.execute(
+                    """
+                    DELETE FROM education_structure_knowledge_points
+                    WHERE unit_id IN (
+                        SELECT unit_id
+                        FROM education_structure_units
+                        WHERE structure_id = %s
+                    )
+                    """,
+                    (structure_id,),
+                )
+                await cur.execute(
+                    """
+                    DELETE FROM education_structure_units
+                    WHERE structure_id = %s
+                    """,
+                    (structure_id,),
+                )
+                stored_units: list[dict[str, Any]] = []
+                for unit in units:
+                    unit_id = str(uuid4())
+                    await cur.execute(
+                        """
+                        INSERT INTO education_structure_units (
+                            unit_id, structure_id, position, slug, title, summary,
+                            unit_type, source_refs, confidence, status
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING unit_id
+                        """,
+                        (
+                            unit_id,
+                            structure_id,
+                            unit["position"],
+                            unit["slug"],
+                            unit["title"],
+                            unit.get("summary", ""),
+                            unit["unit_type"],
+                            Json(unit.get("source_refs", [])),
+                            unit["confidence"],
+                            unit.get("status", "review"),
+                        ),
+                    )
+                    await cur.fetchone()
+                    stored_unit = {
+                        **unit,
+                        "unit_id": unit_id,
+                        "knowledge_points": [],
+                    }
+                    for knowledge_point in unit.get("knowledge_points", []):
+                        knowledge_point_id = str(uuid4())
+                        await cur.execute(
+                            """
+                            INSERT INTO education_structure_knowledge_points (
+                                knowledge_point_id, unit_id, position, slug, title,
+                                summary, source_refs, confidence, status
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            RETURNING knowledge_point_id
+                            """,
+                            (
+                                knowledge_point_id,
+                                unit_id,
+                                knowledge_point["position"],
+                                knowledge_point["slug"],
+                                knowledge_point["title"],
+                                knowledge_point.get("summary", ""),
+                                Json(knowledge_point.get("source_refs", [])),
+                                knowledge_point["confidence"],
+                                knowledge_point.get("status", "review"),
+                            ),
+                        )
+                        await cur.fetchone()
+                        stored_unit["knowledge_points"].append(
+                            {
+                                **knowledge_point,
+                                "knowledge_point_id": knowledge_point_id,
+                                "unit_id": unit_id,
+                            }
+                        )
+                    stored_units.append(stored_unit)
+    return stored_units
+
+
+async def create_generation_job(
+    *,
+    version_id: str,
+    scope: str,
+    structure_id: str | None,
+    knowledge_point_id: str | None,
+    processing_profile_sha256: str,
+) -> dict[str, Any]:
+    """Queue one structure or lesson generation job."""
+    structure_target = str(structure_id) if structure_id is not None else None
+    knowledge_point_target = (
+        str(knowledge_point_id) if knowledge_point_id is not None else None
+    )
+    if scope == "structure":
+        valid_target = (
+            structure_target is not None and knowledge_point_target is None
+        )
+    elif scope == "lesson":
+        valid_target = (
+            structure_target is None and knowledge_point_target is not None
+        )
+    else:
+        valid_target = False
+    if not valid_target:
+        raise ValueError("generation job requires exactly one target")
+
+    generation_job_id = str(uuid4())
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                INSERT INTO education_generation_jobs (
+                    generation_job_id, version_id, scope, structure_id,
+                    knowledge_point_id, status, processing_profile_sha256
+                ) VALUES (%s, %s, %s, %s, %s, 'queued', %s)
+                RETURNING generation_job_id, version_id, scope, structure_id,
+                          knowledge_point_id, status
+                """,
+                (
+                    generation_job_id,
+                    version_id,
+                    scope,
+                    structure_target,
+                    knowledge_point_target,
+                    processing_profile_sha256,
+                ),
+            )
+            row = await cur.fetchone()
+    return dict(row)
+
+
+async def claim_generation_job(
+    *,
+    generation_job_id: str,
+    managed_workspace_id: str,
+    managed_thread_id: str,
+) -> dict[str, Any] | None:
+    """Reserve one queued generation attempt under the job's single-writer row."""
+    attempt_id = str(uuid4())
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT generation_job_id, version_id, scope, structure_id,
+                           knowledge_point_id, latest_attempt_id AS previous_attempt_id
+                    FROM education_generation_jobs
+                    WHERE generation_job_id = %s AND status = 'queued'
+                    FOR UPDATE
+                    """,
+                    (generation_job_id,),
+                )
+                job = await cur.fetchone()
+                if not job:
+                    return None
+                await cur.execute(
+                    """
+                    INSERT INTO education_generation_attempts (
+                        attempt_id, generation_job_id, previous_attempt_id,
+                        managed_workspace_id, managed_thread_id, status
+                    ) VALUES (%s, %s, %s, %s, %s, 'preparing')
+                    RETURNING attempt_id, generation_job_id, previous_attempt_id,
+                              managed_workspace_id, managed_thread_id, root_run_id
+                    """,
+                    (
+                        attempt_id,
+                        generation_job_id,
+                        job["previous_attempt_id"],
+                        managed_workspace_id,
+                        managed_thread_id,
+                    ),
+                )
+                attempt = dict(await cur.fetchone())
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs
+                    SET status = 'preparing',
+                        attempt_count = attempt_count + 1,
+                        latest_attempt_id = %s,
+                        updated_at = NOW()
+                    WHERE generation_job_id = %s AND status = 'queued'
+                    """,
+                    (attempt_id, generation_job_id),
+                )
+    return {**dict(job), **attempt}
+
+
+async def settle_generation_job(
+    *,
+    generation_job_id: str,
+    attempt_id: str,
+    status: str,
+    error_code: str | None = None,
+    error_message: str | None = None,
+) -> dict[str, Any] | None:
+    """Settle one generation attempt and project its terminal product status."""
+    if status not in {"completed", "failed", "cancelled", "worker_lost"}:
+        raise ValueError("Invalid generation attempt status")
+    job_status = "completed" if status == "completed" else status
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_generation_attempts
+                    SET status = %s, error_code = %s, error_message = %s,
+                        completed_at = NOW()
+                    WHERE attempt_id = %s AND generation_job_id = %s
+                      AND status IN ('preparing', 'running')
+                    RETURNING attempt_id, generation_job_id, status
+                    """,
+                    (
+                        status,
+                        error_code,
+                        error_message,
+                        attempt_id,
+                        generation_job_id,
+                    ),
+                )
+                attempt = await cur.fetchone()
+                if not attempt:
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs
+                    SET status = %s, error_code = %s, error_message = %s,
+                        updated_at = NOW()
+                    WHERE generation_job_id = %s AND latest_attempt_id = %s
+                    RETURNING generation_job_id, version_id, scope, structure_id,
+                              knowledge_point_id, status
+                    """,
+                    (
+                        job_status,
+                        error_code,
+                        error_message,
+                        generation_job_id,
+                        attempt_id,
+                    ),
+                )
+                job = await cur.fetchone()
+    return dict(job) if job else None
+
+
 async def get_teaching_input_for_parent(
     *, parent_user_id: str, content_version_id: str
 ) -> dict[str, Any] | None:
