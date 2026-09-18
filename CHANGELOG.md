@@ -7,7 +7,8 @@
 - **现象**：侧栏和 `/chat` 工作区列表出现多个“家庭教材加工”；每个都点不开，并触发 workspace 文件/状态接口报错。
 - **根因**：这些是 managed textbook PTC 运行使用的 service-owned workspace。详情、文件和消息接口已经按设计拒绝普通访问，但 `get_workspaces_for_user()` 的列表和 total 查询没有排除 `config.managed_execution`，因此内部执行行泄漏到了用户导航。
 - **修复**：workspace 列表与计数 SQL 统一排除带 `managed_execution` 配置的行；共享 `useWorkspaces` hook 同时做前端过滤，确保侧栏和“工作区”画廊在现有缓存状态下也立即隐藏，不改变详情接口的 404 安全边界，也不影响后台按状态扫描和清理这些 workspace。
-- **验证**：`test_workspace_db.py` 与 `test_workspaces.py` 聚焦测试 71 项通过；前端 workspace/navigation 测试 55 项与 `pnpm typecheck` 通过；真实 `/chat` 页面仅剩 Flash 和用户工作区。
+- **生命周期**：managed workspace 没有普通聊天活动时间，原 idle reaper 会因 `last_activity_at IS NULL` 永久跳过，导致 sandbox 可能持续 running。现在 managed row 使用 `updated_at` 作为活动时间；若没有活跃 workflow，超过 idle timeout 后由现有 `stop_workspace()` 停止并保留可恢复数据。
+- **验证**：`test_workspace_db.py`、`test_workspaces.py` 与 workspace manager 聚焦测试通过；前端 workspace/navigation 测试 55 项、`pnpm typecheck` 和 `pnpm build` 通过；真实 `/chat` 页面仅剩 Flash 和用户工作区。
 
 ### 修复：教材加工环境无法启动
 

@@ -3536,8 +3536,19 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
 
             last_activity = workspace.get("last_activity_at")
             if not last_activity:
-                # Never used, skip
-                continue
+                config = workspace.get("config")
+                managed = (
+                    isinstance(config, dict)
+                    and config.get("managed_execution") is not None
+                )
+                if not managed:
+                    # A normal workspace that was never used has no meaningful
+                    # idle clock. Service-owned managed workspaces do: their
+                    # updated_at is the execution creation/bind time.
+                    continue
+                last_activity = workspace.get("updated_at")
+                if not last_activity:
+                    continue
 
             # Handle timezone-aware comparison
             if last_activity.tzinfo is None:

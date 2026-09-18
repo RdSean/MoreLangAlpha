@@ -655,6 +655,29 @@ class TestCleanupIdle:
         assert count == 0
         mock_stop.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    @patch("src.server.services.workspace_manager.get_workspaces_by_status", new_callable=AsyncMock)
+    async def test_cleanup_idle_managed_workspace_uses_updated_at(self, mock_get_by_status):
+        ws_id = str(uuid.uuid4())
+        old_time = datetime.now(timezone.utc) - timedelta(hours=2)
+        mock_get_by_status.return_value = [
+            _make_workspace(
+                workspace_id=ws_id,
+                last_activity_at=None,
+                updated_at=old_time,
+                config={"managed_execution": {"kind": "education_teaching"}},
+            ),
+        ]
+
+        config = _make_config()
+        wm = WorkspaceManager(config, idle_timeout=1800)
+
+        with patch.object(wm, "stop_workspace", new_callable=AsyncMock) as mock_stop:
+            count = await wm.cleanup_idle_workspaces()
+
+        assert count == 1
+        mock_stop.assert_awaited_once_with(ws_id)
+
     # --- always-on entitlement reconciliation (bundled into the idle sweep) ---
 
     @pytest.mark.asyncio
