@@ -6,6 +6,7 @@ import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -92,6 +93,37 @@ async def test_repository_reads_only_artifact_backed_usage_for_the_owner(
     assert "bundle_prefix" not in normalized_sql
     assert "storage_key" not in normalized_sql
     assert params == ("doc-A1b2C3d4E5f6", "owner-1")
+
+
+@pytest.mark.asyncio
+async def test_service_normalizes_database_uuid_columns_for_the_api(
+    monkeypatch,
+) -> None:
+    textbook_id = uuid4()
+    content_version_id = uuid4()
+    teaching_package_id = uuid4()
+    publication_id = uuid4()
+    row = _usage_row(
+        textbook_id=textbook_id,
+        content_version_id=content_version_id,
+        teaching_package_id=teaching_package_id,
+        publication_id=publication_id,
+    )
+    monkeypatch.setattr(
+        document_teaching_usage.education_textbook_repository,
+        "list_document_teaching_usages",
+        AsyncMock(return_value=[row]),
+    )
+
+    [usage] = await document_teaching_usage.list_document_teaching_usages(
+        owner_user_id="owner-1",
+        document_id="doc-A1b2C3d4E5f6",
+    )
+
+    assert usage["textbook_id"] == str(textbook_id)
+    assert usage["content_version_id"] == str(content_version_id)
+    assert usage["teaching_package_id"] == str(teaching_package_id)
+    assert usage["publication_id"] == str(publication_id)
 
 
 @pytest.mark.asyncio

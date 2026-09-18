@@ -25,10 +25,22 @@ _SAFE_USAGE_FIELDS = (
     "has_asset_manifest",
     "created_at",
 )
+_UUID_FIELDS = frozenset(
+    {
+        "textbook_id",
+        "content_version_id",
+        "teaching_package_id",
+        "publication_id",
+    }
+)
 
 
 def _safe_usage(row: Mapping[str, Any]) -> dict[str, Any]:
-    return {field: row.get(field) for field in _SAFE_USAGE_FIELDS}
+    usage = {field: row.get(field) for field in _SAFE_USAGE_FIELDS}
+    for field in _UUID_FIELDS:
+        if usage[field] is not None:
+            usage[field] = str(usage[field])
+    return usage
 
 
 async def list_document_teaching_usages(

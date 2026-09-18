@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-18
+
+### 修复：图书馆“教材资产”接口遇到真实 UUID 返回 500
+
+- **现象**：打开独立图书馆详情页的“教材资产”标签时，`GET /api/v1/documents/{id}/teaching-usage` 返回 500。
+- **根因**：PostgreSQL 驱动返回 `textbook_id`、`content_version_id`、`teaching_package_id`、`publication_id` 为 UUID 对象，响应模型的这些字段却声明为 `str`；此前测试使用了伪造的字符串 ID，没有覆盖真实驱动类型。
+- **修复**：service 投影在离开数据库层前把 UUID 字段统一转换为字符串，API 的 JSON 契约保持不变。
+- **验证**：新增真实 UUID 行的 service 回归；文档 teaching-usage 与 API 聚焦测试 22 项通过，Ruff 通过。
+
 ## 2026-09-17
 
 ### 修复：普通对话页泄漏“家庭教材加工”工作区
