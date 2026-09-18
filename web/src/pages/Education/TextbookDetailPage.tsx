@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { ArrowLeft, BookOpenCheck, ExternalLink, FileCog, Play, RotateCcw, Send } from 'lucide-react';
+import { ArrowLeft, BookOpenCheck, ExternalLink, FileCog, GitBranch, Play, RotateCcw, Send } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -176,6 +176,7 @@ function VersionPanel({ textbookId, version }: { textbookId: string; version: Te
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="border px-2 py-1 font-mono text-[11px]" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-secondary)' }}>{statusLabels[version.status]}</span>
+          <Link to={`/education/textbooks/${textbookId}/versions/${version.version_id}/structure`} className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-[var(--color-bg-hover)]"><GitBranch className="mr-2 size-4" aria-hidden="true" />结构与知识点</Link>
           {canRun && <Button size="sm" variant="outline" onClick={() => void act(() => mutations.run.mutateAsync(version.processing_job_id!), '无法执行加工')} disabled={mutations.run.isPending}><Play className="mr-2 size-4" aria-hidden="true" />执行本地加工</Button>}
           {canRetry && <Button size="sm" variant="outline" onClick={() => void act(() => mutations.retry.mutateAsync(version.processing_job_id!), '无法重试加工')} disabled={mutations.retry.isPending}><RotateCcw className="mr-2 size-4" aria-hidden="true" />重试加工</Button>}
           {canPublish && <Button size="sm" onClick={() => void act(() => mutations.publish.mutateAsync({ textbookId, versionId: version.version_id, teachingPackageId: reviewedPackage!.teaching_package_id }), '无法发布版本')} disabled={mutations.publish.isPending}>{mutations.publish.isPending ? '正在发布' : '发布版本'}</Button>}

@@ -688,6 +688,39 @@ async def get_textbook_structure_for_parent(
     return result
 
 
+async def get_latest_textbook_structure_for_parent(
+    *, parent_user_id: str, content_version_id: str
+) -> dict[str, Any] | None:
+    """Return the newest structure for one version, if the parent owns it."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT structures.structure_id
+                FROM education_textbook_structures AS structures
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = structures.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                WHERE structures.version_id = %s
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                ORDER BY structures.sequence DESC
+                LIMIT 1
+                """,
+                (content_version_id, parent_user_id),
+            )
+            row = await cur.fetchone()
+    if not row:
+        return None
+    return await get_textbook_structure_for_parent(
+        parent_user_id=parent_user_id,
+        structure_id=str(row["structure_id"]),
+    )
+
+
 async def get_generation_job_for_parent(
     *, parent_user_id: str, generation_job_id: str
 ) -> dict[str, Any] | None:
@@ -1414,6 +1447,44 @@ async def get_kp_lesson_for_parent(
             )
             result["revisions"] = [dict(row) for row in await cur.fetchall()]
     return result
+
+
+async def get_kp_lesson_by_knowledge_point_for_parent(
+    *, parent_user_id: str, knowledge_point_id: str
+) -> dict[str, Any] | None:
+    """Return the stable lesson identity for one accepted knowledge point."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT lessons.lesson_id
+                FROM education_kp_lessons AS lessons
+                JOIN education_structure_knowledge_points AS knowledge_points
+                  ON knowledge_points.knowledge_point_id =
+                     lessons.knowledge_point_id
+                JOIN education_structure_units AS units
+                  ON units.unit_id = knowledge_points.unit_id
+                JOIN education_textbook_structures AS structures
+                  ON structures.structure_id = units.structure_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = structures.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                WHERE lessons.knowledge_point_id = %s
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (knowledge_point_id, parent_user_id),
+            )
+            row = await cur.fetchone()
+    if not row:
+        return None
+    return await get_kp_lesson_for_parent(
+        parent_user_id=parent_user_id,
+        lesson_id=str(row["lesson_id"]),
+    )
 
 
 async def approve_kp_lesson_revision(

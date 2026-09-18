@@ -9,6 +9,7 @@ from src.server.database.education_textbooks import (
     approve_kp_lesson_revision,
     create_kp_lesson_revision,
     get_generation_job_for_parent,
+    get_kp_lesson_by_knowledge_point_for_parent,
     get_kp_lesson_for_parent,
     publish_textbook_structure,
 )
@@ -96,6 +97,23 @@ async def get_lesson_for_parent(
         **lesson,
         "content_markdown": content.decode("utf-8"),
     }
+
+
+async def get_lesson_for_knowledge_point(
+    *, parent_user_id: str, knowledge_point_id: str
+) -> dict[str, Any] | None:
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can review lessons")
+    lesson = await get_kp_lesson_by_knowledge_point_for_parent(
+        parent_user_id=parent_user_id,
+        knowledge_point_id=knowledge_point_id,
+    )
+    if not lesson:
+        return None
+    return await get_lesson_for_parent(
+        parent_user_id=parent_user_id,
+        lesson_id=str(lesson["lesson_id"]),
+    )
 
 
 async def approve_lesson_for_parent(

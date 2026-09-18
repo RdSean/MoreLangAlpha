@@ -37,6 +37,7 @@ from src.server.services.education_structure_review import (
     accept_structure_for_parent,
     get_structure_for_parent,
     get_structure_generation_job,
+    get_latest_structure_for_parent,
     queue_structure_for_parent,
     replace_structure_for_parent,
 )
@@ -44,6 +45,7 @@ from src.server.services.education_lesson_review import (
     approve_lesson_for_parent,
     create_manual_lesson_revision,
     get_lesson_for_parent,
+    get_lesson_for_knowledge_point,
     publish_structure_for_parent,
     queue_lesson_for_parent,
 )
@@ -153,6 +155,23 @@ async def queue_family_textbook_structure(
 
 
 @router.get(
+    "/textbook-versions/{content_version_id}/structure",
+    response_model=TextbookStructureResponse | None,
+)
+async def get_latest_family_textbook_structure(
+    content_version_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_latest_structure_for_parent(
+            parent_user_id=user_id,
+            content_version_id=str(content_version_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
     "/structure-generation-jobs/{generation_job_id}",
     response_model=StructureGenerationJobResponse,
 )
@@ -245,6 +264,23 @@ async def generate_family_knowledge_point_lesson(
             parent_user_id=user_id,
             knowledge_point_id=str(knowledge_point_id),
             auto_grading=body.auto_grading,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/knowledge-points/{knowledge_point_id}/lesson",
+    response_model=KnowledgePointLessonResponse | None,
+)
+async def get_family_knowledge_point_lesson_by_point(
+    knowledge_point_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_lesson_for_knowledge_point(
+            parent_user_id=user_id,
+            knowledge_point_id=str(knowledge_point_id),
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc

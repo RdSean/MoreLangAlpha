@@ -199,6 +199,7 @@ async def test_parent_generates_reviews_and_publishes_lesson(client):
         "latest_revision_id": revision_id,
         "knowledge_point_id": knowledge_point_id,
         "knowledge_point_title": "世界运动",
+        "structure_id": uuid4(),
         "unit_id": unit_id,
         "unit_title": "Unit 1",
         "content_markdown": "# 世界运动\n",
@@ -281,3 +282,33 @@ async def test_parent_generates_reviews_and_publishes_lesson(client):
     assert publish.await_args.kwargs["structure_id"] == str(
         publication["structure_id"]
     )
+
+
+@pytest.mark.asyncio
+async def test_parent_reads_latest_structure_and_lesson_by_knowledge_point(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    structure = _structure()
+    knowledge_point_id = uuid4()
+    with (
+        patch(
+            "src.server.app.education.textbooks.get_latest_structure_for_parent",
+            new=AsyncMock(return_value=structure),
+        ) as latest,
+        patch(
+            "src.server.app.education.textbooks.get_lesson_for_knowledge_point",
+            new=AsyncMock(return_value=None),
+        ) as lesson,
+    ):
+        structure_response = await client.get(
+            f"/api/v1/education/textbook-versions/{structure['version_id']}/structure"
+        )
+        lesson_response = await client.get(
+            f"/api/v1/education/knowledge-points/{knowledge_point_id}/lesson"
+        )
+
+    assert structure_response.status_code == 200
+    assert lesson_response.status_code == 200
+    assert lesson_response.json() is None
+    latest.assert_awaited_once()
+    lesson.assert_awaited_once()

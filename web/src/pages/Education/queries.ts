@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from './api';
-import type { EducationTaskCalendarRequest, TeachingJob, TeachingReviewAssetKind } from './types';
+import type { EducationTaskCalendarRequest, StructureGenerationJob, TeachingJob, TeachingReviewAssetKind, TextbookStructureUnit } from './types';
 
 const terminalTeachingJobStatuses = new Set<TeachingJob['status']>(['completed', 'failed', 'cancelled']);
 
@@ -197,6 +197,48 @@ export function useParentLearningTranscript(assignmentId: string | undefined, en
   });
 }
 
+export function useLatestTextbookStructure(versionId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.education.textbookStructure(versionId ?? ''),
+    queryFn: () => educationApi.getLatestTextbookStructure(versionId ?? ''),
+    enabled: Boolean(versionId) && enabled,
+    staleTime: 5_000,
+  });
+}
+
+export function useStructureGenerationJob(jobId: string | undefined, enabled: boolean) {
+  const terminal = new Set<StructureGenerationJob['status']>(['completed', 'failed', 'cancelled']);
+  return useQuery({
+    queryKey: queryKeys.education.structureJob(jobId ?? ''),
+    queryFn: () => educationApi.getStructureGenerationJob(jobId ?? ''),
+    enabled: Boolean(jobId) && enabled,
+    staleTime: 2_000,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status && terminal.has(status) ? false : 5_000;
+    },
+    refetchIntervalInBackground: true,
+  });
+}
+
+export function useKnowledgePointLesson(lessonId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.education.knowledgePointLesson(lessonId ?? ''),
+    queryFn: () => educationApi.getKnowledgePointLesson(lessonId ?? ''),
+    enabled: Boolean(lessonId) && enabled,
+    staleTime: 5_000,
+  });
+}
+
+export function useKnowledgePointLessonByPoint(knowledgePointId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.education.knowledgePointLessonByPoint(knowledgePointId ?? ''),
+    queryFn: () => educationApi.getKnowledgePointLessonByPoint(knowledgePointId ?? ''),
+    enabled: Boolean(knowledgePointId) && enabled,
+    staleTime: 5_000,
+  });
+}
+
 export function useTextbookMutations() {
   const queryClient = useQueryClient();
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
@@ -216,5 +258,45 @@ export function useTextbookMutations() {
     assign: useMutation({ mutationFn: ({ publicationId, studentUserId }: { publicationId: string; studentUserId: string }) => educationApi.assignTextbookPublication(publicationId, studentUserId), onSuccess: invalidate }),
     progress: useMutation({ mutationFn: ({ assignmentId, chapterId, status }: { assignmentId: string; chapterId: string; status: 'learning' | 'read' | 'check_completed' | 'review_recommended' }) => educationApi.updateLearningProgress(assignmentId, chapterId, status), onSuccess: invalidate }),
     answer: useMutation({ mutationFn: ({ assignmentId, questionId, selectedOption }: { assignmentId: string; questionId: string; selectedOption: string }) => educationApi.answerLearningQuestion(assignmentId, questionId, selectedOption), onSuccess: invalidate }),
+  };
+}
+
+export function useStructureMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
+  return {
+    create: useMutation({
+      mutationFn: educationApi.createTextbookStructure,
+      onSuccess: invalidate,
+    }),
+    save: useMutation({
+      mutationFn: ({ structureId, units }: { structureId: string; units: TextbookStructureUnit[] }) =>
+        educationApi.updateTextbookStructure(structureId, units),
+      onSuccess: invalidate,
+    }),
+    accept: useMutation({
+      mutationFn: educationApi.acceptTextbookStructure,
+      onSuccess: invalidate,
+    }),
+    generateLesson: useMutation({
+      mutationFn: ({ knowledgePointId, autoGrading }: { knowledgePointId: string; autoGrading: boolean }) =>
+        educationApi.generateKnowledgePointLesson(knowledgePointId, autoGrading),
+      onSuccess: invalidate,
+    }),
+    saveLessonRevision: useMutation({
+      mutationFn: ({ lessonId, contentMarkdown }: { lessonId: string; contentMarkdown: string }) =>
+        educationApi.createKnowledgePointLessonRevision(lessonId, contentMarkdown),
+      onSuccess: invalidate,
+    }),
+    approveLesson: useMutation({
+      mutationFn: ({ lessonId, revisionId }: { lessonId: string; revisionId: string }) =>
+        educationApi.approveKnowledgePointLesson(lessonId, revisionId),
+      onSuccess: invalidate,
+    }),
+    publish: useMutation({
+      mutationFn: ({ versionId, structureId }: { versionId: string; structureId: string }) =>
+        educationApi.publishTextbookStructure(versionId, structureId),
+      onSuccess: invalidate,
+    }),
   };
 }

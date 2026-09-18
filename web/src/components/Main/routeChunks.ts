@@ -12,6 +12,8 @@ export const routeChunks = {
   createHomework: () => import('../../pages/Education/EducationPage'),
   textbookLibrary: () => import('../../pages/Education/TextbooksPage'),
   textbookDetail: () => import('../../pages/Education/TextbookDetailPage'),
+  textbookStructure: () => import('../../pages/Education/TextbookStructurePage'),
+  knowledgePointLessonReview: () => import('../../pages/Education/KnowledgePointLessonReviewPage'),
   studentLearning: () => import('../../pages/Education/StudentLearningPage'),
   settings: () => import('../../pages/Settings/Settings'),
 };

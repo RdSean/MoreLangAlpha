@@ -16,8 +16,11 @@
 - 删除 lesson 对 `vocabulary.json`、`evidence.json` 等固定 JSON 的依赖，英语词汇、数学公式和语文知识点都可在 Markdown 中按学科 Profile 自然表达。
 - 新增 lesson 生成、读取、人工修订、审批 API，以及结构发布接口；发布必须为每个 accepted 知识点冻结一份 approved lesson revision。
 - publication 现在明确支持 teaching package 或 structure 二选一，结构发布不再伪装成旧教学包。
+- 新增家长端教材结构审阅页：章节树、Unit 与知识点编辑、来源定位、添加/删除/拆分/合并知识点、保存和接受结构。
+- 新增家长端单知识点课程审阅页：Markdown 预览与人工修订、revision 历史、重新生成、逐课审批和结构发布。
+- Markdown 统一通过 `EducationMarkdown` 适配层渲染，后续替换渲染样式不影响业务页面。
 - 新结构模型不承担旧教学包双读、回填或迁移兼容；历史格式无法转换时直接重新加工。
-- 验证：迁移在线降级/升级与离线 SQL 生成通过；使用真实 `bbb` 内容版本完成结构任务排队、读取和清理；结构调整、验证、lesson revision、单知识点生成、审阅、发布、存储、API 与 PTC 边界聚焦测试 202 项通过，Ruff 通过。
+- 验证：迁移在线降级/升级与离线 SQL 生成通过；使用真实 `bbb` 内容版本完成结构任务排队、读取和清理；后端结构、lesson、审阅、发布、存储与 PTC 边界聚焦测试通过；前端审阅页、既有教材详情和查询契约测试 40 项通过，`pnpm typecheck`、`pnpm build`、ESLint 和 Ruff 通过。
 
 ### 修复：图书馆“教材资产”接口遇到真实 UUID 返回 500
 

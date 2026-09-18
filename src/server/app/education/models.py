@@ -419,6 +419,7 @@ class KnowledgePointLessonResponse(BaseModel):
     latest_revision_id: UUID | None = None
     knowledge_point_id: UUID
     knowledge_point_title: str
+    structure_id: UUID
     unit_id: UUID
     unit_title: str
     content_markdown: str

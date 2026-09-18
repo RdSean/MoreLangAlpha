@@ -158,6 +158,92 @@ export interface TextbookLibraryItem {
   assignment_count: number;
 }
 
+export interface StructureSourceRef {
+  source_id: string;
+  start: number;
+  end: number;
+  quote?: string | null;
+  heading_path?: string[];
+}
+
+export interface TextbookKnowledgePoint {
+  knowledge_point_id: string;
+  position: number;
+  slug: string;
+  title: string;
+  summary: string;
+  source_refs: StructureSourceRef[];
+  confidence: number;
+  status: 'review' | 'accepted' | 'blocked';
+}
+
+export interface TextbookStructureUnit {
+  unit_id: string;
+  position: number;
+  slug: string;
+  title: string;
+  summary: string;
+  unit_type: 'teaching' | 'front_matter' | 'reference' | 'appendix';
+  source_refs: StructureSourceRef[];
+  confidence: number;
+  status: 'review' | 'accepted' | 'blocked';
+  knowledge_points: TextbookKnowledgePoint[];
+}
+
+export interface TextbookStructure {
+  structure_id: string;
+  version_id: string;
+  sequence: number;
+  status: 'queued' | 'running' | 'review' | 'accepted' | 'failed' | 'cancelled';
+  schema_version: string;
+  processing_profile_id?: string | null;
+  processing_profile_sha256: string;
+  input_manifest_sha256: string;
+  source_revision: string;
+  created_at?: string | null;
+  reviewed_at?: string | null;
+  units: TextbookStructureUnit[];
+}
+
+export interface StructureGenerationJob {
+  generation_job_id: string;
+  version_id: string;
+  scope: 'structure' | 'lesson';
+  structure_id?: string | null;
+  status: 'queued' | 'preparing' | 'running' | 'validating' | 'completed' | 'failed' | 'cancelled';
+  attempt_count: number;
+  error_code?: string | null;
+  error_message?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  structure_sequence?: number | null;
+  structure_status?: string | null;
+  structure_bundle_prefix?: string | null;
+}
+
+export interface KnowledgePointLessonRevision {
+  revision_id: string;
+  revision: number;
+  format: 'markdown';
+  content_sha256: string;
+  size_bytes: number;
+  processing_profile_sha256: string;
+  created_at?: string | null;
+}
+
+export interface KnowledgePointLesson {
+  lesson_id: string;
+  status: 'draft' | 'generating' | 'review' | 'approved' | 'failed' | 'cancelled';
+  latest_revision_id?: string | null;
+  knowledge_point_id: string;
+  knowledge_point_title: string;
+  structure_id: string;
+  unit_id: string;
+  unit_title: string;
+  content_markdown: string;
+  revisions: KnowledgePointLessonRevision[];
+}
+
 export interface TextbookQuestion {
   question_id: string;
   position: number;

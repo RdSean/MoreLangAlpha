@@ -8,6 +8,7 @@ from typing import Any
 from src.server.database.education_textbooks import (
     accept_textbook_structure,
     get_generation_job_for_parent,
+    get_latest_textbook_structure_for_parent,
     get_teaching_input_for_parent,
     get_textbook_structure_for_parent,
     replace_structure_contents,
@@ -80,6 +81,17 @@ async def get_structure_for_parent(
     if not structure:
         raise TextbookNotFoundError("Textbook structure not found")
     return structure
+
+
+async def get_latest_structure_for_parent(
+    *, parent_user_id: str, content_version_id: str
+) -> dict[str, Any] | None:
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can review textbook structures")
+    return await get_latest_textbook_structure_for_parent(
+        parent_user_id=parent_user_id,
+        content_version_id=content_version_id,
+    )
 
 
 async def replace_structure_for_parent(
