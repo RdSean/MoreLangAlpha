@@ -829,6 +829,73 @@ async def write_structure_bundle(
     return prefix
 
 
+def kp_lesson_content_key(job: Mapping[str, Any]) -> str:
+    """Return the deterministic private key for one Markdown lesson revision."""
+    try:
+        content_sequence = int(job["content_version_sequence"])
+        structure_sequence = int(job["structure_sequence"])
+        unit_position = int(job["unit_position"])
+        knowledge_point_position = int(job["knowledge_point_position"])
+        lesson_revision = int(job["lesson_revision"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TeachingPackageStorageError(
+            "Knowledge-point lesson version is invalid"
+        ) from exc
+    if min(
+        content_sequence,
+        structure_sequence,
+        unit_position,
+        knowledge_point_position,
+        lesson_revision,
+    ) <= 0:
+        raise TeachingPackageStorageError(
+            "Knowledge-point lesson version is invalid"
+        )
+    return (
+        "education/{household}/{textbook}/v{content}/structures/v{structure}/"
+        "units/{unit_position:02d}-{unit_slug}/knowledge-points/"
+        "{knowledge_point_position:02d}-{knowledge_point_slug}/lessons/"
+        "v{lesson_revision}/lesson.md"
+    ).format(
+        household=_safe_component(job.get("household_id"), "household"),
+        textbook=_safe_component(job.get("slug"), "textbook"),
+        content=content_sequence,
+        structure=structure_sequence,
+        unit_position=unit_position,
+        unit_slug=_safe_component(job.get("unit_slug"), "unit"),
+        knowledge_point_position=knowledge_point_position,
+        knowledge_point_slug=_safe_component(
+            job.get("knowledge_point_slug"), "knowledge-point"
+        ),
+        lesson_revision=lesson_revision,
+    )
+
+
+async def write_kp_lesson_revision(
+    job: Mapping[str, Any], content: bytes
+) -> dict[str, Any]:
+    """Store one immutable Markdown lesson revision."""
+    if (
+        not isinstance(content, bytes)
+        or not content
+        or len(content) > _MAX_CANDIDATE_BYTES
+    ):
+        raise TeachingPackageStorageError("Knowledge-point lesson content is invalid")
+    try:
+        content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise TeachingPackageStorageError(
+            "Knowledge-point lesson content must be UTF-8"
+        ) from exc
+    content_key = kp_lesson_content_key(job)
+    await _put(content_key, content, "text/markdown; charset=utf-8")
+    return {
+        "content_key": content_key,
+        "content_sha256": hashlib.sha256(content).hexdigest(),
+        "size_bytes": len(content),
+    }
+
+
 async def write_teaching_asset_bundle(
     job: Mapping[str, Any], manifest: Mapping[str, Any], outputs: Mapping[str, bytes]
 ) -> str:

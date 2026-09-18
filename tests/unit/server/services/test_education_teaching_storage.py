@@ -586,6 +586,45 @@ async def test_write_structure_bundle_uses_only_private_education_keys(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_write_kp_lesson_revision_uses_private_revision_path(monkeypatch):
+    uploads: list[tuple[str, bytes, str]] = []
+
+    async def put(key: str, content: bytes, content_type: str) -> None:
+        uploads.append((key, content, content_type))
+
+    monkeypatch.setattr(education_teaching_storage, "_put", put)
+    job = {
+        **_job(),
+        "structure_sequence": 1,
+        "unit_position": 1,
+        "unit_slug": "unit-1-sports",
+        "knowledge_point_position": 2,
+        "knowledge_point_slug": "world-game",
+        "lesson_revision": 3,
+    }
+    content = "# 世界运动\n\n课程内容。\n".encode()
+
+    stored = await education_teaching_storage.write_kp_lesson_revision(
+        job,
+        content,
+    )
+
+    expected_key = (
+        "education/household-1/english-2/v1/structures/v1/"
+        "units/01-unit-1-sports/knowledge-points/02-world-game/"
+        "lessons/v3/lesson.md"
+    )
+    assert stored == {
+        "content_key": expected_key,
+        "content_sha256": sha256(content).hexdigest(),
+        "size_bytes": len(content),
+    }
+    assert uploads == [
+        (expected_key, content, "text/markdown; charset=utf-8")
+    ]
+
+
+@pytest.mark.asyncio
 async def test_download_complete_teaching_outputs_uses_only_all_service_derived_paths():
     sandbox = AsyncMock()
     paths = expected_teaching_asset_paths(education_teaching_storage.freeze_teaching_input(_job()))

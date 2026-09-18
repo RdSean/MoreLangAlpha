@@ -302,3 +302,67 @@ async def test_accept_structure_authorizes_parent_and_updates_children(
     assert "status = 'review'" in authorization_sql
     child_sql = mock_cursor.execute.call_args_list[1].args[0]
     assert "education_structure_knowledge_points" in child_sql
+
+
+@pytest.mark.asyncio
+async def test_create_kp_lesson_revision_updates_stable_lesson_latest_revision(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"knowledge_point_id": "kp-1"},
+        None,
+        {"revision": 1},
+        {"revision_id": "revision-1"},
+        {"lesson_id": "lesson-1", "latest_revision_id": "revision-1"},
+    ]
+
+    result = await education_textbooks.create_kp_lesson_revision(
+        knowledge_point_id="kp-1",
+        content_key="education/household/book/v1/structures/v1/lesson.md",
+        content_sha256="a" * 64,
+        size_bytes=100,
+        processing_profile_sha256="b" * 64,
+        generation_job_id="generation-1",
+    )
+
+    assert result["lesson_id"] == "lesson-1"
+    UUID(result["revision_id"])
+    revision_sql = mock_cursor.execute.call_args_list[4].args[0]
+    assert "INSERT INTO education_kp_lesson_revisions" in revision_sql
+    update_sql = mock_cursor.execute.call_args_list[5].args[0]
+    assert "latest_revision_id = %s" in update_sql
+
+
+@pytest.mark.asyncio
+async def test_freeze_publication_lessons_rejects_cross_structure_revision(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"publication_id": "publication-1", "version_id": "version-1"},
+        None,
+    ]
+
+    frozen = await education_textbooks.freeze_publication_lessons(
+        publication_id="publication-1",
+        lessons=[
+            {
+                "knowledge_point_id": "kp-1",
+                "lesson_revision_id": "revision-other-version",
+            }
+        ],
+    )
+
+    assert frozen is False
+    validation_sql = mock_cursor.execute.call_args_list[1].args[0]
+    assert "revisions.revision_id = %s" in validation_sql
+    assert "structures.version_id = %s" in validation_sql

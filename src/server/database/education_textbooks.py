@@ -1171,6 +1171,193 @@ async def accept_textbook_structure(
     return dict(structure) if structure else None
 
 
+async def create_kp_lesson_revision(
+    *,
+    knowledge_point_id: str,
+    content_key: str,
+    content_sha256: str,
+    size_bytes: int,
+    processing_profile_sha256: str,
+    generation_job_id: str | None,
+) -> dict[str, Any] | None:
+    """Create an immutable Markdown revision for one knowledge point."""
+    if not content_key.startswith("education/") or ".." in content_key:
+        raise ValueError("Lesson content key is invalid")
+    if not _SHA256.fullmatch(content_sha256):
+        raise ValueError("Lesson content sha256 is invalid")
+    if not _SHA256.fullmatch(processing_profile_sha256):
+        raise ValueError("Lesson processing profile sha256 is invalid")
+    if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes <= 0:
+        raise ValueError("Lesson content size is invalid")
+
+    revision_id = str(uuid4())
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT knowledge_point_id
+                    FROM education_structure_knowledge_points
+                    WHERE knowledge_point_id = %s
+                      AND status = 'accepted'
+                    FOR UPDATE
+                    """,
+                    (knowledge_point_id,),
+                )
+                if not await cur.fetchone():
+                    return None
+                await cur.execute(
+                    """
+                    SELECT lesson_id, latest_revision_id, status
+                    FROM education_kp_lessons
+                    WHERE knowledge_point_id = %s
+                    FOR UPDATE
+                    """,
+                    (knowledge_point_id,),
+                )
+                lesson = await cur.fetchone()
+                if lesson:
+                    lesson_id = str(lesson["lesson_id"])
+                else:
+                    lesson_id = str(uuid4())
+                    await cur.execute(
+                        """
+                        INSERT INTO education_kp_lessons (
+                            lesson_id, knowledge_point_id, status
+                        ) VALUES (%s, %s, 'review')
+                        """,
+                        (lesson_id, knowledge_point_id),
+                    )
+                await cur.execute(
+                    """
+                    SELECT COALESCE(MAX(revision), 0) + 1 AS revision
+                    FROM education_kp_lesson_revisions
+                    WHERE lesson_id = %s
+                    """,
+                    (lesson_id,),
+                )
+                revision = (await cur.fetchone())["revision"]
+                await cur.execute(
+                    """
+                    INSERT INTO education_kp_lesson_revisions (
+                        revision_id, lesson_id, revision, format, content_key,
+                        content_sha256, size_bytes, processing_profile_sha256,
+                        generation_job_id
+                    ) VALUES (
+                        %s, %s, %s, 'markdown', %s, %s, %s, %s, %s
+                    )
+                    RETURNING revision_id
+                    """,
+                    (
+                        revision_id,
+                        lesson_id,
+                        revision,
+                        content_key,
+                        content_sha256,
+                        size_bytes,
+                        processing_profile_sha256,
+                        generation_job_id,
+                    ),
+                )
+                await cur.fetchone()
+                await cur.execute(
+                    """
+                    UPDATE education_kp_lessons
+                    SET latest_revision_id = %s,
+                        status = 'review',
+                        reviewed_at = NULL
+                    WHERE lesson_id = %s
+                    RETURNING lesson_id, knowledge_point_id,
+                              latest_revision_id, status
+                    """,
+                    (revision_id, lesson_id),
+                )
+                updated = dict(await cur.fetchone())
+    return {
+        **updated,
+        "revision_id": revision_id,
+        "revision": revision,
+        "content_key": content_key,
+        "content_sha256": content_sha256,
+        "size_bytes": size_bytes,
+    }
+
+
+async def freeze_publication_lessons(
+    *,
+    publication_id: str,
+    lessons: list[dict[str, str]],
+) -> bool:
+    """Freeze exact approved lesson revisions into one publication snapshot."""
+    if not lessons:
+        return False
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT publications.publication_id, publications.version_id
+                    FROM education_textbook_publications AS publications
+                    WHERE publications.publication_id = %s
+                    FOR UPDATE
+                    """,
+                    (publication_id,),
+                )
+                publication = await cur.fetchone()
+                if not publication:
+                    return False
+                for lesson in lessons:
+                    knowledge_point_id = str(
+                        lesson.get("knowledge_point_id") or ""
+                    )
+                    lesson_revision_id = str(
+                        lesson.get("lesson_revision_id") or ""
+                    )
+                    if not knowledge_point_id or not lesson_revision_id:
+                        return False
+                    await cur.execute(
+                        """
+                        SELECT revisions.revision_id
+                        FROM education_kp_lesson_revisions AS revisions
+                        JOIN education_kp_lessons AS lessons
+                          ON lessons.lesson_id = revisions.lesson_id
+                        JOIN education_structure_knowledge_points AS knowledge_points
+                          ON knowledge_points.knowledge_point_id =
+                             lessons.knowledge_point_id
+                        JOIN education_structure_units AS units
+                          ON units.unit_id = knowledge_points.unit_id
+                        JOIN education_textbook_structures AS structures
+                          ON structures.structure_id = units.structure_id
+                        WHERE revisions.revision_id = %s
+                          AND lessons.knowledge_point_id = %s
+                          AND lessons.status = 'approved'
+                          AND structures.version_id = %s
+                        FOR UPDATE OF revisions, lessons
+                        """,
+                        (
+                            lesson_revision_id,
+                            knowledge_point_id,
+                            publication["version_id"],
+                        ),
+                    )
+                    if not await cur.fetchone():
+                        return False
+                    await cur.execute(
+                        """
+                        INSERT INTO education_publication_kp_lessons (
+                            publication_id, knowledge_point_id,
+                            lesson_revision_id
+                        ) VALUES (%s, %s, %s)
+                        """,
+                        (
+                            publication_id,
+                            knowledge_point_id,
+                            lesson_revision_id,
+                        ),
+                    )
+    return True
+
+
 async def fail_structure_generation(
     *,
     generation_job_id: str,
