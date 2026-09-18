@@ -968,6 +968,25 @@ async def write_kp_lesson_revision(
     }
 
 
+async def read_kp_lesson_revision(content_key: str) -> bytes:
+    """Read one private Markdown lesson revision by its database key."""
+    if (
+        not isinstance(content_key, str)
+        or not content_key.startswith("education/")
+        or ".." in content_key
+        or not content_key.endswith("/lesson.md")
+    ):
+        raise TeachingPackageStorageError("Knowledge-point lesson key is invalid")
+    content = await asyncio.to_thread(get_bytes, content_key)
+    if (
+        not isinstance(content, bytes)
+        or not content
+        or len(content) > _MAX_CANDIDATE_BYTES
+    ):
+        raise TeachingPackageStorageError("Knowledge-point lesson content is unavailable")
+    return content
+
+
 async def write_teaching_asset_bundle(
     job: Mapping[str, Any], manifest: Mapping[str, Any], outputs: Mapping[str, bytes]
 ) -> str:

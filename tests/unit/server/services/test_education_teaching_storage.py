@@ -654,6 +654,29 @@ async def test_stage_kp_lesson_inputs_contains_only_target_context():
 
 
 @pytest.mark.asyncio
+async def test_read_kp_lesson_revision_accepts_only_private_lesson_keys(monkeypatch):
+    async def to_thread(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(education_teaching_storage.asyncio, "to_thread", to_thread)
+    monkeypatch.setattr(
+        education_teaching_storage,
+        "get_bytes",
+        lambda _key: b"# Lesson\n",
+    )
+
+    content = await education_teaching_storage.read_kp_lesson_revision(
+        "education/household/book/v1/structures/v1/lessons/v1/lesson.md"
+    )
+
+    assert content == b"# Lesson\n"
+    with pytest.raises(education_teaching_storage.TeachingPackageStorageError):
+        await education_teaching_storage.read_kp_lesson_revision(
+            "education/../secret"
+        )
+
+
+@pytest.mark.asyncio
 async def test_download_kp_lesson_outputs_uses_only_fixed_paths():
     sandbox = AsyncMock()
     sandbox.adownload_file_bytes.side_effect = [
