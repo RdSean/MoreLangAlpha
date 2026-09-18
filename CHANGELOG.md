@@ -9,6 +9,13 @@
 - **修复**：service 投影在离开数据库层前把 UUID 字段统一转换为字符串，API 的 JSON 契约保持不变。
 - **验证**：新增真实 UUID 行的 service 回归；文档 teaching-usage 与 API 聚焦测试 22 项通过，Ruff 通过。
 
+### 修复：教材章节知识点超过 24 个时教学包被误判失败
+
+- **现象**：RE3 教材任务运行约 18 小时后 root run 完成，生成 25 个知识点、完整 concept index、coverage audit、toolkit 和 practice，但最终提示“教材教学包校验或归档失败”。
+- **根因**：`education_teaching_validation.py` 把所有字符串列表统一限制为最多 24 项；实际单章知识点达到 25 项时被拒绝，并非模型漏产出。
+- **修复**：将通用列表上限提高到 64，仍保留数量、长度、重复项、章节覆盖、哈希和知识点关联校验。使用停止 sandbox 中保存的真实产物离线重跑 `validate_teaching_assets()`，结果为 `chapters=1 / concepts=25 / coverage=complete`。
+- **验证**：教学包与完整资产聚焦测试 13 项通过，Ruff 通过。
+
 ## 2026-09-17
 
 ### 修复：普通对话页泄漏“家庭教材加工”工作区

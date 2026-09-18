@@ -54,6 +54,17 @@ def test_accepts_complete_hashed_teaching_package():
     assert validated["chapters"][0]["knowledge_points"] == ["核心概念"]
 
 
+def test_accepts_a_realistic_chapter_with_more_than_24_knowledge_points():
+    package = copy.deepcopy(VALID_PACKAGE)
+    knowledge_points = [f"知识点 {index}" for index in range(25)]
+    package["chapters"][0]["knowledge_points"] = knowledge_points
+    package["chapters"][0]["questions"][0]["knowledge_point"] = knowledge_points[0]
+
+    validated = validate_teaching_package(package, FROZEN_INPUT)
+
+    assert len(validated["chapters"][0]["knowledge_points"]) == 25
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [

@@ -11,7 +11,7 @@ from uuid import UUID
 _PACKAGE_FORMAT = "langalpha-managed-teaching-package/v1"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_TEXT_LENGTH = 30_000
-_MAX_LIST_ITEMS = 24
+_MAX_LIST_ITEMS = 64
 _MAX_QUESTIONS_PER_CHAPTER = 24
 
 
