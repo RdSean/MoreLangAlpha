@@ -65,6 +65,27 @@ def test_accepts_a_realistic_chapter_with_more_than_24_knowledge_points():
     assert len(validated["chapters"][0]["knowledge_points"]) == 25
 
 
+def test_accepts_one_question_for_each_realistic_knowledge_point():
+    package = copy.deepcopy(VALID_PACKAGE)
+    knowledge_points = [f"知识点 {index}" for index in range(25)]
+    package["chapters"][0]["knowledge_points"] = knowledge_points
+    package["chapters"][0]["questions"] = [
+        {
+            "position": index + 1,
+            "prompt": f"理解知识点 {index + 1}",
+            "options": {"A": "正确", "B": "错误"},
+            "correct_option": "A",
+            "explanation": "解释",
+            "knowledge_point": knowledge_points[index],
+        }
+        for index in range(25)
+    ]
+
+    validated = validate_teaching_package(package, FROZEN_INPUT)
+
+    assert len(validated["chapters"][0]["questions"]) == 25
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
