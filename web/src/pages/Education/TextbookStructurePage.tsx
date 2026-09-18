@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import ProcessingProfileDialog, { type ProcessingProfileValue } from './components/ProcessingProfileDialog';
+import TextbookWorkflowStepper, { type TextbookWorkflowStep } from './components/TextbookWorkflowStepper';
 import { useLatestTextbookStructure, useStructureGenerationJob, useStructureMutations } from './queries';
 import type { TextbookKnowledgePoint, TextbookStructureUnit } from './types';
 
@@ -154,7 +155,7 @@ export default function TextbookStructurePage() {
   }
 
   if (!structure.data && !jobId) {
-    return <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page"><div className="mx-auto max-w-3xl px-6 py-12"><Link to={`/education/textbooks/${textbookId}`} className="text-sm text-muted-foreground">返回教材</Link><h1 className="title-font mt-6 text-2xl font-semibold">生成教材结构</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">先从 Markdown 中识别 Unit、知识点和来源定位。非教学单元可以没有知识点，生成后再由你审阅。</p><Button className="mt-6" onClick={() => setProfileOpen(true)} disabled={mutations.create.isPending}><WandSparkles className="mr-2 size-4" />{mutations.create.isPending ? '正在创建任务' : '开始结构分析'}</Button><ProcessingProfileDialog open={profileOpen} onOpenChange={setProfileOpen} onConfirm={createStructure} /></div></main>;
+    return <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page"><div className="mx-auto max-w-3xl px-6 py-12"><Link to={`/textbooks/${textbookId}`} className="text-sm text-muted-foreground">返回教材</Link><h1 className="title-font mt-6 text-2xl font-semibold">生成教材结构</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">先从 Markdown 中识别 Unit、知识点和来源定位。非教学单元可以没有知识点，生成后再由你审阅。</p><Button className="mt-6" onClick={() => setProfileOpen(true)} disabled={mutations.create.isPending}><WandSparkles className="mr-2 size-4" />{mutations.create.isPending ? '正在创建任务' : '开始结构分析'}</Button><ProcessingProfileDialog open={profileOpen} onOpenChange={setProfileOpen} onConfirm={createStructure} /></div></main>;
   }
 
   if (!structure.data && generation.data) {
@@ -162,14 +163,66 @@ export default function TextbookStructurePage() {
   }
 
   const data = structure.data;
-  if (!data || !selectedUnit) return null;
+  if (!data) return null;
   const readOnly = data.status === 'accepted';
+  const lessonSummary = data.lesson_summary ?? { total: 0, accepted: 0, generated: 0, approved: 0 };
+  const steps: TextbookWorkflowStep[] = [
+    { id: 'content', label: '内容准备', status: 'completed' },
+    {
+      id: 'structure',
+      label: '结构分析',
+      status:
+        data.status === 'failed'
+          ? 'failed'
+          : data.status === 'queued' || data.status === 'running'
+            ? 'in_progress'
+            : 'completed',
+    },
+    {
+      id: 'lessons',
+      label: '知识点课程',
+      status:
+        data.status === 'accepted'
+          ? lessonSummary.accepted > 0 &&
+            lessonSummary.approved === lessonSummary.accepted
+            ? 'completed'
+            : 'in_progress'
+          : 'pending',
+    },
+    { id: 'publish', label: '发布', status: 'pending' },
+  ];
+  if (!selectedUnit) {
+    return (
+      <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page">
+        <div className="mx-auto w-full max-w-3xl px-6 py-12">
+          <Link to={`/textbooks/${textbookId}`} className="text-sm text-muted-foreground">返回教材</Link>
+          <div className="mt-6">
+            <TextbookWorkflowStepper steps={steps} />
+          </div>
+          <h1 className="title-font mt-8 text-2xl font-semibold">结构暂无可审阅内容</h1>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            {data.status === 'failed'
+              ? '结构分析没有生成可审阅的 Unit，请重新运行结构分析。'
+              : '结构分析尚未产生 Unit。'}
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="textbook-structure-page">
+      <div
+        className="mx-auto w-full max-w-[1500px] border-b px-4 py-5 sm:px-8"
+        style={{ borderColor: 'var(--color-border-muted)' }}
+      >
+        <Link to={`/textbooks/${textbookId}`} className="text-sm text-muted-foreground">返回教材</Link>
+        <div className="mt-5">
+          <TextbookWorkflowStepper steps={steps} />
+        </div>
+      </div>
       <div className="mx-auto grid w-full max-w-[1500px] lg:grid-cols-[280px_minmax(0,1fr)_280px]">
         <aside className="border-b px-4 py-6 lg:min-h-[calc(100dvh-80px)] lg:border-b-0 lg:border-r" style={{ borderColor: 'var(--color-border-muted)' }}>
-          <Link to={`/education/textbooks/${textbookId}`} className="text-sm text-muted-foreground">返回教材</Link>
           <h1 className="title-font mt-5 text-lg font-semibold">教材结构</h1>
           <p className="mt-1 font-mono text-xs text-muted-foreground">v{data.sequence} · {data.status}</p>
           <nav className="mt-5 grid gap-1" aria-label="结构单元">
@@ -186,7 +239,7 @@ export default function TextbookStructurePage() {
           <div className="mt-3 border-y" style={{ borderColor: 'var(--color-border-muted)' }}>
             {selectedUnit.knowledge_points.map((point) => <div key={point.knowledge_point_id} className="grid gap-3 border-b px-3 py-4 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto]" style={{ borderColor: 'var(--color-border-muted)' }}>
               <label className="grid gap-1.5"><span className="sr-only">知识点标题</span><input value={point.title} disabled={readOnly} onChange={(event) => updateKnowledgePoint(point.knowledge_point_id, { title: event.target.value })} className="min-h-10 border bg-background px-3 text-sm font-medium" /><span className="font-mono text-[11px] text-muted-foreground">{point.source_refs.map((ref) => `${ref.source_id} [${ref.start}:${ref.end}]`).join(' · ')}</span></label>
-              <div className="flex items-center gap-1"><Link to={`/education/textbooks/${textbookId}/versions/${versionId}/knowledge/${point.knowledge_point_id}`} className="inline-flex h-10 w-10 items-center justify-center rounded-md hover:bg-[var(--color-bg-hover)]" aria-label={`查看课程 ${point.title}`}><BookOpenCheck className="size-4" /></Link><Button type="button" size="icon" variant="ghost" aria-label={`拆分 ${point.title}`} disabled={readOnly} onClick={() => splitKnowledgePoint(point)}><Scissors className="size-4" /></Button><Button type="button" size="icon" variant="ghost" aria-label={`合并 ${point.title}`} disabled={readOnly || selectedUnit.knowledge_points[0]?.knowledge_point_id === point.knowledge_point_id} onClick={() => mergeKnowledgePointWithPrevious(point)}><GitMerge className="size-4" /></Button><Button type="button" size="icon" variant="ghost" aria-label={`删除 ${point.title}`} disabled={readOnly} onClick={() => deleteKnowledgePoint(point.knowledge_point_id)}><Trash2 className="size-4" /></Button></div>
+              <div className="flex items-center gap-1"><Link to={`/textbooks/${textbookId}/versions/${versionId}/knowledge/${point.knowledge_point_id}`} className="inline-flex h-10 w-10 items-center justify-center rounded-md hover:bg-[var(--color-bg-hover)]" aria-label={`查看课程 ${point.title}`}><BookOpenCheck className="size-4" /></Link><Button type="button" size="icon" variant="ghost" aria-label={`拆分 ${point.title}`} disabled={readOnly} onClick={() => splitKnowledgePoint(point)}><Scissors className="size-4" /></Button><Button type="button" size="icon" variant="ghost" aria-label={`合并 ${point.title}`} disabled={readOnly || selectedUnit.knowledge_points[0]?.knowledge_point_id === point.knowledge_point_id} onClick={() => mergeKnowledgePointWithPrevious(point)}><GitMerge className="size-4" /></Button><Button type="button" size="icon" variant="ghost" aria-label={`删除 ${point.title}`} disabled={readOnly} onClick={() => deleteKnowledgePoint(point.knowledge_point_id)}><Trash2 className="size-4" /></Button></div>
             </div>)}
           </div>
         </section>

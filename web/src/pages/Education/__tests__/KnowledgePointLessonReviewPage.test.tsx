@@ -32,10 +32,10 @@ vi.mock('../queries', () => ({
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={['/education/textbooks/textbook-1/versions/version-1/knowledge/kp-1']}>
+    <MemoryRouter initialEntries={['/textbooks/textbook-1/versions/version-1/knowledge/kp-1']}>
       <Routes>
         <Route
-          path="/education/textbooks/:textbookId/versions/:versionId/knowledge/:knowledgePointId"
+          path="/textbooks/:textbookId/versions/:versionId/knowledge/:knowledgePointId"
           element={<KnowledgePointLessonReviewPage />}
         />
       </Routes>

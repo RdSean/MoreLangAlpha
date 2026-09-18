@@ -1,4 +1,4 @@
-import { Blocks, BookOpenCheck, LayoutDashboard, LibraryBig, MessagesSquare, Settings, Timer } from 'lucide-react';
+import { Blocks, BookMarked, BookOpenCheck, LayoutDashboard, LibraryBig, MessagesSquare, Settings, Timer } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 export interface NavItem {
@@ -16,6 +16,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: '/dashboard', icon: LayoutDashboard, labelKey: 'sidebar.dashboard', match: 'exact-or-sub' },
   { key: '/chat', icon: MessagesSquare, labelKey: 'sidebar.chatAgent', match: 'prefix' },
   { key: '/documents', icon: LibraryBig, labelKey: 'sidebar.documents', match: 'exact-or-sub' },
+  { key: '/textbooks', icon: BookMarked, labelKey: 'sidebar.textbooks', match: 'exact-or-sub' },
   { key: '/automations', icon: Timer, labelKey: 'sidebar.automations', match: 'exact-or-sub' },
   { key: '/education', icon: BookOpenCheck, labelKey: 'sidebar.education', match: 'exact-or-sub' },
   { key: '/plugins', icon: Blocks, labelKey: 'sidebar.plugins', match: 'exact-or-sub' },
@@ -34,7 +35,7 @@ export function getVisibleNavItems(
   options: { includeSettings?: boolean } = {},
 ): NavItem[] {
   const items = role === 'student'
-    ? NAV_ITEMS.filter((item) => item.key !== '/automations' && item.key !== '/documents')
+    ? NAV_ITEMS.filter((item) => item.key !== '/automations' && item.key !== '/documents' && item.key !== '/textbooks')
     : NAV_ITEMS;
   return options.includeSettings && role !== 'student' ? [...items, SETTINGS_ITEM] : items;
 }

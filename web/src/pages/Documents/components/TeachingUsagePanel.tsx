@@ -71,7 +71,7 @@ export default function TeachingUsagePanel({ documentId }: TeachingUsagePanelPro
 
 function TeachingUsageItem({ usage }: { usage: DocumentTeachingUsage }) {
   const { t } = useTranslation();
-  const textbookPath = `/education/textbooks/${encodeURIComponent(usage.textbook_id)}`;
+  const textbookPath = `/textbooks/${encodeURIComponent(usage.textbook_id)}`;
   const canOpenAssets = usage.has_asset_manifest
     && (usage.status === 'review' || usage.is_published);
   const displayStatus: DisplayStatus | null = usage.is_published ? 'published' : (usage.status ?? null);

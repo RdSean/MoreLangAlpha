@@ -33,6 +33,9 @@ vi.mock('@/pages/Documents/DocumentDetailPage', () => ({
 vi.mock('@/pages/Education/EducationPage', () => ({
   default: () => <div data-testid="education-page" />,
 }));
+vi.mock('@/pages/Education/TextbooksPage', () => ({
+  default: () => <div data-testid="textbook-library-page" />,
+}));
 vi.mock('@/pages/Education/StudentFlashChat', () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
@@ -54,6 +57,7 @@ describe('generic application routes', () => {
       '/dashboard',
       '/chat',
       '/documents',
+      '/textbooks',
       '/automations',
       '/education',
       // Added by the platform-core merge: the Plugins/MCP/Skills/Vault
@@ -72,6 +76,7 @@ describe('generic application routes', () => {
     ['/chat', 'chat-page'],
     ['/documents', 'documents-page'],
     ['/documents/doc-1', 'document-detail-page'],
+    ['/textbooks', 'textbook-library-page'],
     ['/automations', 'automations-page'],
     ['/education', 'education-page'],
     ['/settings', 'settings-page'],

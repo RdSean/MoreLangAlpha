@@ -52,10 +52,10 @@ function Main() {
         <Route path="/connectors" element={<LegacyConnectorsRedirect />} />
         <Route path="/education" element={<Education />} />
         <Route path="/education/tasks/new" element={<CreateHomework />} />
-        <Route path="/education/textbooks" element={<TextbookLibrary />} />
-        <Route path="/education/textbooks/:textbookId" element={<TextbookDetail />} />
-        <Route path="/education/textbooks/:textbookId/versions/:versionId/structure" element={<TextbookStructure />} />
-        <Route path="/education/textbooks/:textbookId/versions/:versionId/knowledge/:knowledgePointId" element={<KnowledgePointLessonReview />} />
+        <Route path="/textbooks" element={<TextbookLibrary />} />
+        <Route path="/textbooks/:textbookId" element={<TextbookDetail />} />
+        <Route path="/textbooks/:textbookId/versions/:versionId/structure" element={<TextbookStructure />} />
+        <Route path="/textbooks/:textbookId/versions/:versionId/knowledge/:knowledgePointId" element={<KnowledgePointLessonReview />} />
         <Route path="/education/learn/:assignmentId" element={<StudentTextbookLearning />} />
         <Route path="/education/learn/:assignmentId/units/:unitId" element={<StudentTextbookLearning />} />
         <Route path="/education/learn/:assignmentId/knowledge/:knowledgePointId" element={<StudentTextbookLearning />} />

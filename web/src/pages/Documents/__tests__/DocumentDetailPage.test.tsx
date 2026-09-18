@@ -72,7 +72,7 @@ function renderPage() {
       <Routes>
         <Route path="/documents/:documentId" element={<DocumentDetailPage />} />
         <Route
-          path="/education/textbooks/:textbookId"
+          path="/textbooks/:textbookId"
           element={<output data-testid="textbook-route">textbook detail route</output>}
         />
       </Routes>
@@ -175,11 +175,11 @@ describe('DocumentDetailPage', () => {
 
     expect(screen.getByRole('link', { name: 'Reading Explorer 3' })).toHaveAttribute(
       'href',
-      '/education/textbooks/textbook-1',
+      '/textbooks/textbook-1',
     );
     expect(screen.getByRole('link', { name: 'Published Reader' })).toHaveAttribute(
       'href',
-      '/education/textbooks/textbook-2',
+      '/textbooks/textbook-2',
     );
     expect(screen.getByText('内容版本 v2')).toBeInTheDocument();
     expect(screen.getByText('内容版本 v3')).toBeInTheDocument();

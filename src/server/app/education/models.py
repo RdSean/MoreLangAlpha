@@ -385,6 +385,13 @@ class StructureUnitResponse(StructureUnitWrite):
     knowledge_points: list[StructureKnowledgePointResponse]
 
 
+class TextbookLessonSummaryResponse(BaseModel):
+    total: int = 0
+    accepted: int = 0
+    generated: int = 0
+    approved: int = 0
+
+
 class TextbookStructureResponse(BaseModel):
     structure_id: UUID
     version_id: UUID
@@ -398,6 +405,9 @@ class TextbookStructureResponse(BaseModel):
     created_at: datetime | None = None
     reviewed_at: datetime | None = None
     units: list[StructureUnitResponse]
+    lesson_summary: TextbookLessonSummaryResponse = Field(
+        default_factory=TextbookLessonSummaryResponse
+    )
 
 
 class StructureGenerationJobResponse(BaseModel):

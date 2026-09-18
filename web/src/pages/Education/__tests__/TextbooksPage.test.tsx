@@ -52,9 +52,9 @@ describe('TextbooksPage', () => {
     function LocationProbe() {
       return <output data-testid="location">{useLocation().pathname}</output>;
     }
-    render(<MemoryRouter initialEntries={['/education/textbooks']}><Routes><Route path="/education/textbooks" element={<TextbooksPage />} /><Route path="*" element={<LocationProbe />} /></Routes></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/textbooks']}><Routes><Route path="/textbooks" element={<TextbooksPage />} /><Route path="*" element={<LocationProbe />} /></Routes></MemoryRouter>);
 
-    expect(screen.getByRole('heading', { name: '家庭教材库' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '教材加工' })).toBeInTheDocument();
     expect(screen.getByText('英语第二册')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '新建教材' }));
@@ -62,7 +62,7 @@ describe('TextbooksPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建教材' }));
 
     await waitFor(() => expect(state.create).toHaveBeenCalledWith({ title: '语文上册' }));
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/education/textbooks/textbook-2'));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/textbooks/textbook-2'));
   });
 
   it('uses a compact table that exposes the current version state', () => {

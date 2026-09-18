@@ -794,6 +794,30 @@ async def get_textbook_structure_for_parent(
             for unit in units:
                 unit["knowledge_points"] = by_unit.get(str(unit["unit_id"]), [])
             result["units"] = units
+            await cur.execute(
+                """
+                SELECT COUNT(*) AS total,
+                       COUNT(*) FILTER (
+                           WHERE knowledge_points.status = 'accepted'
+                       ) AS accepted,
+                       COUNT(lessons.lesson_id) FILTER (
+                           WHERE lessons.latest_revision_id IS NOT NULL
+                       ) AS generated,
+                       COUNT(*) FILTER (
+                           WHERE lessons.status = 'approved'
+                             AND lessons.latest_revision_id IS NOT NULL
+                       ) AS approved
+                FROM education_structure_units AS units
+                JOIN education_structure_knowledge_points AS knowledge_points
+                  ON knowledge_points.unit_id = units.unit_id
+                LEFT JOIN education_kp_lessons AS lessons
+                  ON lessons.knowledge_point_id =
+                     knowledge_points.knowledge_point_id
+                WHERE units.structure_id = %s
+                """,
+                (structure_id,),
+            )
+            result["lesson_summary"] = dict(await cur.fetchone())
     return result
 
 

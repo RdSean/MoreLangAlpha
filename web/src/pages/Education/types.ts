@@ -203,6 +203,12 @@ export interface TextbookStructure {
   created_at?: string | null;
   reviewed_at?: string | null;
   units: TextbookStructureUnit[];
+  lesson_summary: {
+    total: number;
+    accepted: number;
+    generated: number;
+    approved: number;
+  };
 }
 
 export interface StructureGenerationJob {

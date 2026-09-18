@@ -55,6 +55,12 @@ vi.mock('../queries', () => ({
           ],
         },
       ],
+      lesson_summary: {
+        total: 2,
+        accepted: 0,
+        generated: 0,
+        approved: 0,
+      },
     },
     isLoading: false,
     refetch,
@@ -69,10 +75,10 @@ vi.mock('../queries', () => ({
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={['/education/textbooks/textbook-1/versions/version-1/structure']}>
+    <MemoryRouter initialEntries={['/textbooks/textbook-1/versions/version-1/structure']}>
       <Routes>
         <Route
-          path="/education/textbooks/:textbookId/versions/:versionId/structure"
+          path="/textbooks/:textbookId/versions/:versionId/structure"
           element={<TextbookStructurePage />}
         />
       </Routes>

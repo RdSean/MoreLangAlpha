@@ -41,4 +41,14 @@ describe('library navigation visibility', () => {
     expect(getVisibleNavItems('student').map((item) => item.key)).not.toContain('/documents');
     expect(getVisibleNavItems('student', { includeSettings: true }).map((item) => item.key)).not.toContain('/documents');
   });
+
+  it('shows textbook processing as a parent-only top-level entry', () => {
+    expect(getVisibleNavItems('parent').find((item) => item.key === '/textbooks')).toMatchObject({
+      key: '/textbooks',
+      labelKey: 'sidebar.textbooks',
+    });
+    expect(enUS.sidebar.textbooks).toBe('Textbooks');
+    expect(zhCN.sidebar.textbooks).toBe('教材加工');
+    expect(getVisibleNavItems('student').map((item) => item.key)).not.toContain('/textbooks');
+  });
 });

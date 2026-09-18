@@ -81,7 +81,7 @@ export default function KnowledgePointLessonReviewPage() {
     return (
       <main className="h-full overflow-y-auto bg-canvas" data-testid="knowledge-point-lesson-review">
         <div className="mx-auto max-w-3xl px-6 py-12">
-          <Link to={`/education/textbooks/${textbookId}/versions/${versionId}/structure`} className="text-sm text-muted-foreground">返回结构审阅</Link>
+          <Link to={`/textbooks/${textbookId}/versions/${versionId}/structure`} className="text-sm text-muted-foreground">返回结构审阅</Link>
           <h1 className="title-font mt-6 text-2xl font-semibold">生成知识点课程</h1>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">课程将以 `lesson.md` 生成，只有需要自动判题时才额外生成结构化练习。</p>
           <label className="mt-5 flex items-center gap-3 text-sm"><input type="checkbox" checked={autoGrading} onChange={(event) => setAutoGrading(event.target.checked)} />自动判题</label>
@@ -100,7 +100,7 @@ export default function KnowledgePointLessonReviewPage() {
         <section className="min-w-0 px-5 py-7 lg:px-10">
           <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-5" style={{ borderColor: 'var(--color-border-muted)' }}>
             <div>
-              <Link to={`/education/textbooks/${textbookId}/versions/${versionId}/structure`} className="text-sm text-muted-foreground">返回结构审阅</Link>
+              <Link to={`/textbooks/${textbookId}/versions/${versionId}/structure`} className="text-sm text-muted-foreground">返回结构审阅</Link>
               <p className="mt-4 font-mono text-xs text-muted-foreground">KNOWLEDGE POINT LESSON</p>
               <h1 className="title-font mt-2 text-2xl font-semibold">{lesson.data.knowledge_point_title}</h1>
               <p className="mt-1 text-sm text-muted-foreground">{lesson.data.unit_title} · {lesson.data.status}</p>
@@ -122,7 +122,7 @@ export default function KnowledgePointLessonReviewPage() {
           <div className="mt-4 grid gap-3">{lesson.data.revisions.map((revision) => <div key={revision.revision_id} className="border-l-2 pl-3 text-sm" style={{ borderColor: revision.revision_id === lesson.data?.latest_revision_id ? 'var(--color-accent-primary)' : 'var(--color-border-muted)' }}><p className="font-medium">v{revision.revision}</p><p className="mt-1 font-mono text-[11px] text-muted-foreground">{revision.size_bytes} bytes · {revision.content_sha256.slice(0, 12)}</p></div>)}</div>
           <div className="mt-8 grid gap-2">
             <Button onClick={() => void publish()} disabled={mutations.publish.isPending}><Send className="mr-2 size-4" />发布结构教材</Button>
-            <Link to={`/education/textbooks/${textbookId}`} className="inline-flex min-h-9 items-center justify-center text-sm text-muted-foreground"><Download className="mr-2 size-4" />返回教材详情</Link>
+            <Link to={`/textbooks/${textbookId}`} className="inline-flex min-h-9 items-center justify-center text-sm text-muted-foreground"><Download className="mr-2 size-4" />返回教材详情</Link>
           </div>
         </aside>
       </div>

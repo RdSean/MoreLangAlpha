@@ -10,6 +10,7 @@ export const routeChunks = {
   plugins: () => import('../../pages/Plugins/Plugins'),
   connectors: () => import('../../pages/Plugins/Plugins'),
   createHomework: () => import('../../pages/Education/EducationPage'),
+  textbooks: () => import('../../pages/Education/TextbooksPage'),
   textbookLibrary: () => import('../../pages/Education/TextbooksPage'),
   textbookDetail: () => import('../../pages/Education/TextbookDetailPage'),
   textbookStructure: () => import('../../pages/Education/TextbookStructurePage'),
