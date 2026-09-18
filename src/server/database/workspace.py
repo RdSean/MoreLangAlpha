@@ -291,6 +291,12 @@ async def get_workspaces_for_user(
         status_filter = "" if include_deleted else "AND status != 'deleted'"
         # Exclude flash workspaces from gallery listings unless explicitly requested
         flash_filter = "" if include_flash else "AND status != 'flash'"
+        # Managed education workspaces are service-owned execution rows. Their
+        # threads and sandboxes are intentionally not reachable through the
+        # ordinary workspace/chat surface.
+        managed_filter = (
+            "AND (config IS NULL OR config->'managed_execution' IS NULL)"
+        )
 
         # Build ORDER BY based on sort mode
         if sort_by == "activity":
@@ -307,7 +313,7 @@ async def get_workspaces_for_user(
                 f"""
                 SELECT COUNT(*) as total
                 FROM workspaces
-                WHERE user_id = %s {status_filter} {flash_filter}
+                WHERE user_id = %s {status_filter} {flash_filter} {managed_filter}
                 """,
                 (user_id,),
             )
@@ -319,7 +325,7 @@ async def get_workspaces_for_user(
                 f"""
                 SELECT {_WS_COLS}
                 FROM workspaces
-                WHERE user_id = %s {status_filter} {flash_filter}
+                WHERE user_id = %s {status_filter} {flash_filter} {managed_filter}
                 ORDER BY {order_clause}
                 LIMIT %s OFFSET %s
                 """,

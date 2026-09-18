@@ -252,6 +252,7 @@ async def test_get_workspaces_for_user(ws_mock_db, mock_cursor):
     # Verify flash filter is applied
     count_sql = mock_cursor.execute.call_args_list[0][0][0]
     assert "status != 'flash'" in count_sql
+    assert "config->'managed_execution' IS NULL" in count_sql
 
 
 @pytest.mark.asyncio
