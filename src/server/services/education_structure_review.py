@@ -178,6 +178,7 @@ async def replace_structure_for_parent(
     return await replace_structure_contents(
         structure_id=structure_id,
         units=validated["units"],
+        warnings=list(validated.get("warnings", [])),
     )
 
 

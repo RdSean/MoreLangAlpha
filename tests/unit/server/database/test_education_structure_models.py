@@ -208,6 +208,58 @@ async def test_replace_structure_contents_preserves_ids_for_matching_slugs(
 
 
 @pytest.mark.asyncio
+async def test_replace_structure_contents_persists_validation_warnings(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"structure_id": "structure-1"},
+        {"unit_id": "unit-1"},
+        {"knowledge_point_id": "kp-1"},
+    ]
+
+    await education_textbooks.replace_structure_contents(
+        structure_id="structure-1",
+        units=[
+            {
+                "position": 1,
+                "slug": "unit-1",
+                "title": "Unit 1",
+                "summary": "",
+                "unit_type": "teaching",
+                "source_refs": [],
+                "confidence": 0.9,
+                "status": "review",
+                "knowledge_points": [
+                    {
+                        "position": 1,
+                        "slug": "world-game",
+                        "title": "世界运动",
+                        "summary": "",
+                        "source_refs": [],
+                        "confidence": 0.9,
+                        "status": "review",
+                    }
+                ],
+            }
+        ],
+        warnings=["source_quote_unresolved"],
+    )
+
+    warning_call = next(
+        call
+        for call in mock_cursor.execute.call_args_list
+        if "SET validation_warnings = %s" in call.args[0]
+    )
+    warning_payload = warning_call.args[1][0]
+    assert warning_payload.obj == ["source_quote_unresolved"]
+
+
+@pytest.mark.asyncio
 async def test_create_generation_job_requires_exactly_one_target(
     mock_connection, mock_cursor, monkeypatch
 ):

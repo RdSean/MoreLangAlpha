@@ -276,6 +276,7 @@ async def finalize_structure_generation(
         await replace_structure_contents(
             structure_id=str(job["structure_id"]),
             units=validated["units"],
+            warnings=list(validated.get("warnings", [])),
         )
         bundle_prefix = await write_structure_bundle(job, validated)
         completed = await complete_structure_generation(

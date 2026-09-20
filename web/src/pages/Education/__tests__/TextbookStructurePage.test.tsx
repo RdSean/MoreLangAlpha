@@ -20,6 +20,11 @@ vi.mock('../queries', () => ({
       processing_profile_sha256: 'a'.repeat(64),
       input_manifest_sha256: 'b'.repeat(64),
       source_revision: 'c'.repeat(64),
+      validation_warnings: [
+        'source_quote_unresolved',
+        'source_quote_unresolved',
+        'unit_type_promoted',
+      ],
       units: [
         {
           unit_id: 'unit-1',
@@ -97,6 +102,10 @@ describe('TextbookStructurePage', () => {
     expect(screen.getByDisplayValue('Unit 1: Sports')).toBeInTheDocument();
     expect(screen.getByDisplayValue('世界运动')).toBeInTheDocument();
     expect(screen.getByDisplayValue('足球之爱')).toBeInTheDocument();
+    expect(screen.getByTestId('structure-warning-summary')).toHaveTextContent(
+      '部分引用暂时无法定位到解析 Markdown',
+    );
+    expect(screen.getByTestId('structure-warning-summary')).toHaveTextContent('（2 处）');
   });
 
   it('supports add, split, merge, and delete knowledge-point actions', async () => {

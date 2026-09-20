@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpenCheck, CheckCircle2, GitMerge, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
+import { AlertTriangle, BookOpenCheck, CheckCircle2, GitMerge, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -10,6 +10,19 @@ import type { TextbookKnowledgePoint, TextbookStructureUnit } from './types';
 
 function messageOf(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+const structureWarningLabels: Record<string, string> = {
+  knowledge_point_source_refs_missing: '部分知识点没有来源引用，已保留内容供人工确认。',
+  source_quote_ambiguous_first_match_used: '部分引用在原文中出现多次，已采用首个匹配位置。',
+  source_quote_unresolved: '部分引用暂时无法定位到解析 Markdown，原文摘录已保留。',
+  unit_slug_deduplicated: '部分 Unit 标识重复，已自动生成唯一标识。',
+  unit_source_refs_missing: '部分 Unit 没有来源引用，已保留内容供人工确认。',
+  unit_type_promoted: '部分 Unit 类型无法识别，已按教学单元处理。',
+};
+
+function structureWarningLabel(warning: string) {
+  return structureWarningLabels[warning] ?? `已自动处理：${warning.replaceAll('_', ' ')}`;
 }
 
 function cloneUnits(units: TextbookStructureUnit[]): TextbookStructureUnit[] {
@@ -190,6 +203,10 @@ export default function TextbookStructurePage() {
   if (!data) return null;
   const readOnly = data.status === 'accepted';
   const lessonSummary = data.lesson_summary ?? { total: 0, accepted: 0, generated: 0, approved: 0 };
+  const warningCounts = new Map<string, number>();
+  for (const warning of data.validation_warnings ?? []) {
+    warningCounts.set(warning, (warningCounts.get(warning) ?? 0) + 1);
+  }
   const steps: TextbookWorkflowStep[] = [
     { id: 'content', label: '内容准备', status: 'completed' },
     {
@@ -251,6 +268,29 @@ export default function TextbookStructurePage() {
           <TextbookWorkflowStepper steps={steps} />
         </div>
       </div>
+      {warningCounts.size > 0 && (
+        <div
+          className="border-b px-4 py-3 sm:px-8"
+          data-testid="structure-warning-summary"
+          style={{ borderColor: 'var(--color-border-muted)', background: 'var(--color-warning-bg, color-mix(in srgb, var(--color-warning, #f59e0b) 8%, transparent))' }}
+        >
+          <div className="mx-auto flex w-full max-w-[1500px] items-start gap-3">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" style={{ color: 'var(--color-warning, #f59e0b)' }} />
+            <div className="min-w-0">
+              <p className="text-sm font-medium">结构已生成，但有 {warningCounts.size} 类需要留意的问题</p>
+              <ul className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground">
+                {[...warningCounts.entries()].map(([warning, count]) => (
+                  <li key={warning}>
+                    {structureWarningLabel(warning)}
+                    {count > 1 ? `（${count} 处）` : ''}
+                    <span className="ml-2 font-mono text-[10px] opacity-70">{warning}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="mx-auto grid w-full max-w-[1500px] lg:grid-cols-[280px_minmax(0,1fr)_280px]">
         <aside className="border-b px-4 py-6 lg:min-h-[calc(100dvh-80px)] lg:border-b-0 lg:border-r" style={{ borderColor: 'var(--color-border-muted)' }}>
           <h1 className="title-font mt-5 text-lg font-semibold">教材结构</h1>

@@ -40,6 +40,7 @@ def _structure() -> dict:
         "source_revision": "c" * 64,
         "created_at": None,
         "reviewed_at": None,
+        "validation_warnings": ["source_quote_unresolved"],
         "units": [
             {
                 "unit_id": unit_id,
@@ -156,6 +157,7 @@ async def test_parent_queues_reads_edits_and_accepts_structure(client):
 
     assert queued.status_code == 202
     assert loaded.status_code == 200
+    assert loaded.json()["validation_warnings"] == ["source_quote_unresolved"]
     assert updated.status_code == 200
     assert accepted.status_code == 200
     queue.assert_awaited_once()

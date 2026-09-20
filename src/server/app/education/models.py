@@ -402,6 +402,7 @@ class TextbookStructureResponse(BaseModel):
     reviewed_at: datetime | None = None
     book_asset_prefix: str | None = None
     book_asset_manifest: dict[str, Any] = Field(default_factory=dict)
+    validation_warnings: list[str] = Field(default_factory=list)
     units: list[StructureUnitResponse]
     lesson_summary: TextbookLessonSummaryResponse = Field(
         default_factory=TextbookLessonSummaryResponse

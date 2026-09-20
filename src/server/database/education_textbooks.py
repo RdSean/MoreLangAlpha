@@ -737,7 +737,8 @@ async def get_textbook_structure_for_parent(
                        structures.input_manifest_sha256, structures.source_revision,
                        structures.created_at, structures.reviewed_at,
                        structures.book_asset_prefix,
-                       structures.book_asset_manifest
+                       structures.book_asset_manifest,
+                       structures.validation_warnings
                 FROM education_textbook_structures AS structures
                 JOIN education_textbook_versions AS versions
                   ON versions.version_id = structures.version_id
@@ -985,7 +986,10 @@ async def get_knowledge_point_for_parent(
 
 
 async def replace_structure_contents(
-    *, structure_id: str, units: list[dict[str, Any]]
+    *,
+    structure_id: str,
+    units: list[dict[str, Any]],
+    warnings: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Replace a mutable structure projection with service-owned IDs."""
     async with get_db_connection() as conn:
@@ -1003,6 +1007,15 @@ async def replace_structure_contents(
                 )
                 if not await cur.fetchone():
                     raise ValueError("Textbook structure is not mutable")
+                if warnings is not None:
+                    await cur.execute(
+                        """
+                        UPDATE education_textbook_structures
+                        SET validation_warnings = %s
+                        WHERE structure_id = %s
+                        """,
+                        (Json(warnings), structure_id),
+                    )
                 await cur.execute(
                     """
                     SELECT units.unit_id, units.slug AS unit_slug,
