@@ -23,7 +23,15 @@
 - `position` means order within a parent and is service-generated.
 - `slug` means a stable logical identifier and is service-generated or service-normalized.
 - Source location is represented only by Markdown source identity and character offsets. PDF page/bbox mapping is out of scope until a real consumer exists.
-- Models return source quotes, not offsets. The service computes `start/end` after exact quote resolution.
+- Models return source quotes, not offsets. The service computes `start/end` after tolerant quote resolution.
+- `book-to-skill` output is treated as a high-value draft, not as an adversarial
+  payload that must reproduce the service's preferred shape.
+- The service post-processes before validating. It derives missing deterministic
+  metadata, normalizes optional fields, resolves source evidence, and records
+  non-blocking warnings.
+- Hard failure is reserved for unsafe paths, unreadable output, absent usable
+  content, or integrity/security violations. Format variation alone must not
+  discard a valid book-to-skill result.
 - Legacy teaching packages, chapter lessons, old learning progress, and their compatibility paths are removed rather than migrated.
 
 ## Target Flow
@@ -57,6 +65,33 @@ Publication
   -> assign to student
   -> knowledge-point learning
   -> follow-up / highlights / notes / personalized summary
+```
+
+## Processing and Validation Policy
+
+The service must optimize for successful assimilation of `book-to-skill` output:
+
+1. Parse and preserve every usable Unit, knowledge point, chapter asset, and
+   lesson section.
+2. Derive `position`, final `slug`, database IDs, storage paths, hashes, and
+   timestamps in the service.
+3. Resolve source refs in this order:
+   - exact quote match;
+   - whitespace-normalized match;
+   - unique normalized fragment match;
+   - unresolved warning retained for parent review.
+4. Store warnings without blocking structure review when content remains usable.
+5. Only hard-fail malformed/unreadable files, unsafe writes, absent usable
+   content, or invalid security boundaries.
+
+Warning examples:
+
+```text
+source_quote_unresolved
+source_quote_ambiguous_first_match_used
+optional_field_defaulted
+unit_slug_generated
+knowledge_point_slug_generated
 ```
 
 ## Removal Inventory
@@ -246,10 +281,14 @@ git commit -m "refactor(education): extract shared managed run runtime"
 Cover:
 
 - Unique exact quote resolves to the correct character offsets.
-- Missing quote fails with `source_quote_not_found`.
-- Duplicate quote fails with `source_quote_ambiguous` unless an explicit occurrence is supplied.
-- Quote normalization is forbidden; offsets are computed from exact source text.
-- Unknown `source_id` fails.
+- Whitespace-normalized quote resolves to the original source span.
+- Duplicate quote uses the first match and records
+  `source_quote_ambiguous_first_match_used`.
+- Missing quote is retained with `resolution_status="unresolved"` and warning
+  `source_quote_unresolved`.
+- Unknown `source_id` falls back to the only source when exactly one source
+  exists; otherwise it remains unresolved with a warning.
+- Unsafe source IDs and paths still fail.
 
 **Step 2: Implement resolver**
 
@@ -273,9 +312,13 @@ Return:
   "source_id": "source-1",
   "quote": "exact source sentence",
   "start": 123,
-  "end": 145
+  "end": 145,
+  "resolution_status": "resolved"
 }
 ```
+
+Unresolved refs return `start: null`, `end: null`, and
+`resolution_status: "unresolved"`; they do not fail the whole structure.
 
 **Step 3: Run tests**
 
@@ -313,7 +356,13 @@ Cover:
 - Model-provided position/slug may be ignored or used only as optional hints.
 - Chinese titles fall back to stable `kp-01`, `kp-02` slugs.
 - Source refs accept model-authored `quote` and service-resolved `start/end`.
-- A line-number-like `start/end` from older output is rejected.
+- A line-number-like `start/end` from older output is ignored and replaced by
+  service resolution.
+- Missing optional summaries/confidence values receive safe defaults with
+  warnings.
+- A malformed optional Unit is skipped only when other usable Units remain and
+  a warning is recorded.
+- The structure fails only when no usable Unit/knowledge content remains.
 
 **Step 2: Change normalized structure**
 
@@ -874,18 +923,22 @@ git commit -m "feat(education): surface source evidence diagnostics"
 
 **Step 1: Run real structure generation**
 
-Use the manually parsed RE3 Markdown already available outside git:
+Use the completed library document:
 
 ```text
-RE 3 Page1-50.pdf
-datalab-output-REX 3e SB3 Page1-50.pdf.md
+document_id: doc-2spsb1AQdrRp
+filename: REX 3e SB3.pdf
+parse_job_id: job-KVIZjMQU4iTd
+primary artifact: art-H7ZGMir0xRQ9
+embedded images: 144
 ```
 
 Expected:
 
 - Structure succeeds with no positional or slug retry.
 - Source refs contain exact quotes and service-generated character offsets.
-- Unit 1A, Unit 1B and video lesson are reviewable.
+- Ambiguous or unresolved quotes produce warnings, not failed archives.
+- The full textbook structure is reviewable.
 - ToC-only Units may be present with zero knowledge points only if product review accepts that behavior.
 
 **Step 2: Generate one lesson**
