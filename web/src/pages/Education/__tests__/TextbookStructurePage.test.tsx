@@ -55,7 +55,7 @@ vi.mock('../queries', () => ({
               summary: '',
               confidence: 0.9,
               status: 'review',
-              source_refs: [{ source_id: 'source-1', start: 40, end: 80 }],
+              source_refs: [{ source_id: 'source-1', start: null, end: null }],
             },
           ],
         },

@@ -25,6 +25,12 @@ function structureWarningLabel(warning: string) {
   return structureWarningLabels[warning] ?? `已自动处理：${warning.replaceAll('_', ' ')}`;
 }
 
+function sourceRefRange(ref: { start?: number | null; end?: number | null }) {
+  return ref.start != null && ref.end != null
+    ? `[${ref.start}:${ref.end}]`
+    : '未定位偏移';
+}
+
 function cloneUnits(units: TextbookStructureUnit[]): TextbookStructureUnit[] {
   return units.map((unit) => ({
     ...unit,
@@ -308,14 +314,14 @@ export default function TextbookStructurePage() {
           <div className="mt-6 flex items-center justify-between"><h2 className="text-sm font-semibold">知识点</h2><span className="font-mono text-xs text-muted-foreground">confidence {selectedUnit.confidence.toFixed(2)}</span></div>
           <div className="mt-3 border-y" style={{ borderColor: 'var(--color-border-muted)' }}>
             {selectedUnit.knowledge_points.map((point) => <div key={point.knowledge_point_id} className="grid gap-3 border-b px-3 py-4 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto]" style={{ borderColor: 'var(--color-border-muted)' }}>
-              <label className="grid gap-1.5"><span className="sr-only">知识点标题</span><input value={point.title} disabled={readOnly} onChange={(event) => updateKnowledgePoint(point.knowledge_point_id, { title: event.target.value })} className="min-h-10 border bg-background px-3 text-sm font-medium" /><span className="font-mono text-[11px] text-muted-foreground">{point.source_refs.map((ref) => `${ref.source_id} [${ref.start}:${ref.end}]`).join(' · ')}</span></label>
+              <label className="grid gap-1.5"><span className="sr-only">知识点标题</span><input value={point.title} disabled={readOnly} onChange={(event) => updateKnowledgePoint(point.knowledge_point_id, { title: event.target.value })} className="min-h-10 border bg-background px-3 text-sm font-medium" /><span className="font-mono text-[11px] text-muted-foreground">{point.source_refs.map((ref) => `${ref.source_id} ${sourceRefRange(ref)}`).join(' · ')}</span></label>
               <div className="flex items-center gap-1"><Link to={`/textbooks/${textbookId}/versions/${versionId}/knowledge/${point.knowledge_point_id}`} className="inline-flex h-10 w-10 items-center justify-center rounded-md hover:bg-[var(--color-bg-hover)]" aria-label={`查看课程 ${point.title}`}><BookOpenCheck className="size-4" /></Link><Button type="button" size="icon" variant="ghost" aria-label={`拆分 ${point.title}`} disabled={readOnly} onClick={() => splitKnowledgePoint(point)}><Scissors className="size-4" /></Button><Button type="button" size="icon" variant="ghost" aria-label={`合并 ${point.title}`} disabled={readOnly || selectedUnit.knowledge_points[0]?.knowledge_point_id === point.knowledge_point_id} onClick={() => mergeKnowledgePointWithPrevious(point)}><GitMerge className="size-4" /></Button><Button type="button" size="icon" variant="ghost" aria-label={`删除 ${point.title}`} disabled={readOnly} onClick={() => deleteKnowledgePoint(point.knowledge_point_id)}><Trash2 className="size-4" /></Button></div>
             </div>)}
           </div>
         </section>
         <aside className="border-t px-4 py-6 lg:min-h-[calc(100dvh-80px)] lg:border-t-0 lg:border-l" style={{ borderColor: 'var(--color-border-muted)' }}>
           <p className="font-mono text-xs text-muted-foreground">来源定位</p>
-          <div className="mt-3 grid gap-3">{selectedUnit.source_refs.map((ref) => <div key={`${ref.source_id}-${ref.start}-${ref.end}`} className="border-l-2 pl-3 text-xs leading-5" style={{ borderColor: 'var(--color-border-muted)' }}><p className="font-mono">{ref.source_id} [{ref.start}:{ref.end}]</p>{ref.quote && <p className="mt-1 text-muted-foreground">{ref.quote}</p>}</div>)}</div>
+          <div className="mt-3 grid gap-3">{selectedUnit.source_refs.map((ref) => <div key={`${ref.source_id}-${ref.start}-${ref.end}`} className="border-l-2 pl-3 text-xs leading-5" style={{ borderColor: 'var(--color-border-muted)' }}><p className="font-mono">{ref.source_id} {sourceRefRange(ref)}</p>{ref.quote && <p className="mt-1 text-muted-foreground">{ref.quote}</p>}</div>)}</div>
           {data.status === 'review' && <div className="mt-8 grid gap-2"><Button onClick={() => void saveStructure()} disabled={mutations.save.isPending}><Save className="mr-2 size-4" />保存结构</Button><Button variant="outline" onClick={() => void acceptStructure()} disabled={mutations.accept.isPending}><CheckCircle2 className="mr-2 size-4" />接受结构</Button></div>}
           {data.status === 'accepted' && <p className="mt-8 border-l-2 pl-3 text-sm" style={{ borderColor: 'var(--color-success)', color: 'var(--color-text-secondary)' }}>结构已接受，可以逐知识点生成课程。</p>}
           {data.status === 'accepted' && (

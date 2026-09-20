@@ -70,8 +70,8 @@ def _structure() -> dict:
                         "source_refs": [
                             {
                                 "source_id": "source-1",
-                                "start": 0,
-                                "end": 40,
+                                "start": None,
+                                "end": None,
                                 "quote": None,
                                 "heading_path": [],
                             }

@@ -160,8 +160,8 @@ export interface TextbookLibraryItem {
 
 export interface StructureSourceRef {
   source_id: string;
-  start: number;
-  end: number;
+  start?: number | null;
+  end?: number | null;
   quote?: string | null;
   heading_path?: string[];
 }

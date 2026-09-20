@@ -314,13 +314,17 @@ class TextbookParseJobCandidateResponse(BaseModel):
 
 class StructureSourceRefResponse(BaseModel):
     source_id: str = Field(min_length=1, max_length=255)
-    start: int = Field(ge=0)
-    end: int = Field(gt=0)
+    start: int | None = Field(default=None, ge=0)
+    end: int | None = Field(default=None, gt=0)
     quote: str | None = Field(default=None, max_length=500)
     heading_path: list[str] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def validate_range(self) -> "StructureSourceRefResponse":
+        if self.start is None or self.end is None:
+            if self.start is not None or self.end is not None:
+                raise ValueError("source reference offsets must be both set or both empty")
+            return self
         if self.end <= self.start:
             raise ValueError("source reference end must be greater than start")
         return self
@@ -331,7 +335,9 @@ class StructureKnowledgePointWrite(BaseModel):
     slug: str = Field(min_length=1, max_length=255)
     title: str = Field(min_length=1, max_length=255)
     summary: str = Field(default="", max_length=30_000)
-    source_refs: list[StructureSourceRefResponse] = Field(min_length=1, max_length=32)
+    source_refs: list[StructureSourceRefResponse] = Field(
+        default_factory=list, max_length=32
+    )
     confidence: float = Field(ge=0, le=1)
 
 
@@ -341,7 +347,9 @@ class StructureUnitWrite(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     summary: str = Field(default="", max_length=30_000)
     unit_type: Literal["teaching", "front_matter", "reference", "appendix"]
-    source_refs: list[StructureSourceRefResponse] = Field(min_length=1, max_length=32)
+    source_refs: list[StructureSourceRefResponse] = Field(
+        default_factory=list, max_length=32
+    )
     confidence: float = Field(ge=0, le=1)
     knowledge_points: list[StructureKnowledgePointWrite] = Field(
         default_factory=list,
