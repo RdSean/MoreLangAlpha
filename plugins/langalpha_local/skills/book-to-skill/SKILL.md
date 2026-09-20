@@ -53,9 +53,27 @@ this non-interactive structure stage before every normal conversion step.
    appendices. A non-teaching Unit must not invent knowledge points. A teaching
    Unit may also have an empty knowledge-point list when the frozen content does
    not yet support a teachable point.
-5. Preserve source-grounded evidence for every Unit and knowledge point. Never
-   emit lessons, practice assets, teaching packages, HTML artifacts or public
-   files from this mode.
+5. Preserve source-grounded titles, summaries and short quotes for Units and
+   knowledge points. Do not calculate position, slug, line numbers, character
+   offsets, PDF pages or bounding boxes; the service derives those values.
+   Never emit lessons, practice assets, teaching packages, HTML artifacts or
+   public files from this mode.
+
+## Managed knowledge-point lesson mode
+
+When the invocation includes `--managed-textbook-lesson <job>`, run only this
+single knowledge-point authoring stage.
+
+1. Read `/managed/textbook-job/<job>/inputs/manifest.json` and
+   `/managed/textbook-job/<job>/inputs/lesson-context.md`.
+2. Read `reference/managed-textbook-contract.md` and follow its
+   `Managed knowledge-point lesson mode` section.
+3. Produce exactly one primary candidate:
+   `/managed/textbook-job/<job>/outputs/lesson.md`.
+4. When `auto_grading` is true, also produce
+   `/managed/textbook-job/<job>/outputs/practice.json`.
+5. Write a static Mentrix-style knowledge-point page. Do not include follow-up
+   chat, personal notes, progress data or personalized summaries.
 
 ## Managed textbook mode
 

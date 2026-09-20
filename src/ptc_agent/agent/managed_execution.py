@@ -48,10 +48,10 @@ def education_lesson_policy(job_id: str) -> ManagedExecutionPolicy:
     """Return the fixed policy for one knowledge-point lesson job."""
     normalized_job_id = str(UUID(job_id))
     return ManagedExecutionPolicy(
-        allowed_skill_names=frozenset({"the-knowledge-guy"}),
+        allowed_skill_names=frozenset({"book-to-skill"}),
         filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
         purpose="lesson",
-        allow_subagents=False,
+        allow_subagents=True,
     )
 
 

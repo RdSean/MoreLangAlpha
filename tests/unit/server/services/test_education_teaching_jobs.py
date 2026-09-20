@@ -382,15 +382,18 @@ async def test_managed_graph_does_not_inject_interactive_skill_bodies(monkeypatc
     education_teaching_jobs = import_module(
         "src.server.services.education_teaching_jobs"
     )
+    managed_runs = import_module(
+        "src.server.services.education_managed_runs"
+    )
     setup = import_module("src.server.app.setup")
     policy = import_module(
         "ptc_agent.agent.managed_execution"
     ).education_teaching_policy("8a77d086-0b23-4a1e-89d0-f163fa23d5d1")
     agent_config = object()
     monkeypatch.setattr(setup, "agent_config", object())
-    monkeypatch.setattr(education_teaching_jobs, "get_ptc_recursion_limit", lambda: 200)
+    monkeypatch.setattr(managed_runs, "get_ptc_recursion_limit", lambda: 200)
     monkeypatch.setattr(
-        education_teaching_jobs,
+        managed_runs,
         "build_ptc_graph_with_session",
         AsyncMock(return_value=object()),
     )
@@ -412,7 +415,7 @@ async def test_managed_graph_does_not_inject_interactive_skill_bodies(monkeypatc
     assert "skill_contexts" not in config["configurable"]
     assert "skill_dirs" not in config["configurable"]
     assert config["recursion_limit"] == 200
-    graph_call = education_teaching_jobs.build_ptc_graph_with_session.await_args
+    graph_call = managed_runs.build_ptc_graph_with_session.await_args
     assert graph_call.kwargs["config"] is agent_config
     assert graph_call.kwargs["user_id"] is None
     assert graph_call.kwargs["disable_subagents"] is False

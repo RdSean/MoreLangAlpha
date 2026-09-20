@@ -123,15 +123,30 @@ def test_book_to_skill_managed_structure_mode_is_non_interactive_and_source_grou
     assert "must not invent knowledge points" in contract
 
 
-def test_knowledge_guy_managed_lesson_mode_uses_markdown_as_primary_output():
-    text = (SKILLS_ROOT / "the-knowledge-guy/SKILL.md").read_text()
+def test_book_to_skill_structure_contract_uses_service_owned_identity_fields():
+    text = (SKILLS_ROOT / "book-to-skill/SKILL.md").read_text()
     contract = (
-        SKILLS_ROOT / "the-knowledge-guy/reference/managed-textbook-contract.md"
+        SKILLS_ROOT / "book-to-skill/reference/managed-textbook-contract.md"
+    ).read_text()
+
+    assert "Do not calculate `position`" in contract
+    assert '"quote": "short source excerpt"' in contract
+    assert '"knowledge_points": [{' in contract
+    assert "the service derives those values" in text
+    assert '"start": 0' not in contract.split("## Frozen inputs", 1)[0]
+
+
+def test_book_to_skill_managed_lesson_mode_uses_markdown_as_primary_output():
+    text = (SKILLS_ROOT / "book-to-skill/SKILL.md").read_text()
+    contract = (
+        SKILLS_ROOT / "book-to-skill/reference/managed-textbook-contract.md"
     ).read_text()
 
     assert "--managed-textbook-lesson" in text
     assert "outputs/lesson.md" in text
     assert "outputs/practice.json" in text
-    assert "vocabulary.json" in contract
-    assert "evidence.json" in contract
+    assert "Mentrix-style" in contract
     assert "Markdown" in contract
+    assert "--managed-textbook-lesson" not in (
+        SKILLS_ROOT / "the-knowledge-guy/SKILL.md"
+    ).read_text()

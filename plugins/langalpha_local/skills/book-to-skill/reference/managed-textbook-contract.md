@@ -19,30 +19,75 @@ The file uses `langalpha-managed-textbook-structure/v1`:
 {
   "format": "langalpha-managed-textbook-structure/v1",
   "units": [{
-    "position": 1,
-    "slug": "unit-1-sports",
     "title": "Unit 1: Sports and Fitness",
+    "slug": "unit-1-sports",
     "summary": "short summary",
     "unit_type": "teaching",
     "confidence": 0.96,
     "source_refs": [{
       "source_id": "source identity from manifest.json",
-      "start": 0,
-      "end": 500,
       "quote": "short source excerpt"
     }],
-    "knowledge_points": []
+    "knowledge_points": [{
+      "title": "World game: history and popularity",
+      "slug": "world-game",
+      "summary": "short knowledge-point summary",
+      "confidence": 0.94,
+      "source_refs": [{
+        "source_id": "source identity from manifest.json",
+        "quote": "short source excerpt"
+      }]
+    }]
   }]
 }
 ```
 
 `unit_type` is one of `teaching`, `front_matter`, `reference`, or `appendix`.
-Every Unit must have at least one source reference. Every knowledge point must
-have a title, confidence, and source reference. A non-teaching Unit must not invent knowledge points. A teaching Unit may have an empty knowledge-point list
-until content supports a teachable point or until parent review adds one.
+Every Unit should include a title. Source references and confidence are
+preferred but optional; the service will retain usable content and record
+warnings rather than reject the whole structure because an optional field is
+missing. A non-teaching Unit must not invent knowledge points. A teaching Unit
+may have an empty knowledge-point list until content supports a teachable point
+or until parent review adds one.
+
+Do not calculate `position`, line numbers, character offsets, PDF pages or
+bounding boxes. The service generates order and final slugs. Include a short
+`quote` when evidence is available; the service resolves it to an optional
+Markdown offset when cheaply possible.
 
 Do not generate lessons, practice files, teaching packages, HTML artifacts,
 memory, or any path other than `outputs/structure.json`.
+
+## Managed knowledge-point lesson mode
+
+When the service invokes `--managed-textbook-lesson <job>`, the input is one
+target knowledge point, its source excerpts, and optionally a related
+`book-to-skill` chapter toolkit.
+
+The primary output is:
+
+```text
+outputs/lesson.md
+```
+
+`lesson.md` is the static full content of one Mentrix-style knowledge-point
+page. It is not a chapter toolkit, a chat transcript, a note, a progress record,
+or a personalized summary.
+
+Use Markdown. It may naturally contain learning goals, prerequisite knowledge,
+warm-up or preview questions, a section-by-section explanation of the source,
+tables, examples, vocabulary, formulas, misconceptions, review prompts, and
+ordinary exercises.
+
+Only when `manifest.json` has `"auto_grading": true`, also create:
+
+```text
+outputs/practice.json
+```
+
+The practice file contains 2 to 6 options per question, one correct option,
+a prompt, and an explanation. Do not create `vocabulary.json`, `evidence.json`,
+a JSON lesson object, or any other path.
 
 ## Frozen inputs and capability boundary
 

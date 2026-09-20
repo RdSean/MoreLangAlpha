@@ -38,9 +38,9 @@ from src.server.services.education_processing_profiles import (
     processing_profile_prompt,
     resolve_processing_profile,
 )
-from src.server.services.education_teaching_jobs import (
-    build_managed_teaching_graph,
-    resolve_managed_teaching_agent_config,
+from src.server.services.education_managed_runs import (
+    build_managed_education_graph,
+    resolve_managed_education_agent_config,
 )
 from src.server.services.education_teaching_storage import (
     build_staged_teaching_input,
@@ -74,7 +74,8 @@ def managed_structure_prompt(
         f"{root}/inputs/assets/。解析器不保证标准 Unit/TOC 边界。"
         f"先读取 {root}/.agents/skills/book-to-skill/SKILL.md，再按需读取 "
         f"{root}/.agents/skills/book-to-skill/reference/managed-textbook-contract.md 中的结构模式。"
-        "识别教学 Unit、前言/目录/附录等非教学单元，并为每个 Unit 和知识点写出来源定位。"
+        "识别教学 Unit、前言/目录/附录等非教学单元，并为每个 Unit 和知识点尽量写出来源 quote。"
+        "不要计算 position、slug、行号、字符偏移、PDF 页码或坐标；这些由服务端生成。"
         "非教学单元可以没有知识点；教学单元在真实内容不足时也可以暂时为空。"
         "不得为了满足数量、格式或进度而编造知识点。"
         f"只写 {root}/outputs/structure.json，输出格式必须是 "
@@ -362,7 +363,7 @@ async def _dispatch_structure_root_run(
         },
     )
     try:
-        graph, input_state, graph_config = await build_managed_teaching_graph(
+        graph, input_state, graph_config = await build_managed_education_graph(
             session=session,
             thread_id=thread_id,
             run_handle=run_handle,
@@ -476,7 +477,7 @@ async def launch_structure_generation(
         raise RuntimeError("Textbook structure generation job was claimed")
     attempt_id = str(attempt["attempt_id"])
     try:
-        agent_config = await resolve_managed_teaching_agent_config(
+        agent_config = await resolve_managed_education_agent_config(
             parent_user_id=parent_user_id
         )
     except BaseException:

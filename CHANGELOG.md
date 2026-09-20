@@ -2,6 +2,18 @@
 
 ## 2026-09-18
 
+### 重构：教材加工改用 book-to-skill 的容错处理链路
+
+- 抽取共享 managed run 运行时，结构任务和知识点课程任务不再依赖旧教学包模块构建 PTC graph 与解析模型配置。
+- 新增服务端来源 quote 解析器：优先精确匹配，其次空白归一化匹配；重复 quote 使用首个位置并告警；无法定位时保留 quote 并标记 unresolved，不阻断结构审阅。
+- 将结构校验从格式裁判改为稳定化处理器：`position` 按数组顺序生成，`slug` 由服务端规范化或使用 `unit-01` / `kp-01` 兜底；旧 `start/end` 可在可恢复时回填 quote。
+- 非教学 Unit 携带知识点时保留内容并提升为 teaching；缺失 source refs、confidence、summary 等可选字段产生 warning，而不是让整本教材失败。
+- 只有无法解析、没有可用 Unit、路径越权或数据不安全时才硬失败。
+- 结构编辑按 slug 复用 Unit 和知识点的 UUID，重命名和重排不再导致身份变化。
+- 知识点课程生成改用 `book-to-skill` managed lesson mode；`the-knowledge-guy` 退出课程正文生成，保留为后续交互学习层。
+- 补充 `book-to-skill` 的 Mentrix 风格知识点课程 contract，明确 `lesson.md` 是单个知识点的完整静态学习页，不包含追问、笔记或个性化总结。
+- 验证：结构标准化、来源解析、结构任务、lesson 任务、共享运行时和 skill contract 聚焦测试通过，Ruff 通过。
+
 ### 重构：教材加工切换为独立入口与分阶段工作流
 
 - 教材加工从 `/education/textbooks` 迁出为一级入口 `/textbooks`，父账号侧栏直接显示“教材加工”；学生导航不展示该入口。

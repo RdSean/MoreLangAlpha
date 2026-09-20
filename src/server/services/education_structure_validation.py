@@ -1,10 +1,15 @@
-"""Validation for untrusted managed-PTC textbook structure candidates."""
+"""Tolerant normalization for untrusted textbook structure candidates."""
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
+import re
 from typing import Any
+
+from src.server.services.education_source_refs import (
+    SourceReferenceResolutionError,
+    resolve_source_ref,
+)
 
 
 _STRUCTURE_FORMAT = "langalpha-managed-textbook-structure/v1"
@@ -18,52 +23,68 @@ _UNIT_TYPES = frozenset({"teaching", "front_matter", "reference", "appendix"})
 
 
 class TextbookStructureValidationError(ValueError):
-    """A managed structure candidate cannot become a reviewable structure."""
+    """A textbook structure cannot be represented as usable review content."""
 
 
-def _require_text(
+def _text(
     value: object,
     *,
-    field: str,
+    fallback: str = "",
     limit: int = _MAX_TEXT_LENGTH,
 ) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise TextbookStructureValidationError(
-            f"{field} must be a non-empty string"
-        )
-    normalized = value.strip()
-    if len(normalized) > limit:
-        raise TextbookStructureValidationError(
-            f"{field} exceeds its maximum length"
-        )
-    return normalized
-
-
-def _safe_slug(value: object, *, field: str) -> str:
-    normalized = _SAFE_SLUG_RE.sub(
-        "-", _require_text(value, field=field, limit=255)
-    ).strip(".-").lower()[:80]
+    if value is None:
+        return fallback
+    normalized = str(value).strip()
     if not normalized:
-        raise TextbookStructureValidationError(f"{field} is invalid")
-    return normalized
+        return fallback
+    return normalized[:limit]
 
 
-def _require_confidence(value: object, *, field: str) -> float:
+def _slug(value: object, *, fallback: str) -> str:
+    normalized = _SAFE_SLUG_RE.sub("-", str(value or "").strip()).strip(".-").lower()
+    return normalized[:80] or fallback
+
+
+def _unique_slug(
+    value: object,
+    *,
+    fallback: str,
+    used: set[str],
+    warning_code: str,
+    warnings: list[str],
+) -> str:
+    base = _slug(value, fallback=fallback)
+    candidate = base
+    suffix = 2
+    while candidate in used:
+        candidate = f"{base[:74]}-{suffix}"
+        suffix += 1
+    if candidate != base:
+        warnings.append(warning_code)
+    used.add(candidate)
+    return candidate
+
+
+def _confidence(
+    value: object,
+    *,
+    default: float,
+    field: str,
+    warnings: list[str],
+) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise TextbookStructureValidationError(
-            f"{field} must be a number between 0 and 1"
-        )
-    confidence = float(value)
-    if confidence < 0 or confidence > 1:
-        raise TextbookStructureValidationError(
-            f"{field} must be between 0 and 1"
-        )
-    return confidence
+        warnings.append(f"{field}_defaulted")
+        return default
+    numeric = float(value)
+    if numeric < 0 or numeric > 1:
+        warnings.append(f"{field}_clamped")
+        return min(1.0, max(0.0, numeric))
+    return numeric
 
 
 def _frozen_sources(
     frozen_input: Mapping[str, Any],
-) -> dict[str, str | None]:
+) -> tuple[dict[str, str], set[str]]:
     raw_sources = frozen_input.get("sources")
     if raw_sources is None:
         raw_sources = frozen_input.get("chapters")
@@ -71,7 +92,8 @@ def _frozen_sources(
         raise TextbookStructureValidationError(
             "Frozen input must contain sources or chapters"
         )
-    sources: dict[str, str | None] = {}
+    markdown_by_source: dict[str, str] = {}
+    known_source_ids: set[str] = set()
     for raw_source in raw_sources:
         if not isinstance(raw_source, Mapping):
             raise TextbookStructureValidationError("Frozen source is invalid")
@@ -84,91 +106,82 @@ def _frozen_sources(
             raise TextbookStructureValidationError(
                 "Frozen source identity is invalid"
             )
-        if source_id in sources:
+        if source_id in known_source_ids:
             raise TextbookStructureValidationError(
                 "Frozen source identities must be unique"
             )
+        known_source_ids.add(source_id)
         markdown = raw_source.get("markdown")
-        sources[source_id] = (
-            markdown if isinstance(markdown, str) and markdown else None
-        )
-    return sources
+        if isinstance(markdown, str):
+            markdown_by_source[source_id] = markdown
+    return markdown_by_source, known_source_ids
+
+
+def _legacy_quote(reference: Mapping[str, Any], markdown_by_source: Mapping[str, str]) -> str:
+    source_id = str(reference.get("source_id") or "")
+    markdown = markdown_by_source.get(source_id)
+    start = reference.get("start")
+    end = reference.get("end")
+    if (
+        not markdown
+        or not isinstance(start, int)
+        or isinstance(start, bool)
+        or not isinstance(end, int)
+        or isinstance(end, bool)
+        or start < 0
+        or end <= start
+        or end > len(markdown)
+    ):
+        return ""
+    return markdown[start:end]
 
 
 def _normalize_source_refs(
     value: object,
     *,
-    field: str,
-    sources: Mapping[str, str | None],
+    markdown_by_source: Mapping[str, str],
+    warning_prefix: str,
+    warnings: list[str],
 ) -> list[dict[str, Any]]:
-    if not isinstance(value, list) or not value:
-        raise TextbookStructureValidationError(
-            f"{field} must contain at least one source reference"
-        )
-    if len(value) > _MAX_SOURCE_REFS:
-        raise TextbookStructureValidationError(
-            f"{field} contains too many source references"
-        )
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        warnings.append(f"{warning_prefix}_source_refs_invalid")
+        return []
     normalized: list[dict[str, Any]] = []
-    for reference in value:
-        if not isinstance(reference, Mapping):
-            raise TextbookStructureValidationError(
-                f"{field} source reference is invalid"
+    for raw_reference in value[:_MAX_SOURCE_REFS]:
+        if not isinstance(raw_reference, Mapping):
+            warnings.append(f"{warning_prefix}_source_ref_skipped")
+            continue
+        source_id = str(raw_reference.get("source_id") or "").strip() or None
+        quote = _text(raw_reference.get("quote"), limit=2_000)
+        if not quote:
+            quote = _legacy_quote(raw_reference, markdown_by_source)
+            if quote:
+                warnings.append("legacy_source_offsets_recovered")
+        if not quote:
+            warnings.append(f"{warning_prefix}_source_ref_skipped")
+            continue
+        try:
+            resolved = resolve_source_ref(
+                sources=markdown_by_source,
+                source_id=source_id,
+                quote=quote,
             )
-        source_id = _require_text(
-            reference.get("source_id"),
-            field=f"{field} source_id",
-            limit=255,
-        )
-        if source_id not in sources:
-            raise TextbookStructureValidationError(
-                f"{field} references an unknown source"
-            )
-        start = reference.get("start")
-        end = reference.get("end")
-        if (
-            not isinstance(start, int)
-            or isinstance(start, bool)
-            or not isinstance(end, int)
-            or isinstance(end, bool)
-            or start < 0
-            or end <= start
-        ):
-            raise TextbookStructureValidationError(
-                f"{field} source range is invalid"
-            )
-        markdown = sources[source_id]
-        if markdown is not None and end > len(markdown):
-            raise TextbookStructureValidationError(
-                f"{field} source range exceeds the frozen source"
-            )
-        item: dict[str, Any] = {
-            "source_id": source_id,
-            "start": start,
-            "end": end,
-        }
-        quote = reference.get("quote")
-        if quote is not None:
-            item["quote"] = _require_text(
-                quote,
-                field=f"{field} quote",
-                limit=500,
-            )
-        heading_path = reference.get("heading_path")
-        if heading_path is not None:
-            if (
-                not isinstance(heading_path, list)
-                or len(heading_path) > 8
-                or any(not isinstance(item, str) for item in heading_path)
-            ):
-                raise TextbookStructureValidationError(
-                    f"{field} heading_path is invalid"
-                )
-            item["heading_path"] = [
-                _require_text(value, field=f"{field} heading", limit=255)
-                for value in heading_path
+        except SourceReferenceResolutionError:
+            warnings.append(f"{warning_prefix}_source_ref_skipped")
+            continue
+        warnings.extend(resolved.pop("warnings", []))
+        heading_path = raw_reference.get("heading_path")
+        if isinstance(heading_path, list):
+            resolved["heading_path"] = [
+                _text(item, limit=255)
+                for item in heading_path[:8]
+                if isinstance(item, str) and _text(item)
             ]
-        normalized.append(item)
+        normalized.append(resolved)
+    if len(value) > _MAX_SOURCE_REFS:
+        warnings.append(f"{warning_prefix}_source_refs_truncated")
     return normalized
 
 
@@ -176,58 +189,45 @@ def _normalize_knowledge_point(
     value: object,
     *,
     index: int,
-    sources: Mapping[str, str | None],
-    positions: set[int],
-    slugs: set[str],
-) -> dict[str, Any]:
+    markdown_by_source: Mapping[str, str],
+    used_slugs: set[str],
+    warnings: list[str],
+) -> dict[str, Any] | None:
     if not isinstance(value, Mapping):
-        raise TextbookStructureValidationError(
-            f"knowledge point {index} must be an object"
-        )
-    position = value.get("position")
-    if (
-        not isinstance(position, int)
-        or isinstance(position, bool)
-        or position <= 0
-    ):
-        raise TextbookStructureValidationError(
-            f"knowledge point {index} position is invalid"
-        )
-    if position in positions:
-        raise TextbookStructureValidationError(
-            "knowledge point positions must be unique within a Unit"
-        )
-    positions.add(position)
-    slug = _safe_slug(
-        value.get("slug"), field=f"knowledge point {index} slug"
+        warnings.append("knowledge_point_skipped_invalid")
+        return None
+    title = _text(
+        value.get("title"),
+        fallback=f"Knowledge point {index}",
+        limit=_MAX_TITLE_LENGTH,
     )
-    if slug in slugs:
-        raise TextbookStructureValidationError(
-            "knowledge point slugs must be unique within a Unit"
-        )
-    slugs.add(slug)
-    summary = value.get("summary", "")
-    if not isinstance(summary, str):
-        raise TextbookStructureValidationError(
-            f"knowledge point {index} summary must be a string"
-        )
+    if title == f"Knowledge point {index}":
+        warnings.append("knowledge_point_title_defaulted")
+    source_refs = _normalize_source_refs(
+        value.get("source_refs"),
+        markdown_by_source=markdown_by_source,
+        warning_prefix="knowledge_point",
+        warnings=warnings,
+    )
+    if not source_refs:
+        warnings.append("knowledge_point_source_refs_missing")
     return {
-        "position": position,
-        "slug": slug,
-        "title": _require_text(
-            value.get("title"),
-            field=f"knowledge point {index} title",
-            limit=_MAX_TITLE_LENGTH,
+        "position": index,
+        "slug": _unique_slug(
+            value.get("slug") or title,
+            fallback=f"kp-{index:02d}",
+            used=used_slugs,
+            warning_code="knowledge_point_slug_deduplicated",
+            warnings=warnings,
         ),
-        "summary": summary.strip(),
-        "source_refs": _normalize_source_refs(
-            value.get("source_refs"),
-            field=f"knowledge point {index}",
-            sources=sources,
-        ),
-        "confidence": _require_confidence(
+        "title": title,
+        "summary": _text(value.get("summary"), limit=_MAX_TEXT_LENGTH),
+        "source_refs": source_refs,
+        "confidence": _confidence(
             value.get("confidence"),
-            field=f"knowledge point {index} confidence",
+            default=1.0,
+            field="knowledge_point_confidence",
+            warnings=warnings,
         ),
         "status": "review",
     }
@@ -237,81 +237,74 @@ def _normalize_unit(
     value: object,
     *,
     index: int,
-    sources: Mapping[str, str | None],
-    positions: set[int],
-    slugs: set[str],
-) -> dict[str, Any]:
+    markdown_by_source: Mapping[str, str],
+    used_slugs: set[str],
+    warnings: list[str],
+) -> dict[str, Any] | None:
     if not isinstance(value, Mapping):
-        raise TextbookStructureValidationError(f"Unit {index} must be an object")
-    position = value.get("position")
-    if (
-        not isinstance(position, int)
-        or isinstance(position, bool)
-        or position <= 0
-    ):
-        raise TextbookStructureValidationError(
-            f"Unit {index} position is invalid"
-        )
-    if position in positions:
-        raise TextbookStructureValidationError("Unit positions must be unique")
-    positions.add(position)
-    slug = _safe_slug(value.get("slug"), field=f"Unit {index} slug")
-    if slug in slugs:
-        raise TextbookStructureValidationError("Unit slugs must be unique")
-    slugs.add(slug)
-    unit_type = value.get("unit_type")
-    if unit_type not in _UNIT_TYPES:
-        raise TextbookStructureValidationError(f"Unit {index} type is invalid")
-    summary = value.get("summary", "")
-    if not isinstance(summary, str):
-        raise TextbookStructureValidationError(
-            f"Unit {index} summary must be a string"
-        )
+        warnings.append("unit_skipped_invalid")
+        return None
+    title = _text(
+        value.get("title"),
+        fallback=f"Unit {index}",
+        limit=_MAX_TITLE_LENGTH,
+    )
+    if title == f"Unit {index}":
+        warnings.append("unit_title_defaulted")
     raw_knowledge_points = value.get("knowledge_points", [])
     if not isinstance(raw_knowledge_points, list):
-        raise TextbookStructureValidationError(
-            f"Unit {index} knowledge_points must be a list"
-        )
-    if len(raw_knowledge_points) > _MAX_KNOWLEDGE_POINTS_PER_UNIT:
-        raise TextbookStructureValidationError(
-            f"Unit {index} contains too many knowledge points"
-        )
+        warnings.append("unit_knowledge_points_invalid")
+        raw_knowledge_points = []
+    unit_type = value.get("unit_type")
+    if unit_type not in _UNIT_TYPES:
+        unit_type = "teaching"
+        warnings.append("unit_type_defaulted")
     if unit_type != "teaching" and raw_knowledge_points:
-        raise TextbookStructureValidationError(
-            f"non-teaching Unit {index} must not contain knowledge points"
-        )
-    knowledge_point_positions: set[int] = set()
+        unit_type = "teaching"
+        warnings.append("unit_type_promoted")
+    source_refs = _normalize_source_refs(
+        value.get("source_refs"),
+        markdown_by_source=markdown_by_source,
+        warning_prefix="unit",
+        warnings=warnings,
+    )
+    if not source_refs:
+        warnings.append("unit_source_refs_missing")
     knowledge_point_slugs: set[str] = set()
-    knowledge_points = [
-        _normalize_knowledge_point(
+    knowledge_points: list[dict[str, Any]] = []
+    for knowledge_point_index, knowledge_point in enumerate(
+        raw_knowledge_points[:_MAX_KNOWLEDGE_POINTS_PER_UNIT],
+        start=1,
+    ):
+        normalized = _normalize_knowledge_point(
             knowledge_point,
             index=knowledge_point_index,
-            sources=sources,
-            positions=knowledge_point_positions,
-            slugs=knowledge_point_slugs,
+            markdown_by_source=markdown_by_source,
+            used_slugs=knowledge_point_slugs,
+            warnings=warnings,
         )
-        for knowledge_point_index, knowledge_point in enumerate(
-            raw_knowledge_points, start=1
-        )
-    ]
+        if normalized is not None:
+            knowledge_points.append(normalized)
+    if len(raw_knowledge_points) > _MAX_KNOWLEDGE_POINTS_PER_UNIT:
+        warnings.append("unit_knowledge_points_truncated")
     return {
-        "position": position,
-        "slug": slug,
-        "title": _require_text(
-            value.get("title"),
-            field=f"Unit {index} title",
-            limit=_MAX_TITLE_LENGTH,
+        "position": index,
+        "slug": _unique_slug(
+            value.get("slug") or title,
+            fallback=f"unit-{index:02d}",
+            used=used_slugs,
+            warning_code="unit_slug_deduplicated",
+            warnings=warnings,
         ),
-        "summary": summary.strip(),
+        "title": title,
+        "summary": _text(value.get("summary"), limit=_MAX_TEXT_LENGTH),
         "unit_type": unit_type,
-        "source_refs": _normalize_source_refs(
-            value.get("source_refs"),
-            field=f"Unit {index}",
-            sources=sources,
-        ),
-        "confidence": _require_confidence(
+        "source_refs": source_refs,
+        "confidence": _confidence(
             value.get("confidence"),
-            field=f"Unit {index} confidence",
+            default=1.0,
+            field="unit_confidence",
+            warnings=warnings,
         ),
         "status": "review",
         "knowledge_points": knowledge_points,
@@ -322,7 +315,7 @@ def validate_textbook_structure(
     candidate: object,
     frozen_input: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Return a safe normalized structure or reject the candidate."""
+    """Normalize a book-to-skill structure into safe review content."""
     if not isinstance(candidate, Mapping):
         raise TextbookStructureValidationError("Structure must be an object")
     if candidate.get("format") != _STRUCTURE_FORMAT:
@@ -332,22 +325,28 @@ def validate_textbook_structure(
         raise TextbookStructureValidationError(
             "Structure must contain at least one Unit"
         )
-    if len(raw_units) > _MAX_UNITS:
-        raise TextbookStructureValidationError("Structure contains too many Units")
-    sources = _frozen_sources(frozen_input)
-    positions: set[int] = set()
-    slugs: set[str] = set()
-    units = [
-        _normalize_unit(
-            unit,
-            index=index,
-            sources=sources,
-            positions=positions,
-            slugs=slugs,
+    markdown_by_source, _ = _frozen_sources(frozen_input)
+    warnings: list[str] = []
+    unit_slugs: set[str] = set()
+    units: list[dict[str, Any]] = []
+    for unit_index, raw_unit in enumerate(raw_units[:_MAX_UNITS], start=1):
+        normalized = _normalize_unit(
+            raw_unit,
+            index=unit_index,
+            markdown_by_source=markdown_by_source,
+            used_slugs=unit_slugs,
+            warnings=warnings,
         )
-        for index, unit in enumerate(raw_units, start=1)
-    ]
+        if normalized is not None:
+            units.append(normalized)
+    if len(raw_units) > _MAX_UNITS:
+        warnings.append("structure_units_truncated")
+    if not units:
+        raise TextbookStructureValidationError(
+            "Structure has no usable Units"
+        )
     return {
         "format": _STRUCTURE_FORMAT,
-        "units": sorted(units, key=lambda unit: unit["position"]),
+        "units": units,
+        "warnings": warnings,
     }

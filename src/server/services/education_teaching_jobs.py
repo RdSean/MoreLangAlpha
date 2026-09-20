@@ -14,13 +14,11 @@ from time import monotonic
 from typing import Any
 from uuid import UUID, uuid4
 
-from ptc_agent.agent.graph import build_ptc_graph_with_session
 from ptc_agent.agent.managed_execution import (
     ManagedExecutionPolicy,
 )
 from src.config.settings import (
     get_education_teaching_workflow_timeout,
-    get_ptc_recursion_limit,
 )
 from src.server.database.education_textbooks import (
     mark_teaching_job_cancel_requested,
@@ -33,6 +31,10 @@ from src.server.services.runs.coordinator import RunCoordinator
 from src.server.services.runs.executor import LocalRunExecutor
 from src.server.services.runs.sse_producer import RunSSEProducer
 from src.server.services.education_teaching_assets import expected_teaching_asset_paths
+from src.server.services.education_managed_runs import (
+    build_managed_education_graph,
+    resolve_managed_education_agent_config,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -368,78 +370,25 @@ async def build_managed_teaching_graph(
     The managed root already owns a durable run row and has no caller supplied
     prompt, identity, context or optional tools.
     """
-    from src.server.app import setup
-
-    config = agent_config or setup.agent_config
-    if config is None:
-        raise RuntimeError("PTC Agent is not initialized")
     job_id = str(UUID(policy.filesystem_root.rsplit("/", 1)[-1]))
-    graph = await build_ptc_graph_with_session(
+    return await build_managed_education_graph(
         session=session,
-        operation_callback=operation_callback,
-        config=config,
-        subagent_names=["textbook-chapter-worker"] if policy.allow_subagents else [],
-        disable_subagents=not policy.allow_subagents,
-        checkpointer=run_handle.checkpointer,
-        background_registry=None,
-        # Built-in workers write to task:<id> through the same fenced saver as
-        # the root run. This is a service-side write lease, not parent state.
-        namespace_owner=run_handle.guard if policy.allow_subagents else None,
-        user_id=None,
-        plan_mode=False,
         thread_id=thread_id,
-        store=None,
-        on_signed_url=None,
-        managed_policy=policy,
+        run_handle=run_handle,
+        policy=policy,
+        agent_config=agent_config,
+        operation_callback=operation_callback,
+        prompt=prompt or managed_teaching_prompt(job_id),
+        tags=tags,
+        managed_kind=managed_kind,
     )
-    graph_config: dict[str, Any] = {
-        "configurable": {
-            "thread_id": thread_id,
-            "agent_mode": "ptc",
-            "managed_execution": {"kind": managed_kind, "job_id": job_id},
-        },
-        # Teaching packages can span many chapters. Their durable root run
-        # must use the configured operational limit rather than chat's former
-        # short-turn cap, while cancellation and heartbeats remain shared.
-        "recursion_limit": get_ptc_recursion_limit(),
-        "tags": list(tags),
-        "metadata": {
-            "managed_execution": {"kind": managed_kind, "job_id": job_id},
-            "run_id": run_handle.run_id,
-            "turn_index": run_handle.turn_index,
-        },
-        "run_id": run_handle.run_id,
-    }
-    input_state = {
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt or managed_teaching_prompt(job_id),
-            }
-        ],
-        "current_agent": "ptc",
-    }
-    return graph, input_state, graph_config
 
 
 async def resolve_managed_teaching_agent_config(*, parent_user_id: str) -> Any:
     """Resolve model credentials without admitting parent runtime capabilities."""
-    from src.server.app import setup
-    from src.server.database.api_keys import is_byok_active
-    from src.server.services.llm.config import resolve_llm_config
-
-    if setup.agent_config is None:
-        raise RuntimeError("PTC Agent is not initialized")
-    config = await resolve_llm_config(
-        base_config=setup.agent_config,
-        user_id=parent_user_id,
-        request_model=None,
-        is_byok=await is_byok_active(parent_user_id),
-        mode="ptc",
-        enabled_subagents=[],
+    return await resolve_managed_education_agent_config(
+        parent_user_id=parent_user_id
     )
-    config.get_llm_client()
-    return config
 
 
 async def request_root_run_cancel(*, thread_id: str, run_id: str) -> None:

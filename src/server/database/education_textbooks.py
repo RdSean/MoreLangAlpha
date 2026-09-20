@@ -989,6 +989,31 @@ async def replace_structure_contents(
                     raise ValueError("Textbook structure is not mutable")
                 await cur.execute(
                     """
+                    SELECT units.unit_id, units.slug AS unit_slug,
+                           knowledge_points.knowledge_point_id,
+                           knowledge_points.slug AS knowledge_point_slug
+                    FROM education_structure_units AS units
+                    LEFT JOIN education_structure_knowledge_points AS knowledge_points
+                      ON knowledge_points.unit_id = units.unit_id
+                    WHERE units.structure_id = %s
+                    """,
+                    (structure_id,),
+                )
+                existing_rows = await cur.fetchall()
+                existing_unit_ids = {
+                    str(row["unit_slug"]): str(row["unit_id"])
+                    for row in existing_rows
+                }
+                existing_knowledge_point_ids = {
+                    (str(row["unit_id"]), str(row["knowledge_point_slug"])): str(
+                        row["knowledge_point_id"]
+                    )
+                    for row in existing_rows
+                    if row.get("knowledge_point_id") is not None
+                    and row.get("knowledge_point_slug") is not None
+                }
+                await cur.execute(
+                    """
                     DELETE FROM education_structure_knowledge_points
                     WHERE unit_id IN (
                         SELECT unit_id
@@ -1007,7 +1032,9 @@ async def replace_structure_contents(
                 )
                 stored_units: list[dict[str, Any]] = []
                 for unit in units:
-                    unit_id = str(uuid4())
+                    unit_id = existing_unit_ids.get(
+                        str(unit["slug"]), str(uuid4())
+                    )
                     await cur.execute(
                         """
                         INSERT INTO education_structure_units (
@@ -1036,7 +1063,10 @@ async def replace_structure_contents(
                         "knowledge_points": [],
                     }
                     for knowledge_point in unit.get("knowledge_points", []):
-                        knowledge_point_id = str(uuid4())
+                        knowledge_point_id = existing_knowledge_point_ids.get(
+                            (unit_id, str(knowledge_point["slug"])),
+                            str(uuid4()),
+                        )
                         await cur.execute(
                             """
                             INSERT INTO education_structure_knowledge_points (

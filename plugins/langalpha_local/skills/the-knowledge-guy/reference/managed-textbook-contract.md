@@ -4,37 +4,6 @@ This is the non-interactive `--managed-textbook` contract shared with
 `book-to-skill`. It applies inside one service-owned PTC root, not to the
 normal chat, course or HTML-artifact modes.
 
-## Managed knowledge-point lesson mode
-
-When the service invokes `--managed-textbook-lesson <job>`, the input is one
-target knowledge point and only its source ranges:
-
-```text
-inputs/manifest.json
-inputs/lesson-context.md
-```
-
-The primary output is:
-
-```text
-outputs/lesson.md
-```
-
-Use Markdown for the course. It may contain headings, tables, quotations,
-vocabulary, formulas, worked examples, misconceptions, review prompts, and
-ordinary exercises. Do not create `vocabulary.json`, `evidence.json`, or a
-complex lesson object. Source evidence belongs to the structure manifest.
-
-Only when `manifest.json` has `"auto_grading": true`, also create:
-
-```text
-outputs/practice.json
-```
-
-Its questions must use 2 to 6 options, one correct option, a prompt, and an
-explanation. Do not write any other path. Do not read the full textbook, use the
-network, or expose model reasoning.
-
 Read only the manifest and frozen complete source Markdown under `inputs/`
 (`inputs/sources/`, or legacy `inputs/chapters/`) plus staged static Skill
 documentation under `.agents/skills/`. The input may contain one or more

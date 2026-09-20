@@ -214,7 +214,7 @@ async def test_finalize_structure_generation_fails_only_the_structure_job(
 ) -> None:
     failed: dict[str, object] = {}
     invalid = json.loads(json.dumps(VALID_STRUCTURE))
-    invalid["units"][0]["source_refs"] = []
+    invalid["units"] = ["not an object"]
 
     async def fake_download(job_id, sandbox):
         return invalid

@@ -39,9 +39,9 @@ from src.server.services.education_structure_jobs import (
     create_generation_workspace,
     managed_generation_workflow_events,
 )
-from src.server.services.education_teaching_jobs import (
-    build_managed_teaching_graph,
-    resolve_managed_teaching_agent_config,
+from src.server.services.education_managed_runs import (
+    build_managed_education_graph,
+    resolve_managed_education_agent_config,
 )
 from src.server.services.education_teaching_storage import (
     download_kp_lesson_outputs,
@@ -66,7 +66,7 @@ MAX_LESSON_GENERATION_ATTEMPTS = 3
 def _processing_profile_sha256(*, auto_grading: bool) -> str:
     payload = {
         "profile": _PROFILE_VERSION,
-        "skills": ["the-knowledge-guy"],
+        "skills": ["book-to-skill"],
         "auto_grading": auto_grading,
     }
     return hashlib.sha256(
@@ -94,9 +94,11 @@ def managed_lesson_prompt(job: Mapping[str, Any]) -> str:
         f"所属单元是：{job.get('unit_title') or ''}。"
         f"只读取 {root}/inputs/manifest.json 和 {root}/inputs/lesson-context.md，"
         "不要读取整本书，也不要访问网络、MCP、Vault 或普通工作区。"
-        f"读取 {root}/.agents/skills/the-knowledge-guy/SKILL.md 及其 managed lesson contract。"
-        "课程主体必须是 Markdown，可以自然包含标题、表格、引用、词汇、公式、例子、"
-        "易错点和普通练习。不要为了统一格式生成 vocabulary.json 或 evidence.json。"
+        f"读取 {root}/.agents/skills/book-to-skill/SKILL.md 及其 managed lesson contract。"
+        "课程主体必须是一个 Mentrix 风格的完整知识点静态页面：使用 Markdown，"
+        "自然包含学习目标、前置知识、分步讲解、例子、表格、词汇或公式、"
+        "易错点、复习和普通练习；不要输出追问记录、笔记或个性化总结。"
+        "不要为了统一格式生成 vocabulary.json 或 evidence.json。"
         f"{practice_instruction}"
         f"唯一允许的课程输出是 {root}/outputs/lesson.md。"
         + (
@@ -359,7 +361,7 @@ async def _dispatch_kp_lesson_root_run(
     )
     try:
         await stage_kp_lesson_inputs(job, source_context, session.sandbox)
-        graph, input_state, graph_config = await build_managed_teaching_graph(
+        graph, input_state, graph_config = await build_managed_education_graph(
             session=session,
             thread_id=thread_id,
             run_handle=run_handle,
@@ -472,7 +474,7 @@ async def launch_kp_lesson_generation(
         raise RuntimeError("Knowledge-point lesson job was claimed")
     attempt_id = str(attempt["attempt_id"])
     try:
-        agent_config = await resolve_managed_teaching_agent_config(
+        agent_config = await resolve_managed_education_agent_config(
             parent_user_id=parent_user_id
         )
     except BaseException:
@@ -493,7 +495,7 @@ async def launch_kp_lesson_generation(
         await stage_managed_teaching_skills(
             generation_job_id,
             session.sandbox,
-            skill_names=("the-knowledge-guy",),
+            skill_names=("book-to-skill",),
         )
         frozen_input = await get_teaching_input_for_parent(
             parent_user_id=parent_user_id,

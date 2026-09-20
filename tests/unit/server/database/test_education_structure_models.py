@@ -150,6 +150,60 @@ async def test_replace_structure_contents_generates_service_owned_ids(
 
 
 @pytest.mark.asyncio
+async def test_replace_structure_contents_preserves_ids_for_matching_slugs(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"structure_id": "structure-1"},
+        {"unit_id": "existing-unit"},
+        {"knowledge_point_id": "existing-kp"},
+    ]
+    mock_cursor.fetchall.return_value = [
+        {
+            "unit_id": "existing-unit",
+            "unit_slug": "unit-1",
+            "knowledge_point_id": "existing-kp",
+            "knowledge_point_slug": "world-game",
+        }
+    ]
+
+    result = await education_textbooks.replace_structure_contents(
+        structure_id="structure-1",
+        units=[
+            {
+                "position": 1,
+                "slug": "unit-1",
+                "title": "Renamed Unit",
+                "summary": "",
+                "unit_type": "teaching",
+                "source_refs": [],
+                "confidence": 0.9,
+                "status": "review",
+                "knowledge_points": [
+                    {
+                        "position": 1,
+                        "slug": "world-game",
+                        "title": "Renamed Knowledge Point",
+                        "summary": "",
+                        "source_refs": [],
+                        "confidence": 0.9,
+                        "status": "review",
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert result[0]["unit_id"] == "existing-unit"
+    assert result[0]["knowledge_points"][0]["knowledge_point_id"] == "existing-kp"
+
+
+@pytest.mark.asyncio
 async def test_create_generation_job_requires_exactly_one_target(
     mock_connection, mock_cursor, monkeypatch
 ):
