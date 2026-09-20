@@ -62,12 +62,16 @@ async def test_get_structure_returns_units_and_knowledge_points_for_parent(
         yield mock_connection
 
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
-    mock_cursor.fetchone.return_value = {
-        "structure_id": "structure-1",
-        "version_id": "version-1",
-        "sequence": 1,
-        "status": "review",
-    }
+    mock_cursor.fetchone.side_effect = [
+        {
+            "structure_id": "structure-1",
+            "version_id": "version-1",
+            "sequence": 1,
+            "status": "review",
+        },
+        {"total": 1, "accepted": 0, "generated": 0, "approved": 0},
+        {"generation_job_id": "generation-1"},
+    ]
     mock_cursor.fetchall.side_effect = [
         [
             {
@@ -289,6 +293,29 @@ async def test_generation_job_parent_projection_includes_frozen_dispatch_context
 
 
 @pytest.mark.asyncio
+async def test_requeue_structure_generation_reuses_same_structure(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {"structure_id": "structure-1"}
+
+    requeued = await education_textbooks.requeue_structure_generation(
+        generation_job_id="generation-1"
+    )
+
+    assert requeued is True
+    assert "scope = 'structure'" in mock_cursor.execute.call_args_list[0].args[0]
+    structure_sql = mock_cursor.execute.call_args_list[1].args[0]
+    assert "UPDATE education_textbook_structures" in structure_sql
+    assert "status = 'queued'" in structure_sql
+    assert mock_cursor.execute.call_args_list[1].args[1] == ("structure-1",)
+
+
+@pytest.mark.asyncio
 async def test_mark_and_complete_generation_attempt_fence_the_root_run(
     mock_connection, mock_cursor, monkeypatch
 ):
@@ -304,7 +331,12 @@ async def test_mark_and_complete_generation_attempt_fence_the_root_run(
             "root_run_id": "run-1",
             "status": "running",
         },
-        {"generation_job_id": "generation-1", "status": "running"},
+        {
+            "generation_job_id": "generation-1",
+            "scope": "structure",
+            "structure_id": "structure-1",
+            "status": "running",
+        },
         {"structure_id": "structure-1", "status": "review"},
         {"attempt_id": "attempt-1"},
         {"generation_job_id": "generation-1", "status": "completed"},
@@ -327,7 +359,9 @@ async def test_mark_and_complete_generation_attempt_fence_the_root_run(
     assert completed["job_status"] == "completed"
     running_sql = mock_cursor.execute.call_args_list[0].args[0]
     assert "root_run_id = %s" in running_sql
-    complete_sql = mock_cursor.execute.call_args_list[2].args[0]
+    running_structure_sql = mock_cursor.execute.call_args_list[2].args[0]
+    assert "UPDATE education_textbook_structures" in running_structure_sql
+    complete_sql = mock_cursor.execute.call_args_list[3].args[0]
     assert "status = 'review'" in complete_sql
 
 

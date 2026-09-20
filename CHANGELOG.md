@@ -11,6 +11,7 @@
 - 只有无法解析、没有可用 Unit、路径越权或数据不安全时才硬失败。
 - 结构编辑按 slug 复用 Unit 和知识点的 UUID，重命名和重排不再导致身份变化。
 - 知识点课程生成改用 `book-to-skill` managed lesson mode；`the-knowledge-guy` 退出课程正文生成，保留为后续交互学习层。
+- 新增结构失败重试：同一 structure job 重新入队，结构状态回到 `queued/running`，结构和内容版本保持不变；结构审阅空态提供“重新运行结构分析”。
 - 补充 `book-to-skill` 的 Mentrix 风格知识点课程 contract，明确 `lesson.md` 是单个知识点的完整静态学习页，不包含追问、笔记或个性化总结。
 - 从公共教材 API 移除旧教学包、教学 job 和旧 version publish 路由，只保留结构审阅、知识点课程和 structure publication。
 - 清理前端旧教学包 API、查询键、类型和 `TeachingRunDrawer`，教材加工前端只保留结构、知识点课程和发布链路。

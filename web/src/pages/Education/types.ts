@@ -209,6 +209,7 @@ export interface TextbookStructure {
     generated: number;
     approved: number;
   };
+  latest_generation_job_id?: string | null;
 }
 
 export interface StructureGenerationJob {

@@ -404,6 +404,7 @@ class TextbookStructureResponse(BaseModel):
     lesson_summary: TextbookLessonSummaryResponse = Field(
         default_factory=TextbookLessonSummaryResponse
     )
+    latest_generation_job_id: UUID | None = None
 
 
 class StructureGenerationJobResponse(BaseModel):

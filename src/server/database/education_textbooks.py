@@ -818,6 +818,22 @@ async def get_textbook_structure_for_parent(
                 (structure_id,),
             )
             result["lesson_summary"] = dict(await cur.fetchone())
+            await cur.execute(
+                """
+                SELECT generation_job_id
+                FROM education_generation_jobs
+                WHERE structure_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (structure_id,),
+            )
+            latest_generation_job = await cur.fetchone()
+            result["latest_generation_job_id"] = (
+                latest_generation_job["generation_job_id"]
+                if latest_generation_job
+                else None
+            )
     return result
 
 
@@ -1227,6 +1243,38 @@ async def requeue_generation_job(*, generation_job_id: str) -> bool:
             return await cur.fetchone() is not None
 
 
+async def requeue_structure_generation(*, generation_job_id: str) -> bool:
+    """Requeue one failed structure job with its existing structure identity."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs
+                    SET status = 'queued', error_code = NULL,
+                        error_message = NULL, updated_at = NOW()
+                    WHERE generation_job_id = %s
+                      AND scope = 'structure'
+                      AND status = 'failed'
+                      AND attempt_count < 3
+                    RETURNING structure_id
+                    """,
+                    (generation_job_id,),
+                )
+                job = await cur.fetchone()
+                if not job or job.get("structure_id") is None:
+                    return False
+                await cur.execute(
+                    """
+                    UPDATE education_textbook_structures
+                    SET status = 'queued', bundle_prefix = NULL
+                    WHERE structure_id = %s AND status = 'failed'
+                    """,
+                    (job["structure_id"],),
+                )
+    return True
+
+
 async def settle_generation_job(
     *,
     generation_job_id: str,
@@ -1314,11 +1362,24 @@ async def mark_generation_attempt_running(
                     WHERE generation_job_id = %s
                       AND latest_attempt_id = %s
                       AND status = 'preparing'
-                    RETURNING generation_job_id, status
+                    RETURNING generation_job_id, scope, structure_id, status
                     """,
                     (generation_job_id, attempt_id),
                 )
                 job = await cur.fetchone()
+                if (
+                    job
+                    and job.get("scope") == "structure"
+                    and job.get("structure_id") is not None
+                ):
+                    await cur.execute(
+                        """
+                        UPDATE education_textbook_structures
+                        SET status = 'running'
+                        WHERE structure_id = %s AND status = 'queued'
+                        """,
+                        (job["structure_id"],),
+                    )
     return {**dict(attempt), **dict(job)} if job else None
 
 

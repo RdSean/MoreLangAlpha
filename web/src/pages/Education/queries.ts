@@ -278,6 +278,10 @@ export function useStructureMutations() {
         educationApi.createTextbookStructure(versionId, profile),
       onSuccess: invalidate,
     }),
+    resumeStructure: useMutation({
+      mutationFn: educationApi.resumeStructureGenerationJob,
+      onSuccess: invalidate,
+    }),
     save: useMutation({
       mutationFn: ({ structureId, units }: { structureId: string; units: TextbookStructureUnit[] }) =>
         educationApi.updateTextbookStructure(structureId, units),

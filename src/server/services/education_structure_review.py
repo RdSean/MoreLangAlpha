@@ -12,6 +12,7 @@ from src.server.database.education_textbooks import (
     get_teaching_input_for_parent,
     get_textbook_structure_for_parent,
     replace_structure_contents,
+    requeue_structure_generation,
 )
 from src.server.services.education_structure_jobs import (
     get_structure_generation_job_for_parent,
@@ -98,6 +99,45 @@ async def get_latest_structure_for_parent(
         parent_user_id=parent_user_id,
         content_version_id=content_version_id,
     )
+
+
+async def resume_structure_generation_for_parent(
+    *,
+    parent_user_id: str,
+    generation_job_id: str,
+) -> dict[str, Any]:
+    """Requeue and relaunch one failed structure job in place."""
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can resume textbook structures")
+    job = await get_generation_job_for_parent(
+        parent_user_id=parent_user_id,
+        generation_job_id=generation_job_id,
+    )
+    if not job:
+        raise TextbookNotFoundError("Textbook structure generation job not found")
+    if job.get("scope") != "structure" or job.get("status") != "failed":
+        raise TextbookTransitionError("Only a failed structure job can be resumed")
+    if not await requeue_structure_generation(
+        generation_job_id=generation_job_id
+    ):
+        raise TextbookTransitionError("Textbook structure job cannot be resumed")
+    try:
+        await launch_structure_generation(
+            parent_user_id=parent_user_id,
+            generation_job_id=generation_job_id,
+        )
+    except Exception as exc:
+        projection = await get_structure_generation_job_for_parent(
+            parent_user_id=parent_user_id,
+            generation_job_id=generation_job_id,
+        )
+        if projection and projection.get("status") in {"failed", "cancelled"}:
+            return projection
+        raise TextbookError("教材结构分析无法继续，请稍后重试。") from exc
+    return await get_structure_generation_job_for_parent(
+        parent_user_id=parent_user_id,
+        generation_job_id=generation_job_id,
+    ) or job
 
 
 async def replace_structure_for_parent(

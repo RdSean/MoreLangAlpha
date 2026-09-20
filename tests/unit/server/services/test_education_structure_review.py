@@ -150,6 +150,73 @@ async def test_structure_read_and_replace_require_parent(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_resume_structure_requeues_same_job_and_launches(monkeypatch):
+    launched: dict[str, str] = {}
+
+    async def household(_user_id: str):
+        return {"household_id": "household-1"}
+
+    async def get_job(**_kwargs):
+        return {
+            "generation_job_id": "generation-1",
+            "scope": "structure",
+            "status": "failed",
+        }
+
+    async def requeue(**kwargs):
+        launched["requeue"] = kwargs["generation_job_id"]
+        return True
+
+    async def launch(**kwargs):
+        launched["launch"] = kwargs["generation_job_id"]
+        return {"root_run_id": "run-2"}
+
+    async def projection(**_kwargs):
+        return {
+            "generation_job_id": "generation-1",
+            "scope": "structure",
+            "status": "queued",
+        }
+
+    monkeypatch.setattr(
+        education_structure_review,
+        "get_household_context_for_parent",
+        household,
+    )
+    monkeypatch.setattr(
+        education_structure_review,
+        "get_generation_job_for_parent",
+        get_job,
+    )
+    monkeypatch.setattr(
+        education_structure_review,
+        "requeue_structure_generation",
+        requeue,
+    )
+    monkeypatch.setattr(
+        education_structure_review,
+        "launch_structure_generation",
+        launch,
+    )
+    monkeypatch.setattr(
+        education_structure_review,
+        "get_structure_generation_job_for_parent",
+        projection,
+    )
+
+    result = await education_structure_review.resume_structure_generation_for_parent(
+        parent_user_id="parent-1",
+        generation_job_id="generation-1",
+    )
+
+    assert launched == {
+        "requeue": "generation-1",
+        "launch": "generation-1",
+    }
+    assert result["status"] == "queued"
+
+
+@pytest.mark.asyncio
 async def test_replace_structure_validates_edit_and_persists_units(monkeypatch):
     stored: dict[str, object] = {}
 

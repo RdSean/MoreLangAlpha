@@ -41,6 +41,7 @@ from src.server.services.education_structure_review import (
     get_latest_structure_for_parent,
     queue_structure_for_parent,
     replace_structure_for_parent,
+    resume_structure_generation_for_parent,
 )
 from src.server.services.education_lesson_review import (
     approve_lesson_for_parent,
@@ -188,6 +189,24 @@ async def get_family_structure_generation_job(
 ):
     try:
         return await get_structure_generation_job(
+            parent_user_id=user_id,
+            generation_job_id=str(generation_job_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/structure-generation-jobs/{generation_job_id}/resume",
+    response_model=StructureGenerationJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def resume_family_structure_generation_job(
+    generation_job_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await resume_structure_generation_for_parent(
             parent_user_id=user_id,
             generation_job_id=str(generation_job_id),
         )

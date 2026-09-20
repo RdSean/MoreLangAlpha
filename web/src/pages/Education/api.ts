@@ -109,6 +109,11 @@ export async function getStructureGenerationJob(generationJobId: string): Promis
   return data;
 }
 
+export async function resumeStructureGenerationJob(generationJobId: string): Promise<StructureGenerationJob> {
+  const { data } = await api.post<StructureGenerationJob>(`/api/v1/education/structure-generation-jobs/${generationJobId}/resume`);
+  return data;
+}
+
 export async function updateTextbookStructure(structureId: string, units: TextbookStructureUnit[]): Promise<TextbookStructure> {
   const { data } = await api.put<TextbookStructure>(`/api/v1/education/textbook-structures/${structureId}`, { units });
   return data;

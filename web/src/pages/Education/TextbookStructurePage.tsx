@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpenCheck, CheckCircle2, GitMerge, Plus, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
+import { BookOpenCheck, CheckCircle2, GitMerge, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -130,6 +130,18 @@ export default function TextbookStructurePage() {
     }
   };
 
+  const resumeStructure = async () => {
+    const generationJobId = structure.data?.latest_generation_job_id;
+    if (!generationJobId) return;
+    try {
+      const job = await mutations.resumeStructure.mutateAsync(generationJobId);
+      setJobId(job.generation_job_id);
+      await structure.refetch();
+    } catch (error) {
+      toast({ variant: 'destructive', title: '无法继续结构分析', description: messageOf(error, '请稍后重试。') });
+    }
+  };
+
   const saveStructure = async () => {
     if (!structure.data) return;
     try {
@@ -205,6 +217,12 @@ export default function TextbookStructurePage() {
               ? '结构分析没有生成可审阅的 Unit，请重新运行结构分析。'
               : '结构分析尚未产生 Unit。'}
           </p>
+          {data.status === 'failed' && data.latest_generation_job_id && (
+            <Button className="mt-6" onClick={() => void resumeStructure()} disabled={mutations.resumeStructure.isPending}>
+              <RefreshCcw className="mr-2 size-4" />
+              {mutations.resumeStructure.isPending ? '正在继续' : '重新运行结构分析'}
+            </Button>
+          )}
         </div>
       </main>
     );
