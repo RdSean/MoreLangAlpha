@@ -33,7 +33,7 @@ export async function sendChatMessageStream(
   onRunIdResolved: ((runId: string, threadId: string | null) => void) | null = null,
   signal: AbortSignal | null = null,
   requestKey: string | null = null,
-  educationContext: { assignmentId: string; chapterId?: string; knowledgePointId?: string } | null = null,
+  educationContext: { assignmentId: string; knowledgePointId?: string } | null = null,
 ) {
   // For checkpoint replay (regenerate/retry), send empty messages
   const messages = checkpointId && !message
@@ -63,7 +63,6 @@ export async function sendChatMessageStream(
   if (platform) body.platform = platform;
   if (educationContext) {
     body.education_assignment_id = educationContext.assignmentId;
-    if (educationContext.chapterId) body.education_chapter_id = educationContext.chapterId;
     if (educationContext.knowledgePointId) body.education_knowledge_point_id = educationContext.knowledgePointId;
   }
   // Use /threads/{id}/messages for existing thread, /threads/messages for new

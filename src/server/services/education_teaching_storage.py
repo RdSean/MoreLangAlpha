@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import io
 import json
 import re
-import zipfile
 from collections.abc import Mapping
 from typing import Any, Protocol
 from urllib.parse import unquote
 from uuid import UUID
 
-from src.server.services.education_teaching_assets import expected_teaching_asset_paths
 from src.server.services.education_book_assets import (
     expected_book_asset_files,
     validate_book_asset_content,
@@ -564,25 +561,6 @@ async def stage_teaching_inputs(
     return {key: staged[key] for key in ("manifest", "manifest_sha256", "chapters")}
 
 
-async def download_teaching_output(
-    job_id: str, sandbox: ManagedTeachingSandbox
-) -> dict[str, Any]:
-    """Download the single contractually fixed candidate; never list paths."""
-    path = f"{managed_job_root(job_id)}/outputs/teaching-package.json"
-    content = await sandbox.adownload_file_bytes(path)
-    if content is None:
-        raise TeachingPackageStorageError("Managed teaching package output is unavailable")
-    if len(content) > _MAX_CANDIDATE_BYTES:
-        raise TeachingPackageStorageError("Managed teaching package output is too large")
-    try:
-        output = json.loads(content.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise TeachingPackageStorageError("Managed teaching package output is invalid") from exc
-    if not isinstance(output, dict):
-        raise TeachingPackageStorageError("Managed teaching package output is invalid")
-    return output
-
-
 async def download_structure_output(
     job_id: str, sandbox: ManagedTeachingSandbox
 ) -> dict[str, Any]:
@@ -719,81 +697,6 @@ async def download_kp_lesson_outputs(
     return lesson, practice
 
 
-async def download_teaching_asset_outputs(
-    job_id: str, frozen_input: Mapping[str, Any], sandbox: ManagedTeachingSandbox
-) -> dict[str, bytes]:
-    """Download every v2 candidate from service-derived paths without listing."""
-    paths = expected_teaching_asset_paths(frozen_input)
-    root = managed_job_root(job_id)
-    outputs: dict[str, bytes] = {}
-    for path in sorted(paths.all_paths):
-        content = await sandbox.adownload_file_bytes(f"{root}/{path}")
-        if content is None:
-            raise TeachingPackageStorageError(
-                "Managed teaching bundle is incomplete", relative_path=path
-            )
-        if not isinstance(content, bytes) or len(content) > _MAX_CANDIDATE_BYTES:
-            raise TeachingPackageStorageError("Managed teaching bundle asset is invalid")
-        outputs[path] = content
-    return outputs
-
-
-def encode_teaching_archive_stage(
-    frozen_input: Mapping[str, Any], outputs: Mapping[str, bytes]
-) -> bytes:
-    """Pack one validated fixed-output set for internal archive recovery."""
-    paths = expected_teaching_asset_paths(frozen_input)
-    if set(outputs) != set(paths.all_paths):
-        raise TeachingPackageStorageError("Teaching archive stage paths are invalid")
-    total_size = 0
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(
-        buffer, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
-    ) as archive:
-        for path in sorted(paths.all_paths):
-            content = outputs[path]
-            if not isinstance(content, bytes) or len(content) > _MAX_CANDIDATE_BYTES:
-                raise TeachingPackageStorageError("Teaching archive stage content is invalid")
-            total_size += len(content)
-            if total_size > _MAX_ARCHIVE_STAGE_BYTES:
-                raise TeachingPackageStorageError("Teaching archive stage is too large")
-            archive.writestr(path, content)
-    staged = buffer.getvalue()
-    if len(staged) > _MAX_ARCHIVE_STAGE_BYTES:
-        raise TeachingPackageStorageError("Teaching archive stage is too large")
-    return staged
-
-
-def decode_teaching_archive_stage(
-    frozen_input: Mapping[str, Any], staged: bytes
-) -> dict[str, bytes]:
-    """Restore only the exact fixed outputs from a service-owned archive stage."""
-    if not isinstance(staged, bytes) or not staged or len(staged) > _MAX_ARCHIVE_STAGE_BYTES:
-        raise TeachingPackageStorageError("Teaching archive stage is invalid")
-    paths = expected_teaching_asset_paths(frozen_input)
-    try:
-        with zipfile.ZipFile(io.BytesIO(staged)) as archive:
-            infos = archive.infolist()
-            names = [info.filename for info in infos]
-            if len(names) != len(set(names)) or set(names) != set(paths.all_paths):
-                raise TeachingPackageStorageError("Teaching archive stage paths are invalid")
-            total_size = 0
-            outputs: dict[str, bytes] = {}
-            for info in infos:
-                if info.is_dir() or info.file_size > _MAX_CANDIDATE_BYTES:
-                    raise TeachingPackageStorageError("Teaching archive stage content is invalid")
-                total_size += info.file_size
-                if total_size > _MAX_ARCHIVE_STAGE_BYTES:
-                    raise TeachingPackageStorageError("Teaching archive stage is too large")
-                content = archive.read(info)
-                if len(content) != info.file_size:
-                    raise TeachingPackageStorageError("Teaching archive stage content is invalid")
-                outputs[info.filename] = content
-    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
-        raise TeachingPackageStorageError("Teaching archive stage is invalid") from exc
-    return outputs
-
-
 async def _put(key: str, content: bytes, content_type: str) -> None:
     for retry_delay in (*_ARCHIVE_PUT_RETRY_DELAYS, None):
         if await asyncio.to_thread(upload_bytes, key, content, content_type):
@@ -859,22 +762,6 @@ def _safe_asset_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
         },
         "chapters": safe_chapters,
     }
-
-
-def teaching_package_bundle_prefix(job: Mapping[str, Any]) -> str:
-    try:
-        content_sequence = int(job["content_version_sequence"])
-        package_sequence = int(job["teaching_package_sequence"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise TeachingPackageStorageError("Teaching package version sequence is invalid") from exc
-    if content_sequence <= 0 or package_sequence <= 0:
-        raise TeachingPackageStorageError("Teaching package version sequence is invalid")
-    return "education/{}/{}/v{}/teaching/v{}".format(
-        _safe_component(job.get("household_id"), "household"),
-        _safe_component(job.get("slug"), "textbook"),
-        content_sequence,
-        package_sequence,
-    )
 
 
 def structure_bundle_prefix(job: Mapping[str, Any]) -> str:
@@ -1062,95 +949,3 @@ async def read_kp_lesson_revision(content_key: str) -> bytes:
     ):
         raise TeachingPackageStorageError("Knowledge-point lesson content is unavailable")
     return content
-
-
-async def write_teaching_asset_bundle(
-    job: Mapping[str, Any], manifest: Mapping[str, Any], outputs: Mapping[str, bytes]
-) -> str:
-    """Archive a validated v2 output set under private service-generated keys."""
-    frozen_input = freeze_teaching_input(job)
-    paths = expected_teaching_asset_paths(frozen_input)
-    if set(outputs) != set(paths.all_paths):
-        raise TeachingPackageStorageError("Teaching asset bundle paths are invalid")
-    prefix = teaching_package_bundle_prefix(job)
-    for source_path in sorted(paths.all_paths):
-        content = outputs[source_path]
-        if not isinstance(content, bytes):
-            raise TeachingPackageStorageError("Teaching asset bundle content is invalid")
-        archive_path = source_path.removeprefix("outputs/")
-        await _put(f"{prefix}/{archive_path}", content, _asset_content_type(archive_path))
-    safe_manifest = _safe_asset_manifest(manifest)
-    safe_manifest.update(
-        {
-            "content_version": job["content_version_sequence"],
-            "teaching_package": job["teaching_package_sequence"],
-        }
-    )
-    readme = "# 教学知识资产\n\n本目录由受管教材任务生成，须经服务端校验与家长审阅后才可发布。\n"
-    await _put(f"{prefix}/README.md", readme.encode("utf-8"), "text/markdown; charset=utf-8")
-    await _put(
-        f"{prefix}/manifest.json",
-        json.dumps(safe_manifest, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8"),
-        "application/json",
-    )
-    return prefix
-
-
-async def write_teaching_package_bundle(
-    job: Mapping[str, Any], package: Mapping[str, Any]
-) -> str:
-    """Archive a previously validated candidate under service-generated keys only."""
-    prefix = teaching_package_bundle_prefix(job)
-    frozen = freeze_teaching_input(job)
-    chapters_by_id = {
-        chapter["content_chapter_id"]: chapter for chapter in frozen["chapters"]
-    }
-    package_chapters = package.get("chapters")
-    if not isinstance(package_chapters, list):
-        raise TeachingPackageStorageError("Validated teaching package chapters are invalid")
-    manifest_chapters: list[dict[str, Any]] = []
-    for candidate in package_chapters:
-        if not isinstance(candidate, Mapping):
-            raise TeachingPackageStorageError("Validated teaching chapter is invalid")
-        content_chapter = chapters_by_id.get(str(candidate.get("content_chapter_id")))
-        if not content_chapter:
-            raise TeachingPackageStorageError("Teaching package references an unknown chapter")
-        material_relative = "chapters/{:02d}-{}-material.md".format(
-            content_chapter["position"], content_chapter["slug"]
-        )
-        questions_relative = "chapters/{:02d}-{}-questions.json".format(
-            content_chapter["position"], content_chapter["slug"]
-        )
-        material = str(candidate["teaching_material"]).encode("utf-8")
-        questions = json.dumps(
-            candidate["questions"], ensure_ascii=False, sort_keys=True, indent=2
-        ).encode("utf-8")
-        await _put(f"{prefix}/{material_relative}", material, "text/markdown; charset=utf-8")
-        await _put(f"{prefix}/{questions_relative}", questions, "application/json")
-        manifest_chapters.append(
-            {
-                "content_chapter_id": content_chapter["content_chapter_id"],
-                "position": content_chapter["position"],
-                "slug": content_chapter["slug"],
-                "content_sha256": candidate["content_sha256"],
-                "material_path": material_relative,
-                "material_sha256": hashlib.sha256(material).hexdigest(),
-                "questions_path": questions_relative,
-                "questions_sha256": hashlib.sha256(questions).hexdigest(),
-            }
-        )
-    manifest_chapters.sort(key=lambda chapter: chapter["position"])
-    readme = "# 教学包\n\n本目录是冻结教材内容的候选教学包，须经服务端校验与家长审阅后才可发布。\n"
-    manifest = {
-        "format": "langalpha-family-teaching-package/v1",
-        "content_version": job["content_version_sequence"],
-        "teaching_package": job["teaching_package_sequence"],
-        "chapters": manifest_chapters,
-    }
-    await _put(f"{prefix}/README.md", readme.encode("utf-8"), "text/markdown; charset=utf-8")
-    await _put(
-        f"{prefix}/manifest.json",
-        json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8"),
-        "application/json",
-    )
-    return prefix

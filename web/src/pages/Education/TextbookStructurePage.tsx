@@ -272,7 +272,7 @@ export default function TextbookStructurePage() {
         <div
           className="border-b px-4 py-3 sm:px-8"
           data-testid="structure-warning-summary"
-          style={{ borderColor: 'var(--color-border-muted)', background: 'var(--color-warning-bg, color-mix(in srgb, var(--color-warning, #f59e0b) 8%, transparent))' }}
+          style={{ borderColor: 'var(--color-border-muted)', background: 'var(--color-warning-soft)' }}
         >
           <div className="mx-auto flex w-full max-w-[1500px] items-start gap-3">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" style={{ color: 'var(--color-warning, #f59e0b)' }} />

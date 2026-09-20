@@ -494,11 +494,10 @@ async def _handle_send_message(
             await require_student_flash_workspace(user_id, workspace)
 
         # A learning reference can only ever drive the student's private Flash
-        # workspace. Resolve the immutable published chapter on the server so a
+        # workspace. Resolve the immutable published lesson on the server so a
         # browser cannot inject arbitrary material or cross-household content.
         if (
             request.education_assignment_id
-            or request.education_chapter_id
             or request.education_knowledge_point_id
         ):
             if (
@@ -527,7 +526,6 @@ async def _handle_send_message(
                         "additional_context": await attach_learning_chat_context(
                             user_id=user_id,
                             assignment_id=request.education_assignment_id,
-                            chapter_id=request.education_chapter_id,
                             knowledge_point_id=request.education_knowledge_point_id,
                             additional_context=request.additional_context,
                         )

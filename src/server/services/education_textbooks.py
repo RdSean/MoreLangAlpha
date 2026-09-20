@@ -1,12 +1,11 @@
 """Versioning, explicit local processing, and authorization for family textbooks."""
 
 import asyncio
-import hashlib
 import json
 import logging
 from collections.abc import Mapping
 from io import BytesIO
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
 
@@ -19,27 +18,17 @@ from src.server.database.education_textbooks import (
     create_textbook_record,
     fail_textbook_processing_job,
     get_processing_job_for_parent,
-    get_teaching_asset_review_for_parent,
-    get_teaching_input_for_parent,
-    get_teaching_job_projection_for_parent,
     get_owned_parse_job,
     get_textbook_for_parent,
-    get_student_chapter_context_record,
-    get_student_learning as get_student_learning_record,
     get_student_published_kp_lesson,
     get_student_published_structure,
     list_completed_parse_jobs_for_parent,
     list_student_assignments,
-    list_student_learning_records,
     list_textbooks_for_parent,
-    publish_textbook_version,
-    queue_teaching_package,
     queue_textbook_processing,
     queue_textbook_processing_from_artifacts,
     retry_textbook_processing_job,
-    submit_student_answer,
     TextbookQueueValidationError,
-    update_student_progress,
 )
 from src.server.database.education_members import get_membership_for_user
 from src.server.database.session_lock import await_settled
@@ -53,13 +42,7 @@ from src.server.services.education_textbook_snapshot_reads import (
     read_snapshot_artifact_bytes,
 )
 from src.server.services.education_textbook_storage import write_textbook_content_bundle
-from src.server.services.education_teaching_assets import (
-    TeachingAssetValidationError,
-    expected_teaching_asset_paths,
-)
 from src.server.services.education_teaching_storage import (
-    build_staged_teaching_input,
-    hydrate_source_asset_manifests,
     read_kp_lesson_revision,
 )
 from src.utils.storage import get_bytes
@@ -621,389 +604,6 @@ async def get_parent_textbook(
     return textbook
 
 
-def _managed_skill_hash(skill_name: str) -> str:
-    # The managed teaching skills ship in a bundle, so the source is found
-    # through the same chain the agent's skill delivery uses rather than a
-    # repo-relative path.
-    source = _managed_skill_source_root(skill_name) / "SKILL.md"
-    try:
-        return hashlib.sha256(source.read_bytes()).hexdigest()
-    except OSError as exc:
-        raise TextbookError("教材教学加工能力当前不可用") from exc
-
-
-def _managed_skill_source_root(skill_name: str) -> Path:
-    """Host directory holding one managed skill, wherever the bundle puts it."""
-    from ptc_agent.config.agent import host_skill_dirs
-
-    for root in host_skill_dirs():
-        candidate = root / skill_name
-        if (candidate / "SKILL.md").is_file():
-            return candidate
-    raise TextbookError("教材教学加工能力当前不可用")
-
-
-def _teaching_actions(*, status: str) -> list[str]:
-    if status in {"queued", "preparing", "running", "validating"}:
-        return ["cancel"]
-    if status in {"failed", "cancelled"}:
-        return ["resume"]
-    return []
-
-
-def _safe_teaching_projection(job: dict[str, Any]) -> dict[str, Any]:
-    """Keep the API shape intentionally independent from PTC runtime records."""
-    status = str(job["status"])
-    events = [
-        {
-            "sequence": event["sequence"],
-            "phase": event["phase"],
-            "summary": event["summary"],
-            "chapter_id": event.get("chapter_id"),
-            "asset_kind": event.get("asset_kind"),
-            "created_at": event.get("created_at"),
-        }
-        for event in job.get("events", [])
-    ]
-    phase = job["phase"] if status == "completed" or not events else events[-1]["phase"]
-    return {
-        "job_id": job["job_id"],
-        "teaching_package_id": job["teaching_package_id"],
-        "content_version_id": job["content_version_id"],
-        "status": status,
-        "phase": phase,
-        "attempt_count": int(job["attempt_count"]),
-        "completed_chapter_count": int(job["completed_chapter_count"]),
-        "total_chapter_count": int(job["total_chapter_count"]),
-        "last_heartbeat_at": job.get("last_heartbeat_at"),
-        "error_message": job.get("error_message") or job.get("package_error_message"),
-        "created_at": job.get("created_at"),
-        "completed_at": job.get("completed_at"),
-        "actions": _teaching_actions(status=status),
-        "events": events,
-        "attempts": [
-            {
-                "attempt_id": attempt["attempt_id"],
-                "root_run_id": attempt.get("root_run_id"),
-                "previous_attempt_id": attempt.get("previous_attempt_id"),
-                "status": attempt["status"],
-                "started_at": attempt.get("started_at"),
-                "heartbeat_at": attempt.get("heartbeat_at"),
-                "completed_at": attempt.get("completed_at"),
-            }
-            for attempt in job.get("attempts", [])
-        ],
-    }
-
-
-_REVIEWABLE_TEACHING_ASSET_KINDS = frozenset({"knowledge", "toolkit", "practice"})
-
-
-def _validated_teaching_asset_review(
-    review: Mapping[str, Any],
-) -> tuple[Mapping[str, Any], dict[str, Mapping[str, Any]], Any]:
-    """Rebuild fixed archive paths only from the service-authored manifest."""
-    manifest = review.get("asset_manifest")
-    chapters = review.get("chapters")
-    if (
-        not isinstance(manifest, Mapping)
-        or manifest.get("format") != "langalpha-family-teaching-assets/v2"
-        or not isinstance(chapters, list)
-        or not isinstance(manifest.get("chapters"), list)
-    ):
-        raise TextbookNotFoundError("Teaching assets are not available")
-    manifest_chapters: dict[str, Mapping[str, Any]] = {}
-    for entry in manifest["chapters"]:
-        if not isinstance(entry, Mapping):
-            raise TextbookNotFoundError("Teaching assets are not available")
-        chapter_id = str(entry.get("content_chapter_id", ""))
-        if not chapter_id or chapter_id in manifest_chapters:
-            raise TextbookNotFoundError("Teaching assets are not available")
-        manifest_chapters[chapter_id] = entry
-    chapter_records: dict[str, Mapping[str, Any]] = {}
-    frozen_chapters: list[dict[str, Any]] = []
-    for chapter in chapters:
-        if not isinstance(chapter, Mapping):
-            raise TextbookNotFoundError("Teaching assets are not available")
-        chapter_id = str(chapter.get("content_chapter_id", ""))
-        manifest_chapter = manifest_chapters.get(chapter_id)
-        if not manifest_chapter or chapter_id in chapter_records:
-            raise TextbookNotFoundError("Teaching assets are not available")
-        chapter_records[chapter_id] = chapter
-        frozen_chapters.append(
-            {
-                "content_chapter_id": chapter_id,
-                "content_sha256": manifest_chapter.get("content_sha256"),
-                "position": chapter.get("position"),
-                "slug": chapter.get("slug"),
-            }
-        )
-    if set(chapter_records) != set(manifest_chapters):
-        raise TextbookNotFoundError("Teaching assets are not available")
-    try:
-        paths = expected_teaching_asset_paths({"chapters": frozen_chapters})
-    except TeachingAssetValidationError as exc:
-        raise TextbookNotFoundError("Teaching assets are not available") from exc
-    return manifest, chapter_records, paths
-
-
-def _safe_review_asset_metadata(asset: object) -> dict[str, Any]:
-    if not isinstance(asset, Mapping):
-        raise TextbookNotFoundError("Teaching assets are not available")
-    kind = asset.get("kind")
-    size_bytes = asset.get("size_bytes")
-    sha256 = asset.get("sha256")
-    if (
-        kind not in _REVIEWABLE_TEACHING_ASSET_KINDS
-        or not isinstance(size_bytes, int)
-        or isinstance(size_bytes, bool)
-        or size_bytes < 0
-        or not isinstance(sha256, str)
-        or len(sha256) != 64
-    ):
-        raise TextbookNotFoundError("Teaching assets are not available")
-    return {"kind": kind, "size_bytes": size_bytes, "sha256": sha256}
-
-
-def _private_teaching_asset_key(bundle_prefix: object, relative_path: str) -> str:
-    if not isinstance(bundle_prefix, str) or not bundle_prefix.startswith("education/"):
-        raise TextbookNotFoundError("Teaching assets are not available")
-    prefix_parts = bundle_prefix.split("/")
-    if any(part in {"", ".", ".."} for part in prefix_parts):
-        raise TextbookNotFoundError("Teaching assets are not available")
-    return f"{bundle_prefix}/{relative_path}"
-
-
-async def get_teaching_asset_summary(
-    *, parent_user_id: str, teaching_package_id: str
-) -> dict[str, Any]:
-    review = await get_teaching_asset_review_for_parent(
-        parent_user_id=parent_user_id, teaching_package_id=teaching_package_id
-    )
-    if not review:
-        raise TextbookNotFoundError("Teaching package not found")
-    manifest, chapter_records, _paths = _validated_teaching_asset_review(review)
-    concept_index = manifest.get("concept_index")
-    coverage_audit = manifest.get("coverage_audit")
-    if (
-        not isinstance(concept_index, Mapping)
-        or not isinstance(coverage_audit, Mapping)
-        or not isinstance(concept_index.get("size_bytes"), int)
-        or not isinstance(concept_index.get("concept_count"), int)
-        or not isinstance(coverage_audit.get("size_bytes"), int)
-        or coverage_audit.get("status") != "complete"
-    ):
-        raise TextbookNotFoundError("Teaching assets are not available")
-    manifest_chapters = {
-        str(chapter["content_chapter_id"]): chapter for chapter in manifest["chapters"]
-    }
-    chapters = []
-    for chapter_id, chapter in sorted(
-        chapter_records.items(), key=lambda item: int(item[1]["position"])
-    ):
-        entry = manifest_chapters[chapter_id]
-        assets = entry.get("assets")
-        if (
-            entry.get("coverage_status") != "complete"
-            or not isinstance(entry.get("concept_count"), int)
-            or not isinstance(assets, list)
-        ):
-            raise TextbookNotFoundError("Teaching assets are not available")
-        safe_assets = [_safe_review_asset_metadata(asset) for asset in assets]
-        if {asset["kind"] for asset in safe_assets} != _REVIEWABLE_TEACHING_ASSET_KINDS:
-            raise TextbookNotFoundError("Teaching assets are not available")
-        chapters.append(
-            {
-                "chapter_id": chapter_id,
-                "position": chapter["position"],
-                "title": chapter["title"],
-                "coverage_status": entry["coverage_status"],
-                "concept_count": entry["concept_count"],
-                "assets": safe_assets,
-            }
-        )
-    return {
-        "teaching_package_id": review["teaching_package_id"],
-        "format": manifest["format"],
-        "concept_index": {
-            "size_bytes": concept_index["size_bytes"],
-            "concept_count": concept_index["concept_count"],
-        },
-        "coverage_audit": {
-            "size_bytes": coverage_audit["size_bytes"],
-            "status": coverage_audit["status"],
-        },
-        "chapters": chapters,
-    }
-
-
-async def get_teaching_chapter_asset(
-    *,
-    parent_user_id: str,
-    teaching_package_id: str,
-    chapter_id: str,
-    kind: str,
-) -> dict[str, Any]:
-    if kind not in _REVIEWABLE_TEACHING_ASSET_KINDS:
-        raise TextbookNotFoundError("Teaching asset not found")
-    review = await get_teaching_asset_review_for_parent(
-        parent_user_id=parent_user_id, teaching_package_id=teaching_package_id
-    )
-    if not review:
-        raise TextbookNotFoundError("Teaching package not found")
-    manifest, _chapter_records, paths = _validated_teaching_asset_review(review)
-    manifest_chapter = next(
-        (
-            entry
-            for entry in manifest["chapters"]
-            if str(entry.get("content_chapter_id")) == chapter_id
-        ),
-        None,
-    )
-    if not isinstance(manifest_chapter, Mapping):
-        raise TextbookNotFoundError("Teaching asset not found")
-    metadata = next(
-        (
-            _safe_review_asset_metadata(asset)
-            for asset in manifest_chapter.get("assets", [])
-            if isinstance(asset, Mapping) and asset.get("kind") == kind
-        ),
-        None,
-    )
-    if not metadata:
-        raise TextbookNotFoundError("Teaching asset not found")
-    chapter_paths = paths.for_chapter(chapter_id)
-    relative_path = getattr(chapter_paths, kind)
-    key = _private_teaching_asset_key(
-        review.get("bundle_prefix"), relative_path.removeprefix("outputs/")
-    )
-    content = await asyncio.to_thread(get_bytes, key)
-    if (
-        content is None
-        or len(content) != metadata["size_bytes"]
-        or hashlib.sha256(content).hexdigest() != metadata["sha256"]
-    ):
-        raise TextbookNotFoundError("Teaching asset not found")
-    try:
-        decoded: str | dict[str, Any]
-        if kind == "toolkit":
-            decoded = content.decode("utf-8").strip()
-            if not decoded:
-                raise ValueError
-        else:
-            decoded = json.loads(content.decode("utf-8"))
-            if not isinstance(decoded, dict):
-                raise ValueError
-    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
-        raise TextbookNotFoundError("Teaching asset not found") from exc
-    return {
-        "teaching_package_id": review["teaching_package_id"],
-        "chapter_id": chapter_id,
-        "kind": kind,
-        "content": decoded,
-    }
-
-
-async def get_teaching_job_projection(
-    *, parent_user_id: str, job_id: str
-) -> dict[str, Any]:
-    if not await get_household_context_for_parent(parent_user_id):
-        raise TextbookPermissionError("Only a parent can manage teaching jobs")
-    job = await get_teaching_job_projection_for_parent(
-        parent_user_id=parent_user_id, job_id=job_id
-    )
-    if not job:
-        raise TextbookNotFoundError("Teaching job not found")
-    return _safe_teaching_projection(job)
-
-
-async def queue_teaching_package_for_parent(
-    *, parent_user_id: str, content_version_id: str
-) -> dict[str, Any]:
-    """Freeze a reviewed content version and immediately register its root PTC run."""
-    if not await get_household_context_for_parent(parent_user_id):
-        raise TextbookPermissionError("Only a parent can create teaching packages")
-    frozen_input = await get_teaching_input_for_parent(
-        parent_user_id=parent_user_id, content_version_id=content_version_id
-    )
-    if not frozen_input:
-        raise TextbookNotFoundError("Reviewable textbook content version not found")
-
-    frozen_input = await hydrate_source_asset_manifests(frozen_input)
-    job_id = str(uuid4())
-    frozen_input["job_id"] = job_id
-    staged = build_staged_teaching_input(frozen_input)
-    from src.server.database.education_textbooks import TeachingInputHashes
-    from src.server.services.education_teaching_jobs import managed_teaching_prompt
-
-    hashes = TeachingInputHashes(
-        input_manifest_sha256=staged["manifest_sha256"],
-        book_to_skill_sha256=_managed_skill_hash("book-to-skill"),
-        knowledge_guy_sha256=_managed_skill_hash("the-knowledge-guy"),
-        adapter_prompt_sha256=hashlib.sha256(
-            managed_teaching_prompt(job_id).encode("utf-8")
-        ).hexdigest(),
-    )
-    package = await queue_teaching_package(
-        parent_user_id=parent_user_id,
-        content_version_id=content_version_id,
-        hashes=hashes,
-        job_id=job_id,
-    )
-    if not package:
-        raise TextbookNotFoundError("Reviewable textbook content version not found")
-
-    from src.server.services.education_managed_ptc import launch_teaching_attempt
-
-    try:
-        await launch_teaching_attempt(parent_user_id=parent_user_id, job_id=job_id)
-    except Exception:
-        projection = await get_teaching_job_projection_for_parent(
-            parent_user_id=parent_user_id, job_id=job_id
-        )
-        if projection and projection["status"] in {"failed", "cancelled"}:
-            return _safe_teaching_projection(projection)
-        raise TextbookError("教材教学加工无法启动，请稍后重试。")
-    return await get_teaching_job_projection(
-        parent_user_id=parent_user_id, job_id=job_id
-    )
-
-
-async def cancel_teaching_job_for_parent(
-    *, parent_user_id: str, job_id: str
-) -> dict[str, Any]:
-    if not await get_household_context_for_parent(parent_user_id):
-        raise TextbookPermissionError("Only a parent can manage teaching jobs")
-    from src.server.services.education_teaching_jobs import cancel_teaching_job
-
-    try:
-        await cancel_teaching_job(parent_user_id=parent_user_id, job_id=job_id)
-    except LookupError as exc:
-        raise TextbookNotFoundError("Teaching job not found") from exc
-    return await get_teaching_job_projection(parent_user_id=parent_user_id, job_id=job_id)
-
-
-async def resume_teaching_job_for_parent(
-    *, parent_user_id: str, job_id: str
-) -> dict[str, Any]:
-    if not await get_household_context_for_parent(parent_user_id):
-        raise TextbookPermissionError("Only a parent can manage teaching jobs")
-    from src.server.services.education_managed_ptc import resume_teaching_job
-
-    try:
-        await resume_teaching_job(parent_user_id=parent_user_id, job_id=job_id)
-    except LookupError as exc:
-        raise TextbookTransitionError("Teaching job cannot be resumed") from exc
-    except Exception as exc:
-        projection = await get_teaching_job_projection_for_parent(
-            parent_user_id=parent_user_id, job_id=job_id
-        )
-        if projection and projection["status"] in {"failed", "cancelled"}:
-            return _safe_teaching_projection(projection)
-        raise TextbookError("教材教学加工无法启动，请稍后重试。") from exc
-    return await get_teaching_job_projection(parent_user_id=parent_user_id, job_id=job_id)
-
-
 async def run_processing_for_parent(
     *, parent_user_id: str, job_id: str
 ) -> dict[str, Any]:
@@ -1032,29 +632,6 @@ async def retry_processing_for_parent(
     return job
 
 
-async def publish_version(
-    *,
-    parent_user_id: str,
-    textbook_id: str,
-    version_id: str,
-    teaching_package_id: str,
-) -> dict[str, Any]:
-    if not await get_household_context_for_parent(parent_user_id):
-        raise TextbookPermissionError("Only a parent can publish textbook versions")
-    try:
-        publication = await publish_textbook_version(
-            parent_user_id=parent_user_id,
-            textbook_id=textbook_id,
-            version_id=version_id,
-            teaching_package_id=teaching_package_id,
-        )
-    except ValueError as exc:
-        raise TextbookTransitionError(str(exc)) from exc
-    if not publication:
-        raise TextbookNotFoundError("Textbook version not found")
-    return publication
-
-
 async def assign_publication(
     *, parent_user_id: str, publication_id: str, student_user_id: str
 ) -> dict[str, Any]:
@@ -1075,20 +652,6 @@ async def list_learning_assignments(*, student_user_id: str) -> list[dict[str, A
     if not membership or membership["role"] != "student":
         raise TextbookPermissionError("Only a student can access learning assignments")
     return await list_student_assignments(student_user_id)
-
-
-async def get_student_learning(
-    *, student_user_id: str, assignment_id: str
-) -> dict[str, Any]:
-    membership = await get_membership_for_user(student_user_id)
-    if not membership or membership["role"] != "student":
-        raise TextbookPermissionError("Only a student can access learning assignments")
-    learning = await get_student_learning_record(
-        student_user_id=student_user_id, assignment_id=assignment_id
-    )
-    if not learning:
-        raise TextbookNotFoundError("Learning assignment not found")
-    return learning
 
 
 async def get_student_structure(
@@ -1124,86 +687,3 @@ async def get_student_kp_lesson(
         **lesson,
         "content_markdown": content.decode("utf-8"),
     }
-
-
-async def get_student_chapter_context(
-    *, student_user_id: str, assignment_id: str, chapter_id: str
-) -> dict[str, Any]:
-    membership = await get_membership_for_user(student_user_id)
-    if not membership or membership["role"] != "student":
-        raise TextbookPermissionError(
-            "Only a student can access learning chapter context"
-        )
-    chapter = await get_student_chapter_context_record(
-        student_user_id=student_user_id,
-        assignment_id=assignment_id,
-        chapter_id=chapter_id,
-    )
-    if not chapter:
-        raise TextbookNotFoundError("Learning chapter not found")
-    content = "\n\n".join(
-        [
-            f"# {chapter['textbook_title']} - {chapter['chapter_title']}",
-            "以下是学生已分配且已发布的章节材料。只根据这些材料解释、提问和引导学习；"
-            "不声称能访问未发布版本、其他学生记录或家长管理资料。",
-            chapter["markdown"],
-            chapter["teaching_material"],
-        ]
-    )
-    return {
-        "assignment_id": str(chapter["assignment_id"]),
-        "chapter_id": str(chapter["chapter_id"]),
-        "content": content,
-    }
-
-
-async def record_learning_progress(
-    *, student_user_id: str, assignment_id: str, chapter_id: str, status: str
-) -> dict[str, Any]:
-    if status not in {"learning", "read", "check_completed", "review_recommended"}:
-        raise TextbookError("Learning progress status is invalid")
-    membership = await get_membership_for_user(student_user_id)
-    if not membership or membership["role"] != "student":
-        raise TextbookPermissionError("Only a student can record learning progress")
-    progress = await update_student_progress(
-        student_user_id=student_user_id,
-        assignment_id=assignment_id,
-        chapter_id=chapter_id,
-        status=status,
-    )
-    if not progress:
-        raise TextbookNotFoundError("Learning chapter not found")
-    return progress
-
-
-async def answer_learning_question(
-    *, student_user_id: str, assignment_id: str, question_id: str, selected_option: str
-) -> dict[str, Any]:
-    option = selected_option.strip().upper()
-    if not option or len(option) > 32:
-        raise TextbookError("A valid answer option is required")
-    membership = await get_membership_for_user(student_user_id)
-    if not membership or membership["role"] != "student":
-        raise TextbookPermissionError("Only a student can answer learning questions")
-    answer = await submit_student_answer(
-        student_user_id=student_user_id,
-        assignment_id=assignment_id,
-        question_id=question_id,
-        selected_option=option,
-    )
-    if not answer:
-        raise TextbookNotFoundError("Learning question not found")
-    return answer
-
-
-async def get_parent_learning_records(
-    *, parent_user_id: str, assignment_id: str
-) -> dict[str, Any]:
-    if not await get_household_context_for_parent(parent_user_id):
-        raise TextbookPermissionError("Only a parent can read learning records")
-    records = await list_student_learning_records(
-        parent_user_id=parent_user_id, assignment_id=assignment_id
-    )
-    if not records:
-        raise TextbookNotFoundError("Learning assignment not found")
-    return records

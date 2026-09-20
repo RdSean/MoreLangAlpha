@@ -563,7 +563,6 @@ class TextbookChapterResponse(BaseModel):
     page_start: int | None = None
     page_end: int | None = None
     markdown: str
-    teaching_material: str | None = None
     questions: list[TextbookQuestionResponse]
 
 
@@ -572,16 +571,6 @@ class TextbookAssignmentSummaryResponse(BaseModel):
     student_user_id: str
     student_name: str | None = None
     created_at: datetime | None = None
-
-
-class TeachingPackageSummaryResponse(BaseModel):
-    teaching_package_id: UUID
-    job_id: UUID
-    sequence: int
-    status: str
-    job_status: str
-    chapter_count: int
-    question_count: int
 
 
 class TextbookVersionResponse(BaseModel):

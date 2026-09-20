@@ -2,6 +2,15 @@
 
 ## 2026-09-20
 
+### 重构：清理旧教学包运行时与 schema 残留
+
+- 删除旧教学包专用 service 模块、数据库函数和测试：`education_managed_ptc`、`education_teaching_jobs`、`education_teaching_assets`、`education_teaching_validation` 及其 attempt/archive/asset review 数据访问。
+- 学生学习追问上下文收敛为已发布知识点课程，移除旧的章节级学习上下文和旧章节学习 API 字段。
+- 清理教学存储模块中旧教学包归档、下载和 manifest writer，只保留结构、知识包和知识点课程实际使用的能力。
+- 修复迁移 `071` 后的 schema 漂移：发布结构时不再写已删除的 `publication.teaching_package_id`；本地 PDF 内容落库时不再写已删除的 `teaching_material`、`teaching_material_key` 和 `education_chapter_questions`。
+- 更新图书馆教材使用投影测试到 structure/book asset 字段，并移除已废弃的 frontend teaching-package 类型和 mock 数据。
+- 验证：后端完整单测 `7863 passed`，结构/发布/内容处理聚焦测试通过，修改文件 Ruff 与 `pnpm typecheck` 通过。
+
 ### 改进：教材结构保留非阻断校验警告
 
 - 新增 `education_textbook_structures.validation_warnings`，结构生成或人工编辑时产生的可恢复问题会随结构版本持久化，沙盒关闭后仍可查看。

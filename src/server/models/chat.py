@@ -328,7 +328,6 @@ class ChatRequest(BaseModel):
     # chapter material from these IDs; browser content never becomes textbook
     # context.
     education_assignment_id: Optional[str] = Field(default=None, max_length=64)
-    education_chapter_id: Optional[str] = Field(default=None, max_length=64)
     education_knowledge_point_id: Optional[str] = Field(
         default=None, max_length=64
     )

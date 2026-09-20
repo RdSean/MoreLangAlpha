@@ -15,7 +15,6 @@ from src.server.database.education_textbooks import (
 )
 from src.server.services.education_textbooks import (
     TextbookNotFoundError,
-    TextbookPermissionError,
     TextbookTransitionError,
     get_student_structure,
 )

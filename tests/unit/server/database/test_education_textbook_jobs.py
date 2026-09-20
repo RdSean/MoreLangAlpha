@@ -88,87 +88,6 @@ async def test_teaching_input_returns_artifact_backed_complete_sources_in_order(
 
 
 @pytest.mark.asyncio
-async def test_publishing_freezes_a_reviewed_teaching_package_for_its_content_version(
-    mock_connection, mock_cursor, monkeypatch
-):
-    """A content version cannot publish arbitrary or unfinished teaching material."""
-
-    @asynccontextmanager
-    async def fake_connection():
-        yield mock_connection
-
-    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
-    mock_cursor.fetchone.side_effect = [
-        {"version_id": "version-1"},
-        {"status": "review"},
-        {"count": 1},
-        {"teaching_package_id": "package-1", "chapter_count": 1, "question_count": 1},
-        {
-            "publication_id": "publication-1",
-            "version_id": "version-1",
-            "teaching_package_id": "package-1",
-            "published_by_user_id": "parent-1",
-        },
-    ]
-
-    publication = await education_textbooks.publish_textbook_version(
-        parent_user_id="parent-1",
-        textbook_id="textbook-1",
-        version_id="version-1",
-        teaching_package_id="package-1",
-    )
-
-    assert publication["teaching_package_id"] == "package-1"
-    package_lookup_sql = mock_cursor.execute.call_args_list[3].args[0]
-    assert "packages.status = 'review'" in package_lookup_sql
-    assert "packages.content_version_id = %s" in package_lookup_sql
-
-
-@pytest.mark.asyncio
-async def test_student_learning_reads_material_and_questions_from_publication_package(
-    mock_connection, mock_cursor, monkeypatch
-):
-    """Student learning must use the immutable package selected by publication."""
-
-    @asynccontextmanager
-    async def fake_connection():
-        yield mock_connection
-
-    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
-    mock_cursor.fetchone.return_value = {
-        "assignment_id": "assignment-1",
-        "publication_id": "publication-1",
-        "textbook_title": "英语第二册",
-        "textbook_slug": "english-2",
-        "version_sequence": 1,
-    }
-    mock_cursor.fetchall.side_effect = [
-        [
-            {
-                "chapter_id": "chapter-1",
-                "position": 1,
-                "slug": "01-overview",
-                "title": "导读",
-                "markdown": "# 内容",
-                "teaching_material": "# 教学包",
-                "progress_status": "not_started",
-            }
-        ],
-        [],
-    ]
-
-    learning = await education_textbooks.get_student_learning(
-        student_user_id="student-1", assignment_id="assignment-1"
-    )
-
-    assert learning is not None
-    chapter_sql = mock_cursor.execute.call_args_list[1].args[0]
-    question_sql = mock_cursor.execute.call_args_list[2].args[0]
-    assert "education_teaching_package_chapters" in chapter_sql
-    assert "education_teaching_package_questions" in question_sql
-
-
-@pytest.mark.asyncio
 async def test_retry_reclaims_only_an_expired_processing_lease(
     mock_connection, mock_cursor, monkeypatch
 ):
@@ -193,54 +112,6 @@ async def test_retry_reclaims_only_an_expired_processing_lease(
     retry_sql = mock_cursor.execute.call_args_list[0].args[0]
     assert "jobs.status = 'processing'" in retry_sql
     assert "jobs.claim_expires_at <= NOW()" in retry_sql
-
-
-@pytest.mark.asyncio
-async def test_student_assignment_queries_scope_membership_to_the_textbook_household(
-    mock_connection, mock_cursor, monkeypatch
-):
-    """A student membership in another household must never authorize an assignment."""
-
-    @asynccontextmanager
-    async def fake_connection():
-        yield mock_connection
-
-    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
-    operations = [
-        lambda: education_textbooks.list_student_assignments("student-1"),
-        lambda: education_textbooks.get_student_learning(
-            student_user_id="student-1", assignment_id="assignment-1"
-        ),
-        lambda: education_textbooks.get_student_chapter_context_record(
-            student_user_id="student-1",
-            assignment_id="assignment-1",
-            chapter_id="chapter-1",
-        ),
-        lambda: education_textbooks.update_student_progress(
-            student_user_id="student-1",
-            assignment_id="assignment-1",
-            chapter_id="chapter-1",
-            status="learning",
-        ),
-        lambda: education_textbooks.submit_student_answer(
-            student_user_id="student-1",
-            assignment_id="assignment-1",
-            question_id="question-1",
-            selected_option="A",
-        ),
-        lambda: education_textbooks.get_student_learning_space(
-            student_user_id="student-1", assignment_id="assignment-1"
-        ),
-        lambda: education_textbooks.get_student_learning_space_for_thread(
-            student_user_id="student-1", conversation_thread_id="thread-1"
-        ),
-    ]
-
-    for make_operation in operations:
-        mock_cursor.execute.reset_mock()
-        await make_operation()
-        sql = mock_cursor.execute.call_args.args[0]
-        assert "memberships.household_id = textbooks.household_id" in sql
 
 
 @pytest.mark.asyncio
@@ -736,74 +607,6 @@ async def test_processing_completion_is_fenced_to_its_claimed_attempt(
 
 
 @pytest.mark.asyncio
-async def test_parent_claims_a_pending_or_legacy_terminal_verified_archive_stage(
-    mock_connection, mock_cursor, monkeypatch
-):
-    @asynccontextmanager
-    async def fake_connection():
-        yield mock_connection
-
-    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
-    mock_cursor.fetchone.return_value = {
-        "attempt_id": "attempt-1",
-        "job_id": "job-1",
-        "root_run_id": "run-1",
-        "validated_assets": {"format": "langalpha-family-teaching-assets/v2"},
-        "output_bundle": b"service-owned-stage",
-        "output_bundle_sha256": "a" * 64,
-    }
-
-    stage = await education_textbooks.claim_teaching_archive_stage_for_parent(
-        parent_user_id="parent-1", job_id="job-1"
-    )
-
-    assert stage is not None
-    claim_sql = mock_cursor.execute.call_args_list[0].args[0]
-    assert "education_teaching_archive_staging" in claim_sql
-    assert "memberships.household_id = textbooks.household_id" in claim_sql
-    assert "attempts.error_code = 'managed_archive_pending'" in claim_sql
-    assert "managed_terminal_unprojected" in claim_sql
-    assert "FOR UPDATE OF stages, attempts, jobs, packages" in claim_sql
-    lease_sql = mock_cursor.execute.call_args_list[1].args[0]
-    assert "UPDATE education_teaching_archive_staging" in lease_sql
-    assert "created_at = NOW()" in lease_sql
-    assert "SET status = 'running'" in mock_cursor.execute.call_args_list[2].args[0]
-    assert "SET status = 'validating'" in mock_cursor.execute.call_args_list[3].args[0]
-
-
-@pytest.mark.asyncio
-async def test_archive_stage_is_written_only_from_the_active_validation_attempt(
-    mock_connection, mock_cursor, monkeypatch
-):
-    @asynccontextmanager
-    async def fake_connection():
-        yield mock_connection
-
-    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
-    mock_cursor.fetchone.side_effect = [
-        {"attempt_id": "attempt-1"},
-        {"attempt_id": "attempt-1"},
-    ]
-
-    stored = await education_textbooks.store_teaching_archive_stage(
-        attempt_id="attempt-1",
-        job_id="job-1",
-        root_run_id="run-1",
-        validated_assets={"format": "langalpha-family-teaching-assets/v2"},
-        output_bundle=b"validated-candidate",
-        output_bundle_sha256="a" * 64,
-    )
-
-    assert stored is True
-    fence_sql = mock_cursor.execute.call_args_list[0].args[0]
-    insert_sql = mock_cursor.execute.call_args_list[1].args[0]
-    assert "jobs.latest_attempt_id = attempts.attempt_id" in fence_sql
-    assert "jobs.status = 'validating'" in fence_sql
-    assert "education_teaching_archive_staging" in insert_sql
-    assert "ON CONFLICT (attempt_id) DO NOTHING" in insert_sql
-
-
-@pytest.mark.asyncio
 async def test_published_textbook_detail_reads_assignment_names_from_household_memberships(
     mock_connection, mock_cursor, monkeypatch
 ):
@@ -830,7 +633,6 @@ async def test_published_textbook_detail_reads_assignment_names_from_household_m
                 "status": "published",
             }
         ],
-        [],
         [],
         [],
         [
@@ -1013,7 +815,6 @@ async def test_parent_detail_projects_frozen_artifact_sources_without_storage_pa
     assert mock_cursor.execute.call_args_list[2].args[1] == (
         "parent-1",
         "version-1",
-        "version-1",
     )
 
 
@@ -1069,10 +870,8 @@ async def test_parent_detail_source_access_is_viewer_scoped_within_household(
         [version],
         [source(accessible=True)],
         [],
-        [],
         [version],
         [source(accessible=False)],
-        [],
         [],
     ]
 
@@ -1093,6 +892,6 @@ async def test_parent_detail_source_access_is_viewer_scoped_within_household(
         if "FROM education_textbook_artifact_sources" in call.args[0]
     ]
     assert [call.args[1] for call in source_calls] == [
-        ("parent-owner", "version-1", "version-1"),
-        ("parent-other", "version-1", "version-1"),
+        ("parent-owner", "version-1"),
+        ("parent-other", "version-1"),
     ]

@@ -333,7 +333,6 @@ export interface TextbookChapter {
   page_start?: number | null;
   page_end?: number | null;
   markdown: string;
-  teaching_material?: string | null;
   progress_status?: 'not_started' | 'learning' | 'read' | 'check_completed' | 'review_recommended';
   questions: TextbookQuestion[];
 }
@@ -421,13 +420,6 @@ export interface TextbookProcessingJob {
   version_id: string;
   status: string;
   attempt_count?: number;
-}
-
-export interface TextbookPublication {
-  publication_id: string;
-  version_id: string;
-  teaching_package_id: string;
-  created_at?: string;
 }
 
 export interface TextbookAssignment {

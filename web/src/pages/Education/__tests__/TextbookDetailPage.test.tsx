@@ -71,7 +71,6 @@ function version(overrides: Record<string, unknown> = {}) {
     publication_id: null,
     sources: [],
     chapters: [],
-    teaching_packages: [],
     assignments: [],
     ...overrides,
   };

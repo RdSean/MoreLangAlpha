@@ -4,7 +4,6 @@ from typing import Any
 
 from src.server.services.education_textbooks import (
     TextbookError,
-    get_student_chapter_context,
     get_student_kp_lesson,
 )
 from src.server.database.education_textbooks import (
@@ -55,47 +54,35 @@ async def attach_learning_chat_context(
     *,
     user_id: str,
     assignment_id: str | None,
-    chapter_id: str | None,
     knowledge_point_id: str | None,
     additional_context: list[Any] | None,
 ) -> list[Any] | None:
     """Resolve published lesson material into the sole learning-chat directive."""
-    if (
-        assignment_id is None
-        and chapter_id is None
-        and knowledge_point_id is None
-    ):
+    if assignment_id is None and knowledge_point_id is None:
         return additional_context
-    if not assignment_id or bool(chapter_id) == bool(knowledge_point_id):
+    if not assignment_id or not knowledge_point_id:
         raise EducationLearningChatContextError(
-            "Learning chat requires an assignment and exactly one lesson reference"
+            "Learning chat requires an assignment and knowledge point"
         )
     try:
-        if knowledge_point_id:
-            lesson = await get_student_kp_lesson(
-                student_user_id=user_id,
-                assignment_id=assignment_id,
-                knowledge_point_id=knowledge_point_id,
+        lesson = await get_student_kp_lesson(
+            student_user_id=user_id,
+            assignment_id=assignment_id,
+            knowledge_point_id=knowledge_point_id,
+        )
+        context = {
+            "content": "\n\n".join(
+                [
+                    f"# {lesson['unit_title']} - {lesson['knowledge_point_title']}",
+                    "以下是学生已分配且已发布的单知识点课程。只根据这些材料解释、"
+                    "提问和引导学习；不要声称能访问未发布版本、其他学生记录或家长管理资料。",
+                    lesson["content_markdown"],
+                ]
             )
-            context = {
-                "content": "\n\n".join(
-                    [
-                        f"# {lesson['unit_title']} - {lesson['knowledge_point_title']}",
-                        "以下是学生已分配且已发布的单知识点课程。只根据这些材料解释、"
-                        "提问和引导学习；不要声称能访问未发布版本、其他学生记录或家长管理资料。",
-                        lesson["content_markdown"],
-                    ]
-                )
-            }
-        else:
-            context = await get_student_chapter_context(
-                student_user_id=user_id,
-                assignment_id=assignment_id,
-                chapter_id=chapter_id or "",
-            )
+        }
     except TextbookError as exc:
         raise EducationLearningChatContextError(
-            "Learning chapter is unavailable"
+            "Learning lesson is unavailable"
         ) from exc
     # Learning threads are deterministic published-material conversations.
     # Discard client context so it cannot change or dilute the assigned chapter.
