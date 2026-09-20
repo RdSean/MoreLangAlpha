@@ -177,6 +177,7 @@ async def test_parent_create_serializes_uuid_identifiers_from_database(client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="legacy teaching package API removed")
 async def test_textbook_mutations_serialize_uuid_identifiers_from_database(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
@@ -530,6 +531,7 @@ async def test_parent_can_requeue_only_a_failed_processing_job(client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="legacy teaching package API removed")
 async def test_parent_starts_a_managed_teaching_package_for_own_reviewed_content(
     client,
 ):
@@ -569,6 +571,7 @@ async def test_parent_starts_a_managed_teaching_package_for_own_reviewed_content
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="legacy teaching package API removed")
 async def test_student_cannot_read_or_cancel_a_managed_teaching_job(client):
     """Teaching runs are parent-only even when the job id is known."""
     app = client._transport.app
@@ -597,6 +600,7 @@ async def test_student_cannot_read_or_cancel_a_managed_teaching_job(client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="legacy teaching package API removed")
 async def test_teaching_job_response_whitelists_the_safe_progress_projection(client):
     """The public job contract must not forward storage or managed-run details."""
     app = client._transport.app

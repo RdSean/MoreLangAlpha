@@ -243,10 +243,6 @@ class StartTextbookProcessingRequest(BaseModel):
         return self
 
 
-class PublishTextbookVersionRequest(BaseModel):
-    teaching_package_id: UUID
-
-
 class AssignTextbookPublicationRequest(BaseModel):
     student_user_id: str = Field(min_length=1, max_length=255)
 
@@ -584,87 +580,6 @@ class TeachingPackageSummaryResponse(BaseModel):
     question_count: int
 
 
-TeachingAssetKind = Literal["knowledge", "toolkit", "practice", "teaching"]
-TeachingReviewAssetKind = Literal["knowledge", "toolkit", "practice"]
-
-
-class TeachingAssetMetadataResponse(BaseModel):
-    kind: TeachingAssetKind
-    size_bytes: int
-    sha256: str | None = None
-
-
-class TeachingConceptIndexSummaryResponse(BaseModel):
-    size_bytes: int
-    concept_count: int
-
-
-class TeachingCoverageAuditSummaryResponse(BaseModel):
-    size_bytes: int
-    status: Literal["complete"]
-
-
-class TeachingAssetChapterSummaryResponse(BaseModel):
-    chapter_id: UUID
-    position: int
-    title: str
-    coverage_status: Literal["complete"]
-    concept_count: int
-    assets: list[TeachingAssetMetadataResponse]
-
-
-class TeachingPackageAssetSummaryResponse(BaseModel):
-    teaching_package_id: UUID
-    format: Literal["langalpha-family-teaching-assets/v2"]
-    concept_index: TeachingConceptIndexSummaryResponse
-    coverage_audit: TeachingCoverageAuditSummaryResponse
-    chapters: list[TeachingAssetChapterSummaryResponse]
-
-
-class TeachingChapterAssetResponse(BaseModel):
-    teaching_package_id: UUID
-    chapter_id: UUID
-    kind: TeachingReviewAssetKind
-    content: str | dict[str, Any]
-
-
-class TeachingJobEventResponse(BaseModel):
-    sequence: int
-    phase: str
-    summary: str
-    chapter_id: UUID | None = None
-    asset_kind: TeachingAssetKind | None = None
-    created_at: datetime | None = None
-
-
-class TeachingJobAttemptResponse(BaseModel):
-    attempt_id: UUID
-    root_run_id: UUID | None = None
-    previous_attempt_id: UUID | None = None
-    status: str
-    started_at: datetime | None = None
-    heartbeat_at: datetime | None = None
-    completed_at: datetime | None = None
-
-
-class TeachingJobResponse(BaseModel):
-    job_id: UUID
-    teaching_package_id: UUID
-    content_version_id: UUID
-    status: str
-    phase: str
-    attempt_count: int
-    completed_chapter_count: int
-    total_chapter_count: int
-    last_heartbeat_at: datetime | None = None
-    error_message: str | None = None
-    created_at: datetime | None = None
-    completed_at: datetime | None = None
-    actions: list[Literal["cancel", "resume"]] = Field(default_factory=list)
-    events: list[TeachingJobEventResponse] = Field(default_factory=list)
-    attempts: list[TeachingJobAttemptResponse] = Field(default_factory=list)
-
-
 class TextbookVersionResponse(BaseModel):
     version_id: UUID
     sequence: int
@@ -680,7 +595,6 @@ class TextbookVersionResponse(BaseModel):
     publication_id: UUID | None = None
     sources: list[TextbookSourceResponse]
     chapters: list[TextbookChapterResponse]
-    teaching_packages: list[TeachingPackageSummaryResponse] = Field(default_factory=list)
     assignments: list[TextbookAssignmentSummaryResponse]
 
 
@@ -695,14 +609,6 @@ class TextbookProcessingResponse(BaseModel):
     attempt_count: int | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
-
-
-class TextbookPublicationResponse(BaseModel):
-    publication_id: UUID
-    version_id: UUID
-    teaching_package_id: UUID
-    published_by_user_id: str | None = None
-    created_at: datetime | None = None
 
 
 class TextbookStructurePublicationResponse(BaseModel):

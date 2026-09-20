@@ -17,7 +17,6 @@ from src.server.app.education.models import (
     LearningAnswerResponse,
     LearningProgressResponse,
     LearningItemResponse,
-    PublishTextbookVersionRequest,
     PublishTextbookStructureRequest,
     StartTextbookProcessingRequest,
     StructureGenerationJobResponse,
@@ -27,14 +26,9 @@ from src.server.app.education.models import (
     TextbookDetailResponse,
     TextbookParseJobCandidateResponse,
     TextbookProcessingResponse,
-    TextbookPublicationResponse,
     TextbookResponse,
     TextbookStructurePublicationResponse,
     TextbookStructureResponse,
-    TeachingJobResponse,
-    TeachingPackageAssetSummaryResponse,
-    TeachingChapterAssetResponse,
-    TeachingReviewAssetKind,
     UpdateLearningProgressRequest,
     UpdateLearningItemRequest,
     UpdateKnowledgePointProgressRequest,
@@ -71,13 +65,9 @@ from src.server.services.education_textbooks import (
     TextbookTransitionError,
     answer_learning_question,
     assign_publication,
-    cancel_teaching_job_for_parent,
     create_textbook,
     get_parent_learning_records,
     get_parent_textbook,
-    get_teaching_asset_summary,
-    get_teaching_chapter_asset,
-    get_teaching_job_projection,
     get_student_chapter_context,
     get_student_learning,
     get_student_kp_lesson,
@@ -85,12 +75,9 @@ from src.server.services.education_textbooks import (
     list_learning_assignments,
     list_completed_textbook_parse_jobs,
     list_parent_textbooks,
-    publish_version,
-    queue_teaching_package_for_parent,
     record_learning_progress,
     retry_processing_for_parent,
     run_processing_for_parent,
-    resume_teaching_job_for_parent,
     start_processing,
     start_processing_from_parse_jobs,
 )
@@ -389,92 +376,6 @@ async def publish_family_textbook_structure(
         raise _textbook_http_error(exc) from exc
 
 
-@router.get(
-    "/teaching-packages/{teaching_package_id}/assets",
-    response_model=TeachingPackageAssetSummaryResponse,
-)
-async def get_family_teaching_asset_summary(
-    teaching_package_id: UUID, user_id: CurrentUserId
-):
-    try:
-        return await get_teaching_asset_summary(
-            parent_user_id=user_id, teaching_package_id=str(teaching_package_id)
-        )
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
-
-
-@router.get(
-    "/teaching-packages/{teaching_package_id}/chapters/{chapter_id}/assets/{kind}",
-    response_model=TeachingChapterAssetResponse,
-)
-async def get_family_teaching_chapter_asset(
-    teaching_package_id: UUID,
-    chapter_id: UUID,
-    kind: TeachingReviewAssetKind,
-    user_id: CurrentUserId,
-):
-    try:
-        return await get_teaching_chapter_asset(
-            parent_user_id=user_id,
-            teaching_package_id=str(teaching_package_id),
-            chapter_id=str(chapter_id),
-            kind=kind,
-        )
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
-
-
-@router.post(
-    "/textbook-versions/{content_version_id}/teaching-packages",
-    response_model=TeachingJobResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def queue_family_teaching_package(content_version_id: UUID, user_id: CurrentUserId):
-    try:
-        return await queue_teaching_package_for_parent(
-            parent_user_id=user_id, content_version_id=str(content_version_id)
-        )
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
-
-
-@router.get("/teaching-jobs/{job_id}", response_model=TeachingJobResponse)
-async def get_family_teaching_job(job_id: UUID, user_id: CurrentUserId):
-    try:
-        return await get_teaching_job_projection(
-            parent_user_id=user_id, job_id=str(job_id)
-        )
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
-
-
-@router.post(
-    "/teaching-jobs/{job_id}/cancel", response_model=TeachingJobResponse
-)
-async def cancel_family_teaching_job(job_id: UUID, user_id: CurrentUserId):
-    try:
-        return await cancel_teaching_job_for_parent(
-            parent_user_id=user_id, job_id=str(job_id)
-        )
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
-
-
-@router.post(
-    "/teaching-jobs/{job_id}/resume",
-    response_model=TeachingJobResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def resume_family_teaching_job(job_id: UUID, user_id: CurrentUserId):
-    try:
-        return await resume_teaching_job_for_parent(
-            parent_user_id=user_id, job_id=str(job_id)
-        )
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
-
-
 @router.post(
     "/textbooks/{textbook_id}/processing",
     response_model=TextbookProcessingResponse,
@@ -520,28 +421,6 @@ async def retry_family_textbook_processing(job_id: UUID, user_id: CurrentUserId)
     try:
         return await retry_processing_for_parent(
             parent_user_id=user_id, job_id=str(job_id)
-        )
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
-
-
-@router.post(
-    "/textbooks/{textbook_id}/versions/{version_id}/publish",
-    response_model=TextbookPublicationResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def publish_family_textbook_version(
-    textbook_id: UUID,
-    version_id: UUID,
-    body: PublishTextbookVersionRequest,
-    user_id: CurrentUserId,
-):
-    try:
-        return await publish_version(
-            parent_user_id=user_id,
-            textbook_id=str(textbook_id),
-            version_id=str(version_id),
-            teaching_package_id=str(body.teaching_package_id),
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
