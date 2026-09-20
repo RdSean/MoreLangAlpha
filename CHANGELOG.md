@@ -13,6 +13,7 @@
 - 知识点课程生成改用 `book-to-skill` managed lesson mode；`the-knowledge-guy` 退出课程正文生成，保留为后续交互学习层。
 - 补充 `book-to-skill` 的 Mentrix 风格知识点课程 contract，明确 `lesson.md` 是单个知识点的完整静态学习页，不包含追问、笔记或个性化总结。
 - 从公共教材 API 移除旧教学包、教学 job 和旧 version publish 路由，只保留结构审阅、知识点课程和 structure publication。
+- 清理前端旧教学包 API、查询键、类型和 `TeachingRunDrawer`，教材加工前端只保留结构、知识点课程和发布链路。
 - 验证：结构标准化、来源解析、结构任务、lesson 任务、共享运行时和 skill contract 聚焦测试通过，Ruff 通过。
 
 ### 重构：教材加工切换为独立入口与分阶段工作流

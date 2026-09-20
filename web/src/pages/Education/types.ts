@@ -341,86 +341,6 @@ export interface TextbookAssignmentSummary {
   created_at?: string;
 }
 
-export interface TeachingPackageSummary {
-  teaching_package_id: string;
-  job_id: string;
-  sequence: number;
-  status: 'queued' | 'preparing' | 'building_skill' | 'generating_teaching' | 'validating' | 'review' | 'failed' | 'cancelled';
-  job_status: 'queued' | 'preparing' | 'running' | 'validating' | 'completed' | 'failed' | 'cancelled';
-  chapter_count: number;
-  question_count: number;
-}
-
-export type TeachingJobAction = 'cancel' | 'resume';
-export type TeachingJobPhase = TeachingPackageSummary['status'] | 'planning' | 'chapter_mapping' | 'concept_linking' | 'coverage_audit' | 'practice_build' | 'teaching_build' | 'bundle_assembling' | 'validating_bundle';
-export type TeachingAssetKind = 'knowledge' | 'toolkit' | 'practice' | 'teaching';
-export type TeachingReviewAssetKind = Exclude<TeachingAssetKind, 'teaching'>;
-
-export interface TeachingJobEvent {
-  sequence: number;
-  phase: TeachingJobPhase;
-  summary: string;
-  chapter_id?: string | null;
-  asset_kind?: TeachingAssetKind | null;
-  created_at?: string | null;
-}
-
-export interface TeachingAssetMetadata {
-  kind: TeachingReviewAssetKind;
-  size_bytes: number;
-  sha256?: string | null;
-}
-
-export interface TeachingPackageAssets {
-  teaching_package_id: string;
-  format: 'langalpha-family-teaching-assets/v2';
-  concept_index: { size_bytes: number; concept_count: number };
-  coverage_audit: { size_bytes: number; status: 'complete' };
-  chapters: Array<{
-    chapter_id: string;
-    position: number;
-    title: string;
-    coverage_status: 'complete';
-    concept_count: number;
-    assets: TeachingAssetMetadata[];
-  }>;
-}
-
-export interface TeachingChapterAsset {
-  teaching_package_id: string;
-  chapter_id: string;
-  kind: TeachingReviewAssetKind;
-  content: string | Record<string, unknown>;
-}
-
-export interface TeachingJobAttempt {
-  attempt_id: string;
-  root_run_id?: string | null;
-  previous_attempt_id?: string | null;
-  status: string;
-  started_at?: string | null;
-  heartbeat_at?: string | null;
-  completed_at?: string | null;
-}
-
-export interface TeachingJob {
-  job_id: string;
-  teaching_package_id: string;
-  content_version_id: string;
-  status: 'queued' | 'preparing' | 'running' | 'validating' | 'completed' | 'failed' | 'cancelled';
-  phase: TeachingJobPhase;
-  attempt_count: number;
-  completed_chapter_count: number;
-  total_chapter_count: number;
-  last_heartbeat_at?: string | null;
-  error_message?: string | null;
-  created_at?: string | null;
-  completed_at?: string | null;
-  actions: TeachingJobAction[];
-  events: TeachingJobEvent[];
-  attempts: TeachingJobAttempt[];
-}
-
 export interface ArtifactTextbookSource {
   legacy: false;
   position: number;
@@ -480,7 +400,6 @@ export interface TextbookVersion {
   publication_id?: string | null;
   sources: TextbookSource[];
   chapters: TextbookChapter[];
-  teaching_packages: TeachingPackageSummary[];
   assignments: TextbookAssignmentSummary[];
 }
 

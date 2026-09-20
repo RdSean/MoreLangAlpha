@@ -1,10 +1,7 @@
-import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from './api';
-import type { EducationTaskCalendarRequest, StructureGenerationJob, TeachingJob, TeachingReviewAssetKind, TextbookStructureUnit } from './types';
-
-const terminalTeachingJobStatuses = new Set<TeachingJob['status']>(['completed', 'failed', 'cancelled']);
+import type { EducationTaskCalendarRequest, StructureGenerationJob, TextbookStructureUnit } from './types';
 
 export function useEducationTasks() {
   return useQuery({
@@ -92,63 +89,6 @@ export function useCompletedParseJobs(enabled: boolean) {
     queryFn: educationApi.listCompletedParseJobs,
     enabled,
     staleTime: 10_000,
-  });
-}
-
-export function useTeachingJob(jobId: string | undefined, enabled: boolean) {
-  const queryClient = useQueryClient();
-  const lastInvalidatedTerminalStatus = useRef<TeachingJob['status'] | null>(null);
-  const query = useQuery({
-    queryKey: queryKeys.education.teachingJob(jobId ?? ''),
-    queryFn: () => educationApi.getTeachingJob(jobId ?? ''),
-    enabled: Boolean(jobId) && enabled,
-    staleTime: 2_000,
-    refetchInterval: enabled ? 5_000 : false,
-    refetchIntervalInBackground: enabled,
-  });
-
-  useEffect(() => {
-    const status = query.data?.status;
-    if (!status || !terminalTeachingJobStatuses.has(status)) {
-      lastInvalidatedTerminalStatus.current = null;
-      return;
-    }
-    if (lastInvalidatedTerminalStatus.current === status) return;
-
-    lastInvalidatedTerminalStatus.current = status;
-    void Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.education.all }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.documents.teachingUsages() }),
-    ]);
-  }, [query.data?.status, queryClient]);
-
-  return query;
-}
-
-export function useTeachingPackageAssets(teachingPackageId: string | undefined, enabled: boolean) {
-  return useQuery({
-    queryKey: queryKeys.education.teachingPackageAssets(teachingPackageId ?? ''),
-    queryFn: () => educationApi.getTeachingPackageAssets(teachingPackageId ?? ''),
-    enabled: Boolean(teachingPackageId) && enabled,
-    staleTime: 15_000,
-  });
-}
-
-export function useTeachingChapterAsset(
-  teachingPackageId: string | undefined,
-  chapterId: string | undefined,
-  kind: TeachingReviewAssetKind | undefined,
-  enabled: boolean,
-) {
-  return useQuery({
-    queryKey: queryKeys.education.teachingChapterAsset(teachingPackageId ?? '', chapterId ?? '', kind ?? ''),
-    queryFn: () => educationApi.getTeachingChapterAsset(
-      teachingPackageId ?? '',
-      chapterId ?? '',
-      kind as TeachingReviewAssetKind,
-    ),
-    enabled: Boolean(teachingPackageId && chapterId && kind) && enabled,
-    staleTime: Infinity,
   });
 }
 
@@ -318,19 +258,11 @@ export function useKnowledgePointLessonByPoint(knowledgePointId: string | undefi
 export function useTextbookMutations() {
   const queryClient = useQueryClient();
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
-  const invalidateTeaching = () => Promise.all([
-    invalidate(),
-    queryClient.invalidateQueries({ queryKey: queryKeys.documents.teachingUsages() }),
-  ]);
   return {
     create: useMutation({ mutationFn: educationApi.createTextbook, onSuccess: invalidate }),
     start: useMutation({ mutationFn: ({ textbookId, sourceParseJobIds }: { textbookId: string; sourceParseJobIds: string[] }) => educationApi.startTextbookProcessingFromParseJobs(textbookId, sourceParseJobIds), onSuccess: invalidate }),
     run: useMutation({ mutationFn: educationApi.runTextbookProcessing, onSuccess: invalidate }),
     retry: useMutation({ mutationFn: educationApi.retryTextbookProcessing, onSuccess: invalidate }),
-    createTeaching: useMutation({ mutationFn: educationApi.createTeachingPackage, onSuccess: invalidateTeaching }),
-    cancelTeaching: useMutation({ mutationFn: educationApi.cancelTeachingJob, onSuccess: invalidateTeaching }),
-    resumeTeaching: useMutation({ mutationFn: educationApi.resumeTeachingJob, onSuccess: invalidateTeaching }),
-    publish: useMutation({ mutationFn: ({ textbookId, versionId, teachingPackageId }: { textbookId: string; versionId: string; teachingPackageId: string }) => educationApi.publishTextbookVersion(textbookId, versionId, teachingPackageId), onSuccess: invalidateTeaching }),
     assign: useMutation({ mutationFn: ({ publicationId, studentUserId }: { publicationId: string; studentUserId: string }) => educationApi.assignTextbookPublication(publicationId, studentUserId), onSuccess: invalidate }),
     progress: useMutation({ mutationFn: ({ assignmentId, chapterId, status }: { assignmentId: string; chapterId: string; status: 'learning' | 'read' | 'check_completed' | 'review_recommended' }) => educationApi.updateLearningProgress(assignmentId, chapterId, status), onSuccess: invalidate }),
     answer: useMutation({ mutationFn: ({ assignmentId, questionId, selectedOption }: { assignmentId: string; questionId: string; selectedOption: string }) => educationApi.answerLearningQuestion(assignmentId, questionId, selectedOption), onSuccess: invalidate }),
