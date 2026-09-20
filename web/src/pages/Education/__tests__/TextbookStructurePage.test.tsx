@@ -129,6 +129,17 @@ describe('TextbookStructurePage', () => {
     expect(screen.queryByDisplayValue('世界运动 / 足球之爱')).not.toBeInTheDocument();
   });
 
+  it('shows Chinese tips for knowledge-point action buttons', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.hover(screen.getByRole('button', { name: '拆分 世界运动' }));
+
+    expect(await screen.findAllByText(
+      '拆分知识点：保留当前内容，并在下方创建一个副本，适合把过大的知识点拆成两个。',
+    )).not.toHaveLength(0);
+  });
+
   it('saves edits and accepts the structure', async () => {
     const user = userEvent.setup();
     renderPage();

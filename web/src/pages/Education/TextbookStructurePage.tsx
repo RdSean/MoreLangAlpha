@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, BookOpenCheck, CheckCircle2, GitMerge, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AlertTriangle, BookOpenCheck, CheckCircle2, CircleHelp, GitMerge, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/components/ui/use-toast';
 import ProcessingProfileDialog, { type ProcessingProfileValue } from './components/ProcessingProfileDialog';
 import TextbookWorkflowStepper, { type TextbookWorkflowStep } from './components/TextbookWorkflowStepper';
@@ -29,6 +30,21 @@ function sourceRefRange(ref: { start?: number | null; end?: number | null }) {
   return ref.start != null && ref.end != null
     ? `[${ref.start}:${ref.end}]`
     : '未定位偏移';
+}
+
+function ActionTip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex" title={label}>
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-[240px] leading-5">
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function cloneUnits(units: TextbookStructureUnit[]): TextbookStructureUnit[] {
@@ -264,9 +280,10 @@ export default function TextbookStructurePage() {
   }
 
   return (
+    <TooltipProvider delayDuration={150}>
     <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="textbook-structure-page">
       <div
-        className="mx-auto w-full max-w-[1500px] border-b px-4 py-5 sm:px-8"
+        className="mx-auto w-full max-w-[1720px] border-b px-4 py-5 sm:px-8"
         style={{ borderColor: 'var(--color-border-muted)' }}
       >
         <Link to={`/textbooks/${textbookId}`} className="text-sm text-muted-foreground">返回教材</Link>
@@ -280,7 +297,7 @@ export default function TextbookStructurePage() {
           data-testid="structure-warning-summary"
           style={{ borderColor: 'var(--color-border-muted)', background: 'var(--color-warning-soft)' }}
         >
-          <div className="mx-auto flex w-full max-w-[1500px] items-start gap-3">
+          <div className="mx-auto flex w-full max-w-[1720px] items-start gap-3">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" style={{ color: 'var(--color-warning, #f59e0b)' }} />
             <div className="min-w-0">
               <p className="text-sm font-medium">结构已生成，但有 {warningCounts.size} 类需要留意的问题</p>
@@ -297,26 +314,133 @@ export default function TextbookStructurePage() {
           </div>
         </div>
       )}
-      <div className="mx-auto grid w-full max-w-[1500px] lg:grid-cols-[280px_minmax(0,1fr)_280px]">
+      <div className="mx-auto grid w-full max-w-[1720px] lg:grid-cols-[300px_minmax(0,1fr)_320px]">
         <aside className="border-b px-4 py-6 lg:min-h-[calc(100dvh-80px)] lg:border-b-0 lg:border-r" style={{ borderColor: 'var(--color-border-muted)' }}>
-          <h1 className="title-font mt-5 text-lg font-semibold">教材结构</h1>
+          <h1 className="title-font text-lg font-semibold">教材结构</h1>
           <p className="mt-1 font-mono text-xs text-muted-foreground">v{data.sequence} · {data.status}</p>
           <nav className="mt-5 grid gap-1" aria-label="结构单元">
-            {units.map((unit) => <button key={unit.unit_id} type="button" onClick={() => setSelectedUnitId(unit.unit_id)} className="min-h-11 border-l-2 px-3 text-left text-sm" style={{ borderColor: unit.unit_id === selectedUnit.unit_id ? 'var(--color-accent-primary)' : 'transparent', color: 'var(--color-text-primary)' }}><span className="block truncate">{unit.position}. {unit.title}</span><span className="mt-1 block font-mono text-[11px] text-muted-foreground">{unit.unit_type} · {unit.knowledge_points.length} 个知识点</span></button>)}
+            {units.map((unit) => (
+              <button
+                key={unit.unit_id}
+                type="button"
+                title={unit.title}
+                onClick={() => setSelectedUnitId(unit.unit_id)}
+                className="flex min-h-14 w-full min-w-0 flex-col justify-center overflow-hidden border-l-2 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--color-bg-hover)]"
+                style={{
+                  borderColor: unit.unit_id === selectedUnit.unit_id ? 'var(--color-accent-primary)' : 'transparent',
+                  color: 'var(--color-text-primary)',
+                  backgroundColor: unit.unit_id === selectedUnit.unit_id ? 'var(--color-bg-subtle)' : undefined,
+                }}
+              >
+                <span className="block w-full truncate whitespace-nowrap">{unit.position}. {unit.title}</span>
+                <span className="mt-1 block truncate whitespace-nowrap font-mono text-[11px] text-muted-foreground">
+                  {unit.unit_type} · {unit.knowledge_points.length} 个知识点
+                </span>
+              </button>
+            ))}
           </nav>
         </aside>
         <section className="min-w-0 px-4 py-6 lg:px-8">
-          <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-5" style={{ borderColor: 'var(--color-border-muted)' }}>
-            <label className="grid min-w-0 flex-1 gap-1.5"><span className="sr-only">单元标题</span><input value={selectedUnit.title} disabled={readOnly} onChange={(event) => updateUnit({ title: event.target.value })} className="title-font min-h-11 w-full border bg-background px-3 text-xl font-semibold" /></label>
-            <Button variant="outline" size="sm" onClick={addKnowledgePoint} disabled={readOnly}><Plus className="mr-2 size-4" />添加知识点</Button>
+          <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-5" style={{ borderColor: 'var(--color-border-muted)' }}>
+            <label className="grid min-w-[320px] flex-1 gap-1.5">
+              <span className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">当前 Unit</span>
+              <input
+                value={selectedUnit.title}
+                disabled={readOnly}
+                onChange={(event) => updateUnit({ title: event.target.value })}
+                className="title-font min-h-11 w-full border bg-background px-3 text-xl font-semibold"
+                aria-label="单元标题"
+              />
+            </label>
+            <ActionTip label="添加知识点：在当前 Unit 末尾新增一个待审阅知识点。">
+              <Button variant="outline" size="sm" onClick={addKnowledgePoint} disabled={readOnly}>
+                <Plus className="mr-2 size-4" />添加知识点
+              </Button>
+            </ActionTip>
           </div>
-          <label className="mt-5 grid gap-1.5 text-sm"><span className="font-medium">单元说明</span><textarea value={selectedUnit.summary} disabled={readOnly} onChange={(event) => updateUnit({ summary: event.target.value })} className="min-h-24 border bg-background p-3" /></label>
-          <div className="mt-6 flex items-center justify-between"><h2 className="text-sm font-semibold">知识点</h2><span className="font-mono text-xs text-muted-foreground">confidence {selectedUnit.confidence.toFixed(2)}</span></div>
+          <label className="mt-5 grid gap-1.5 text-sm">
+            <span className="font-medium">单元说明</span>
+            <textarea
+              value={selectedUnit.summary}
+              disabled={readOnly}
+              onChange={(event) => updateUnit({ summary: event.target.value })}
+              className="min-h-24 border bg-background p-3"
+            />
+          </label>
+          <div className="mt-6 flex items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <h2 className="text-sm font-semibold">知识点</h2>
+              <ActionTip label="知识点标题可直接编辑。右侧书本图标会打开该知识点的课程审阅页；课程尚未生成时页面为空。结构页只保存来源引用，不在这里生成独立 Markdown。">
+                <span className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground" aria-label="知识点操作说明">
+                  <CircleHelp className="size-3.5" />
+                </span>
+              </ActionTip>
+            </div>
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">confidence {selectedUnit.confidence.toFixed(2)}</span>
+          </div>
           <div className="mt-3 border-y" style={{ borderColor: 'var(--color-border-muted)' }}>
-            {selectedUnit.knowledge_points.map((point) => <div key={point.knowledge_point_id} className="grid gap-3 border-b px-3 py-4 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto]" style={{ borderColor: 'var(--color-border-muted)' }}>
-              <label className="grid gap-1.5"><span className="sr-only">知识点标题</span><input value={point.title} disabled={readOnly} onChange={(event) => updateKnowledgePoint(point.knowledge_point_id, { title: event.target.value })} className="min-h-10 border bg-background px-3 text-sm font-medium" /><span className="font-mono text-[11px] text-muted-foreground">{point.source_refs.map((ref) => `${ref.source_id} ${sourceRefRange(ref)}`).join(' · ')}</span></label>
-              <div className="flex items-center gap-1"><Link to={`/textbooks/${textbookId}/versions/${versionId}/knowledge/${point.knowledge_point_id}`} className="inline-flex h-10 w-10 items-center justify-center rounded-md hover:bg-[var(--color-bg-hover)]" aria-label={`查看课程 ${point.title}`}><BookOpenCheck className="size-4" /></Link><Button type="button" size="icon" variant="ghost" aria-label={`拆分 ${point.title}`} disabled={readOnly} onClick={() => splitKnowledgePoint(point)}><Scissors className="size-4" /></Button><Button type="button" size="icon" variant="ghost" aria-label={`合并 ${point.title}`} disabled={readOnly || selectedUnit.knowledge_points[0]?.knowledge_point_id === point.knowledge_point_id} onClick={() => mergeKnowledgePointWithPrevious(point)}><GitMerge className="size-4" /></Button><Button type="button" size="icon" variant="ghost" aria-label={`删除 ${point.title}`} disabled={readOnly} onClick={() => deleteKnowledgePoint(point.knowledge_point_id)}><Trash2 className="size-4" /></Button></div>
-            </div>)}
+            {selectedUnit.knowledge_points.map((point) => {
+              const sourceLabel = point.source_refs
+                .map((ref) => `${ref.source_id} ${sourceRefRange(ref)}`)
+                .join(' · ');
+              return (
+                <div key={point.knowledge_point_id} className="border-b px-3 py-4 last:border-b-0" style={{ borderColor: 'var(--color-border-muted)' }}>
+                  <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start">
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <span className="mt-2 flex size-6 shrink-0 items-center justify-center rounded-full border font-mono text-[11px] text-muted-foreground" style={{ borderColor: 'var(--color-border-muted)' }}>
+                        {point.position}
+                      </span>
+                      <label className="grid min-w-0 flex-1 gap-1.5">
+                        <span className="sr-only">知识点标题</span>
+                        <input
+                          value={point.title}
+                          disabled={readOnly}
+                          onChange={(event) => updateKnowledgePoint(point.knowledge_point_id, { title: event.target.value })}
+                          className="min-h-10 w-full border bg-background px-3 text-sm font-medium"
+                        />
+                        <span className="break-words font-mono text-[11px] text-muted-foreground" title={sourceLabel}>
+                          {sourceLabel}
+                        </span>
+                      </label>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-0.5 self-start rounded-md border bg-background p-0.5 sm:mt-5" style={{ borderColor: 'var(--color-border-muted)' }} aria-label={`知识点操作 ${point.title}`}>
+                      <ActionTip label="查看课程：打开这个知识点的课程审阅页，不会修改当前结构。">
+                        <Link
+                          to={`/textbooks/${textbookId}/versions/${versionId}/knowledge/${point.knowledge_point_id}`}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded hover:bg-[var(--color-bg-hover)]"
+                          aria-label={`查看课程 ${point.title}`}
+                        >
+                          <BookOpenCheck className="size-4" />
+                        </Link>
+                      </ActionTip>
+                      <ActionTip label="拆分知识点：保留当前内容，并在下方创建一个副本，适合把过大的知识点拆成两个。">
+                        <Button type="button" size="icon" variant="ghost" className="size-8" aria-label={`拆分 ${point.title}`} disabled={readOnly} onClick={() => splitKnowledgePoint(point)}>
+                          <Scissors className="size-4" />
+                        </Button>
+                      </ActionTip>
+                      <ActionTip label="与上一个合并：把当前知识点并入上一个知识点，适合删除重复或过细的拆分。">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="size-8"
+                          aria-label={`合并 ${point.title}`}
+                          disabled={readOnly || selectedUnit.knowledge_points[0]?.knowledge_point_id === point.knowledge_point_id}
+                          onClick={() => mergeKnowledgePointWithPrevious(point)}
+                        >
+                          <GitMerge className="size-4" />
+                        </Button>
+                      </ActionTip>
+                      <ActionTip label="删除知识点：只删除当前草稿中的这一项；保存或接受结构后才会写入数据库。">
+                        <Button type="button" size="icon" variant="ghost" className="size-8" aria-label={`删除 ${point.title}`} disabled={readOnly} onClick={() => deleteKnowledgePoint(point.knowledge_point_id)}>
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </ActionTip>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
         <aside className="border-t px-4 py-6 lg:min-h-[calc(100dvh-80px)] lg:border-t-0 lg:border-l" style={{ borderColor: 'var(--color-border-muted)' }}>
@@ -325,13 +449,16 @@ export default function TextbookStructurePage() {
           {data.status === 'review' && <div className="mt-8 grid gap-2"><Button onClick={() => void saveStructure()} disabled={mutations.save.isPending}><Save className="mr-2 size-4" />保存结构</Button><Button variant="outline" onClick={() => void acceptStructure()} disabled={mutations.accept.isPending}><CheckCircle2 className="mr-2 size-4" />接受结构</Button></div>}
           {data.status === 'accepted' && <p className="mt-8 border-l-2 pl-3 text-sm" style={{ borderColor: 'var(--color-success)', color: 'var(--color-text-secondary)' }}>结构已接受，可以逐知识点生成课程。</p>}
           {data.status === 'accepted' && (
-            <Button className="mt-8 w-full" variant="outline" onClick={() => void generateBookAssets()} disabled={mutations.generateBookAssets.isPending}>
-              <WandSparkles className="mr-2 size-4" />
-              {mutations.generateBookAssets.isPending ? '正在启动' : data.book_asset_prefix ? '重新生成知识包' : '生成教材知识包'}
-            </Button>
+            <ActionTip label="生成整本知识包：会基于当前已接受结构的全部 Unit 和知识点生成章节知识包，不是只处理当前选中的 Unit。">
+              <Button className="mt-8 w-full" variant="outline" onClick={() => void generateBookAssets()} disabled={mutations.generateBookAssets.isPending}>
+                <WandSparkles className="mr-2 size-4" />
+                {mutations.generateBookAssets.isPending ? '正在启动' : data.book_asset_prefix ? '重新生成知识包' : '生成教材知识包'}
+              </Button>
+            </ActionTip>
           )}
         </aside>
       </div>
     </main>
+    </TooltipProvider>
   );
 }
