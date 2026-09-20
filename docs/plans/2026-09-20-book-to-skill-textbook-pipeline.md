@@ -1008,3 +1008,17 @@ git commit -m "test(education): verify book-to-skill textbook pipeline"
 - Publications reference only structures and lesson revisions.
 - Failed structure jobs can be resumed without creating a new structure version.
 - A real RE3 structure and one full lesson pass parent review, publication, assignment, and student learning.
+
+## Implementation Notes
+
+### 2026-09-20 real RE3 acceptance
+
+- Real source: `doc-2spsb1AQdrRp` / `job-KVIZjMQU4iTd` / `REX 3e SB3.pdf`.
+- Structure generation completed with one attempt: 20 Units, 84 knowledge points,
+  7 recoverable source warnings, archived under `structures/v2`, then accepted.
+- One real lesson completed and was approved: 17KB Markdown with learning
+  goals, warm-up, step-by-step explanation, vocabulary, common mistakes,
+  review, and exercises.
+- Publication correctly remains blocked by the existing gate until all 84
+  accepted knowledge points have approved lessons. The remaining work is
+  content generation/review, not a pipeline defect.
