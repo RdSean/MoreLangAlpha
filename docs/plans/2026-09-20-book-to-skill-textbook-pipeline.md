@@ -22,8 +22,11 @@
 - `chapters/<book>-<slug>.md` means a chapter-level knowledge toolkit produced by `book-to-skill`; it is not a lesson and may feed lesson generation.
 - `position` means order within a parent and is service-generated.
 - `slug` means a stable logical identifier and is service-generated or service-normalized.
-- Source location is represented only by Markdown source identity and character offsets. PDF page/bbox mapping is out of scope until a real consumer exists.
-- Models return source quotes, not offsets. The service computes `start/end` after tolerant quote resolution.
+- Source references are optional provenance, not a publication requirement.
+- Prefer source identity and quote excerpts. Markdown character offsets are
+  optional best-effort metadata and must never block structure review.
+- Do not ask models to calculate line numbers, character offsets, PDF pages, or
+  bounding boxes.
 - `book-to-skill` output is treated as a high-value draft, not as an adversarial
   payload that must reproduce the service's preferred shape.
 - The service post-processes before validating. It derives missing deterministic
@@ -75,13 +78,12 @@ The service must optimize for successful assimilation of `book-to-skill` output:
    lesson section.
 2. Derive `position`, final `slug`, database IDs, storage paths, hashes, and
    timestamps in the service.
-3. Resolve source refs in this order:
-   - exact quote match;
-   - whitespace-normalized match;
-   - unique normalized fragment match;
-   - unresolved warning retained for parent review.
-4. Store warnings without blocking structure review when content remains usable.
-5. Only hard-fail malformed/unreadable files, unsafe writes, absent usable
+3. Preserve source identity and quote excerpts when supplied. Do not require
+   offsets for review or publication.
+4. If an exact or normalized quote match is cheaply available, store offsets as
+   optional debug metadata. Never fail the task when offsets are unavailable.
+5. Store warnings without blocking structure review when content remains usable.
+6. Only hard-fail malformed/unreadable files, unsafe writes, absent usable
    content, or invalid security boundaries.
 
 Warning examples:
@@ -269,7 +271,7 @@ git add src/server/services/education_managed_runs.py \
 git commit -m "refactor(education): extract shared managed run runtime"
 ```
 
-## Task 3: Add Service-Owned Source Reference Resolution
+## Task 3: Add Optional Best-Effort Source Anchors
 
 **Files:**
 
@@ -289,6 +291,7 @@ Cover:
 - Unknown `source_id` falls back to the only source when exactly one source
   exists; otherwise it remains unresolved with a warning.
 - Unsafe source IDs and paths still fail.
+- Missing offsets never change the structure status from `review`.
 
 **Step 2: Implement resolver**
 
@@ -890,10 +893,12 @@ Do not persist raw model output or sandbox paths.
 
 The structure review page must show:
 
-- Resolved quote.
-- Source filename.
-- Character offsets.
-- A context excerpt around the quote.
+- Source filename when available.
+- Quote excerpt when available.
+- A context excerpt only when offsets were resolved cheaply.
+
+Do not display character ranges as required metadata. They are diagnostic
+details only.
 
 **Step 3: Run tests**
 
@@ -936,7 +941,8 @@ embedded images: 144
 Expected:
 
 - Structure succeeds with no positional or slug retry.
-- Source refs contain exact quotes and service-generated character offsets.
+- Source refs retain quotes when book-to-skill supplies them.
+- Missing or unresolved offsets do not fail the structure.
 - Ambiguous or unresolved quotes produce warnings, not failed archives.
 - The full textbook structure is reviewable.
 - ToC-only Units may be present with zero knowledge points only if product review accepts that behavior.
