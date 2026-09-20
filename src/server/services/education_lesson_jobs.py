@@ -426,6 +426,10 @@ async def _dispatch_kp_lesson_root_run(
             graph=graph,
         )
     except BaseException as exc:
+        logger.exception(
+            "Managed knowledge-point lesson start failed",
+            extra={"generation_job_id": generation_job_id},
+        )
         await RunCoordinator.get_instance().fail_open_run(
             run_handle,
             str(exc),

@@ -49,12 +49,13 @@ async def queue_lesson_for_parent(
             knowledge_point_id=knowledge_point_id,
             auto_grading=auto_grading,
         )
+    except LookupError as exc:
+        raise TextbookNotFoundError("Accepted knowledge point not found") from exc
+    try:
         await launch_kp_lesson_generation(
             parent_user_id=parent_user_id,
             generation_job_id=str(queued["generation_job_id"]),
         )
-    except LookupError as exc:
-        raise TextbookNotFoundError("Accepted knowledge point not found") from exc
     except Exception as exc:
         projection = await get_generation_job_for_parent(
             parent_user_id=parent_user_id,

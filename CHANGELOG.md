@@ -4,6 +4,8 @@
 
 ### 重构：清理旧教学包运行时与 schema 残留
 
+- 修复知识点课程真实链路中的字段漂移：staging 现在使用 `generation_job_id` 和 `knowledge_point_source_refs`，课程归档在未预分配 revision 时使用作业 UUID 生成唯一不可变路径，避免并发覆盖或无效版本号。
+- 修复 lesson 启动错误被误报为“知识点不存在”：只有排队阶段找不到 accepted 知识点才返回 404，sandbox/运行启动失败保留真实错误类型和日志。
 - 删除旧教学包专用 service 模块、数据库函数和测试：`education_managed_ptc`、`education_teaching_jobs`、`education_teaching_assets`、`education_teaching_validation` 及其 attempt/archive/asset review 数据访问。
 - 学生学习追问上下文收敛为已发布知识点课程，移除旧的章节级学习上下文和旧章节学习 API 字段。
 - 清理教学存储模块中旧教学包归档、下载和 manifest writer，只保留结构、知识包和知识点课程实际使用的能力。
@@ -19,6 +21,7 @@
 - 教材结构审阅页新增紧凑警告条，按警告类型和出现次数展示自动处理结果；用户仍可继续编辑、接受结构和生成知识点课程。
 - 新增迁移 `072`、数据库持久化回归和 API 响应契约测试。
 - 真实 `REX 3e SB3.pdf` 数据完成结构分析：20 个 Unit、84 个知识点、7 条可恢复引用告警，成功归档到 `structures/v2` 并进入 review。
+- 真实 Unit 1 知识点课程生成成功：`lesson.md` 17KB，包含学习目标、读前准备、分步讲解、词汇、易错点、复习和练习，并已审批为 `approved`；发布仍按既定规则等待其余 83 个 accepted 知识点也具备 approved lesson。
 - 验证：迁移测试、结构数据库/任务/审阅测试通过；结构页前端测试、`pnpm typecheck` 和 Ruff 通过。
 
 ## 2026-09-18

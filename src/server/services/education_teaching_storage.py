@@ -635,15 +635,18 @@ async def stage_kp_lesson_inputs(
         raise TeachingPackageStorageError(
             "Knowledge-point lesson context is unavailable"
         )
-    root = managed_job_root(str(job["job_id"]))
-    source_refs = job.get("source_refs")
+    job_id = str(job.get("generation_job_id") or job.get("job_id") or "")
+    if not job_id:
+        raise TeachingPackageStorageError("Knowledge-point lesson job is unavailable")
+    root = managed_job_root(job_id)
+    source_refs = job.get("knowledge_point_source_refs") or job.get("source_refs")
     if not isinstance(source_refs, list) or not source_refs:
         raise TeachingPackageStorageError(
             "Knowledge-point lesson source refs are unavailable"
         )
     manifest = {
         "format": "langalpha-managed-kp-lesson-input/v1",
-        "job_id": str(job["job_id"]),
+        "job_id": job_id,
         "knowledge_point_id": str(job["knowledge_point_id"]),
         "knowledge_point_title": str(job.get("knowledge_point_title") or ""),
         "unit_title": str(job.get("unit_title") or ""),
@@ -872,7 +875,14 @@ def kp_lesson_content_key(job: Mapping[str, Any]) -> str:
         structure_sequence = int(job["structure_sequence"])
         unit_position = int(job["unit_position"])
         knowledge_point_position = int(job["knowledge_point_position"])
-        lesson_revision = int(job["lesson_revision"])
+        raw_revision = job.get("lesson_revision")
+        if raw_revision is None:
+            lesson_revision = f"job-{UUID(str(job['generation_job_id']))}"
+        else:
+            numeric_revision = int(raw_revision)
+            if numeric_revision <= 0:
+                raise ValueError("lesson revision must be positive")
+            lesson_revision = f"v{numeric_revision}"
     except (KeyError, TypeError, ValueError) as exc:
         raise TeachingPackageStorageError(
             "Knowledge-point lesson version is invalid"
@@ -882,7 +892,6 @@ def kp_lesson_content_key(job: Mapping[str, Any]) -> str:
         structure_sequence,
         unit_position,
         knowledge_point_position,
-        lesson_revision,
     ) <= 0:
         raise TeachingPackageStorageError(
             "Knowledge-point lesson version is invalid"
@@ -891,7 +900,7 @@ def kp_lesson_content_key(job: Mapping[str, Any]) -> str:
         "education/{household}/{textbook}/v{content}/structures/v{structure}/"
         "units/{unit_position:02d}-{unit_slug}/knowledge-points/"
         "{knowledge_point_position:02d}-{knowledge_point_slug}/lessons/"
-        "v{lesson_revision}/lesson.md"
+        "{lesson_revision}/lesson.md"
     ).format(
         household=_safe_component(job.get("household_id"), "household"),
         textbook=_safe_component(job.get("slug"), "textbook"),

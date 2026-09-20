@@ -585,7 +585,7 @@ async def test_write_kp_lesson_revision_uses_private_revision_path(monkeypatch):
         "unit_slug": "unit-1-sports",
         "knowledge_point_position": 2,
         "knowledge_point_slug": "world-game",
-        "lesson_revision": 3,
+        "generation_job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
     }
     content = "# 世界运动\n\n课程内容。\n".encode()
 
@@ -597,7 +597,7 @@ async def test_write_kp_lesson_revision_uses_private_revision_path(monkeypatch):
     expected_key = (
         "education/household-1/english-2/v1/structures/v1/"
         "units/01-unit-1-sports/knowledge-points/02-world-game/"
-        "lessons/v3/lesson.md"
+        "lessons/job-5e3a0b43-8378-4b6c-926f-0f053577501d/lesson.md"
     )
     assert stored == {
         "content_key": expected_key,
@@ -616,12 +616,14 @@ async def test_stage_kp_lesson_inputs_contains_only_target_context():
 
     await education_teaching_storage.stage_kp_lesson_inputs(
         {
-            "job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+            "generation_job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
             "knowledge_point_id": "kp-1",
             "knowledge_point_title": "世界运动",
             "unit_title": "Unit 1",
             "auto_grading": False,
-            "source_refs": [{"source_id": "source-1", "start": 0, "end": 40}],
+            "knowledge_point_source_refs": [
+                {"source_id": "source-1", "start": 0, "end": 40}
+            ],
         },
         "# Unit 1\n\nsource excerpt",
         sandbox,
