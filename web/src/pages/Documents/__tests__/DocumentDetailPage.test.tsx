@@ -56,9 +56,10 @@ const usage = (overrides: Record<string, unknown> = {}) => ({
   content_version_id: 'version-1',
   content_version_sequence: 2,
   artifact_position: 1,
-  teaching_package_id: 'package-1',
-  teaching_package_sequence: 1,
-  status: 'review',
+  structure_id: 'structure-1',
+  structure_sequence: 1,
+  structure_status: 'review',
+  book_asset_prefix: null,
   publication_id: null,
   is_published: false,
   has_asset_manifest: true,
@@ -157,9 +158,10 @@ describe('DocumentDetailPage', () => {
           content_version_sequence: 3,
           producer_job_id: 'job-2',
           primary_artifact_id: 'art-published',
-          teaching_package_id: 'package-2',
-          teaching_package_sequence: 2,
-          status: 'review',
+          structure_id: 'structure-2',
+          structure_sequence: 2,
+          structure_status: 'review',
+          book_asset_prefix: null,
           publication_id: 'publication-2',
           is_published: true,
         }),
@@ -183,15 +185,15 @@ describe('DocumentDetailPage', () => {
     );
     expect(screen.getByText('内容版本 v2')).toBeInTheDocument();
     expect(screen.getByText('内容版本 v3')).toBeInTheDocument();
-    expect(screen.getByText('教学包 #1')).toBeInTheDocument();
-    expect(screen.getByText('教学包 #2')).toBeInTheDocument();
+    expect(screen.getByText('结构版本 v1')).toBeInTheDocument();
+    expect(screen.getByText('结构版本 v2')).toBeInTheDocument();
     expect(screen.getByText('等待审阅')).toBeInTheDocument();
     expect(screen.getByText('已发布')).toBeInTheDocument();
     expect(screen.getByText('解析产物 art-markdown')).toBeInTheDocument();
     expect(screen.getByText('解析任务 job-1')).toBeInTheDocument();
     expect(screen.getByText('解析产物 art-published')).toBeInTheDocument();
     expect(screen.getByText('解析任务 job-2')).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: '查看正式教材资产' })).toHaveLength(2);
+    expect(screen.getAllByRole('link', { name: '查看教材知识包' })).toHaveLength(2);
 
     await user.click(screen.getByRole('link', { name: 'Reading Explorer 3' }));
     expect(screen.getByTestId('textbook-route')).toBeInTheDocument();
@@ -201,23 +203,24 @@ describe('DocumentDetailPage', () => {
     state.teachingUsage = {
       data: [
         usage({
-          teaching_package_id: null,
-          teaching_package_sequence: null,
-          status: null,
+          structure_id: null,
+          structure_sequence: null,
+          structure_status: null,
+          book_asset_prefix: null,
           has_asset_manifest: false,
         }),
         usage({
           textbook_id: 'textbook-failed',
           textbook_title: 'Failed Reader',
-          teaching_package_id: 'package-failed',
-          status: 'failed',
+          structure_id: 'structure-failed',
+          structure_status: 'failed',
           has_asset_manifest: true,
         }),
         usage({
           textbook_id: 'textbook-cancelled',
           textbook_title: 'Cancelled Reader',
-          teaching_package_id: 'package-cancelled',
-          status: 'cancelled',
+          structure_id: 'structure-cancelled',
+          structure_status: 'cancelled',
           has_asset_manifest: true,
         }),
       ],
@@ -230,9 +233,9 @@ describe('DocumentDetailPage', () => {
 
     await user.click(screen.getByRole('tab', { name: '教材资产' }));
 
-    expect(screen.getByText('尚未生成教学包')).toBeInTheDocument();
-    expect(screen.getByText('教学包加工失败')).toBeInTheDocument();
-    expect(screen.getByText('教学包加工已取消')).toBeInTheDocument();
+    expect(screen.getByText('尚未生成结构')).toBeInTheDocument();
+    expect(screen.getByText('结构加工失败')).toBeInTheDocument();
+    expect(screen.getByText('结构加工已取消')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '查看正式教材资产' })).not.toBeInTheDocument();
   });
 

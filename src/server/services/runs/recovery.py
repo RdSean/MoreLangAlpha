@@ -149,7 +149,6 @@ class RecoveryScanner:
         # cascade-orphaned task rows sit unnoticed, so the heal must not be
         # conditional on there being open runs to recover.
         await self.heal_task_chains()
-        await self._reconcile_managed_teaching_roots()
 
         # Same reasoning for billing settle: a terminal row whose settle stamp
         # never landed sits unnoticed precisely when nothing is running. But
@@ -189,26 +188,6 @@ class RecoveryScanner:
         if open_task_runs:
             recovered += await self._scan_task_runs(open_task_runs, None)
         return recovered
-
-    async def _reconcile_managed_teaching_roots(self) -> None:
-        """Repair terminal managed roots whose owner died after its root CAS.
-
-        This runs even on an idle scanner pass because such roots are no longer
-        part of ``list_open_runs``. The education service performs a bounded,
-        root-id keyed database-only reconciliation; it never opens a dead
-        sandbox or reads a candidate output here.
-        """
-        try:
-            from src.server.services.education_managed_ptc import (
-                reconcile_terminal_teaching_root_runs,
-            )
-
-            await reconcile_terminal_teaching_root_runs()
-        except Exception:
-            logger.error(
-                "[RecoveryScanner] managed teaching terminal reconciliation failed",
-                exc_info=True,
-            )
 
     async def _scan(
         self, open_runs: List[Dict[str, Any]], lock_conn
@@ -423,65 +402,12 @@ class RecoveryScanner:
             },
         )
         if result.applied:
-            await self._project_managed_terminal(
-                run,
-                root_run_id=run_id,
-                terminal_status=(result.run or {}).get("status", status),
-            )
             logger.warning(
                 f"[RecoveryScanner] recovered run {run_id} (thread={thread_id}) "
                 f"-> {(result.run or {}).get('status', status)} "
                 f"(quality={quality})"
             )
         return result.applied
-
-    async def _project_managed_terminal(
-        self,
-        run: Dict[str, Any],
-        *,
-        root_run_id: str,
-        terminal_status: str,
-    ) -> None:
-        """Mirror recovery only for the service-owned textbook root contract.
-
-        This deliberately has no sandbox, query, workspace, or output access:
-        a recovered run is never a candidate for automatic teaching-package
-        publication. The parent resumes it with a newly staged root attempt.
-        """
-        metadata = run.get("metadata")
-        managed = metadata.get("managed_execution") if isinstance(metadata, dict) else None
-        if not isinstance(managed, dict) or managed.get("kind") != "education_teaching":
-            return
-        product_status = "cancelled" if terminal_status == "cancelled" else "failed"
-        try:
-            from src.server.services.education_managed_ptc import (
-                settle_recovered_teaching_root_run,
-            )
-
-            await settle_recovered_teaching_root_run(
-                root_run_id=root_run_id,
-                status=product_status,
-                error_code=(
-                    "managed_cancelled"
-                    if product_status == "cancelled"
-                    else "managed_worker_lost"
-                ),
-                error_message=(
-                    "教材教学加工已取消。"
-                    if product_status == "cancelled"
-                    else "教材教学加工进程中断，请重新运行。"
-                ),
-            )
-        except Exception:
-            # The root-run terminal record is authoritative and must never be
-            # rolled back or retried by the scanner because a product projection
-            # encountered a transient database error. A later job reconciliation
-            # can safely run this idempotent root-id keyed update again.
-            logger.error(
-                "[RecoveryScanner] managed teaching product projection failed for %s",
-                root_run_id,
-                exc_info=True,
-            )
 
     # --------------------------------------------------------- classification
 

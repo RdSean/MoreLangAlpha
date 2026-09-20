@@ -17,9 +17,10 @@ _SAFE_USAGE_FIELDS = (
     "content_version_id",
     "content_version_sequence",
     "artifact_position",
-    "teaching_package_id",
-    "teaching_package_sequence",
-    "status",
+    "structure_id",
+    "structure_sequence",
+    "structure_status",
+    "book_asset_prefix",
     "publication_id",
     "is_published",
     "has_asset_manifest",
@@ -29,7 +30,7 @@ _UUID_FIELDS = frozenset(
     {
         "textbook_id",
         "content_version_id",
-        "teaching_package_id",
+        "structure_id",
         "publication_id",
     }
 )

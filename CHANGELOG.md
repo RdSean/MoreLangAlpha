@@ -14,6 +14,9 @@
 - 新增结构失败重试：同一 structure job 重新入队，结构状态回到 `queued/running`，结构和内容版本保持不变；结构审阅空态提供“重新运行结构分析”。
 - 新增 `book-to-skill` 章节资产模式：受管生成 `chapters/*.md`、`glossary.md`、`patterns.md`、`cheatsheet.md`、`nutshell.md` 和 `chapters_manifest.json`，并归档到结构版本的 `book-assets/` 前缀。
 - 章节资产使用独立的 `assets` generation job，不修改 structure review 状态；结构审阅页已接受结构后可以启动生成或重新生成知识包。
+- 图书馆“教材资产”改为读取教材结构、结构版本、知识包 manifest 和 publication，不再查询旧教学包表。
+- 新增迁移 `071`：删除旧教学包、旧章节题目、旧章节学习进度/答案和 legacy textbook source 表；publication 现在只允许关联 structure，`teaching_package_id` 已移除。
+- 恢复扫描器和教材学习入口同步退出旧教学包恢复/章节学习路由，避免已删除表被后台任务继续访问。
 - 补充 `book-to-skill` 的 Mentrix 风格知识点课程 contract，明确 `lesson.md` 是单个知识点的完整静态学习页，不包含追问、笔记或个性化总结。
 - 从公共教材 API 移除旧教学包、教学 job 和旧 version publish 路由，只保留结构审阅、知识点课程和 structure publication。
 - 清理前端旧教学包 API、查询键、类型和 `TeachingRunDrawer`，教材加工前端只保留结构、知识点课程和发布链路。

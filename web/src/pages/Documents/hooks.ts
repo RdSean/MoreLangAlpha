@@ -6,15 +6,11 @@ import type {
   CreateParseJobInput,
   DatasetFilters,
   DocumentFilters,
-  DocumentTeachingPackageStatus,
+  DocumentStructureStatus,
 } from './types';
 
-const ACTIVE_TEACHING_PACKAGE_STATUSES = new Set<DocumentTeachingPackageStatus>([
+const ACTIVE_STRUCTURE_STATUSES = new Set<DocumentStructureStatus>([
   'queued',
-  'preparing',
-  'building_skill',
-  'generating_teaching',
-  'validating',
   'running',
 ]);
 
@@ -55,9 +51,9 @@ export function useDocumentTeachingUsage(documentId?: string) {
     enabled: Boolean(documentId),
     refetchInterval: (query) => (
       (query.state.data ?? []).some((usage) => (
-        usage.status !== null
-        && usage.status !== undefined
-        && ACTIVE_TEACHING_PACKAGE_STATUSES.has(usage.status)
+        usage.structure_status !== null
+        && usage.structure_status !== undefined
+        && ACTIVE_STRUCTURE_STATUSES.has(usage.structure_status)
       ))
         ? 5_000
         : false

@@ -3,22 +3,19 @@ import { useTranslation } from 'react-i18next';
 import { BookOpenCheck, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDocumentTeachingUsage } from '../hooks';
-import type { DocumentTeachingPackageStatus, DocumentTeachingUsage } from '../types';
+import type { DocumentStructureStatus, DocumentTeachingUsage } from '../types';
 
 interface TeachingUsagePanelProps {
   documentId: string;
 }
 
-type DisplayStatus = DocumentTeachingPackageStatus | 'published';
+type DisplayStatus = DocumentStructureStatus | 'published';
 
 const PACKAGE_STATUS_KEYS: Record<DisplayStatus, string> = {
   queued: 'queued',
-  preparing: 'active',
-  building_skill: 'active',
-  generating_teaching: 'active',
-  validating: 'active',
   running: 'active',
   review: 'review',
+  accepted: 'review',
   published: 'published',
   failed: 'failed',
   cancelled: 'cancelled',
@@ -62,7 +59,7 @@ export default function TeachingUsagePanel({ documentId }: TeachingUsagePanelPro
     <section className="documents-teaching-usage" aria-label={t('documents.detail.teachingUsage.label')}>
       <ol className="documents-teaching-usage-list">
         {usages.data.map((usage) => (
-          <TeachingUsageItem key={`${usage.content_version_id}:${usage.teaching_package_id ?? 'unpackaged'}:${usage.artifact_position}`} usage={usage} />
+          <TeachingUsageItem key={`${usage.content_version_id}:${usage.structure_id ?? 'unstructured'}:${usage.artifact_position}`} usage={usage} />
         ))}
       </ol>
     </section>
@@ -73,8 +70,8 @@ function TeachingUsageItem({ usage }: { usage: DocumentTeachingUsage }) {
   const { t } = useTranslation();
   const textbookPath = `/textbooks/${encodeURIComponent(usage.textbook_id)}`;
   const canOpenAssets = usage.has_asset_manifest
-    && (usage.status === 'review' || usage.is_published);
-  const displayStatus: DisplayStatus | null = usage.is_published ? 'published' : (usage.status ?? null);
+    && (usage.structure_status === 'review' || usage.structure_status === 'accepted' || usage.is_published);
+  const displayStatus: DisplayStatus | null = usage.is_published ? 'published' : (usage.structure_status ?? null);
   const statusKey = displayStatus ? PACKAGE_STATUS_KEYS[displayStatus] : null;
 
   return (
@@ -94,16 +91,16 @@ function TeachingUsageItem({ usage }: { usage: DocumentTeachingUsage }) {
         <span className={`documents-teaching-usage-status${statusKey ? ` is-${statusKey}` : ''}`}>
           {statusKey
             ? t(`documents.detail.teachingUsage.status.${statusKey}`)
-            : t('documents.detail.teachingUsage.unpackaged')}
+            : t('documents.detail.teachingUsage.unstructured')}
         </span>
       </div>
 
-      {usage.teaching_package_id ? (
+      {usage.structure_id ? (
         <div className="documents-teaching-usage-package">
           <span>
-            {usage.teaching_package_sequence == null
-              ? t('documents.detail.teachingUsage.package')
-              : t('documents.detail.teachingUsage.packageSequence', { sequence: usage.teaching_package_sequence })}
+            {usage.structure_sequence == null
+              ? t('documents.detail.teachingUsage.structure')
+              : t('documents.detail.teachingUsage.structureSequence', { sequence: usage.structure_sequence })}
           </span>
           {canOpenAssets && (
             <Link className="documents-teaching-usage-asset-link" to={textbookPath}>
@@ -114,7 +111,7 @@ function TeachingUsageItem({ usage }: { usage: DocumentTeachingUsage }) {
         </div>
       ) : (
         <p className="documents-teaching-usage-note">
-          {t('documents.detail.teachingUsage.unpackagedNote')}
+          {t('documents.detail.teachingUsage.unstructuredNote')}
         </p>
       )}
     </li>

@@ -187,18 +187,18 @@
         "sourcePosition": "Source {{position}}",
         "artifact": "Parse artifact {{id}}",
         "job": "Parse job {{id}}",
-        "unpackaged": "No teaching package",
-        "unpackagedNote": "No teaching package has been generated for this content version.",
-        "package": "Teaching package",
-        "packageSequence": "Teaching package #{{sequence}}",
-        "viewAssets": "View formal teaching assets",
+        "unstructured": "No structure",
+        "unstructuredNote": "No textbook structure has been generated for this content version.",
+        "structure": "Textbook structure",
+        "structureSequence": "Structure v{{sequence}}",
+        "viewAssets": "View knowledge assets",
         "status": {
           "queued": "Queued",
-          "active": "Processing",
+          "active": "Processing structure",
           "review": "Awaiting review",
           "published": "Published",
-          "failed": "Teaching package failed",
-          "cancelled": "Teaching package cancelled"
+          "failed": "Structure failed",
+          "cancelled": "Structure cancelled"
         }
       }
     },

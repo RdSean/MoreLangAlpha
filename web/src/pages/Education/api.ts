@@ -1,5 +1,5 @@
 import { api } from '@/api/client';
-import type { CompletedParseJob, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, LearningAnswer, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, ParentLearningRecords, ParentLearningTranscript, StructureGenerationJob, StudentKnowledgePointLesson, StudentLearning, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit } from './types';
+import type { CompletedParseJob, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, ParentLearningTranscript, StructureGenerationJob, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit } from './types';
 
 export async function listEducationTasks(): Promise<EducationTask[]> {
   const { data } = await api.get<EducationTask[]>('/api/v1/education/tasks');
@@ -199,11 +199,6 @@ export async function listLearningAssignments(): Promise<LearningAssignment[]> {
   return data;
 }
 
-export async function getStudentLearning(assignmentId: string): Promise<StudentLearning> {
-  const { data } = await api.get<StudentLearning>(`/api/v1/education/learning/${assignmentId}`);
-  return data;
-}
-
 export async function getStudentTextbookStructure(assignmentId: string): Promise<StudentTextbookStructure> {
   const { data } = await api.get<StudentTextbookStructure>(`/api/v1/education/learning/${assignmentId}/structure`);
   return data;
@@ -271,27 +266,8 @@ export async function updateStudentKpProgress(assignmentId: string, knowledgePoi
   await api.post(`/api/v1/education/learning/${assignmentId}/knowledge-points/${knowledgePointId}/progress`, { status });
 }
 
-export async function getStudentChapterContext(assignmentId: string, chapterId: string): Promise<{ content: string }> {
-  const { data } = await api.get<{ content: string }>(`/api/v1/education/learning/${assignmentId}/chapters/${chapterId}/context`);
-  return data;
-}
-
 export async function getLearningChatSpace(assignmentId: string): Promise<LearningChatSpace> {
   const { data } = await api.get<LearningChatSpace>(`/api/v1/education/learning/${assignmentId}/chat-space`);
-  return data;
-}
-
-export async function updateLearningProgress(assignmentId: string, chapterId: string, status: 'learning' | 'read' | 'check_completed' | 'review_recommended'): Promise<void> {
-  await api.post(`/api/v1/education/learning/${assignmentId}/chapters/${chapterId}/progress`, { status });
-}
-
-export async function answerLearningQuestion(assignmentId: string, questionId: string, selectedOption: string): Promise<LearningAnswer> {
-  const { data } = await api.post<LearningAnswer>(`/api/v1/education/learning/${assignmentId}/questions/${questionId}/answers`, { selected_option: selectedOption });
-  return data;
-}
-
-export async function getParentLearningRecords(assignmentId: string): Promise<ParentLearningRecords> {
-  const { data } = await api.get<ParentLearningRecords>(`/api/v1/education/learning/${assignmentId}/records`);
   return data;
 }
 

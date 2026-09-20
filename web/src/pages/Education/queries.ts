@@ -101,15 +101,6 @@ export function useLearningAssignments(enabled: boolean) {
   });
 }
 
-export function useStudentLearning(assignmentId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.education.assignment(assignmentId ?? ''),
-    queryFn: () => educationApi.getStudentLearning(assignmentId ?? ''),
-    enabled: Boolean(assignmentId),
-    staleTime: 10_000,
-  });
-}
-
 export function useStudentTextbookStructure(assignmentId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.education.assignmentStructure(assignmentId ?? ''),
@@ -195,15 +186,6 @@ export function useLearningChatSpace(assignmentId: string | undefined) {
   });
 }
 
-export function useParentLearningRecords(assignmentId: string | undefined, enabled: boolean) {
-  return useQuery({
-    queryKey: [...queryKeys.education.assignment(assignmentId ?? ''), 'records'],
-    queryFn: () => educationApi.getParentLearningRecords(assignmentId ?? ''),
-    enabled: Boolean(assignmentId) && enabled,
-    staleTime: 10_000,
-  });
-}
-
 export function useParentLearningTranscript(assignmentId: string | undefined, enabled: boolean) {
   return useQuery({
     queryKey: [...queryKeys.education.assignment(assignmentId ?? ''), 'chat-transcript'],
@@ -264,8 +246,6 @@ export function useTextbookMutations() {
     run: useMutation({ mutationFn: educationApi.runTextbookProcessing, onSuccess: invalidate }),
     retry: useMutation({ mutationFn: educationApi.retryTextbookProcessing, onSuccess: invalidate }),
     assign: useMutation({ mutationFn: ({ publicationId, studentUserId }: { publicationId: string; studentUserId: string }) => educationApi.assignTextbookPublication(publicationId, studentUserId), onSuccess: invalidate }),
-    progress: useMutation({ mutationFn: ({ assignmentId, chapterId, status }: { assignmentId: string; chapterId: string; status: 'learning' | 'read' | 'check_completed' | 'review_recommended' }) => educationApi.updateLearningProgress(assignmentId, chapterId, status), onSuccess: invalidate }),
-    answer: useMutation({ mutationFn: ({ assignmentId, questionId, selectedOption }: { assignmentId: string; questionId: string; selectedOption: string }) => educationApi.answerLearningQuestion(assignmentId, questionId, selectedOption), onSuccess: invalidate }),
   };
 }
 

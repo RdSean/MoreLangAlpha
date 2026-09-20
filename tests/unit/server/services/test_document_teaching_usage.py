@@ -27,9 +27,10 @@ def _usage_row(**overrides: object) -> dict[str, object]:
         "content_version_id": "ver-A1b2C3d4E5f6",
         "content_version_sequence": 2,
         "artifact_position": 1,
-        "teaching_package_id": "pkg-A1b2C3d4E5f6",
-        "teaching_package_sequence": 1,
-        "status": "review",
+        "structure_id": "structure-A1b2C3d4E5f6",
+        "structure_sequence": 1,
+        "structure_status": "review",
+        "book_asset_prefix": None,
         "publication_id": None,
         "is_published": False,
         "has_asset_manifest": True,
@@ -68,18 +69,17 @@ async def test_repository_reads_only_artifact_backed_usage_for_the_owner(
         "AND memberships.user_id = documents.owner_user_id "
         "AND memberships.role = 'parent'" in normalized_sql
     )
-    assert "LEFT JOIN education_teaching_packages AS packages" in normalized_sql
-    assert "LEFT JOIN education_teaching_jobs AS jobs" in normalized_sql
+    assert "LEFT JOIN education_textbook_structures AS structures" in normalized_sql
     assert (
         "LEFT JOIN education_textbook_publications AS publications "
         "ON publications.version_id = versions.version_id "
-        "AND publications.teaching_package_id = packages.teaching_package_id"
+        "AND publications.structure_id = structures.structure_id"
         in normalized_sql
     )
     assert "documents.owner_user_id = %s" in normalized_sql
     assert "sources.position AS artifact_position" in normalized_sql
     assert "COALESCE(" in normalized_sql
-    assert "packages.asset_manifest <> '{}'::jsonb" in normalized_sql
+    assert "structures.book_asset_manifest <> '{}'::jsonb" in normalized_sql
     assert "FALSE" in normalized_sql
     assert "AS has_asset_manifest" in normalized_sql
     assert "publications.publication_id" in normalized_sql
@@ -101,12 +101,12 @@ async def test_service_normalizes_database_uuid_columns_for_the_api(
 ) -> None:
     textbook_id = uuid4()
     content_version_id = uuid4()
-    teaching_package_id = uuid4()
+    structure_id = uuid4()
     publication_id = uuid4()
     row = _usage_row(
         textbook_id=textbook_id,
         content_version_id=content_version_id,
-        teaching_package_id=teaching_package_id,
+        structure_id=structure_id,
         publication_id=publication_id,
     )
     monkeypatch.setattr(
@@ -122,7 +122,7 @@ async def test_service_normalizes_database_uuid_columns_for_the_api(
 
     assert usage["textbook_id"] == str(textbook_id)
     assert usage["content_version_id"] == str(content_version_id)
-    assert usage["teaching_package_id"] == str(teaching_package_id)
+    assert usage["structure_id"] == str(structure_id)
     assert usage["publication_id"] == str(publication_id)
 
 
@@ -193,21 +193,21 @@ async def test_service_keeps_review_failed_cancelled_and_unpackaged_usage(
     rows = [
         _usage_row(),
         _usage_row(
-            teaching_package_id="pkg-failed",
-            teaching_package_sequence=2,
-            status="failed",
+            structure_id="structure-failed",
+            structure_sequence=2,
+            structure_status="failed",
             has_asset_manifest=False,
         ),
         _usage_row(
-            teaching_package_id="pkg-cancelled",
-            teaching_package_sequence=3,
-            status="cancelled",
+            structure_id="structure-cancelled",
+            structure_sequence=3,
+            structure_status="cancelled",
             has_asset_manifest=False,
         ),
         _usage_row(
-            teaching_package_id=None,
-            teaching_package_sequence=None,
-            status=None,
+            structure_id=None,
+            structure_sequence=None,
+            structure_status=None,
             has_asset_manifest=False,
         ),
     ]
@@ -223,7 +223,7 @@ async def test_service_keeps_review_failed_cancelled_and_unpackaged_usage(
         document_id="doc-A1b2C3d4E5f6",
     )
 
-    assert [row["status"] for row in usage] == [
+    assert [row["structure_status"] for row in usage] == [
         "review",
         "failed",
         "cancelled",
@@ -231,8 +231,8 @@ async def test_service_keeps_review_failed_cancelled_and_unpackaged_usage(
     ]
     assert usage[1]["has_asset_manifest"] is False
     assert usage[2]["has_asset_manifest"] is False
-    assert usage[3]["teaching_package_id"] is None
-    assert usage[3]["teaching_package_sequence"] is None
+    assert usage[3]["structure_id"] is None
+    assert usage[3]["structure_sequence"] is None
     repository.assert_awaited_once_with(
         owner_user_id="owner-1",
         document_id="doc-A1b2C3d4E5f6",
@@ -240,7 +240,7 @@ async def test_service_keeps_review_failed_cancelled_and_unpackaged_usage(
 
 
 @pytest.mark.asyncio
-async def test_service_marks_review_package_published_by_publication(
+async def test_service_marks_review_structure_published_by_publication(
     monkeypatch,
 ) -> None:
     published = _usage_row(
@@ -259,7 +259,7 @@ async def test_service_marks_review_package_published_by_publication(
         document_id="doc-A1b2C3d4E5f6",
     )
 
-    assert usage[0]["status"] == "review"
+    assert usage[0]["structure_status"] == "review"
     assert usage[0]["publication_id"] == "publication-A1b2C3d4E5f6"
     assert usage[0]["is_published"] is True
 

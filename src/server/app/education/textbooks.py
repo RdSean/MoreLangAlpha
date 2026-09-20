@@ -5,7 +5,6 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, status
 
 from src.server.app.education.models import (
-    AnswerLearningQuestionRequest,
     AssignTextbookPublicationRequest,
     ApproveKnowledgePointLessonRequest,
     CreateKnowledgePointLessonRevisionRequest,
@@ -14,8 +13,6 @@ from src.server.app.education.models import (
     CreateTextbookStructureRequest,
     GenerateKnowledgePointLessonRequest,
     KnowledgePointLessonResponse,
-    LearningAnswerResponse,
-    LearningProgressResponse,
     LearningItemResponse,
     PublishTextbookStructureRequest,
     StartTextbookProcessingRequest,
@@ -29,7 +26,6 @@ from src.server.app.education.models import (
     TextbookResponse,
     TextbookStructurePublicationResponse,
     TextbookStructureResponse,
-    UpdateLearningProgressRequest,
     UpdateLearningItemRequest,
     UpdateKnowledgePointProgressRequest,
     UpdateTextbookStructureRequest,
@@ -68,19 +64,14 @@ from src.server.services.education_textbooks import (
     TextbookNotFoundError,
     TextbookPermissionError,
     TextbookTransitionError,
-    answer_learning_question,
     assign_publication,
     create_textbook,
-    get_parent_learning_records,
     get_parent_textbook,
-    get_student_chapter_context,
-    get_student_learning,
     get_student_kp_lesson,
     get_student_structure,
     list_learning_assignments,
     list_completed_textbook_parse_jobs,
     list_parent_textbooks,
-    record_learning_progress,
     retry_processing_for_parent,
     run_processing_for_parent,
     start_processing,
@@ -669,32 +660,6 @@ async def create_student_unit_summary(
         raise _textbook_http_error(exc) from exc
 
 
-@router.get("/learning/{assignment_id}", response_model=dict)
-async def get_student_assignment_learning(assignment_id: UUID, user_id: CurrentUserId):
-    try:
-        return await get_student_learning(
-            student_user_id=user_id, assignment_id=str(assignment_id)
-        )
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
-
-
-@router.get(
-    "/learning/{assignment_id}/chapters/{chapter_id}/context", response_model=dict
-)
-async def get_student_learning_chapter_context(
-    assignment_id: UUID, chapter_id: UUID, user_id: CurrentUserId
-):
-    try:
-        return await get_student_chapter_context(
-            student_user_id=user_id,
-            assignment_id=str(assignment_id),
-            chapter_id=str(chapter_id),
-        )
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
-
-
 @router.get("/learning/{assignment_id}/chat-space", response_model=dict)
 async def get_student_learning_chat_space(assignment_id: UUID, user_id: CurrentUserId):
     try:
@@ -705,61 +670,6 @@ async def get_student_learning_chat_space(assignment_id: UUID, user_id: CurrentU
         raise _textbook_http_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.post(
-    "/learning/{assignment_id}/chapters/{chapter_id}/progress",
-    response_model=LearningProgressResponse,
-)
-async def update_student_learning_progress(
-    assignment_id: UUID,
-    chapter_id: UUID,
-    body: UpdateLearningProgressRequest,
-    user_id: CurrentUserId,
-):
-    try:
-        return await record_learning_progress(
-            student_user_id=user_id,
-            assignment_id=str(assignment_id),
-            chapter_id=str(chapter_id),
-            status=body.status,
-        )
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
-
-
-@router.post(
-    "/learning/{assignment_id}/questions/{question_id}/answers",
-    response_model=LearningAnswerResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def answer_student_learning_question(
-    assignment_id: UUID,
-    question_id: UUID,
-    body: AnswerLearningQuestionRequest,
-    user_id: CurrentUserId,
-):
-    try:
-        return await answer_learning_question(
-            student_user_id=user_id,
-            assignment_id=str(assignment_id),
-            question_id=str(question_id),
-            selected_option=body.selected_option,
-        )
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
-
-
-@router.get("/learning/{assignment_id}/records", response_model=dict)
-async def get_parent_student_learning_records(
-    assignment_id: UUID, user_id: CurrentUserId
-):
-    try:
-        return await get_parent_learning_records(
-            parent_user_id=user_id, assignment_id=str(assignment_id)
-        )
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
 
 
 @router.get("/learning/{assignment_id}/chat-transcript", response_model=dict)

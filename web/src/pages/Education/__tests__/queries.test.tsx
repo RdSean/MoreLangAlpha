@@ -6,7 +6,6 @@ import * as educationApi from '../api';
 import { useCompletedParseJobs, useEducationTaskCalendar, useEducationTaskDetail, useTextbookMutations } from '../queries';
 
 vi.mock('../api', () => ({
-  getTextbook: vi.fn(),
   getEducationTaskCalendar: vi.fn(),
   getEducationTaskDetail: vi.fn(),
   createTextbook: vi.fn(),
@@ -16,11 +15,8 @@ vi.mock('../api', () => ({
   runTextbookProcessing: vi.fn(),
   retryTextbookProcessing: vi.fn(),
   assignTextbookPublication: vi.fn(),
-  updateLearningProgress: vi.fn(),
-  answerLearningQuestion: vi.fn(),
 }));
 
-const getTextbook = educationApi.getTextbook as unknown as ReturnType<typeof vi.fn>;
 const getEducationTaskCalendar = educationApi.getEducationTaskCalendar as unknown as ReturnType<typeof vi.fn>;
 const getEducationTaskDetail = educationApi.getEducationTaskDetail as unknown as ReturnType<typeof vi.fn>;
 const listCompletedParseJobs = educationApi.listCompletedParseJobs as unknown as ReturnType<typeof vi.fn>;
@@ -28,7 +24,6 @@ const startTextbookProcessingFromParseJobs = educationApi.startTextbookProcessin
 
 describe('education queries', () => {
   beforeEach(() => {
-    getTextbook.mockReset();
     getEducationTaskCalendar.mockReset();
     getEducationTaskDetail.mockReset();
     listCompletedParseJobs.mockReset();

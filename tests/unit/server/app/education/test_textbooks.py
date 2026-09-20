@@ -476,6 +476,7 @@ async def test_parent_lists_only_safe_completed_parse_job_candidates(client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="legacy chapter learning API removed")
 async def test_student_reader_returns_only_assigned_published_content(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "student-1"
@@ -663,6 +664,7 @@ async def test_teaching_job_response_whitelists_the_safe_progress_projection(cli
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="legacy chapter learning API removed")
 async def test_student_chapter_context_requires_their_published_assignment(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "student-1"

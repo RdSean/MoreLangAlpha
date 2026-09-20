@@ -152,13 +152,14 @@ async def list_document_teaching_usages(
                        versions.version_id AS content_version_id,
                        versions.sequence AS content_version_sequence,
                        sources.position AS artifact_position,
-                       packages.teaching_package_id,
-                       packages.sequence AS teaching_package_sequence,
-                       packages.status,
+                       structures.structure_id,
+                       structures.sequence AS structure_sequence,
+                       structures.status AS structure_status,
+                       structures.book_asset_prefix,
                        publications.publication_id,
                        publications.publication_id IS NOT NULL AS is_published,
                        COALESCE(
-                           packages.asset_manifest <> '{}'::jsonb,
+                           structures.book_asset_manifest <> '{}'::jsonb,
                            FALSE
                        ) AS has_asset_manifest,
                        sources.created_at
@@ -173,22 +174,19 @@ async def list_document_teaching_usages(
                   ON memberships.household_id = textbooks.household_id
                  AND memberships.user_id = documents.owner_user_id
                  AND memberships.role = 'parent'
-                LEFT JOIN education_teaching_packages AS packages
-                  ON packages.content_version_id = versions.version_id
-                LEFT JOIN education_teaching_jobs AS jobs
-                  ON jobs.teaching_package_id = packages.teaching_package_id
+                LEFT JOIN education_textbook_structures AS structures
+                  ON structures.version_id = versions.version_id
                 LEFT JOIN education_textbook_publications AS publications
                   ON publications.version_id = versions.version_id
-                 AND publications.teaching_package_id =
-                     packages.teaching_package_id
+                 AND publications.structure_id = structures.structure_id
                 WHERE documents.document_id = %s
                   AND documents.owner_user_id = %s
                 ORDER BY sources.created_at,
                          textbooks.created_at,
                          versions.sequence,
                          sources.position,
-                         packages.sequence NULLS LAST,
-                         packages.teaching_package_id NULLS LAST
+                         structures.sequence NULLS LAST,
+                         structures.structure_id NULLS LAST
                 """,
                 (document_id, owner_user_id),
             )
@@ -4008,68 +4006,36 @@ async def get_textbook_for_parent(
             for version in versions:
                 await cur.execute(
                     """
-                    WITH artifact_sources AS (
-                        SELECT sources.position,
-                               sources.document_id,
-                               sources.producer_job_id,
-                               sources.primary_artifact_id,
-                               sources.source_filename AS filename,
-                               sources.source_media_type AS media_type,
-                               sources.source_format AS format,
-                               sources.parser_id,
-                               sources.parser_name,
-                               sources.parser_version,
-                               sources.parse_completed_at,
-                               sources.primary_sha256,
-                               COALESCE(
-                                   documents.owner_user_id = %s,
-                                   FALSE
-                               ) AS document_accessible,
-                               documents.document_id IS NULL AS document_deleted,
-                               FALSE AS legacy,
-                               NULL::uuid AS asset_id,
-                               NULL::varchar AS original_filename,
-                               NULL::varchar AS content_type,
-                               NULL::bigint AS size_bytes
-                        FROM education_textbook_artifact_sources AS sources
-                        LEFT JOIN documents
-                          ON documents.document_id = sources.document_id
-                        WHERE sources.version_id = %s
-                    ),
-                    legacy_sources AS (
-                        SELECT sources.position,
-                               NULL::varchar AS document_id,
-                               NULL::varchar AS producer_job_id,
-                               NULL::varchar AS primary_artifact_id,
-                               NULL::varchar AS filename,
-                               NULL::varchar AS media_type,
-                               NULL::varchar AS format,
-                               NULL::varchar AS parser_id,
-                               NULL::varchar AS parser_name,
-                               NULL::varchar AS parser_version,
-                               NULL::timestamptz AS parse_completed_at,
-                               NULL::varchar AS primary_sha256,
-                               NULL::boolean AS document_accessible,
-                               NULL::boolean AS document_deleted,
-                               TRUE AS legacy,
-                               assets.asset_id,
-                               assets.original_filename,
-                               assets.content_type,
-                               assets.size_bytes
-                        FROM education_textbook_sources AS sources
-                        JOIN education_assets AS assets
-                          ON assets.asset_id = sources.asset_id
-                        WHERE sources.version_id = %s
-                    )
-                    SELECT * FROM artifact_sources
-                    UNION ALL
-                    SELECT * FROM legacy_sources
-                    WHERE NOT EXISTS (SELECT 1 FROM artifact_sources)
-                    ORDER BY position
+                    SELECT sources.position,
+                           sources.document_id,
+                           sources.producer_job_id,
+                           sources.primary_artifact_id,
+                           sources.source_filename AS filename,
+                           sources.source_media_type AS media_type,
+                           sources.source_format AS format,
+                           sources.parser_id,
+                           sources.parser_name,
+                           sources.parser_version,
+                           sources.parse_completed_at,
+                           sources.primary_sha256,
+                           COALESCE(
+                               documents.owner_user_id = %s,
+                               FALSE
+                           ) AS document_accessible,
+                           documents.document_id IS NULL AS document_deleted,
+                           FALSE AS legacy,
+                           NULL::uuid AS asset_id,
+                           NULL::varchar AS original_filename,
+                           NULL::varchar AS content_type,
+                           NULL::bigint AS size_bytes
+                    FROM education_textbook_artifact_sources AS sources
+                    LEFT JOIN documents
+                      ON documents.document_id = sources.document_id
+                    WHERE sources.version_id = %s
+                    ORDER BY sources.position
                     """,
                     (
                         parent_user_id,
-                        version["version_id"],
                         version["version_id"],
                     ),
                 )
@@ -4077,7 +4043,7 @@ async def get_textbook_for_parent(
                 await cur.execute(
                     """
                     SELECT chapters.chapter_id, chapters.position, chapters.slug, chapters.title,
-                           chapters.page_start, chapters.page_end, chapters.markdown, chapters.teaching_material
+                           chapters.page_start, chapters.page_end, chapters.markdown
                     FROM education_textbook_chapters AS chapters
                     WHERE chapters.version_id = %s ORDER BY chapters.position
                     """,
@@ -4085,97 +4051,8 @@ async def get_textbook_for_parent(
                 )
                 chapters = [dict(row) for row in await cur.fetchall()]
                 for chapter in chapters:
-                    await cur.execute(
-                        """
-                        SELECT question_id, position, prompt, options, correct_option, explanation, knowledge_point
-                        FROM education_chapter_questions WHERE chapter_id = %s ORDER BY position
-                        """,
-                        (chapter["chapter_id"],),
-                    )
-                    chapter["questions"] = [dict(row) for row in await cur.fetchall()]
+                    chapter["questions"] = []
                 version["chapters"] = chapters
-                await cur.execute(
-                    """
-                    SELECT packages.teaching_package_id, jobs.job_id, packages.sequence,
-                           packages.status, jobs.status AS job_status,
-                           COALESCE((
-                               SELECT COUNT(*)
-                               FROM education_teaching_package_chapters AS package_chapters
-                               WHERE package_chapters.teaching_package_id = packages.teaching_package_id
-                           ), 0) AS chapter_count,
-                           COALESCE((
-                               SELECT COUNT(*)
-                               FROM education_teaching_package_questions AS package_questions
-                               JOIN education_teaching_package_chapters AS package_chapters
-                                 ON package_chapters.package_chapter_id = package_questions.package_chapter_id
-                               WHERE package_chapters.teaching_package_id = packages.teaching_package_id
-                           ), 0) AS question_count
-                    FROM education_teaching_packages AS packages
-                    JOIN education_teaching_jobs AS jobs
-                      ON jobs.teaching_package_id = packages.teaching_package_id
-                    WHERE packages.content_version_id = %s
-                    ORDER BY packages.sequence DESC
-                    """,
-                    (version["version_id"],),
-                )
-                version["teaching_packages"] = [
-                    dict(row) for row in await cur.fetchall()
-                ]
-                reviewable_package = next(
-                    (
-                        package
-                        for package in version["teaching_packages"]
-                        if package["status"] == "review"
-                    ),
-                    None,
-                )
-                if reviewable_package:
-                    await cur.execute(
-                        """
-                        SELECT package_chapters.content_chapter_id,
-                               package_chapters.teaching_material,
-                               package_questions.question_id, package_questions.position,
-                               package_questions.prompt, package_questions.options,
-                               package_questions.correct_option,
-                               package_questions.explanation,
-                               package_questions.knowledge_point
-                        FROM education_teaching_package_chapters AS package_chapters
-                        LEFT JOIN education_teaching_package_questions AS package_questions
-                          ON package_questions.package_chapter_id = package_chapters.package_chapter_id
-                        WHERE package_chapters.teaching_package_id = %s
-                        ORDER BY package_chapters.position, package_questions.position
-                        """,
-                        (reviewable_package["teaching_package_id"],),
-                    )
-                    package_rows = [dict(row) for row in await cur.fetchall()]
-                    teaching_by_chapter: dict[Any, dict[str, Any]] = {}
-                    for row in package_rows:
-                        teaching = teaching_by_chapter.setdefault(
-                            row["content_chapter_id"],
-                            {
-                                "teaching_material": row["teaching_material"],
-                                "questions": [],
-                            },
-                        )
-                        if row["question_id"] is not None:
-                            teaching["questions"].append(
-                                {
-                                    key: row[key]
-                                    for key in (
-                                        "question_id",
-                                        "position",
-                                        "prompt",
-                                        "options",
-                                        "correct_option",
-                                        "explanation",
-                                        "knowledge_point",
-                                    )
-                                }
-                            )
-                    for chapter in chapters:
-                        teaching = teaching_by_chapter.get(chapter["chapter_id"])
-                        if teaching:
-                            chapter.update(teaching)
                 if version["publication_id"]:
                     await cur.execute(
                         """
@@ -4478,11 +4355,16 @@ async def list_student_assignments(student_user_id: str) -> list[dict[str, Any]]
                 SELECT assignments.assignment_id, assignments.publication_id, assignments.created_at,
                        textbooks.title AS textbook_title, textbooks.slug AS textbook_slug,
                        versions.sequence AS version_sequence,
-                       COALESCE((SELECT COUNT(*) FROM education_teaching_package_chapters
-                                 WHERE teaching_package_id = publications.teaching_package_id), 0) AS chapter_count,
-                       COALESCE((SELECT COUNT(*) FROM education_learning_progress AS progress
+                       COALESCE((
+                           SELECT COUNT(*)
+                           FROM education_structure_knowledge_points AS knowledge_points
+                           JOIN education_structure_units AS units
+                             ON units.unit_id = knowledge_points.unit_id
+                           WHERE units.structure_id = publications.structure_id
+                       ), 0) AS chapter_count,
+                       COALESCE((SELECT COUNT(*) FROM education_learning_kp_progress AS progress
                                  WHERE progress.assignment_id = assignments.assignment_id
-                                   AND progress.status IN ('read', 'check_completed')), 0) AS completed_chapter_count
+                                   AND progress.status = 'read'), 0) AS completed_chapter_count
                 FROM education_textbook_assignments AS assignments
                 JOIN education_textbook_publications AS publications ON publications.publication_id = assignments.publication_id
                 JOIN education_textbook_versions AS versions ON versions.version_id = publications.version_id

@@ -26,7 +26,7 @@ const createDocumentParseJob = documentsApi.createDocumentParseJob as unknown as
 const updateDocument = documentsApi.updateDocument as unknown as ReturnType<typeof vi.fn>;
 const deleteDocument = documentsApi.deleteDocument as unknown as ReturnType<typeof vi.fn>;
 
-function usage(status: string) {
+function usage(structureStatus: string) {
   return {
     document_id: 'doc-1',
     producer_job_id: 'job-1',
@@ -36,9 +36,10 @@ function usage(status: string) {
     content_version_id: 'version-1',
     content_version_sequence: 1,
     artifact_position: 1,
-    teaching_package_id: 'package-1',
-    teaching_package_sequence: 1,
-    status,
+    structure_id: 'structure-1',
+    structure_sequence: 1,
+    structure_status: structureStatus,
+    book_asset_prefix: null,
     publication_id: null,
     is_published: false,
     has_asset_manifest: false,
@@ -56,13 +57,13 @@ describe('document teaching usage query', () => {
   it('polls while any package is active', async () => {
     vi.useFakeTimers();
     try {
-      getDocumentTeachingUsage.mockResolvedValue([usage('generating_teaching')]);
+      getDocumentTeachingUsage.mockResolvedValue([usage('running')]);
 
       const { result } = renderHookWithProviders(() => useDocumentTeachingUsage('doc-1'));
 
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       expect(getDocumentTeachingUsage).toHaveBeenCalledTimes(1);
-      expect(result.current.data?.[0].status).toBe('generating_teaching');
+      expect(result.current.data?.[0].structure_status).toBe('running');
 
       await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
       expect(getDocumentTeachingUsage).toHaveBeenCalledTimes(2);
@@ -83,7 +84,7 @@ describe('document teaching usage query', () => {
 
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       expect(getDocumentTeachingUsage).toHaveBeenCalledTimes(1);
-      expect(result.current.data?.[0].status).toBe('review');
+      expect(result.current.data?.[0].structure_status).toBe('review');
 
       await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
       expect(getDocumentTeachingUsage).toHaveBeenCalledTimes(1);

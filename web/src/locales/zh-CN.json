@@ -187,18 +187,18 @@
         "sourcePosition": "来源 {{position}}",
         "artifact": "解析产物 {{id}}",
         "job": "解析任务 {{id}}",
-        "unpackaged": "尚未生成教学包",
-        "unpackagedNote": "这个内容版本尚未生成教学包。",
-        "package": "教学包",
-        "packageSequence": "教学包 #{{sequence}}",
-        "viewAssets": "查看正式教材资产",
+        "unstructured": "尚未生成结构",
+        "unstructuredNote": "这个内容版本尚未生成教材结构。",
+        "structure": "教材结构",
+        "structureSequence": "结构版本 v{{sequence}}",
+        "viewAssets": "查看教材知识包",
         "status": {
           "queued": "等待加工",
-          "active": "教学包加工中",
+          "active": "结构加工中",
           "review": "等待审阅",
           "published": "已发布",
-          "failed": "教学包加工失败",
-          "cancelled": "教学包加工已取消"
+          "failed": "结构加工失败",
+          "cancelled": "结构加工已取消"
         }
       }
     },

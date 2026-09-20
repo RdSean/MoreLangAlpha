@@ -83,9 +83,10 @@ class DocumentTeachingUsage(_RowModel):
     content_version_id: str
     content_version_sequence: int
     artifact_position: int
-    teaching_package_id: str | None = None
-    teaching_package_sequence: int | None = None
-    status: str | None = None
+    structure_id: str | None = None
+    structure_sequence: int | None = None
+    structure_status: str | None = None
+    book_asset_prefix: str | None = None
     publication_id: str | None = None
     is_published: bool = False
     has_asset_manifest: bool = False

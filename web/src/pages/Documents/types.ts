@@ -44,14 +44,11 @@ export interface DocumentSummary {
   updated_at?: string | null;
 }
 
-export type DocumentTeachingPackageStatus =
+export type DocumentStructureStatus =
   | 'queued'
-  | 'preparing'
-  | 'building_skill'
-  | 'generating_teaching'
-  | 'validating'
   | 'running'
   | 'review'
+  | 'accepted'
   | 'failed'
   | 'cancelled';
 
@@ -64,9 +61,10 @@ export interface DocumentTeachingUsage {
   content_version_id: string;
   content_version_sequence: number;
   artifact_position: number;
-  teaching_package_id?: string | null;
-  teaching_package_sequence?: number | null;
-  status?: DocumentTeachingPackageStatus | null;
+  structure_id?: string | null;
+  structure_sequence?: number | null;
+  structure_status?: DocumentStructureStatus | null;
+  book_asset_prefix?: string | null;
   publication_id?: string | null;
   is_published: boolean;
   has_asset_manifest: boolean;
