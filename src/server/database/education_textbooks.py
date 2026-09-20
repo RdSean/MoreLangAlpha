@@ -737,7 +737,9 @@ async def get_textbook_structure_for_parent(
                        structures.schema_version, structures.processing_profile_id,
                        structures.processing_profile_sha256,
                        structures.input_manifest_sha256, structures.source_revision,
-                       structures.created_at, structures.reviewed_at
+                       structures.created_at, structures.reviewed_at,
+                       structures.book_asset_prefix,
+                       structures.book_asset_manifest
                 FROM education_textbook_structures AS structures
                 JOIN education_textbook_versions AS versions
                   ON versions.version_id = structures.version_id
@@ -1129,7 +1131,7 @@ async def create_generation_job(
     knowledge_point_target = (
         str(knowledge_point_id) if knowledge_point_id is not None else None
     )
-    if scope == "structure":
+    if scope in {"structure", "assets"}:
         valid_target = (
             structure_target is not None and knowledge_point_target is None
         )
@@ -1462,6 +1464,65 @@ async def complete_structure_generation(
     result["generation_job_id"] = job["generation_job_id"]
     result["job_status"] = job["status"]
     return result
+
+
+async def complete_book_asset_generation(
+    *,
+    generation_job_id: str,
+    attempt_id: str,
+    structure_id: str,
+    bundle_prefix: str,
+    asset_manifest: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Attach optional generated chapter assets to an existing structure."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_textbook_structures
+                    SET book_asset_prefix = %s, book_asset_manifest = %s
+                    WHERE structure_id = %s
+                    RETURNING structure_id, version_id, sequence
+                    """,
+                    (bundle_prefix, Json(asset_manifest), structure_id),
+                )
+                structure = await cur.fetchone()
+                if not structure:
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_generation_attempts
+                    SET status = 'completed', completed_at = NOW()
+                    WHERE attempt_id = %s AND generation_job_id = %s
+                      AND status = 'running'
+                    RETURNING attempt_id
+                    """,
+                    (attempt_id, generation_job_id),
+                )
+                if not await cur.fetchone():
+                    raise RuntimeError("Book asset attempt completion was lost")
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs
+                    SET status = 'completed', error_code = NULL,
+                        error_message = NULL, updated_at = NOW()
+                    WHERE generation_job_id = %s
+                      AND latest_attempt_id = %s
+                    RETURNING generation_job_id, status
+                    """,
+                    (generation_job_id, attempt_id),
+                )
+                job = await cur.fetchone()
+    if not job:
+        return None
+    return {
+        **dict(structure),
+        "generation_job_id": job["generation_job_id"],
+        "job_status": job["status"],
+        "book_asset_prefix": bundle_prefix,
+        "book_asset_manifest": asset_manifest,
+    }
 
 
 async def accept_textbook_structure(

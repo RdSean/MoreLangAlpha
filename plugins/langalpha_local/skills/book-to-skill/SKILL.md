@@ -75,6 +75,20 @@ single knowledge-point authoring stage.
 5. Write a static Mentrix-style knowledge-point page. Do not include follow-up
    chat, personal notes, progress data or personalized summaries.
 
+## Managed chapter asset mode
+
+When the invocation includes `--managed-textbook-assets <job>`, generate only
+reusable chapter-level learning assets.
+
+1. Read `/managed/textbook-job/<job>/inputs/manifest.json`, the frozen
+   `inputs/sources/`, and `reference/managed-textbook-contract.md`.
+2. Produce `outputs/chapters_manifest.json` using
+   `langalpha-managed-book-assets/v1`.
+3. Write chapter Markdown under `outputs/chapters/*.md`.
+4. Optionally write `glossary.md`, `patterns.md`, `cheatsheet.md`, and
+   `nutshell.md`.
+5. Do not produce structure, lesson, practice or HTML outputs in this mode.
+
 ## Managed textbook mode
 
 When the invocation includes `--managed-textbook <job>`, run this mode before

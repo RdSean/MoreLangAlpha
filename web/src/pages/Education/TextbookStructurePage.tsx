@@ -142,6 +142,18 @@ export default function TextbookStructurePage() {
     }
   };
 
+  const generateBookAssets = async () => {
+    if (!structure.data) return;
+    try {
+      const job = await mutations.generateBookAssets.mutateAsync(structure.data.structure_id);
+      setJobId(job.generation_job_id);
+      toast({ title: '知识包生成任务已启动' });
+      await structure.refetch();
+    } catch (error) {
+      toast({ variant: 'destructive', title: '无法生成教材知识包', description: messageOf(error, '请稍后重试。') });
+    }
+  };
+
   const saveStructure = async () => {
     if (!structure.data) return;
     try {
@@ -266,6 +278,12 @@ export default function TextbookStructurePage() {
           <div className="mt-3 grid gap-3">{selectedUnit.source_refs.map((ref) => <div key={`${ref.source_id}-${ref.start}-${ref.end}`} className="border-l-2 pl-3 text-xs leading-5" style={{ borderColor: 'var(--color-border-muted)' }}><p className="font-mono">{ref.source_id} [{ref.start}:{ref.end}]</p>{ref.quote && <p className="mt-1 text-muted-foreground">{ref.quote}</p>}</div>)}</div>
           {data.status === 'review' && <div className="mt-8 grid gap-2"><Button onClick={() => void saveStructure()} disabled={mutations.save.isPending}><Save className="mr-2 size-4" />保存结构</Button><Button variant="outline" onClick={() => void acceptStructure()} disabled={mutations.accept.isPending}><CheckCircle2 className="mr-2 size-4" />接受结构</Button></div>}
           {data.status === 'accepted' && <p className="mt-8 border-l-2 pl-3 text-sm" style={{ borderColor: 'var(--color-success)', color: 'var(--color-text-secondary)' }}>结构已接受，可以逐知识点生成课程。</p>}
+          {data.status === 'accepted' && (
+            <Button className="mt-8 w-full" variant="outline" onClick={() => void generateBookAssets()} disabled={mutations.generateBookAssets.isPending}>
+              <WandSparkles className="mr-2 size-4" />
+              {mutations.generateBookAssets.isPending ? '正在启动' : data.book_asset_prefix ? '重新生成知识包' : '生成教材知识包'}
+            </Button>
+          )}
         </aside>
       </div>
     </main>

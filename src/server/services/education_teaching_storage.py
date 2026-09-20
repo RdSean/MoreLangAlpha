@@ -14,6 +14,11 @@ from urllib.parse import unquote
 from uuid import UUID
 
 from src.server.services.education_teaching_assets import expected_teaching_asset_paths
+from src.server.services.education_book_assets import (
+    expected_book_asset_files,
+    validate_book_asset_content,
+    validate_book_asset_manifest,
+)
 from src.server.services.education_textbook_snapshot_reads import (
     TextbookSnapshotDigestError,
     TextbookSnapshotReadError,
@@ -605,6 +610,43 @@ async def download_structure_output(
     return output
 
 
+async def download_book_asset_outputs(
+    job_id: str,
+    sandbox: ManagedTeachingSandbox,
+) -> tuple[dict[str, Any], dict[str, bytes]]:
+    """Download the fixed manifest and only the Markdown files it names."""
+    root = managed_job_root(job_id)
+    manifest_content = await sandbox.adownload_file_bytes(
+        f"{root}/outputs/chapters_manifest.json"
+    )
+    if not isinstance(manifest_content, bytes) or not manifest_content.strip():
+        raise TeachingPackageStorageError(
+            "Managed book asset manifest is unavailable"
+        )
+    try:
+        candidate = json.loads(manifest_content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TeachingPackageStorageError(
+            "Managed book asset manifest is invalid"
+        ) from exc
+    manifest = validate_book_asset_manifest(candidate)
+    outputs: dict[str, bytes] = {}
+    for relative_path in expected_book_asset_files(manifest):
+        content = await sandbox.adownload_file_bytes(
+            f"{root}/outputs/{relative_path}"
+        )
+        if not isinstance(content, bytes) or not content.strip():
+            raise TeachingPackageStorageError(
+                f"Managed book asset is unavailable: {relative_path}"
+            )
+        if len(content) > _MAX_CANDIDATE_BYTES:
+            raise TeachingPackageStorageError(
+                f"Managed book asset is too large: {relative_path}"
+            )
+        outputs[relative_path] = content
+    return manifest, outputs
+
+
 async def stage_kp_lesson_inputs(
     job: Mapping[str, Any],
     source_context: str,
@@ -899,6 +941,41 @@ async def write_structure_bundle(
         "text/markdown; charset=utf-8",
     )
     return prefix
+
+
+async def write_book_asset_bundle(
+    job: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    outputs: Mapping[str, bytes],
+) -> tuple[str, dict[str, Any]]:
+    """Archive optional chapter assets under the immutable structure bundle."""
+    prefix = f"{structure_bundle_prefix(job)}/book-assets"
+    validated = validate_book_asset_content(manifest, outputs)
+    for entry in validated["files"]:
+        relative_path = str(entry["path"])
+        await _put(
+            f"{prefix}/{relative_path}",
+            outputs[relative_path],
+            _asset_content_type(relative_path),
+        )
+    await _put(
+        f"{prefix}/manifest.json",
+        json.dumps(
+            validated,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        ).encode("utf-8"),
+        "application/json",
+    )
+    await _put(
+        f"{prefix}/README.md",
+        "# 教材知识包\n\n本目录由受管教材任务生成，可随教材结构版本一起复用。\n".encode(
+            "utf-8"
+        ),
+        "text/markdown; charset=utf-8",
+    )
+    return prefix, validated
 
 
 def kp_lesson_content_key(job: Mapping[str, Any]) -> str:

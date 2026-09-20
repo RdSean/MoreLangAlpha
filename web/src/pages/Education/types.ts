@@ -202,6 +202,8 @@ export interface TextbookStructure {
   source_revision: string;
   created_at?: string | null;
   reviewed_at?: string | null;
+  book_asset_prefix?: string | null;
+  book_asset_manifest?: Record<string, unknown>;
   units: TextbookStructureUnit[];
   lesson_summary: {
     total: number;

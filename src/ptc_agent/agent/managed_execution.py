@@ -55,6 +55,17 @@ def education_lesson_policy(job_id: str) -> ManagedExecutionPolicy:
     )
 
 
+def education_book_asset_policy(job_id: str) -> ManagedExecutionPolicy:
+    """Return the fixed policy for optional book-to-skill chapter assets."""
+    normalized_job_id = str(UUID(job_id))
+    return ManagedExecutionPolicy(
+        allowed_skill_names=frozenset({"book-to-skill"}),
+        filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
+        purpose="assets",
+        allow_subagents=True,
+    )
+
+
 def managed_core_config(core_config: Any, policy: ManagedExecutionPolicy) -> Any:
     """Clone and strip a CoreConfig for a service-owned managed run.
 
@@ -146,6 +157,28 @@ def validate_managed_textbook_write(
             if not isinstance(decoded, dict):
                 return "managed lesson practice must be a JSON object"
             return None
+        return "managed teaching candidate path is not allowed"
+    if policy.purpose == "assets":
+        if relative == PurePosixPath("outputs/chapters_manifest.json"):
+            try:
+                decoded = json.loads(content)
+            except json.JSONDecodeError:
+                return "managed book asset manifest must be valid JSON"
+            if not isinstance(decoded, dict):
+                return "managed book asset manifest must be a JSON object"
+            return None
+        if relative.as_posix() in {
+            "outputs/glossary.md",
+            "outputs/patterns.md",
+            "outputs/cheatsheet.md",
+            "outputs/nutshell.md",
+        }:
+            return None if content.strip() else "managed book asset must not be empty"
+        if re.fullmatch(
+            r"outputs/chapters/[0-9A-Za-z][0-9A-Za-z._-]*\.md",
+            relative.as_posix(),
+        ):
+            return None if content.strip() else "managed book asset must not be empty"
         return "managed teaching candidate path is not allowed"
     allowed_json = {
         PurePosixPath("outputs/knowledge/concept-index.json"),

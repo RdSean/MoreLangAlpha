@@ -51,6 +51,10 @@ from src.server.services.education_lesson_review import (
     publish_structure_for_parent,
     queue_lesson_for_parent,
 )
+from src.server.services.education_book_asset_jobs import (
+    launch_book_asset_generation,
+    queue_book_assets_for_parent,
+)
 from src.server.services.education_learning_assets import (
     add_learning_item,
     edit_learning_item,
@@ -210,6 +214,33 @@ async def resume_family_structure_generation_job(
             parent_user_id=user_id,
             generation_job_id=str(generation_job_id),
         )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/textbook-structures/{structure_id}/book-assets",
+    response_model=StructureGenerationJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def queue_family_book_assets(
+    structure_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        queued = await queue_book_assets_for_parent(
+            parent_user_id=user_id,
+            structure_id=str(structure_id),
+        )
+        await launch_book_asset_generation(
+            parent_user_id=user_id,
+            generation_job_id=str(queued["generation_job_id"]),
+        )
+        return queued
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
 

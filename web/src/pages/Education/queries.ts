@@ -282,6 +282,10 @@ export function useStructureMutations() {
       mutationFn: educationApi.resumeStructureGenerationJob,
       onSuccess: invalidate,
     }),
+    generateBookAssets: useMutation({
+      mutationFn: educationApi.generateBookAssets,
+      onSuccess: invalidate,
+    }),
     save: useMutation({
       mutationFn: ({ structureId, units }: { structureId: string; units: TextbookStructureUnit[] }) =>
         educationApi.updateTextbookStructure(structureId, units),

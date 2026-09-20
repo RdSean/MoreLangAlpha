@@ -150,3 +150,19 @@ def test_book_to_skill_managed_lesson_mode_uses_markdown_as_primary_output():
     assert "--managed-textbook-lesson" not in (
         SKILLS_ROOT / "the-knowledge-guy/SKILL.md"
     ).read_text()
+
+
+def test_book_to_skill_managed_asset_mode_defines_reusable_chapter_files():
+    text = (SKILLS_ROOT / "book-to-skill/SKILL.md").read_text()
+    contract = (
+        SKILLS_ROOT / "book-to-skill/reference/managed-textbook-contract.md"
+    ).read_text()
+
+    assert "--managed-textbook-assets" in text
+    assert "outputs/chapters_manifest.json" in text
+    assert "outputs/chapters/*.md" in text
+    assert "glossary.md" in text
+    assert "patterns.md" in text
+    assert "cheatsheet.md" in text
+    assert "nutshell.md" in text
+    assert "langalpha-managed-book-assets/v1" in contract

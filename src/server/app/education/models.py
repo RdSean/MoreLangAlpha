@@ -400,6 +400,8 @@ class TextbookStructureResponse(BaseModel):
     source_revision: str
     created_at: datetime | None = None
     reviewed_at: datetime | None = None
+    book_asset_prefix: str | None = None
+    book_asset_manifest: dict[str, Any] = Field(default_factory=dict)
     units: list[StructureUnitResponse]
     lesson_summary: TextbookLessonSummaryResponse = Field(
         default_factory=TextbookLessonSummaryResponse
@@ -410,7 +412,7 @@ class TextbookStructureResponse(BaseModel):
 class StructureGenerationJobResponse(BaseModel):
     generation_job_id: UUID
     version_id: UUID
-    scope: Literal["structure", "lesson"]
+    scope: Literal["structure", "assets", "lesson"]
     structure_id: UUID | None = None
     status: str
     attempt_count: int

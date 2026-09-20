@@ -71,7 +71,7 @@ def test_lesson_policy_allows_markdown_and_optional_practice_only():
         "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
     )
 
-    assert policy.allowed_skill_names == frozenset({"the-knowledge-guy"})
+    assert policy.allowed_skill_names == frozenset({"book-to-skill"})
     assert policy.purpose == "lesson"
     assert (
         managed_execution.validate_managed_textbook_write(
@@ -91,6 +91,37 @@ def test_lesson_policy_allows_markdown_and_optional_practice_only():
     )
     assert managed_execution.validate_managed_textbook_write(
         f"{policy.filesystem_root}/outputs/lesson.json",
+        "{}",
+        policy,
+    )
+
+
+def test_book_asset_policy_allows_manifest_chapters_and_support_files_only():
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_asset_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+
+    assert policy.allowed_skill_names == frozenset({"book-to-skill"})
+    assert policy.purpose == "assets"
+    for relative_path, content in (
+        (
+            "outputs/chapters_manifest.json",
+            '{"format":"langalpha-managed-book-assets/v1","chapter_files":[]}',
+        ),
+        ("outputs/chapters/ch01-overview.md", "# Overview"),
+        ("outputs/glossary.md", "# Glossary"),
+    ):
+        assert (
+            managed_execution.validate_managed_textbook_write(
+                f"{policy.filesystem_root}/{relative_path}",
+                content,
+                policy,
+            )
+            is None
+        )
+    assert managed_execution.validate_managed_textbook_write(
+        f"{policy.filesystem_root}/outputs/structure.json",
         "{}",
         policy,
     )

@@ -89,6 +89,37 @@ The practice file contains 2 to 6 options per question, one correct option,
 a prompt, and an explanation. Do not create `vocabulary.json`, `evidence.json`,
 a JSON lesson object, or any other path.
 
+## Managed chapter asset mode
+
+When the service invokes `--managed-textbook-assets <job>`, generate reusable
+chapter-level learning assets from the frozen Markdown. This mode is independent
+of structure review and per-knowledge-point lessons.
+
+Allowed outputs:
+
+```text
+outputs/chapters_manifest.json
+outputs/chapters/*.md
+outputs/glossary.md
+outputs/patterns.md
+outputs/cheatsheet.md
+outputs/nutshell.md
+```
+
+`chapters_manifest.json` must use:
+
+```json
+{
+  "format": "langalpha-managed-book-assets/v1",
+  "chapter_files": ["chapters/ch01-overview.md"],
+  "support_files": ["glossary.md", "patterns.md", "cheatsheet.md", "nutshell.md"]
+}
+```
+
+Only list files actually written. Chapter files use the normal `book-to-skill`
+chapter toolkit style. Do not emit `structure.json`, `lesson.md`,
+`practice.json`, HTML, memory, or any other path.
+
 ## Frozen inputs and capability boundary
 
 The service supplies only these files under one job root:
