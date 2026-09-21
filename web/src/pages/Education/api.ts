@@ -1,5 +1,5 @@
 import { api } from '@/api/client';
-import type { CompletedParseJob, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, KnowledgePointSourcePreview, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, ParentLearningTranscript, StructureGenerationJob, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit } from './types';
+import type { CompletedParseJob, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, KnowledgePointSourcePreview, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, ParentLearningTranscript, StructureGenerationJob, StructureGenerationProgress, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit } from './types';
 
 export async function listEducationTasks(): Promise<EducationTask[]> {
   const { data } = await api.get<EducationTask[]>('/api/v1/education/tasks');
@@ -106,6 +106,11 @@ export async function createTextbookStructure(versionId: string, profile?: Recor
 
 export async function getStructureGenerationJob(generationJobId: string): Promise<StructureGenerationJob> {
   const { data } = await api.get<StructureGenerationJob>(`/api/v1/education/structure-generation-jobs/${generationJobId}`);
+  return data;
+}
+
+export async function getStructureGenerationProgress(generationJobId: string): Promise<StructureGenerationProgress> {
+  const { data } = await api.get<StructureGenerationProgress>(`/api/v1/education/structure-generation-jobs/${generationJobId}/progress`);
   return data;
 }
 

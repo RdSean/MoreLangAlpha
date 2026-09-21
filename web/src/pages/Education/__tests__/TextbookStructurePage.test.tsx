@@ -12,6 +12,7 @@ const save = vi.fn().mockResolvedValue({});
 const accept = vi.fn().mockResolvedValue({});
 const create = vi.fn().mockResolvedValue({ generation_job_id: 'generation-1' });
 const refetch = vi.fn().mockResolvedValue({});
+let progressData: Record<string, unknown> | null = null;
 
 vi.mock('../queries', () => ({
   useLatestTextbookStructure: () => {
@@ -78,6 +79,11 @@ vi.mock('../queries', () => ({
     };
   },
   useStructureGenerationJob: () => ({ data: undefined }),
+  useStructureGenerationProgress: () => ({
+    data: progressData,
+    isPending: false,
+    isError: false,
+  }),
   useKnowledgePointLessonByPoint: () => ({
     data: null,
     isLoading: false,
@@ -132,6 +138,7 @@ describe('TextbookStructurePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     structureState.data = undefined;
+    progressData = null;
   });
 
   it('renders Unit and knowledge-point review tree', async () => {
@@ -184,10 +191,39 @@ describe('TextbookStructurePage', () => {
       },
     };
 
+    progressData = {
+      generation_job_id: 'generation-1',
+      status: 'running',
+      truncated: false,
+      events: [
+        {
+          sequence: 0,
+          kind: 'tool',
+          label: '扫描源文档：01-rex-3e-sb3.pdf.md',
+          detail: null,
+          status: 'completed',
+          timestamp: '2026-09-21T04:45:46Z',
+          count: 1,
+        },
+        {
+          sequence: 1,
+          kind: 'tool',
+          label: '派出并行子任务分析单元',
+          detail: null,
+          status: 'running',
+          timestamp: '2026-09-21T04:46:10Z',
+          count: 3,
+        },
+      ],
+    };
+
     renderPage();
 
     expect(screen.getByTestId('structure-generation-timeline')).toHaveTextContent('分析教材结构');
     expect(screen.getByText(/可以关闭页面，处理会继续在后台进行/)).toBeInTheDocument();
+    expect(screen.getByTestId('structure-activity-list')).toHaveTextContent('扫描源文档：01-rex-3e-sb3.pdf.md');
+    expect(screen.getByTestId('structure-activity-list')).toHaveTextContent('派出并行子任务分析单元');
+    expect(screen.getByTestId('structure-activity-list')).toHaveTextContent('×3');
   });
 
   it('supports add, split, merge, and delete knowledge-point actions', async () => {

@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import EducationMarkdown from './components/EducationMarkdown';
 import ProcessingProfileDialog, { type ProcessingProfileValue } from './components/ProcessingProfileDialog';
 import TextbookWorkflowStepper, { type TextbookWorkflowStep } from './components/TextbookWorkflowStepper';
-import { useKnowledgePointLessonByPoint, useKnowledgePointSourcePreview, useLatestTextbookStructure, useStructureGenerationJob, useStructureMutations } from './queries';
+import { useKnowledgePointLessonByPoint, useKnowledgePointSourcePreview, useLatestTextbookStructure, useStructureGenerationJob, useStructureGenerationProgress, useStructureMutations } from './queries';
 import type { KnowledgePointSourcePreview, StructureGenerationJob, TextbookKnowledgePoint, TextbookStructureUnit } from './types';
 import './TextbookStructurePage.css';
 
@@ -181,6 +181,131 @@ function StructureGenerationTimeline({ job }: { job: StructureGenerationJob }) {
       )}
       {job.error_message && (
         <p className="mt-1 text-xs" style={{ color: 'var(--color-loss)' }}>{job.error_message}</p>
+      )}
+    </div>
+  );
+}
+
+const progressStatusIcon: Record<string, ReactNode> = {
+  completed: <Check className="size-3" />,
+  failed: <AlertTriangle className="size-3" />,
+  running: <Loader2 className="size-3 animate-spin" />,
+  skipped: <span className="size-1.5 rounded-full bg-current opacity-60" />,
+};
+
+function StructureActivityPanel({
+  jobId,
+  job,
+}: {
+  jobId: string | undefined;
+  job: StructureGenerationJob;
+}) {
+  const progress = useStructureGenerationProgress(jobId, Boolean(jobId));
+  const running = ['queued', 'preparing', 'running', 'validating'].includes(job.status);
+  const [expanded, setExpanded] = useState(true);
+  const [showAll, setShowAll] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const events = progress.data?.events ?? [];
+  const visibleEvents = !showAll && events.length > 12 ? events.slice(-8) : events;
+  const hiddenCount = events.length - visibleEvents.length;
+
+  useEffect(() => {
+    setExpanded(running);
+  }, [running]);
+
+  useEffect(() => {
+    const node = listRef.current;
+    if (!node || !running) return;
+    node.scrollTop = node.scrollHeight;
+  }, [running, events.length]);
+
+  return (
+    <div className="textbook-activity-panel" data-testid="structure-activity-panel">
+      <div className="textbook-activity-header">
+        <div className="min-w-0">
+          <p className="text-sm font-medium">处理活动</p>
+          <p className="text-xs text-muted-foreground">
+            {running
+              ? '正在同步服务端处理事件，可关闭页面，任务会继续。'
+              : events.length > 0
+                ? `已完成 ${events.length} 个可读处理步骤。`
+                : '暂无可读处理事件。'}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="textbook-activity-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? '收起' : '展开'}
+          <ChevronDown className={cn('size-3.5 transition-transform', expanded && 'rotate-180')} />
+        </button>
+      </div>
+      {expanded && (
+        <>
+          <div className="textbook-activity-list" ref={listRef} data-testid="structure-activity-list">
+            {progress.isPending ? (
+              <p className="textbook-activity-empty">
+                <Loader2 className="mr-2 inline size-3 animate-spin" />
+                正在读取处理活动…
+              </p>
+            ) : progress.isError ? (
+              <p className="textbook-activity-empty">暂时无法读取处理活动。</p>
+            ) : events.length === 0 ? (
+              <p className="textbook-activity-empty">
+                {running ? '任务已启动，等待首个处理事件…' : '没有记录到可读处理事件。'}
+              </p>
+            ) : (
+              <>
+                {hiddenCount > 0 && (
+                  <button
+                    type="button"
+                    className="textbook-activity-more"
+                    onClick={() => setShowAll(true)}
+                  >
+                    还有 {hiddenCount} 条较早记录，展开查看
+                  </button>
+                )}
+                {visibleEvents.map((event) => (
+                  <div
+                    key={`${event.sequence}-${event.label}`}
+                    className={cn(
+                      'textbook-activity-row',
+                      event.status === 'running' && 'is-running',
+                      event.status === 'failed' && 'is-failed',
+                    )}
+                  >
+                    <span className="textbook-activity-dot">
+                      {progressStatusIcon[event.status] ?? <span className="size-1.5 rounded-full bg-current" />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate" title={event.label}>
+                        {event.label}
+                        {event.count > 1 && (
+                          <span className="ml-1.5 font-mono text-[11px] text-muted-foreground">×{event.count}</span>
+                        )}
+                      </p>
+                      {event.detail && (
+                        <p className="truncate font-mono text-[11px] text-muted-foreground" title={event.detail}>
+                          {event.detail}
+                        </p>
+                      )}
+                    </div>
+                    {event.timestamp && (
+                      <span className="textbook-timeline-time shrink-0">
+                        {new Date(event.timestamp).toLocaleTimeString()}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+          {progress.data?.truncated && (
+            <p className="mt-2 text-[11px] text-muted-foreground">只展示最近的处理记录。</p>
+          )}
+        </>
       )}
     </div>
   );
@@ -729,7 +854,7 @@ export default function TextbookStructurePage() {
   }
 
   if (!structure.data && generation.data) {
-    return <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page"><div className="mx-auto max-w-3xl px-6 py-12"><h1 className="title-font text-2xl font-semibold">正在分析教材结构</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">任务已提交，下面会显示当前进度；可以关闭页面，处理会继续在后台进行。</p><div className="mt-6 rounded-lg border p-4" style={{ borderColor: 'var(--color-border-muted)' }}><StructureGenerationTimeline job={generation.data} /></div>{generation.data.status === 'failed' && <Button className="mt-6" onClick={() => void resumeStructure(generation.data.generation_job_id)} disabled={structureSubmitting || mutations.resumeStructure.isPending}><RefreshCcw className="mr-2 size-4" />{structureSubmitting || mutations.resumeStructure.isPending ? '正在继续' : '重新运行结构分析'}</Button>}</div></main>;
+    return <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page"><div className="mx-auto max-w-3xl px-6 py-12"><h1 className="title-font text-2xl font-semibold">正在分析教材结构</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">任务已提交，下面会显示当前进度；可以关闭页面，处理会继续在后台进行。</p><div className="mt-6 grid gap-4 rounded-lg border p-4" style={{ borderColor: 'var(--color-border-muted)' }}><StructureGenerationTimeline job={generation.data} /><StructureActivityPanel jobId={generation.data.generation_job_id} job={generation.data} /></div>{generation.data.status === 'failed' && <Button className="mt-6" onClick={() => void resumeStructure(generation.data.generation_job_id)} disabled={structureSubmitting || mutations.resumeStructure.isPending}><RefreshCcw className="mr-2 size-4" />{structureSubmitting || mutations.resumeStructure.isPending ? '正在继续' : '重新运行结构分析'}</Button>}</div></main>;
   }
 
   const data = structure.data;
@@ -775,8 +900,11 @@ export default function TextbookStructurePage() {
           </div>
           <h1 className="title-font mt-8 text-2xl font-semibold">正在分析教材结构</h1>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">任务已提交，下面会显示当前进度；可以关闭页面，处理会继续在后台进行。</p>
-          <div className="mt-6 rounded-lg border p-4" style={{ borderColor: 'var(--color-border-muted)' }}>
-            <StructureGenerationTimeline job={activeJob} />
+          <div className="mt-6 grid gap-4 rounded-lg border p-4 lg:grid-cols-[minmax(260px,340px)_minmax(0,1fr)]" style={{ borderColor: 'var(--color-border-muted)' }}>
+            <div className="min-w-0">
+              <StructureGenerationTimeline job={activeJob} />
+            </div>
+            <StructureActivityPanel jobId={activeJob.generation_job_id} job={activeJob} />
           </div>
         </div>
       </main>
@@ -819,12 +947,13 @@ export default function TextbookStructurePage() {
           <TextbookWorkflowStepper steps={steps} />
         </div>
         {activeJob && (
-          <div className="mt-4 rounded-lg border p-4" style={{ borderColor: 'var(--color-border-muted)' }} data-testid="structure-active-job">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="mt-4 grid gap-4 rounded-lg border p-4 lg:grid-cols-[minmax(260px,360px)_minmax(0,1fr)]" style={{ borderColor: 'var(--color-border-muted)' }} data-testid="structure-active-job">
+            <div className="min-w-0">
               <p className="text-sm font-medium">教材结构处理进度</p>
-              <p className="text-xs text-muted-foreground">可以关闭页面，处理会继续在后台进行。</p>
+              <p className="mb-3 text-xs text-muted-foreground">可以关闭页面，处理会继续在后台进行。</p>
+              <StructureGenerationTimeline job={activeJob} />
             </div>
-            <StructureGenerationTimeline job={activeJob} />
+            <StructureActivityPanel jobId={activeJob.generation_job_id} job={activeJob} />
           </div>
         )}
       </div>

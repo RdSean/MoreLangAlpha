@@ -219,6 +219,21 @@ export function useStructureGenerationJob(jobId: string | undefined, enabled: bo
   });
 }
 
+export function useStructureGenerationProgress(jobId: string | undefined, enabled: boolean) {
+  const terminal = new Set<StructureGenerationJob['status']>(['completed', 'failed', 'cancelled']);
+  return useQuery({
+    queryKey: queryKeys.education.structureJobProgress(jobId ?? ''),
+    queryFn: () => educationApi.getStructureGenerationProgress(jobId ?? ''),
+    enabled: Boolean(jobId) && enabled,
+    staleTime: 2_000,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status as StructureGenerationJob['status'] | undefined;
+      return status && terminal.has(status) ? false : 4_000;
+    },
+    refetchIntervalInBackground: true,
+  });
+}
+
 export function useKnowledgePointLesson(lessonId: string | undefined, enabled: boolean) {
   return useQuery({
     queryKey: queryKeys.education.knowledgePointLesson(lessonId ?? ''),

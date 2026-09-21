@@ -329,6 +329,40 @@ async def test_parent_reads_latest_structure_and_lesson_by_knowledge_point(clien
 
 
 @pytest.mark.asyncio
+async def test_parent_reads_structure_generation_progress(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    generation_job_id = uuid4()
+    progress = {
+        "generation_job_id": generation_job_id,
+        "run_id": uuid4(),
+        "status": "running",
+        "events": [
+            {
+                "sequence": 0,
+                "kind": "tool",
+                "label": "扫描源文档：01-rex.md",
+                "detail": None,
+                "status": "completed",
+                "timestamp": "2026-09-21T04:45:46Z",
+            }
+        ],
+        "truncated": False,
+    }
+    with patch(
+        "src.server.app.education.textbooks.get_structure_progress_for_parent",
+        new=AsyncMock(return_value=progress),
+    ) as progress_call:
+        response = await client.get(
+            f"/api/v1/education/structure-generation-jobs/{generation_job_id}/progress"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["events"][0]["label"] == "扫描源文档：01-rex.md"
+    progress_call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_parent_reads_knowledge_point_source_preview(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-1"

@@ -291,6 +291,24 @@ export interface KnowledgePointSourcePreview {
   snippets: KnowledgePointSourceSnippet[];
 }
 
+export interface StructureGenerationProgressEvent {
+  sequence: number;
+  kind: string;
+  label: string;
+  detail?: string | null;
+  status: string;
+  timestamp?: string | null;
+  count: number;
+}
+
+export interface StructureGenerationProgress {
+  generation_job_id: string;
+  run_id?: string | null;
+  status: string;
+  events: StructureGenerationProgressEvent[];
+  truncated: boolean;
+}
+
 export interface StudentKnowledgePoint {
   knowledge_point_id: string;
   position: number;

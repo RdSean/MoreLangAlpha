@@ -13,6 +13,7 @@ from src.server.app.education.models import (
     CreateTextbookStructureRequest,
     GenerateKnowledgePointLessonRequest,
     KnowledgePointLessonResponse,
+    KnowledgePointProgressResponse,
     KnowledgePointSourcePreviewResponse,
     LearningItemResponse,
     PublishTextbookStructureRequest,
@@ -40,6 +41,9 @@ from src.server.services.education_structure_review import (
     queue_structure_for_parent,
     replace_structure_for_parent,
     resume_structure_generation_for_parent,
+)
+from src.server.services.education_structure_progress import (
+    get_structure_progress_for_parent,
 )
 from src.server.services.education_lesson_review import (
     approve_lesson_for_parent,
@@ -186,6 +190,23 @@ async def get_family_structure_generation_job(
 ):
     try:
         return await get_structure_generation_job(
+            parent_user_id=user_id,
+            generation_job_id=str(generation_job_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/structure-generation-jobs/{generation_job_id}/progress",
+    response_model=KnowledgePointProgressResponse,
+)
+async def get_family_structure_generation_progress(
+    generation_job_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_structure_progress_for_parent(
             parent_user_id=user_id,
             generation_job_id=str(generation_job_id),
         )

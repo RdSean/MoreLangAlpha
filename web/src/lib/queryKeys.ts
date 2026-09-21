@@ -164,6 +164,7 @@ export const queryKeys = {
     textbookStructure: (versionId: string) => [...queryKeys.education.textbooks(), versionId, 'structure'],
     structure: (id: string) => [...queryKeys.education.all, 'textbook-structures', id],
     structureJob: (id: string) => [...queryKeys.education.all, 'structure-generation-jobs', id],
+    structureJobProgress: (id: string) => [...queryKeys.education.structureJob(id), 'progress'],
     knowledgePointLesson: (id: string) => [...queryKeys.education.all, 'knowledge-point-lessons', id],
     knowledgePointLessonByPoint: (id: string) => [...queryKeys.education.all, 'knowledge-points', id, 'lesson'],
     knowledgePointSourcePreview: (id: string) => [...queryKeys.education.all, 'knowledge-points', id, 'source-preview'],

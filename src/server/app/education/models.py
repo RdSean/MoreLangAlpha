@@ -498,6 +498,24 @@ class KnowledgePointSourcePreviewResponse(BaseModel):
     snippets: list[KnowledgePointSourceSnippetResponse]
 
 
+class KnowledgePointProgressEventResponse(BaseModel):
+    sequence: int
+    kind: str
+    label: str
+    detail: str | None = None
+    status: str
+    timestamp: str | None = None
+    count: int = 1
+
+
+class KnowledgePointProgressResponse(BaseModel):
+    generation_job_id: UUID
+    run_id: UUID | None = None
+    status: str
+    events: list[KnowledgePointProgressEventResponse]
+    truncated: bool = False
+
+
 class CreateKnowledgePointLessonRevisionRequest(BaseModel):
     content_markdown: str = Field(min_length=1, max_length=200_000)
 

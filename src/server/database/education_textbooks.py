@@ -911,6 +911,54 @@ async def get_generation_job_for_parent(
     return dict(row) if row else None
 
 
+async def get_run_id_for_generation_job(
+    *, parent_user_id: str, generation_job_id: str
+) -> dict[str, Any] | None:
+    """Resolve a parent-owned generation job to its current run id."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT jobs.generation_job_id, jobs.status,
+                       jobs.latest_attempt_id, attempts.root_run_id
+                FROM education_generation_jobs AS jobs
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = jobs.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                LEFT JOIN education_generation_attempts AS attempts
+                  ON attempts.attempt_id = jobs.latest_attempt_id
+                WHERE jobs.generation_job_id = %s
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (generation_job_id, parent_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_run_sse_events(*, run_id: str) -> list[Any]:
+    """Read one run's persisted SSE event blob."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT sse_events
+                FROM conversation_responses
+                WHERE conversation_response_id = %s
+                """,
+                (run_id,),
+            )
+            row = await cur.fetchone()
+    if not row:
+        return []
+    events = row.get("sse_events")
+    return list(events) if isinstance(events, list) else []
+
+
 async def get_knowledge_point_for_parent(
     *, parent_user_id: str, knowledge_point_id: str
 ) -> dict[str, Any] | None:
