@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AlertTriangle, BookOpenCheck, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleHelp, Clock3, FileText, GitMerge, Loader2, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AlertTriangle, BookOpenCheck, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Clock3, FileText, GitMerge, Loader2, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -45,6 +45,49 @@ function ActionTip({ label, children }: { label: string; children: ReactNode }) 
         {label}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+function HoverScrollText({ text, className = '' }: { text: string; className?: string }) {
+  const containerRef = useRef<HTMLSpanElement>(null);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [distance, setDistance] = useState(0);
+  const [hovered, setHovered] = useState(false);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const container = containerRef.current;
+      const content = textRef.current;
+      if (!container || !content) return;
+      setDistance(Math.max(0, content.scrollWidth - container.clientWidth));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    if (containerRef.current) observer.observe(containerRef.current);
+    if (textRef.current) observer.observe(textRef.current);
+    return () => observer.disconnect();
+  }, [text]);
+
+  return (
+    <span
+      ref={containerRef}
+      className={`block min-w-0 overflow-hidden ${className}`}
+      title={text}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <span
+        ref={textRef}
+        className="block w-max whitespace-nowrap"
+        style={{
+          transform: hovered && distance > 0 ? `translateX(-${distance}px)` : 'translateX(0)',
+          transition: `transform ${Math.max(350, Math.min(1400, distance * 4))}ms linear`,
+        }}
+      >
+        {text}
+      </span>
+    </span>
   );
 }
 
@@ -507,21 +550,28 @@ export default function TextbookStructurePage() {
                       title={unit.title}
                       aria-label={`选择 ${unit.title}`}
                       onClick={() => selectUnit(unit.unit_id)}
-                      className="flex min-h-11 min-w-0 flex-1 flex-col justify-center overflow-hidden px-2 py-2 text-left text-sm hover:bg-[var(--color-bg-hover)]"
+                      className="flex min-h-10 min-w-0 flex-1 items-center px-2 py-2 text-left text-sm hover:bg-[var(--color-bg-hover)]"
                       style={{ color: 'var(--color-text-primary)' }}
                     >
-                      <span className="block w-full truncate whitespace-nowrap font-medium">{unit.position}. {unit.title}</span>
-                      <span className="mt-0.5 block truncate whitespace-nowrap font-mono text-[10px] text-muted-foreground">
-                        {unit.unit_type} · {unit.knowledge_points.length} 个知识点
-                      </span>
+                      <HoverScrollText
+                        text={`${unit.position}. ${unit.title} (${unit.knowledge_points.length})`}
+                        className="w-full font-medium"
+                      />
                     </button>
                   </div>
                   {expanded && (
-                    <div className="ml-7 mt-0.5 grid gap-0.5 border-l pl-2" style={{ borderColor: 'var(--color-border-muted)' }}>
+                    <div className="ml-4 mt-0.5 grid gap-0.5 border-l pl-1.5" style={{ borderColor: 'var(--color-border-muted)' }}>
                       {unit.knowledge_points.length === 0 ? (
                         <p className="px-2 py-1.5 text-xs text-muted-foreground">无知识点</p>
                       ) : unit.knowledge_points.map((point) => {
                         const active = point.knowledge_point_id === selectedPointId;
+                        const lessonBar = point.lesson_status === 'approved'
+                          ? 'var(--color-success)'
+                          : point.lesson_revision_id
+                            ? 'var(--color-warning)'
+                            : active
+                              ? 'var(--color-accent-primary)'
+                              : null;
                         return (
                           <button
                             key={point.knowledge_point_id}
@@ -529,21 +579,15 @@ export default function TextbookStructurePage() {
                             title={point.title}
                             aria-label={`选择知识点 ${point.title}`}
                             onClick={() => selectPoint(unit.unit_id, point.knowledge_point_id)}
-                            className="flex min-h-9 w-full min-w-0 items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--color-bg-hover)]"
+                            className="flex min-h-8 w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left text-xs transition-colors hover:bg-[var(--color-bg-hover)]"
                             style={{
                               color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
                               backgroundColor: active ? 'var(--color-bg-subtle)' : undefined,
+                              boxShadow: lessonBar ? `inset 3px 0 0 ${lessonBar}` : undefined,
                             }}
                           >
                             <span className="w-4 shrink-0 text-right font-mono text-[10px] text-muted-foreground">{point.position}</span>
-                            <span className="min-w-0 flex-1 truncate">{point.title}</span>
-                            {point.lesson_status === 'approved' ? (
-                              <CheckCircle2 className="size-3.5 shrink-0" aria-label="课程已通过" style={{ color: 'var(--color-success)' }} />
-                            ) : point.lesson_revision_id ? (
-                              <Clock3 className="size-3.5 shrink-0" aria-label="课程待审阅" style={{ color: 'var(--color-warning)' }} />
-                            ) : (
-                              <Circle className="size-3 shrink-0" aria-label="课程未生成" style={{ color: 'var(--color-text-tertiary)' }} />
-                            )}
+                            <HoverScrollText text={point.title} className="min-w-0 flex-1" />
                           </button>
                         );
                       })}
