@@ -1,0 +1,76 @@
+.textbook-structure-tree-unit,
+.textbook-structure-tree-point {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.textbook-structure-tree-unit-row {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.textbook-structure-tree-unit-row.is-active {
+  border-color: var(--color-accent-primary);
+  background: var(--color-bg-subtle);
+}
+
+.textbook-structure-tree-unit {
+  min-height: 40px;
+  padding: 8px;
+  color: var(--color-text-primary);
+}
+
+.textbook-structure-tree-point {
+  min-height: 32px;
+  gap: 8px;
+  padding: 4px 8px;
+  color: var(--color-text-secondary);
+}
+
+.textbook-structure-tree-unit:hover,
+.textbook-structure-tree-point:hover {
+  background: var(--color-bg-hover);
+}
+
+.textbook-structure-tree-unit.is-active,
+.textbook-structure-tree-point.is-active {
+  background: var(--color-bg-subtle);
+  color: var(--color-text-primary);
+}
+
+/* Mirrors .sidebar-panel-item.active::before from Sidebar.css. */
+.textbook-structure-tree-point::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  border-radius: 0 3px 3px 0;
+  background: transparent;
+}
+
+.textbook-structure-tree-point.is-current::before {
+  background: hsl(var(--sidebar-indicator));
+}
+
+.textbook-structure-tree-point.is-pending::before {
+  background: var(--color-warning);
+}
+
+.textbook-structure-tree-point.is-approved::before {
+  background: var(--color-success);
+}

@@ -4,11 +4,13 @@ import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/components/ui/use-toast';
+import { cn } from '@/lib/utils';
 import EducationMarkdown from './components/EducationMarkdown';
 import ProcessingProfileDialog, { type ProcessingProfileValue } from './components/ProcessingProfileDialog';
 import TextbookWorkflowStepper, { type TextbookWorkflowStep } from './components/TextbookWorkflowStepper';
 import { useKnowledgePointLessonByPoint, useLatestTextbookStructure, useStructureGenerationJob, useStructureMutations } from './queries';
 import type { TextbookKnowledgePoint, TextbookStructureUnit } from './types';
+import './TextbookStructurePage.css';
 
 function messageOf(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -531,11 +533,7 @@ export default function TextbookStructurePage() {
               return (
                 <div key={unit.unit_id}>
                   <div
-                    className="flex min-w-0 items-stretch rounded-md border"
-                    style={{
-                      borderColor: unitSelected ? 'var(--color-accent-primary)' : 'transparent',
-                      backgroundColor: unitSelected ? 'var(--color-bg-subtle)' : undefined,
-                    }}
+                    className={cn('textbook-structure-tree-unit-row', unitSelected && 'is-active')}
                   >
                     <button
                       type="button"
@@ -550,8 +548,7 @@ export default function TextbookStructurePage() {
                       title={unit.title}
                       aria-label={`选择 ${unit.title}`}
                       onClick={() => selectUnit(unit.unit_id)}
-                      className="flex min-h-10 min-w-0 flex-1 items-center px-2 py-2 text-left text-sm hover:bg-[var(--color-bg-hover)]"
-                      style={{ color: 'var(--color-text-primary)' }}
+                      className="textbook-structure-tree-unit min-w-0 flex-1"
                     >
                       <HoverScrollText
                         text={`${unit.position}. ${unit.title} (${unit.knowledge_points.length})`}
@@ -560,17 +557,17 @@ export default function TextbookStructurePage() {
                     </button>
                   </div>
                   {expanded && (
-                    <div className="ml-4 mt-0.5 grid gap-0.5 border-l pl-1.5" style={{ borderColor: 'var(--color-border-muted)' }}>
+                    <div className="ml-4 mt-0.5 grid gap-0.5 pl-1.5">
                       {unit.knowledge_points.length === 0 ? (
                         <p className="px-2 py-1.5 text-xs text-muted-foreground">无知识点</p>
                       ) : unit.knowledge_points.map((point) => {
                         const active = point.knowledge_point_id === selectedPointId;
-                        const lessonBar = point.lesson_status === 'approved'
-                          ? 'var(--color-success)'
+                        const lessonStateClass = point.lesson_status === 'approved'
+                          ? 'is-approved'
                           : point.lesson_revision_id
-                            ? 'var(--color-warning)'
+                            ? 'is-pending'
                             : active
-                              ? 'var(--color-accent-primary)'
+                              ? 'is-current'
                               : null;
                         return (
                           <button
@@ -579,12 +576,11 @@ export default function TextbookStructurePage() {
                             title={point.title}
                             aria-label={`选择知识点 ${point.title}`}
                             onClick={() => selectPoint(unit.unit_id, point.knowledge_point_id)}
-                            className="flex min-h-8 w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left text-xs transition-colors hover:bg-[var(--color-bg-hover)]"
-                            style={{
-                              color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                              backgroundColor: active ? 'var(--color-bg-subtle)' : undefined,
-                              boxShadow: lessonBar ? `inset 3px 0 0 ${lessonBar}` : undefined,
-                            }}
+                            className={cn(
+                              'textbook-structure-tree-point text-xs',
+                              active && 'is-active',
+                              lessonStateClass,
+                            )}
                           >
                             <span className="w-4 shrink-0 text-right font-mono text-[10px] text-muted-foreground">{point.position}</span>
                             <HoverScrollText text={point.title} className="min-w-0 flex-1" />
