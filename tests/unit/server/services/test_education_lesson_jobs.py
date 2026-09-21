@@ -65,82 +65,51 @@ def test_managed_lesson_prompt_contains_only_target_contract() -> None:
     assert "evidence.json" in prompt
 
 
-def test_build_lesson_source_context_uses_only_target_offsets() -> None:
+def _scope(markdown: str, start: int, end: int) -> dict:
+    return {
+        "slot": "reading_a",
+        "scope_title": "The World's Game",
+        "source_id": "source-1",
+        "line_start": 1,
+        "line_end": 50,
+        "char_start": start,
+        "char_end": end,
+    }
+
+
+def test_build_lesson_source_context_slices_the_declared_scope() -> None:
+    markdown = FROZEN_INPUT["sources"][0]["markdown"]
+    quote_start = markdown.index("The second paragraph.")
+    quote_end = quote_start + len("The second paragraph.")
+
     context, warnings = education_lesson_jobs.build_lesson_source_context(
         LESSON_JOB,
         FROZEN_INPUT,
+        [_scope(markdown, quote_start, quote_end)],
     )
 
     assert warnings == []
-    assert context.startswith("## source-1 [0:")
-    assert "# Unit 1" in context
-    assert "The first paragraph." in context
+    assert context.startswith("## The World's Game [1:50]")
+    assert "The second paragraph." in context
+    assert "The first paragraph." not in context
 
 
-def test_build_lesson_source_context_resolves_quote_when_offsets_are_missing() -> None:
-    markdown = FROZEN_INPUT["sources"][0]["markdown"]
-    quote = "The second paragraph."
-    target_start = markdown.index(quote)
-    job = {
-        **LESSON_JOB,
-        "knowledge_point_source_refs": [
-            {
-                "source_id": "source-1",
-                "start": None,
-                "end": None,
-                "quote": quote,
-            }
-        ],
-    }
-
-    context, warnings = education_lesson_jobs.build_lesson_source_context(
-        job,
-        FROZEN_INPUT,
-    )
-
-    assert warnings == ["source_ref_resolved"]
-    assert quote in context
-    assert context.startswith("## source-1 [0:")
+def test_build_lesson_source_context_refuses_to_guess_without_a_scope() -> None:
+    with pytest.raises(ValueError, match="scope is unavailable"):
+        education_lesson_jobs.build_lesson_source_context(
+            LESSON_JOB,
+            FROZEN_INPUT,
+            [],
+        )
 
 
-def test_build_lesson_source_context_approximates_wrapped_quote() -> None:
-    job = {
-        **LESSON_JOB,
-        "knowledge_point_source_refs": [
-            {
-                "source_id": "source-1",
-                "start": None,
-                "end": None,
-                "quote": "The first\n**paragraph**.",
-            }
-        ],
-    }
-
-    context, warnings = education_lesson_jobs.build_lesson_source_context(
-        job,
-        FROZEN_INPUT,
-    )
-
-    assert warnings == ["source_ref_approximate"]
-    assert "The first" in context
-
-
-def test_build_lesson_source_context_uses_document_prefix_as_last_resort() -> None:
-    job = {
-        **LESSON_JOB,
-        "knowledge_point_source_refs": [
-            {"source_id": "source-1", "start": None, "end": None, "quote": ""}
-        ],
-    }
-
-    context, warnings = education_lesson_jobs.build_lesson_source_context(
-        job,
-        FROZEN_INPUT,
-    )
-
-    assert warnings == ["source_ref_document_prefix"]
-    assert context.startswith("## source-1 [0:")
-    assert "# Unit 1" in context
+def test_build_lesson_source_context_rejects_an_empty_scope() -> None:
+    with pytest.raises(ValueError, match="range is invalid"):
+        education_lesson_jobs.build_lesson_source_context(
+            LESSON_JOB,
+            FROZEN_INPUT,
+            [_scope(FROZEN_INPUT["sources"][0]["markdown"], 10, 10)],
+        )
 
 
 @pytest.mark.asyncio

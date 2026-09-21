@@ -22,6 +22,7 @@ from src.server.database.education_textbooks import (
     get_generation_job_for_parent,
     get_knowledge_point_for_parent,
     get_teaching_input_for_parent,
+    get_textbook_scopes_for_unit,
     mark_generation_attempt_running,
     requeue_generation_job,
     settle_generation_job,
@@ -30,10 +31,6 @@ from src.server.database.runs.lifecycle import QuerySpec
 from src.server.services.education_lesson_validation import (
     KnowledgePointLessonValidationError,
     validate_kp_lesson_outputs,
-)
-from src.server.services.education_source_refs import (
-    resolve_quote_range,
-    surrounding_section_range,
 )
 from src.server.services.education_processing_profiles import (
     processing_profile_prompt,
@@ -63,8 +60,6 @@ from src.server.utils.error_sanitization import sanitize_error_text
 
 logger = logging.getLogger(__name__)
 
-_LESSON_EXCERPT_MIN_CHARS = 3_000
-_LESSON_EXCERPT_PADDING_CHARS = 1_200
 _MANAGED_KIND = "education_lesson"
 _PROFILE_VERSION = "kp-lesson-v1"
 MAX_LESSON_GENERATION_ATTEMPTS = 3
@@ -136,71 +131,49 @@ def managed_lesson_prompt(job: Mapping[str, Any]) -> str:
 def build_lesson_source_context(
     job: Mapping[str, Any],
     frozen_input: Mapping[str, Any],
+    scopes: list[Mapping[str, Any]] | None = None,
 ) -> tuple[str, list[str]]:
-    """Slice the target knowledge point's referenced sources.
+    """Return the authoritative source slice for one knowledge point.
 
-    Returns the assembled excerpt plus warnings. A knowledge point whose
-    source offsets could not be resolved must not fail the whole lesson job:
-    the quote can still be located approximately, and as a last resort the
-    source document's leading section is used with a warning.
+    The slice comes from the canonical book-to-skill reading scopes. When no
+    scope is available the lesson job fails loudly: authoring a lesson from a
+    guessed range is exactly the failure this pipeline exists to prevent.
     """
+    if not scopes:
+        raise ValueError("Knowledge-point scope is unavailable")
+    scope = scopes[0]
+    source_id = str(scope.get("source_id") or "")
     raw_sources = frozen_input.get("sources")
     if not isinstance(raw_sources, list):
         raw_sources = frozen_input.get("chapters")
-    source_by_id = {
-        str(
-            source.get("source_id")
-            or source.get("content_chapter_id")
-            or ""
-        ): source
-        for source in raw_sources or []
-        if isinstance(source, Mapping)
-    }
-    source_refs = job.get("knowledge_point_source_refs")
-    if not isinstance(source_refs, list) or not source_refs:
-        raise ValueError("Knowledge-point lesson source refs are unavailable")
-    excerpts: list[str] = []
-    warnings: list[str] = []
-    for reference in source_refs:
-        if not isinstance(reference, Mapping):
-            raise ValueError("Knowledge-point lesson source ref is invalid")
-        source_id = str(reference.get("source_id") or "")
-        source = source_by_id.get(source_id)
-        if not source:
-            raise ValueError("Knowledge-point lesson source is unavailable")
-        markdown = source.get("markdown")
-        start = reference.get("start")
-        end = reference.get("end")
-        if not isinstance(markdown, str) or not markdown.strip():
-            raise ValueError("Knowledge-point lesson source range is invalid")
-        if (
-            not isinstance(start, int)
-            or not isinstance(end, int)
-            or start < 0
-            or end <= start
-            or end > len(markdown)
-        ):
-            resolved = resolve_quote_range(
-                markdown,
-                str(reference.get("quote") or ""),
-                source_id=source_id,
+    source = next(
+        (
+            candidate
+            for candidate in raw_sources or []
+            if isinstance(candidate, Mapping)
+            and str(
+                candidate.get("source_id")
+                or candidate.get("content_chapter_id")
+                or ""
             )
-            start = resolved["start"]
-            end = resolved["end"]
-            warnings.append(f"source_ref_{resolved['resolution_status']}")
-        # Give the lesson writer the whole containing section, not just the
-        # located sentence, so it has enough material to teach from.
-        start, end = surrounding_section_range(
-            markdown, start, end, max_chars=18_000
-        )
-        if end - start < _LESSON_EXCERPT_MIN_CHARS:
-            padding = _LESSON_EXCERPT_PADDING_CHARS
-            start = max(0, start - padding)
-            end = min(len(markdown), end + padding)
-        excerpts.append(
-            f"## {source_id} [{start}:{end}]\n{markdown[start:end].strip()}"
-        )
-    return "\n\n".join(excerpts), warnings
+            == source_id
+        ),
+        None,
+    )
+    if source is None:
+        raise ValueError("Knowledge-point lesson source is unavailable")
+    markdown = source.get("markdown")
+    if not isinstance(markdown, str) or not markdown.strip():
+        raise ValueError("Knowledge-point lesson source range is invalid")
+    start = max(0, min(int(scope["char_start"]), len(markdown)))
+    end = max(start, min(int(scope["char_end"]), len(markdown)))
+    if end <= start:
+        raise ValueError("Knowledge-point lesson source range is invalid")
+    header = (
+        f"## {scope.get('scope_title') or scope.get('slot') or source_id} "
+        f"[{scope.get('line_start')}:{scope.get('line_end')}]"
+    )
+    return f"{header}\n{markdown[start:end]}", []
 
 
 async def queue_kp_lesson_generation_for_parent(
@@ -545,8 +518,17 @@ async def launch_kp_lesson_generation(
         if not frozen_input:
             raise LookupError("Knowledge-point lesson input is unavailable")
         frozen_input = await hydrate_source_asset_manifests(frozen_input)
+        unit_id = str(job.get("unit_id") or "")
+        scopes = (
+            await get_textbook_scopes_for_unit(
+                parent_user_id=parent_user_id,
+                unit_id=unit_id,
+            )
+            if unit_id
+            else []
+        )
         source_context, source_warnings = build_lesson_source_context(
-            job, frozen_input
+            job, frozen_input, scopes
         )
         if source_warnings:
             logger.warning(

@@ -1047,6 +1047,41 @@ async def get_knowledge_point_for_parent(
     return dict(row) if row else None
 
 
+async def get_textbook_scopes_for_unit(
+    *, parent_user_id: str, unit_id: str
+) -> list[dict[str, Any]]:
+    """Return the authoritative reading scopes for one reviewable unit."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT scopes.scope_id, scopes.slot, scopes.title, scopes.summary,
+                       scopes.reading_skill, scopes.vocabulary_building,
+                       scopes.critical_thinking, scopes.source_id,
+                       scopes.line_start, scopes.line_end,
+                       scopes.char_start, scopes.char_end
+                FROM education_textbook_scopes AS scopes
+                JOIN education_structure_units AS units
+                  ON units.unit_id = scopes.unit_id
+                JOIN education_textbook_structures AS structures
+                  ON structures.structure_id = units.structure_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = structures.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                WHERE scopes.unit_id = %s
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                ORDER BY scopes.line_start
+                """,
+                (unit_id, parent_user_id),
+            )
+            rows = await cur.fetchall()
+    return [dict(row) for row in rows]
+
+
 async def get_knowledge_point_source_preview_for_parent(
     *, parent_user_id: str, knowledge_point_id: str
 ) -> dict[str, Any] | None:

@@ -150,7 +150,7 @@ async def test_structure_read_and_replace_require_parent(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_source_preview_returns_markdown_context_for_review_point(monkeypatch):
+async def test_source_preview_returns_the_declared_reading_scope(monkeypatch):
     async def household(_user_id: str):
         return {"household_id": "household-1"}
 
@@ -158,22 +158,31 @@ async def test_source_preview_returns_markdown_context_for_review_point(monkeypa
         return {
             "knowledge_point_id": "kp-1",
             "knowledge_point_title": "世界运动",
-            "knowledge_point_source_refs": [
-                {"source_id": "source-1", "quote": "Unit 1"}
-            ],
             "unit_id": "unit-1",
             "unit_title": "Unit 1: Sports",
             "version_id": "version-1",
             "structure_id": "structure-1",
         }
 
+    async def unit_scopes(**_kwargs):
+        return [
+            {
+                "scope_id": "scope-1",
+                "slot": "reading_a",
+                "title": "The World's Game",
+                "source_id": "source-1",
+                "line_start": 1,
+                "line_end": 40,
+                "char_start": 0,
+                "char_end": 40,
+            }
+        ]
+
     async def frozen_input(**_kwargs):
         return FROZEN_INPUT
 
     monkeypatch.setattr(
-        education_structure_review,
-        "get_household_context_for_parent",
-        household,
+        education_structure_review, "get_household_context_for_parent", household
     )
     monkeypatch.setattr(
         education_structure_review,
@@ -181,9 +190,10 @@ async def test_source_preview_returns_markdown_context_for_review_point(monkeypa
         point_for_parent,
     )
     monkeypatch.setattr(
-        education_structure_review,
-        "get_teaching_input_for_parent",
-        frozen_input,
+        education_structure_review, "get_textbook_scopes_for_unit", unit_scopes
+    )
+    monkeypatch.setattr(
+        education_structure_review, "get_teaching_input_for_parent", frozen_input
     )
 
     preview = await education_structure_review.get_knowledge_point_source_preview(
@@ -192,28 +202,51 @@ async def test_source_preview_returns_markdown_context_for_review_point(monkeypa
     )
 
     assert preview["knowledge_point_title"] == "世界运动"
-    assert preview["unit_title"] == "Unit 1: Sports"
     assert len(preview["snippets"]) == 1
     snippet = preview["snippets"][0]
-    assert snippet["source_id"] == "source-1"
+    assert snippet["scope_slot"] == "reading_a"
+    assert snippet["scope_title"] == "The World's Game"
+    assert snippet["start"] == 0
+    assert snippet["end"] == 40
     assert snippet["markdown"].startswith("# Unit 1")
-    assert snippet["start"] == 2
-    assert snippet["end"] == 8
 
 
-def test_locate_normalized_quote_handles_markdown_and_line_wrapping():
-    markdown = "## **Soccer** is popular\nfor all of these reasons.\n\nNext."
-    located = education_structure_review._locate_normalized_quote(
-        markdown,
-        "Soccer is popular for all of these reasons.",
+@pytest.mark.asyncio
+async def test_source_preview_reports_no_scope_instead_of_guessing(monkeypatch):
+    async def household(_user_id: str):
+        return {"household_id": "household-1"}
+
+    async def point_for_parent(**_kwargs):
+        return {
+            "knowledge_point_id": "kp-1",
+            "knowledge_point_title": "世界运动",
+            "unit_id": "unit-1",
+            "unit_title": "Unit 1: Sports",
+            "version_id": "version-1",
+            "structure_id": "structure-1",
+        }
+
+    async def no_scopes(**_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        education_structure_review, "get_household_context_for_parent", household
+    )
+    monkeypatch.setattr(
+        education_structure_review,
+        "get_knowledge_point_source_preview_for_parent",
+        point_for_parent,
+    )
+    monkeypatch.setattr(
+        education_structure_review, "get_textbook_scopes_for_unit", no_scopes
     )
 
-    assert located is not None
-    start, end = located
-    span = markdown[start:end]
-    assert "Soccer" in span
-    assert "reasons" in span
-    assert "Next." not in span
+    preview = await education_structure_review.get_knowledge_point_source_preview(
+        parent_user_id="parent-1",
+        knowledge_point_id="kp-1",
+    )
+
+    assert preview["snippets"] == []
 
 
 @pytest.mark.asyncio

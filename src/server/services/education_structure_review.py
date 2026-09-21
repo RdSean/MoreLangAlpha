@@ -11,6 +11,7 @@ from src.server.database.education_textbooks import (
     get_knowledge_point_source_preview_for_parent,
     get_latest_textbook_structure_for_parent,
     get_teaching_input_for_parent,
+    get_textbook_scopes_for_unit,
     get_textbook_structure_for_parent,
     replace_structure_contents,
     requeue_structure_generation,
@@ -24,12 +25,6 @@ from src.server.services.education_structure_validation import (
     TextbookStructureValidationError,
     validate_textbook_structure,
 )
-from src.server.services.education_source_refs import (
-    SourceReferenceResolutionError,
-    locate_quote_approximately,
-    resolve_source_ref,
-    surrounding_section_range,
-)
 from src.server.services.education_textbooks import (
     TextbookError,
     TextbookNotFoundError,
@@ -37,11 +32,6 @@ from src.server.services.education_textbooks import (
     TextbookTransitionError,
     get_household_context_for_parent,
 )
-
-
-def _locate_normalized_quote(markdown: str, quote: str) -> tuple[int, int] | None:
-    """Backwards-compatible wrapper around the shared approximate locator."""
-    return locate_quote_approximately(markdown, quote)
 
 
 async def queue_structure_for_parent(
@@ -117,6 +107,13 @@ async def get_latest_structure_for_parent(
 async def get_knowledge_point_source_preview(
     *, parent_user_id: str, knowledge_point_id: str
 ) -> dict[str, Any]:
+    """Return the authoritative reading slice for one knowledge point.
+
+    The slice comes from the canonical book-to-skill line ranges persisted in
+    ``education_textbook_scopes``. There is deliberately no fallback: a
+    knowledge point whose unit has no verified scope reports an empty preview
+    rather than a guessed range.
+    """
     if not await get_household_context_for_parent(parent_user_id):
         raise TextbookPermissionError("Only a parent can review textbook sources")
     point = await get_knowledge_point_source_preview_for_parent(
@@ -125,6 +122,18 @@ async def get_knowledge_point_source_preview(
     )
     if not point:
         raise TextbookNotFoundError("Knowledge point not found")
+    scopes = await get_textbook_scopes_for_unit(
+        parent_user_id=parent_user_id,
+        unit_id=str(point["unit_id"]),
+    )
+    if not scopes:
+        return {
+            "knowledge_point_id": point["knowledge_point_id"],
+            "knowledge_point_title": point["knowledge_point_title"],
+            "unit_id": point["unit_id"],
+            "unit_title": point["unit_title"],
+            "snippets": [],
+        }
     frozen_input = await get_teaching_input_for_parent(
         parent_user_id=parent_user_id,
         content_version_id=str(point["version_id"]),
@@ -137,76 +146,34 @@ async def get_knowledge_point_source_preview(
         if isinstance(source, Mapping)
     }
     snippets: list[dict[str, Any]] = []
-    for raw_ref in point.get("knowledge_point_source_refs", []):
-        if not isinstance(raw_ref, Mapping):
-            continue
-        quote = str(raw_ref.get("quote") or "").strip()
-        source_id = str(raw_ref.get("source_id") or "").strip()
+    for scope in scopes:
+        source_id = str(scope.get("source_id") or "")
         source = sources.get(source_id)
         markdown = str(source.get("markdown") or "") if source else ""
-        start = raw_ref.get("start")
-        end = raw_ref.get("end")
-        if (
-            markdown
-            and quote
-            and (
-                not isinstance(start, int)
-                or not isinstance(end, int)
-                or start < 0
-                or end <= start
-                or end > len(markdown)
-            )
-        ):
-            try:
-                resolved = resolve_source_ref(
-                    sources={source_id: markdown},
-                    source_id=source_id,
-                    quote=quote,
-                )
-                start = resolved.get("start")
-                end = resolved.get("end")
-            except SourceReferenceResolutionError:
-                start = None
-                end = None
-            if not isinstance(start, int) or not isinstance(end, int):
-                located = _locate_normalized_quote(markdown, quote)
-                if located:
-                    start, end = located
-        if not markdown:
-            snippets.append(
-                {
-                    "source_id": source_id or "unknown",
-                    "source_title": None,
-                    "start": None,
-                    "end": None,
-                    "quote": quote or None,
-                    "markdown": quote,
-                    "truncated_before": False,
-                    "truncated_after": False,
-                }
-            )
-            continue
-        if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(markdown):
-            # Show the whole section, but bound very large sections so the
-            # response stays reasonable.
-            section_start, section_end = surrounding_section_range(markdown, start, end)
-            context_start, context_end = surrounding_section_range(
-                markdown, start, end, max_chars=18_000
-            )
-        else:
-            section_start, section_end = 0, len(markdown)
-            context_start = 0
-            context_end = min(len(markdown), 2_400)
+        char_start = int(scope["char_start"])
+        char_end = int(scope["char_end"])
+        if markdown:
+            char_start = max(0, min(char_start, len(markdown)))
+            char_end = max(char_start, min(char_end, len(markdown)))
         snippets.append(
             {
                 "source_id": source_id or "unknown",
-                "source_title": str(source.get("title") or source.get("filename") or "") or None,
-                "start": start if isinstance(start, int) else None,
-                "end": end if isinstance(end, int) else None,
-                "quote": quote or None,
-                "markdown": markdown[context_start:context_end],
-                "truncated_before": context_start > section_start,
-                "truncated_after": context_end < section_end,
+                "source_title": (
+                    str(source.get("title") or source.get("filename") or "")
+                    if source
+                    else None
+                )
+                or None,
+                "start": char_start,
+                "end": char_end,
+                "quote": None,
+                "scope_slot": scope.get("slot"),
+                "scope_title": scope.get("title"),
+                "line_start": scope.get("line_start"),
+                "line_end": scope.get("line_end"),
+                "markdown": markdown[char_start:char_end],
+                "truncated_before": False,
+                "truncated_after": False,
             }
         )
     return {
