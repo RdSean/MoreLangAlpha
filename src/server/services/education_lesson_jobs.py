@@ -47,6 +47,7 @@ from src.server.services.education_managed_runs import (
 from src.server.services.education_teaching_storage import (
     download_kp_lesson_outputs,
     hydrate_source_asset_manifests,
+    read_reading_asset_knowledge,
     stage_kp_lesson_inputs,
     stage_managed_teaching_skills,
     write_kp_lesson_revision,
@@ -81,10 +82,24 @@ def _processing_profile_sha256(*, auto_grading: bool) -> str:
     ).hexdigest()
 
 
-def managed_lesson_prompt(job: Mapping[str, Any]) -> str:
+def managed_lesson_prompt(
+    job: Mapping[str, Any],
+    *,
+    scope: Mapping[str, Any] | None = None,
+    chapter_markdown: str | None = None,
+) -> str:
     """Describe one lesson-only managed run."""
     job_id = str(job["generation_job_id"])
     root = f"/managed/textbook-job/{UUID(job_id)}"
+    scope_slot = str(
+        (scope or {}).get("slot")
+        or job.get("knowledge_point_scope_slot")
+        or ""
+    )
+    if scope_slot not in {"reading_a", "reading_b"}:
+        raise ValueError("Knowledge-point reading scope is unavailable")
+    if not isinstance(chapter_markdown, str) or not chapter_markdown.strip():
+        raise ValueError("Knowledge-point chapter asset is unavailable")
     practice_instruction = (
         f"同时输出 {root}/outputs/practice.json，供自动判题使用。"
         if job.get("auto_grading")
@@ -94,7 +109,9 @@ def managed_lesson_prompt(job: Mapping[str, Any]) -> str:
         "这是服务托管的单知识点课程生成任务，不是与用户的对话。"
         f"任务编号为 {job_id}。目标知识点是：{job.get('knowledge_point_title') or ''}；"
         f"所属单元是：{job.get('unit_title') or ''}。"
-        f"只读取 {root}/inputs/manifest.json 和 {root}/inputs/lesson-context.md，"
+        f"只读取 {root}/inputs/manifest.json、"
+        f"{root}/inputs/readings/{scope_slot}.md 和 "
+        f"{root}/inputs/chapters/{scope_slot}-knowledge.md，"
         "不要读取整本书，也不要访问网络、MCP、Vault 或普通工作区。"
         f"读取 {root}/.agents/skills/book-to-skill/SKILL.md 及其 managed lesson contract。"
         "课程主体必须是一个 Mentrix 风格的完整知识点静态页面：使用 Markdown，"
@@ -139,9 +156,7 @@ def build_lesson_source_context(
     scope is available the lesson job fails loudly: authoring a lesson from a
     guessed range is exactly the failure this pipeline exists to prevent.
     """
-    if not scopes:
-        raise ValueError("Knowledge-point scope is unavailable")
-    scope = scopes[0]
+    scope = select_reading_scope(job, scopes)
     source_id = str(scope.get("source_id") or "")
     raw_sources = frozen_input.get("sources")
     if not isinstance(raw_sources, list):
@@ -176,6 +191,27 @@ def build_lesson_source_context(
     return f"{header}\n{markdown[start:end]}", []
 
 
+def select_reading_scope(
+    job: Mapping[str, Any],
+    scopes: list[Mapping[str, Any]] | None,
+) -> Mapping[str, Any]:
+    """Return the exact Reading assigned to one knowledge point."""
+    if not scopes:
+        raise ValueError("Knowledge-point scope is unavailable")
+    slot = str(job.get("knowledge_point_scope_slot") or "")
+    if slot:
+        selected = next(
+            (scope for scope in scopes if str(scope.get("slot") or "") == slot),
+            None,
+        )
+        if selected is None:
+            raise ValueError("Knowledge-point reading scope is unavailable")
+        return selected
+    if len(scopes) == 1:
+        return scopes[0]
+    raise ValueError("Knowledge-point reading scope is ambiguous")
+
+
 async def queue_kp_lesson_generation_for_parent(
     *,
     parent_user_id: str,
@@ -189,6 +225,19 @@ async def queue_kp_lesson_generation_for_parent(
     )
     if not knowledge_point:
         raise LookupError("Accepted knowledge point not found")
+    scope_slot = str(
+        knowledge_point.get("scope_slot")
+        or knowledge_point.get("knowledge_point_scope_slot")
+        or ""
+    )
+    scopes = await get_textbook_scopes_for_unit(
+        parent_user_id=parent_user_id,
+        unit_id=str(knowledge_point.get("unit_id") or ""),
+    )
+    if not scope_slot or not any(
+        str(scope.get("slot") or "") == scope_slot for scope in scopes
+    ):
+        raise LookupError("Knowledge point Reading scope is unavailable")
     job = await create_generation_job(
         version_id=str(knowledge_point["version_id"]),
         scope="lesson",
@@ -326,6 +375,8 @@ async def _dispatch_kp_lesson_root_run(
     *,
     job: Mapping[str, Any],
     source_context: str,
+    scope: Mapping[str, Any],
+    chapter_markdown: str,
     attempt_id: str,
     session: Any,
     workspace_id: str,
@@ -335,7 +386,11 @@ async def _dispatch_kp_lesson_root_run(
 ) -> dict[str, str]:
     generation_job_id = str(job["generation_job_id"])
     run_id = str(uuid4())
-    prompt = managed_lesson_prompt(job)
+    prompt = managed_lesson_prompt(
+        job,
+        scope=scope,
+        chapter_markdown=chapter_markdown,
+    )
     run_handle = await RunCoordinator.get_instance().start_run(
         thread_id=thread_id,
         run_id=run_id,
@@ -364,7 +419,12 @@ async def _dispatch_kp_lesson_root_run(
         },
     )
     try:
-        await stage_kp_lesson_inputs(job, source_context, session.sandbox)
+        await stage_kp_lesson_inputs(
+            job,
+            source_context,
+            chapter_markdown,
+            session.sandbox,
+        )
         graph, input_state, graph_config = await build_managed_education_graph(
             session=session,
             thread_id=thread_id,
@@ -527,9 +587,11 @@ async def launch_kp_lesson_generation(
             if unit_id
             else []
         )
+        scope = select_reading_scope(job, scopes)
         source_context, source_warnings = build_lesson_source_context(
             job, frozen_input, scopes
         )
+        chapter_markdown = await read_reading_asset_knowledge(job, scope)
         if source_warnings:
             logger.warning(
                 "Knowledge-point lesson used fallback source ranges",
@@ -541,6 +603,8 @@ async def launch_kp_lesson_generation(
         return await _dispatch_kp_lesson_root_run(
             job=job,
             source_context=source_context,
+            scope=scope,
+            chapter_markdown=chapter_markdown,
             attempt_id=attempt_id,
             session=session,
             workspace_id=workspace_id,

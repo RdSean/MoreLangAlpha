@@ -665,12 +665,17 @@ async def stage_reading_asset_inputs(
 async def stage_kp_lesson_inputs(
     job: Mapping[str, Any],
     source_context: str,
+    chapter_markdown: str,
     sandbox: ManagedTeachingSandbox,
 ) -> None:
     """Stage only the selected knowledge-point context for one lesson job."""
     if not isinstance(source_context, str) or not source_context.strip():
         raise TeachingPackageStorageError(
             "Knowledge-point lesson context is unavailable"
+        )
+    if not isinstance(chapter_markdown, str) or not chapter_markdown.strip():
+        raise TeachingPackageStorageError(
+            "Knowledge-point chapter asset is unavailable"
         )
     job_id = str(job.get("generation_job_id") or job.get("job_id") or "")
     if not job_id:
@@ -681,6 +686,13 @@ async def stage_kp_lesson_inputs(
         raise TeachingPackageStorageError(
             "Knowledge-point lesson source refs are unavailable"
         )
+    scope_slot = str(job.get("knowledge_point_scope_slot") or "")
+    if scope_slot not in {"reading_a", "reading_b"}:
+        raise TeachingPackageStorageError(
+            "Knowledge-point reading scope is unavailable"
+        )
+    reading_path = f"inputs/readings/{scope_slot}.md"
+    chapter_path = f"inputs/chapters/{scope_slot}-knowledge.md"
     manifest = {
         "format": "langalpha-managed-kp-lesson-input/v1",
         "job_id": job_id,
@@ -688,8 +700,10 @@ async def stage_kp_lesson_inputs(
         "knowledge_point_title": str(job.get("knowledge_point_title") or ""),
         "unit_title": str(job.get("unit_title") or ""),
         "auto_grading": bool(job.get("auto_grading")),
+        "scope_slot": scope_slot,
         "source_refs": source_refs,
-        "context_path": "inputs/lesson-context.md",
+        "reading_path": reading_path,
+        "chapter_path": chapter_path,
     }
     files = [
         (
@@ -701,10 +715,78 @@ async def stage_kp_lesson_inputs(
                 separators=(",", ":"),
             ).encode("utf-8"),
         ),
-        (f"{root}/inputs/lesson-context.md", source_context.encode("utf-8")),
+        (f"{root}/{reading_path}", source_context.encode("utf-8")),
+        (f"{root}/{chapter_path}", chapter_markdown.encode("utf-8")),
         (f"{root}/outputs/.keep", b""),
     ]
     await _upload_staged_files(sandbox, files)
+
+
+async def read_reading_asset_knowledge(
+    job: Mapping[str, Any],
+    scope: Mapping[str, Any],
+) -> str:
+    """Read the verified canonical knowledge file assigned to one Reading."""
+    prefix = str(job.get("book_asset_prefix") or "")
+    manifest = job.get("book_asset_manifest")
+    if (
+        not prefix.startswith("education/")
+        or not isinstance(manifest, Mapping)
+        or manifest.get("format") != READING_ASSET_FORMAT
+    ):
+        raise TeachingPackageStorageError(
+            "Knowledge-point chapter assets are unavailable"
+        )
+    unit_id = str(scope.get("unit_id") or "")
+    slot = str(scope.get("slot") or "")
+    reading = next(
+        (
+            item
+            for item in manifest.get("readings", [])
+            if isinstance(item, Mapping)
+            and str(item.get("unit_id") or "") == unit_id
+            and str(item.get("slot") or "") == slot
+        ),
+        None,
+    )
+    if not isinstance(reading, Mapping):
+        raise TeachingPackageStorageError(
+            "Knowledge-point chapter asset is unavailable"
+        )
+    files = reading.get("files")
+    knowledge = files.get("knowledge") if isinstance(files, Mapping) else None
+    if not isinstance(knowledge, Mapping):
+        raise TeachingPackageStorageError(
+            "Knowledge-point chapter asset is unavailable"
+        )
+    relative_path = str(knowledge.get("path") or "")
+    expected_size = knowledge.get("size_bytes")
+    expected_sha256 = str(knowledge.get("sha256") or "")
+    if (
+        not relative_path
+        or relative_path.startswith("/")
+        or ".." in relative_path
+        or not isinstance(expected_size, int)
+        or len(expected_sha256) != 64
+    ):
+        raise TeachingPackageStorageError(
+            "Knowledge-point chapter manifest is invalid"
+        )
+    content = await asyncio.to_thread(get_bytes, f"{prefix}/{relative_path}")
+    if (
+        not isinstance(content, bytes)
+        or len(content) != expected_size
+        or hashlib.sha256(content).hexdigest() != expected_sha256
+    ):
+        raise TeachingPackageStorageError(
+            "Knowledge-point chapter asset is invalid"
+        )
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise TeachingPackageStorageError(
+            "Knowledge-point chapter asset is invalid"
+        ) from exc
 
 
 async def download_kp_lesson_outputs(

@@ -62,7 +62,9 @@ def _candidate() -> dict:
 
 
 def test_generates_positions_and_slugs_for_missing_model_metadata() -> None:
-    validated = validate_textbook_structure(_candidate(), FROZEN_INPUT)
+    candidate = _candidate()
+    candidate["units"][0]["knowledge_points"][0]["scope_slot"] = "reading_b"
+    validated = validate_textbook_structure(candidate, FROZEN_INPUT)
 
     unit = validated["units"][0]
     knowledge_point = unit["knowledge_points"][0]
@@ -71,6 +73,7 @@ def test_generates_positions_and_slugs_for_missing_model_metadata() -> None:
     assert knowledge_point["position"] == 1
     assert knowledge_point["slug"] == "kp-01"
     assert knowledge_point["title"] == "世界运动：足球的历史与流行原因"
+    assert knowledge_point["scope_slot"] == "reading_b"
 
 
 def test_uses_model_slug_hint_when_safe() -> None:

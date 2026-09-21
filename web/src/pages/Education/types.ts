@@ -172,6 +172,7 @@ export interface TextbookKnowledgePoint {
   slug: string;
   title: string;
   summary: string;
+  scope_slot?: 'reading_a' | 'reading_b' | null;
   source_refs: StructureSourceRef[];
   confidence: number;
   status: 'review' | 'accepted' | 'blocked';

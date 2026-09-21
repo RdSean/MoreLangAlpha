@@ -2,6 +2,14 @@
 
 ## 2026-09-21
 
+### 改进：知识点课程绑定单一 Reading
+
+- 新增迁移 `074`：知识点增加 `scope_slot`，只能关联 `reading_a` 或 `reading_b`，不再由课程任务默认取 Unit 的第一个范围。
+- 结构审阅页为每个知识点提供 Reading 选择器；未关联、范围缺失或范围未验证时，课程生成按钮保持锁定。
+- lesson prompt 现在同时读取该 Reading 的确定性原文切片和 canonical 生成的知识稿，课程生成前会校验知识点确实拥有对应 Reading。
+- Reading 知识稿从已归档 manifest 按 `unit_id + slot` 读取，并校验对象路径、字节数和 SHA-256，找不到或内容损坏时停止生成。
+- 验证：迁移、结构、lesson 与存储聚焦测试 `60 passed`，结构页 Vitest `10 passed`，`pnpm typecheck` 通过。
+
 ### 改进：按 Reading 生成教材知识资产
 
 - 章节知识包生成改为 canonical `book-to-skill` generate pass：每个 Reading 使用服务端裁剪后的独立 Markdown 输入，不再把整本书作为无边界上下文交给模型。

@@ -636,6 +636,7 @@ async def test_stage_kp_lesson_inputs_contains_only_target_context():
             "generation_job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
             "knowledge_point_id": "kp-1",
             "knowledge_point_title": "世界运动",
+            "knowledge_point_scope_slot": "reading_a",
             "unit_title": "Unit 1",
             "auto_grading": False,
             "knowledge_point_source_refs": [
@@ -643,6 +644,7 @@ async def test_stage_kp_lesson_inputs_contains_only_target_context():
             ],
         },
         "# Unit 1\n\nsource excerpt",
+        "# Reading knowledge",
         sandbox,
     )
 
@@ -651,10 +653,50 @@ async def test_stage_kp_lesson_inputs_contains_only_target_context():
         for call in sandbox.aupload_file_bytes.await_args_list
     }
     root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
-    assert uploaded[f"{root}inputs/lesson-context.md"] == b"# Unit 1\n\nsource excerpt"
+    assert uploaded[f"{root}inputs/readings/reading_a.md"] == b"# Unit 1\n\nsource excerpt"
+    assert uploaded[f"{root}inputs/chapters/reading_a-knowledge.md"] == b"# Reading knowledge"
     manifest = json.loads(uploaded[f"{root}inputs/manifest.json"])
     assert manifest["knowledge_point_id"] == "kp-1"
+    assert manifest["scope_slot"] == "reading_a"
     assert manifest["auto_grading"] is False
+
+
+@pytest.mark.asyncio
+async def test_read_reading_asset_knowledge_verifies_manifest_hash(monkeypatch):
+    content = b"# Reading knowledge\n"
+    job = {
+        "book_asset_prefix": "education/household/book/readings",
+        "book_asset_manifest": {
+            "format": "langalpha-managed-reading-assets/v2",
+            "readings": [
+                {
+                    "unit_id": "unit-1",
+                    "slot": "reading_a",
+                    "title": "The World's Game",
+                    "files": {
+                        "knowledge": {
+                            "path": "readings/01-unit/reading_a/knowledge.md",
+                            "size_bytes": len(content),
+                            "sha256": sha256(content).hexdigest(),
+                        }
+                    },
+                }
+            ],
+        },
+    }
+    monkeypatch.setattr(
+        education_teaching_storage,
+        "get_bytes",
+        lambda _key: content,
+        raising=False,
+    )
+
+    loaded = await education_teaching_storage.read_reading_asset_knowledge(
+        job,
+        {"unit_id": "unit-1", "slot": "reading_a"},
+    )
+
+    assert loaded == "# Reading knowledge\n"
 
 
 @pytest.mark.asyncio

@@ -37,9 +37,11 @@ LESSON_JOB = {
     "knowledge_point_position": 2,
     "knowledge_point_slug": "world-game",
     "knowledge_point_title": "世界运动",
+    "knowledge_point_scope_slot": "reading_a",
     "knowledge_point_source_refs": [
         {"source_id": "source-1", "start": 0, "end": 30}
     ],
+    "unit_id": "unit-1",
     "unit_position": 1,
     "unit_slug": "unit-1-sports",
     "unit_title": "Unit 1: Sports and Fitness",
@@ -54,9 +56,14 @@ LESSON_JOB = {
 
 
 def test_managed_lesson_prompt_contains_only_target_contract() -> None:
-    prompt = education_lesson_jobs.managed_lesson_prompt(LESSON_JOB)
+    prompt = education_lesson_jobs.managed_lesson_prompt(
+        LESSON_JOB,
+        scope={"slot": "reading_a"},
+        chapter_markdown="# Chapter knowledge\n",
+    )
 
-    assert "inputs/lesson-context.md" in prompt
+    assert "inputs/readings/reading_a.md" in prompt
+    assert "inputs/chapters/reading_a-knowledge.md" in prompt
     assert "outputs/lesson.md" in prompt
     assert "outputs/practice.json" in prompt
     assert "世界运动" in prompt
@@ -90,6 +97,37 @@ def test_build_lesson_source_context_slices_the_declared_scope() -> None:
 
     assert warnings == []
     assert context.startswith("## The World's Game [1:50]")
+    assert "The second paragraph." in context
+    assert "The first paragraph." not in context
+
+
+def test_build_lesson_source_context_uses_the_assigned_reading() -> None:
+    markdown = FROZEN_INPUT["sources"][0]["markdown"]
+    reading_a_start = markdown.index("The first paragraph.")
+    reading_a_end = markdown.index("filler sentence.")
+    reading_b_start = markdown.index("The second paragraph.")
+    reading_b_end = reading_b_start + len("The second paragraph.")
+    scopes = [
+        {
+            **_scope(markdown, reading_a_start, reading_a_end),
+            "slot": "reading_a",
+            "scope_title": "Reading A",
+        },
+        {
+            **_scope(markdown, reading_b_start, reading_b_end),
+            "slot": "reading_b",
+            "scope_title": "Reading B",
+        },
+    ]
+
+    context, warnings = education_lesson_jobs.build_lesson_source_context(
+        {**LESSON_JOB, "knowledge_point_scope_slot": "reading_b"},
+        FROZEN_INPUT,
+        scopes,
+    )
+
+    assert warnings == []
+    assert context.startswith("## Reading B [1:50]")
     assert "The second paragraph." in context
     assert "The first paragraph." not in context
 
@@ -128,6 +166,14 @@ async def test_queue_lesson_generation_creates_one_lesson_job(monkeypatch) -> No
             "auto_grading": kwargs["auto_grading"],
         }
 
+    async def get_scopes(**_kwargs):
+        return [
+            {
+                "unit_id": "unit-1",
+                "slot": "reading_a",
+            }
+        ]
+
     monkeypatch.setattr(
         education_lesson_jobs,
         "get_knowledge_point_for_parent",
@@ -137,6 +183,11 @@ async def test_queue_lesson_generation_creates_one_lesson_job(monkeypatch) -> No
         education_lesson_jobs,
         "create_generation_job",
         create_job,
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "get_textbook_scopes_for_unit",
+        get_scopes,
     )
 
     queued = await education_lesson_jobs.queue_kp_lesson_generation_for_parent(
@@ -148,7 +199,38 @@ async def test_queue_lesson_generation_creates_one_lesson_job(monkeypatch) -> No
     assert queued["scope"] == "lesson"
     assert captured["scope"] == "lesson"
     assert captured["knowledge_point_id"] == "kp-1"
-    assert captured["auto_grading"] is False
+
+
+@pytest.mark.asyncio
+async def test_queue_lesson_generation_rejects_unassigned_reading(monkeypatch) -> None:
+    async def get_kp(**_kwargs):
+        return {
+            **LESSON_JOB,
+            "knowledge_point_scope_slot": None,
+        }
+
+    async def get_scopes(**_kwargs):
+        return [
+            {"unit_id": "unit-1", "slot": "reading_a"},
+            {"unit_id": "unit-1", "slot": "reading_b"},
+        ]
+
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "get_knowledge_point_for_parent",
+        get_kp,
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "get_textbook_scopes_for_unit",
+        get_scopes,
+    )
+
+    with pytest.raises(LookupError, match="Reading scope"):
+        await education_lesson_jobs.queue_kp_lesson_generation_for_parent(
+            parent_user_id="parent-1",
+            knowledge_point_id="kp-1",
+        )
 
 
 @pytest.mark.asyncio

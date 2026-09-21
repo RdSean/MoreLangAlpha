@@ -184,6 +184,7 @@ function KnowledgePointWorkspace({
   point,
   structureStatus,
   onDelete,
+  onScopeChange,
   onSave,
   onAccept,
   isSaving,
@@ -195,6 +196,7 @@ function KnowledgePointWorkspace({
   point: TextbookKnowledgePoint;
   structureStatus: string;
   onDelete: (() => void) | undefined;
+  onScopeChange: (scopeSlot: 'reading_a' | 'reading_b') => void;
   onSave: () => void;
   onAccept: () => void;
   isSaving: boolean;
@@ -206,8 +208,15 @@ function KnowledgePointWorkspace({
   const [tabTouched, setTabTouched] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const scopes = unit.scopes ?? [];
-  const unverifiedScopes = scopes.filter((scope) => !scope.verified);
-  const scopeReady = scopes.length > 0 && unverifiedScopes.length === 0;
+  const selectedScope = scopes.find((scope) => scope.slot === point.scope_slot);
+  const scopeReady = Boolean(selectedScope?.verified);
+  const scopeWarning = !point.scope_slot
+    ? '这个知识点还没有关联 Reading，暂不能生成课程。'
+    : !selectedScope
+      ? '这个知识点关联的 Reading 范围不存在，暂不能生成课程。'
+      : !selectedScope.verified
+        ? `${selectedScope.title || selectedScope.slot} 的范围未通过验证，暂不能生成课程。`
+        : '';
   const lesson = useKnowledgePointLessonByPoint(point.knowledge_point_id, true);
   const sourcePreview = useKnowledgePointSourcePreview(point.knowledge_point_id, true);
   const lessonGeneration = useLessonGenerationStatus(point.knowledge_point_id, true);
@@ -304,6 +313,23 @@ function KnowledgePointWorkspace({
           </p>
           <h1 className="title-font mt-2 text-2xl font-semibold">{point.title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{point.summary || '暂无知识点说明'}</p>
+          <label className="mt-3 flex max-w-sm items-center gap-2 text-xs text-muted-foreground">
+            <span>阅读范围</span>
+            <select
+              aria-label={`阅读范围 ${point.title}`}
+              className="h-8 min-w-0 flex-1 border bg-background px-2 text-xs"
+              value={point.scope_slot ?? ''}
+              disabled={structureStatus === 'accepted'}
+              onChange={(event) => onScopeChange(event.target.value as 'reading_a' | 'reading_b')}
+            >
+              <option value="" disabled>请选择 Reading</option>
+              {scopes.map((scope) => (
+                <option key={scope.slot} value={scope.slot}>
+                  {scope.title || scope.slot}{scope.verified ? '' : '（范围待确认）'}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {lesson.data && (
@@ -394,9 +420,7 @@ function KnowledgePointWorkspace({
           <AlertTriangle className="size-4 shrink-0" />
           <span className="font-medium">范围待确认</span>
           <span className="text-muted-foreground">
-            {scopes.length === 0
-              ? '这个 Unit 没有可验证的 Reading 范围，暂不能生成课程。'
-              : `${unverifiedScopes.map((scope) => scope.title || scope.slot).join('、')} 的范围未通过验证，暂不能生成课程。`}
+            {scopeWarning}
           </span>
         </div>
       )}
@@ -602,6 +626,7 @@ export default function TextbookStructurePage() {
       slug: `knowledge-point-${position}`,
       title: '新知识点',
       summary: '',
+      scope_slot: selectedUnit.scopes?.[0]?.slot ?? null,
       source_refs: sourceRefs,
       confidence: 1,
       status: 'review',
@@ -1017,6 +1042,7 @@ export default function TextbookStructurePage() {
             unit={selectedUnit}
             point={selectedPoint}
             structureStatus={data.status}
+            onScopeChange={(scopeSlot) => updateKnowledgePoint(selectedPoint.knowledge_point_id, { scope_slot: scopeSlot })}
             onDelete={() => {
               deleteKnowledgePoint(selectedPoint.knowledge_point_id);
               setSelectedPointId(undefined);

@@ -760,6 +760,7 @@ async def get_textbook_structure_for_parent(
                        knowledge_points.slug,
                        knowledge_points.title,
                        knowledge_points.summary,
+                       knowledge_points.scope_slot,
                        knowledge_points.source_refs,
                        knowledge_points.confidence,
                        knowledge_points.status,
@@ -926,6 +927,7 @@ async def get_generation_job_for_parent(
                        knowledge_points.slug AS knowledge_point_slug,
                        knowledge_points.title AS knowledge_point_title,
                        knowledge_points.summary AS knowledge_point_summary,
+                       knowledge_points.scope_slot AS knowledge_point_scope_slot,
                        knowledge_points.source_refs AS knowledge_point_source_refs,
                        units.unit_id,
                        units.position AS unit_position,
@@ -934,6 +936,8 @@ async def get_generation_job_for_parent(
                        structures.sequence AS structure_sequence,
                        structures.status AS structure_status,
                        structures.bundle_prefix AS structure_bundle_prefix,
+                       structures.book_asset_prefix,
+                       structures.book_asset_manifest,
                        profiles.profile_id AS processing_profile_id,
                        profiles.subject AS processing_profile_subject,
                        profiles.grade_band AS processing_profile_grade_band,
@@ -1032,6 +1036,7 @@ async def get_knowledge_point_for_parent(
                        knowledge_points.slug AS knowledge_point_slug,
                        knowledge_points.title AS knowledge_point_title,
                        knowledge_points.summary AS knowledge_point_summary,
+                       knowledge_points.scope_slot,
                        knowledge_points.source_refs AS knowledge_point_source_refs,
                        units.unit_id,
                        units.position AS unit_position,
@@ -1287,11 +1292,13 @@ async def replace_structure_contents(
                         await cur.execute(
                             """
                             INSERT INTO education_structure_knowledge_points (
-                                knowledge_point_id, unit_id, position, slug, title,
-                                summary, source_refs, confidence, status
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            RETURNING knowledge_point_id
-                            """,
+                                    knowledge_point_id, unit_id, position, slug, title,
+                                    summary, scope_slot, source_refs, confidence, status
+                                ) VALUES (
+                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                                )
+                                RETURNING knowledge_point_id
+                                """,
                             (
                                 knowledge_point_id,
                                 unit_id,
@@ -1299,6 +1306,7 @@ async def replace_structure_contents(
                                 knowledge_point["slug"],
                                 knowledge_point["title"],
                                 knowledge_point.get("summary", ""),
+                                knowledge_point.get("scope_slot"),
                                 Json(knowledge_point.get("source_refs", [])),
                                 knowledge_point["confidence"],
                                 knowledge_point.get("status", "review"),

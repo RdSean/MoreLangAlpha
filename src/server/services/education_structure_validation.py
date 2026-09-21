@@ -222,6 +222,11 @@ def _normalize_knowledge_point(
         ),
         "title": title,
         "summary": _text(value.get("summary"), limit=_MAX_TEXT_LENGTH),
+        "scope_slot": (
+            str(value.get("scope_slot"))
+            if value.get("scope_slot") in {"reading_a", "reading_b"}
+            else None
+        ),
         "source_refs": source_refs,
         "confidence": _confidence(
             value.get("confidence"),

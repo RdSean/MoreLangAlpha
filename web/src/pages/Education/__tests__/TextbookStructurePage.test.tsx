@@ -66,6 +66,21 @@ vi.mock('../queries', () => ({
               char_end: 900,
               verified: false,
             },
+            {
+              scope_id: 'scope-2',
+              slot: 'reading_b',
+              title: 'What Makes an Olympic Champion?',
+              summary: '',
+              reading_skill: '',
+              vocabulary_building: '',
+              critical_thinking: '',
+              source_id: 'source-1',
+              line_start: 41,
+              line_end: 70,
+              char_start: 901,
+              char_end: 1400,
+              verified: true,
+            },
           ],
           knowledge_points: [
             {
@@ -74,6 +89,7 @@ vi.mock('../queries', () => ({
               slug: 'world-game',
               title: '世界运动',
               summary: '',
+              scope_slot: 'reading_a',
               confidence: 0.9,
               status: 'review',
               source_refs: [{ source_id: 'source-1', start: 0, end: 40 }],
@@ -212,6 +228,21 @@ describe('TextbookStructurePage', () => {
 
     expect(screen.getByTestId('scope-warning')).toHaveTextContent('范围待确认');
     expect(screen.getByTestId('scope-warning')).toHaveTextContent('The World’s Game');
+  });
+
+  it('assigns a knowledge point to an exact Reading scope', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const scope = screen.getByRole('combobox', { name: '阅读范围 世界运动' });
+    expect(scope).toHaveValue('reading_a');
+    await user.selectOptions(scope, 'reading_b');
+    await user.click(screen.getByRole('button', { name: '保存结构' }));
+
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls.at(-1)?.[0].units[0].knowledge_points[0].scope_slot).toBe(
+      'reading_b',
+    );
   });
 
   it('shows a processing timeline while a structure job is active', () => {

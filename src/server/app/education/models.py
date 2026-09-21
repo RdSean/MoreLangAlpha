@@ -335,6 +335,7 @@ class StructureKnowledgePointWrite(BaseModel):
     slug: str = Field(min_length=1, max_length=255)
     title: str = Field(min_length=1, max_length=255)
     summary: str = Field(default="", max_length=30_000)
+    scope_slot: Literal["reading_a", "reading_b"] | None = None
     source_refs: list[StructureSourceRefResponse] = Field(
         default_factory=list, max_length=32
     )
