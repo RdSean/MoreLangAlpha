@@ -66,21 +66,26 @@ _HEARTBEAT_INTERVAL_SECONDS = 15.0
 def managed_structure_prompt(
     job_id: str, profile: Mapping[str, Any] | None = None
 ) -> str:
-    """Describe a non-interactive structure-only managed run."""
+    """Describe a non-interactive reading-scope analysis run."""
     root = f"/managed/textbook-job/{UUID(job_id)}"
     return (
         "这是服务托管的教材结构分析任务，不是与用户的对话或课程生成任务。"
         f"任务编号为 {job_id}。冻结输入位于 {root}/inputs/manifest.json 与 "
         f"{root}/inputs/sources/；被 Markdown 引用的图片位于 "
-        f"{root}/inputs/assets/。解析器不保证标准 Unit/TOC 边界。"
+        f"{root}/inputs/assets/。这份 Markdown 已经由调用方从原始 PDF 高保真解析完成，"
+        "不需要再做任何 PDF/EPUB 提取，直接以它为唯一事实来源。"
         f"先读取 {root}/.agents/skills/book-to-skill/SKILL.md，再按需读取 "
-        f"{root}/.agents/skills/book-to-skill/reference/managed-textbook-contract.md 中的结构模式。"
-        "识别教学 Unit、前言/目录/附录等非教学单元，并为每个 Unit 和知识点尽量写出来源 quote。"
-        "不要计算 position、slug、行号、字符偏移、PDF 页码或坐标；这些由服务端生成。"
-        "非教学单元可以没有知识点；教学单元在真实内容不足时也可以暂时为空。"
-        "不得为了满足数量、格式或进度而编造知识点。"
+        f"{root}/.agents/skills/book-to-skill/reference/langalpha-managed.md，"
+        "按其中的 managed analyze pass 契约执行。"
+        "识别教学 Unit，以及每个 Unit 内部的 Reading A / Reading B，"
+        "readings[].slot 只能取 reading_a 或 reading_b。"
+        "并为每个 Unit 和每个 Reading 给出**行号区间**（1 起始，line_start 包含、line_end 不包含）。"
+        "行号必须来自实际文件，不得估算；Reading 区间必须落在所属 Unit 区间内，且彼此不重叠。"
+        "前言/目录/附录等非教学单元可以没有 Reading；教学单元在真实内容不足时也可以暂时为空。"
+        "不得为了满足数量、格式或进度而编造 Reading 或知识点。"
+        "不要计算 position、slug、字符偏移、PDF 页码或坐标；这些由服务端根据行号区间推导。"
         f"只写 {root}/outputs/structure.json，输出格式必须是 "
-        "langalpha-managed-textbook-structure/v1。不要生成课程、练习或教学包。"
+        "langalpha-managed-textbook-structure/v2。不要生成课程、练习或教学包。"
         "不要访问网络、MCP、Vault、普通工作区或发布任何资产。"
         + (
             "\n\n" + processing_profile_prompt(profile)

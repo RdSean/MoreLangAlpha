@@ -91,9 +91,22 @@ def test_managed_structure_prompt_uses_one_output_and_forbids_forced_points() ->
 
     assert "outputs/structure.json" in prompt
     assert "book-to-skill/SKILL.md" in prompt
+    assert "reference/langalpha-managed.md" in prompt
     assert "非教学" in prompt
     assert "不得为了满足数量" in prompt
-    assert "不要生成课程、练习或教学包" in prompt
+
+
+def test_managed_structure_prompt_requests_reading_level_line_ranges() -> None:
+    prompt = education_structure_jobs.managed_structure_prompt(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+
+    assert "langalpha-managed-textbook-structure/v2" in prompt
+    assert "reading_a" in prompt
+    assert "reading_b" in prompt
+    assert "line_start" in prompt
+    assert "line_end" in prompt
+    assert "Reading" in prompt
 
 
 @pytest.mark.asyncio
