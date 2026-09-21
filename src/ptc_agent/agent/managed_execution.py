@@ -27,7 +27,7 @@ def education_teaching_policy(job_id: str) -> ManagedExecutionPolicy:
     """Return the fixed policy for one staged family-textbook job."""
     normalized_job_id = str(UUID(job_id))
     return ManagedExecutionPolicy(
-        allowed_skill_names=frozenset({"book-to-skill", "the-knowledge-guy"}),
+        allowed_skill_names=frozenset({"book-to-skill"}),
         filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
         allow_subagents=True,
     )

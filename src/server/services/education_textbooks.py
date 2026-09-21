@@ -535,7 +535,7 @@ async def build_local_pdf_package(job: dict[str, Any]) -> dict[str, Any]:
             position += 1
     return {
         "extractor": {"name": "local_pypdf", "version": "1"},
-        "knowledge_foundations": ["book-to-skill", "the-knowledge-guy"],
+        "knowledge_foundations": ["book-to-skill"],
         "chapters": chapters,
     }
 

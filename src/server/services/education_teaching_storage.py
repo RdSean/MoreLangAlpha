@@ -61,8 +61,8 @@ class ManagedTeachingSandbox(Protocol):
     async def adownload_file_bytes(self, path: str) -> bytes | None: ...
 
 
-_MANAGED_SKILL_NAMES = ("book-to-skill", "the-knowledge-guy")
-_STATIC_SKILL_SUFFIXES = frozenset({".css", ".html", ".json", ".md"})
+_MANAGED_SKILL_NAMES = ("book-to-skill",)
+_STATIC_SKILL_SUFFIXES = frozenset({".css", ".html", ".json", ".md", ".py", ".toml"})
 
 
 async def _upload_staged_files(

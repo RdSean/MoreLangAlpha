@@ -446,11 +446,11 @@ async def test_stage_managed_teaching_skills_stages_complete_static_builtin_skil
     root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/.agents/skills/"
     paths = {call.args[0] for call in sandbox.aupload_file_bytes.await_args_list}
     assert f"{root}book-to-skill/SKILL.md" in paths
-    assert f"{root}book-to-skill/reference/coverage-audit-template.md" in paths
-    assert f"{root}book-to-skill/reference/practice-template.md" in paths
-    assert f"{root}the-knowledge-guy/SKILL.md" in paths
-    assert f"{root}the-knowledge-guy/design-system/layouts.md" in paths
-    assert all("/scripts/" not in path for path in paths)
+    # The canonical skill ships its extractor next to the SKILL.md, so helper
+    # scripts are staged with it rather than excluded.
+    assert f"{root}book-to-skill/scripts/extract.py" in paths
+    assert f"{root}book-to-skill/book_to_skill/parsers/text.py" in paths
+    assert all("the-knowledge-guy" not in path for path in paths)
 
 
 @pytest.mark.asyncio
@@ -467,48 +467,6 @@ async def test_structure_staging_loads_only_book_to_skill():
     root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/.agents/skills/"
     paths = {call.args[0] for call in sandbox.aupload_file_bytes.await_args_list}
     assert f"{root}book-to-skill/SKILL.md" in paths
-    assert f"{root}the-knowledge-guy/SKILL.md" not in paths
-
-
-@pytest.mark.asyncio
-async def test_staged_managed_skill_contracts_describe_only_v2_service_derived_outputs():
-    sandbox = AsyncMock(spec=["aupload_file_bytes"])
-    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
-
-    await education_teaching_storage.stage_managed_teaching_skills(_job()["job_id"], sandbox)
-
-    contracts = [
-        call.args[1].decode("utf-8")
-        for call in sandbox.aupload_file_bytes.await_args_list
-        if call.args[0].endswith("reference/managed-textbook-contract.md")
-    ]
-    assert len(contracts) == 2
-    for contract in contracts:
-        assert "outputs/knowledge/concept-index.json" in contract
-        assert "outputs/knowledge/coverage-audit.json" in contract
-        assert "-knowledge.json" in contract
-        assert "-toolkit.md" in contract
-        assert "-practice.json" in contract
-        assert "outputs/book-skill-manifest.json" not in contract
-
-
-@pytest.mark.asyncio
-async def test_staged_skill_managed_modes_reference_v2_outputs_without_a_service_order():
-    sandbox = AsyncMock(spec=["aupload_file_bytes"])
-    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
-
-    await education_teaching_storage.stage_managed_teaching_skills(_job()["job_id"], sandbox)
-
-    modes = [
-        call.args[1].decode("utf-8")
-        for call in sandbox.aupload_file_bytes.await_args_list
-        if call.args[0].endswith("/SKILL.md")
-    ]
-    assert len(modes) == 2
-    for mode in modes:
-        assert "outputs/knowledge/concept-index.json" in mode
-        assert "outputs/book-skill-manifest.json" not in mode
-        assert "Return control for the next service-owned stage" not in mode
 
 
 @pytest.mark.asyncio

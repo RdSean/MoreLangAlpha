@@ -8,16 +8,14 @@ from unittest.mock import AsyncMock
 import pytest
 
 
-def test_managed_textbook_policy_allows_only_staged_files_and_two_builtin_skills():
+def test_managed_textbook_policy_allows_only_staged_files_and_one_builtin_skill():
     assert find_spec("ptc_agent.agent.managed_execution") is not None
     education_teaching_policy = import_module(
         "ptc_agent.agent.managed_execution"
     ).education_teaching_policy
     policy = education_teaching_policy("8a77d086-0b23-4a1e-89d0-f163fa23d5d1")
 
-    assert policy.allowed_skill_names == frozenset(
-        {"book-to-skill", "the-knowledge-guy"}
-    )
+    assert policy.allowed_skill_names == frozenset({"book-to-skill"})
     assert policy.filesystem_root == "/managed/textbook-job/8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
     assert policy.enable_mcp is False
     assert policy.enable_web is False

@@ -24,6 +24,4 @@ async def test_native_book_learning_skills_are_listed_for_ptc_but_not_flash():
     flash_names = {skill.name for skill in flash["skills"]}
 
     assert "book-to-skill" in ptc_commands
-    assert "the-knowledge-guy" in ptc_commands
     assert "book-to-skill" not in flash_names
-    assert "the-knowledge-guy" not in flash_names

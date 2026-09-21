@@ -1,1116 +1,864 @@
 ---
 name: book-to-skill
-description: >-
-  Converts a technical or non-fiction book (PDF or EPUB) into a structured,
-  two-tier Claude Code skill — extracting the author's named frameworks,
-  techniques, anti-patterns, figures, and concept relationships into a
-  knowledge base that loads cheaply and deepens on demand. Handles embedded
-  images and scanned pages via native image understanding. Use this whenever
-  the user wants to turn a book into a skill, study a book through Claude,
-  apply an author's frameworks while working, or build a reusable knowledge
-  base from a PDF or EPUB — even if they don't say the word "skill".
-  Optional flags make it course-ready: --complete (verified full-coverage
-  extraction, every element audited), --practice (per-chapter quizzes +
-  in-browser runnable code labs + open tasks), or --course (both); practice is
-  what /the-knowledge-guy renders into an interactive learn-by-doing course.
-when_to_use: >-
-  Trigger phrases — "turn this book into a skill", "create a skill from this
-  PDF", "create a skill from this EPUB", "convert PDF to skill", "convert EPUB
-  to skill", "I want to study X book", "add this book to my skills", "make a
-  skill out of this book", "analyze this book", "extract frameworks from this
-  book", "build a knowledge base from this book". Accepts a path to a PDF or
-  EPUB and an optional skill-name slug.
-disable-model-invocation: false
-context: fork
-agent: general-purpose
-allowed-tools: >-
-  Bash(uv *) Bash(bash *) Bash(mkdir *) Bash(cp *) Bash(mv *)
-  Bash(rm *) Bash(find *) Bash(wc *) Bash(echo *) Bash(cat *) Bash(ls *)
-  Bash(test *) Bash(file *) Bash(date *) Read Write Glob Grep Task
-argument-hint: <path-to-pdf-or-epub> [skill-name-slug] [--complete] [--practice] [--course]
-arguments: [book_path, skill_name]
-effort: high
+description: "Converts books and documents (PDF, EPUB, DOCX, HTML, Markdown, plain text, RTF, MOBI/AZW with Calibre) into structured agent skills, extracting frameworks, mental models, principles, techniques, and anti-patterns. Use when the user wants to study a document through GitHub Copilot CLI, Amp, Claude Code, Hermes Agent, or OpenClaw, apply an author's frameworks while working, or build a reusable knowledge base from a file. 当用户说「把这本书/这份 PDF/文档转成技能」「从书里提取框架和心智模型」「book-to-skill」时使用。"
+version: 1.0.0
+agent_created: false
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
+source: https://github.com/virgiliojr94/book-to-skill
 ---
+
+> 安装位置（WorkBuddy）：`~/.workbuddy/skills/book-to-skill`，即 `/Users/seanlee/.workbuddy/skills/book-to-skill`。
+> 助手脚本在同目录的 `scripts/extract.py`，辅助工具在 `tools/`；下文的技能根目录候选列表已包含本目录。
+
+<!--
+Cross-agent notes (informational; ignored by host agents):
+  - Compatible skill roots: GitHub Copilot CLI (~/.copilot/skills, ~/.agents/skills,
+    .github/skills, .claude/skills, .agents/skills), Amp (.agents/skills,
+    ~/.config/agents/skills, ~/.config/amp/skills), Claude Code (~/.claude/skills),
+    Hermes Agent ($HERMES_HOME/skills, .hermes/skills, .agents/skills),
+    OpenClaw (${OPENCLAW_STATE_DIR:-~/.openclaw}/skills, .agents/skills, skills/;
+    ~/.agents/skills only with the default state).
+  - `allowed-tools` is intentionally omitted to stay agent-neutral: Copilot CLI uses
+    `shell`/MCP-server names, Claude uses `Bash`/`Read`/`Write`/`Glob`/`Grep`, Amp
+    adds `shell_command`. The skill needs shell (to run extract.py) and file
+    read/write — each host will prompt for those on first use.
+  - Argument hint: <path-to-document-folder-or-glob>... [skill-name-slug]
+-->
 
 # Book-to-Skill Converter
 
-## Managed textbook structure mode
-
-When the invocation includes `--managed-textbook-structure <job>`, run only
-this non-interactive structure stage before every normal conversion step.
-
-1. Treat `<job>` as a UUID and read only
-   `/managed/textbook-job/<job>/inputs/manifest.json`,
-   `/managed/textbook-job/<job>/inputs/sources/`, staged image assets and the
-   complete static `book-to-skill` skill directory. Do not read a binary source,
-   object store, home directory or normal workspace.
-2. Read
-   `/managed/textbook-job/<job>/.agents/skills/book-to-skill/reference/managed-textbook-contract.md`
-   and follow its `Managed textbook structure mode` section.
-3. Produce exactly one candidate:
-   `/managed/textbook-job/<job>/outputs/structure.json`.
-4. Classify teaching Units separately from front matter, references and
-   appendices. A non-teaching Unit must not invent knowledge points. A teaching
-   Unit may also have an empty knowledge-point list when the frozen content does
-   not yet support a teachable point.
-5. Preserve source-grounded titles, summaries and short quotes for Units and
-   knowledge points. Do not calculate position, slug, line numbers, character
-   offsets, PDF pages or bounding boxes; the service derives those values.
-   Never emit lessons, practice assets, teaching packages, HTML artifacts or
-   public files from this mode.
-
-## Managed knowledge-point lesson mode
-
-When the invocation includes `--managed-textbook-lesson <job>`, run only this
-single knowledge-point authoring stage.
-
-1. Read `/managed/textbook-job/<job>/inputs/manifest.json` and
-   `/managed/textbook-job/<job>/inputs/lesson-context.md`.
-2. Read `reference/managed-textbook-contract.md` and follow its
-   `Managed knowledge-point lesson mode` section.
-3. Produce exactly one primary candidate:
-   `/managed/textbook-job/<job>/outputs/lesson.md`.
-4. When `auto_grading` is true, also produce
-   `/managed/textbook-job/<job>/outputs/practice.json`.
-5. Write a static Mentrix-style knowledge-point page. Do not include follow-up
-   chat, personal notes, progress data or personalized summaries.
-
-## Managed chapter asset mode
-
-When the invocation includes `--managed-textbook-assets <job>`, generate only
-reusable chapter-level learning assets.
-
-1. Read `/managed/textbook-job/<job>/inputs/manifest.json`, the frozen
-   `inputs/sources/`, and `reference/managed-textbook-contract.md`.
-2. Produce `outputs/chapters_manifest.json` using
-   `langalpha-managed-book-assets/v1`.
-3. Write chapter Markdown under `outputs/chapters/*.md`.
-4. Optionally write `glossary.md`, `patterns.md`, `cheatsheet.md`, and
-   `nutshell.md`.
-5. Do not produce structure, lesson, practice or HTML outputs in this mode.
-
-## Managed textbook mode
-
-When the invocation includes `--managed-textbook <job>`, run this mode before
-every normal conversion step. It is a service-owned, non-interactive stage;
-the regular source-ingest, cost confirmation and generated workspace skill
-flows do not apply.
-
-1. Treat `<job>` as a UUID and use only
-   `/managed/textbook-job/<job>/inputs/manifest.json` plus each staged complete source bundle
-   under `/managed/textbook-job/<job>/inputs/sources/`.
-   Markdown image references may point to staged assets under
-   `/managed/textbook-job/<job>/inputs/assets/`.
-   Historical jobs may instead use
-   `/managed/textbook-job/<job>/inputs/chapters/`. Do not read a binary source,
-   object store, home directory, normal workspace file or any path outside
-   `/managed/textbook-job/<job>/`.
-2. Do not solicit input or confirmation, do not launch a user-directed
-   conversion, and do not write a generated `.agents/skills/` directory,
-   memory or an HTML presentation file.
-3. Read the staged managed contract at
-   `/managed/textbook-job/<job>/.agents/skills/book-to-skill/reference/managed-textbook-contract.md`,
-   then derive source-backed knowledge, concept links, coverage evidence and
-   practice as the current frozen task needs. Coordinate with the staged
-   `the-knowledge-guy` skill when Chinese teaching material needs those assets;
-   the PTC root chooses the ordering and may revisit a source for coverage.
-   The parser does not guarantee standard Unit/TOC boundaries; produce the
-   final learning structure in whitelisted outputs.
-4. Write only the v2 candidate paths named by that contract:
-   `/managed/textbook-job/<job>/outputs/knowledge/concept-index.json`,
-   `/managed/textbook-job/<job>/outputs/knowledge/coverage-audit.json`,
-   `/managed/textbook-job/<job>/outputs/chapters/<position>-<slug>-knowledge.json`,
-   `/managed/textbook-job/<job>/outputs/chapters/<position>-<slug>-toolkit.md`,
-   `/managed/textbook-job/<job>/outputs/chapters/<position>-<slug>-practice.json`,
-   and `/managed/textbook-job/<job>/outputs/teaching-package.json`. Preserve
-   every frozen chapter ID and hash exactly. Never write a storage key, URL,
-   credential or untrusted output path.
-5. After actual work units, emit concise stdout `EDUCATION_PROGRESS ` JSON with
-   an allowed phase, optional frozen `content_chapter_id`, and optional asset
-   kind. Do not emit model reasoning, paths, self-reported totals or errors.
+Transform written knowledge into actionable agent skills by extracting structure — not producing summaries.
 
 ## Philosophy
 
-> **Empty-args guard (read first).** This guard fires **only** when the
-> user invoked `/book-to-skill` with no positional argument at all
-> (i.e. `$book_path` is the empty string or unset). In that one case,
-> reply only with:
->
-> > book-to-skill needs a PDF or EPUB path.
-> > Usage: `/book-to-skill /path/to/book.pdf [skill-name]`
->
-> and end the turn — do not invoke any other skill, do not resume any
-> prior walk, do not load `the-knowledge-guy`.
->
-> **If `$book_path` is non-empty, do NOT trigger this guard.** Whether
-> the path is valid (exists, is a PDF/EPUB, etc.) is checked by Step 0
-> below using `test -f` and `file`. Never decide validity from the path
-> string alone — always run the actual filesystem check first.
+Books contain crystallized expertise: frameworks, principles, and techniques that took years to develop. This skill extracts that knowledge into a format GitHub Copilot CLI, Amp, Claude Code, Hermes Agent, OpenClaw, or another compatible agent can leverage repeatedly.
 
-Turn a book into a Claude Code skill that is **expert by default and deep on
-demand**. The result is not a book report — it is a toolkit of the author's
-crystallised frameworks, plus a concept map of how those frameworks connect.
+**Extract structure, not summaries.** A skill isn't a book report. It's a toolkit of:
+- Named frameworks (mental models with clear application)
+- Actionable principles (rules that guide decisions)
+- Techniques (step-by-step methods)
+- Anti-patterns (what to avoid and why)
+- Voice calibration (how the author thinks and communicates)
 
-## Philosophy
+**Preserve the author's precision.** Frameworks often have specific names for reasons. "The 5 Whys" isn't interchangeable with "ask why multiple times." Capture the exact formulation.
 
-- **Extract structure, not summaries.** Capture named frameworks, exact
-  techniques, anti-patterns, and figures — not chapter recaps.
-- **Plumbing in Python, intelligence in Claude.** `scripts/extract.py` does
-  only mechanical extraction. Every act of *understanding* — what a framework
-  is, what a diagram means, how concepts relate — is Claude's work.
-- **Two tiers.** The generated `SKILL.md` is the always-loaded expert (a
-  concept map + topic index). The `chapters/` files are the depth, paged in
-  only when needed. This is why a 600-page book becomes a skill that costs a
-  few thousand tokens to consult, not 400K.
-- **Raw stays with the skill.** The mechanical extraction (full text,
-  per-chapter raw text, images, metadata, spine) is preserved inside the
-  generated skill at `<slug>/raw/`. The chapter `.md` files are summaries;
-  the raw lets the skill (and the user) re-read original passages, quote
-  exactly, or re-extract a chapter without re-running Stage 0.
+**Layer depth appropriately.** Simple books → simple skills. Complex books with 10+ frameworks → skills with reference files and on-demand chapters.
 
-## Architecture — a map-reduce pipeline
+---
 
-```
-Stage 0   EXTRACT   extract.py → text + images + per-chapter slices + offsets
-Pass 0    SPINE     fast read of ToC + intros → the book's thesis & framework list
-Stage 1   MAP       each chapter → one chapter file   (parallel subagents)
-Step 7.5  AUDIT     each chapter → coverage verdict; re-run any gaps  (complete mode)
-Stage 2   REDUCE    all chapter files → concept map + topic index → SKILL.md
-Stage 2.5 NUTSHELL  each chapter file → one micro-summary block → nutshell.md
-Stage 3   PRACTICE  each chapter → one practice set (quizzes/labs/tasks)  (opt-in)
-```
+## Modes of Operation
 
-Stage 1 maps over chapters; Stage 2 reduces over chapter *extractions*. Stage 2
-never sees the full text — only the small chapter files — so book length never
-breaks the context budget. The reduce step **consolidates and connects**; it
-does not summarise summaries.
+Four paths available. Route based on what the user asks:
 
-## Modes
+### 1. Full Conversion (Default)
+**Trigger:** User provides one or more document/directory/glob paths without special instructions
+**Action:** Run all steps below (Steps 0–9)
+**Output:** Complete skill with SKILL.md, chapters/, glossary, patterns, cheatsheet
 
-Route by what the user asks:
+### 2. Analyze Only
+**Trigger:** User says "analyze", "just extract", or "I want to review before generating"
+**Action:** Run Steps 0–3, then produce a structured extraction report (frameworks, principles, techniques found). Stop — do NOT generate skill files.
+**Output:** Analysis report for user review
 
-1. **Full conversion** (default) — a PDF/EPUB path with no special request.
-   Run all steps.
-2. **Analyze only** — "analyze", "just extract", "let me review first". Run
-   Steps 0–5, produce the extraction report, stop. Do not generate skill files.
-3. **Resume** — a prior run was interrupted, or the user says "resume". See
-   *Resuming* at the end; re-run is safe and skips completed work.
+### 3. Generate from Prior Analysis
+**Trigger:** User has existing analysis notes or previously ran analyze-only
+**Action:** Skip Steps 0–3, use the provided analysis as input, run Steps 4–9
+**Output:** Skill files from the provided analysis
+
+### 4. Update / Fold-in (Existing Skill)
+**Trigger:** User provides one or more new source paths and indicates they want to update an existing skill (either by pointing to the existing skill folder, providing a skill slug that already exists in `SKILLS_HOME`, or explicitly requesting an update).
+**Action:** Run Step 0 (out-of-scope check), Step 1 (validate inputs), Step 1.5 (identify book type), and Step 2 (extract new files). Then skip to Step 5 (identify/detect existing skill path) and run the **Update / Fold-in Workflow** to merge the new content into the existing skill files.
+**Output:** Updated existing skill with new/revised chapter summaries and merged indexes/glossaries.
+
+---
+
+## Skill Locations
+
+This converter can run from multiple skill systems. When looking for this converter's helper script or writing the generated book skill, prefer these locations in order:
+
+0. WorkBuddy personal skills: `~/.workbuddy/skills/` (this install); WorkBuddy project skills: `<project>/.workbuddy/skills/`
+1. GitHub Copilot CLI personal skills: `~/.copilot/skills/`
+2. Cross-agent personal skills (Copilot, Amp, Codex; OpenClaw with its default state): `~/.agents/skills/`
+3. Claude Code personal skills: `~/.claude/skills/`
+4. Project-local Copilot skills: `.github/skills/`
+5. Project-local Claude skills: `.claude/skills/`
+6. Project-local Amp / Copilot / OpenClaw skills: `.agents/skills/`
+7. Amp global skills: `~/.config/agents/skills/`
+8. Amp legacy global skills: `~/.config/amp/skills/`
+9. Hermes Agent personal skills: `$HERMES_HOME/skills/` (defaults to `~/.hermes/skills/`)
+10. Hermes Agent project skills: `.hermes/skills/` or `.agents/skills/`
+11. OpenClaw personal skills: `${OPENCLAW_STATE_DIR:-~/.openclaw}/skills/` (active state; `~/.agents/skills/` is shared only with the default state)
+12. OpenClaw project skills: `.agents/skills/` or `skills/`
+
+For **generated** book skills, prefer the user-level cross-agent root `~/.agents/skills/` — one physical copy serves the cross-agent hosts and OpenClaw when it uses its default state. Copilot CLI and Amp discover it natively; Claude Code needs a symlink from `~/.claude/skills/<skill_name>` (created in Step 10, see Step 5 for the rules). Pick a host-private or project-local root only when the user explicitly asks for one. `BOOK_TO_SKILL_SCOPE=project` or `personal` can make that choice explicit for automation; do not ask a mandatory scope question merely because both scopes are available.
 
 ---
 
 ## Step 0 — Out-of-scope check
 
-If the argument is not a path to a PDF or EPUB, stop:
-> "book-to-skill needs a PDF or EPUB path. Usage:
-> `/book-to-skill /path/to/book.pdf [skill-name]`"
+If no arguments are provided, stop and respond:
+> "book-to-skill requires a supported document path, folder, or glob pattern. Usage: `book-to-skill <path-to-document-folder-or-glob>... [skill-name-slug]`"
 
-## Step 0.5 — Resolve the book-to-skill install path
+Throughout the workflow:
+- Identify the input paths and the optional skill slug.
+- If the last argument is not a file, folder, or glob that exists or matches any files, and it looks like a skill slug (e.g. lowercase hyphens, alphanumeric), treat it as `SKILL_NAME`.
+- Treat all other arguments as the list of `INPUT_PATHS`.
+- If any input path is an existing skill directory (contains `SKILL.md` and a `chapters/` sub-folder), or if `SKILL_NAME` matches an existing skill slug in `SKILLS_HOME`, flag this run as an **Update/Fold-in** operation (Mode 4).
 
-PTC stages project skills in the current workspace's `.agents/skills/`.
-The skill can also live in the user's `~/.ptc-agent/skills/` or a
-Claude-compatible fallback location. Resolve which once and reuse:
+---
+
+## Step 1 — Validate input
+
+Verify that there is at least one supported file, directory, or glob pattern among the `INPUT_PATHS`.
+For directories and globs, expand them to find matching supported files (`.pdf`, `.epub`, `.docx`, `.txt`, `.md`, `.markdown`, `.rst`, `.adoc`, `.html`, `.htm`, `.rtf`, `.mobi`, `.azw`, `.azw3`).
+
+If no supported files are found, stop with a clear error message.
+
+---
+
+## Step 1.5 — Identify content type
+
+Before extracting, ask the user:
+
+> "What kind of content do these sources have? This helps me choose the best extraction method.
+>
+> 1. **Technical** — has code blocks, tables, formulas, diagrams (e.g. programming books, academic papers, architecture guides)
+> 2. **Text-heavy** — mostly prose, few or no tables/code (e.g. management, productivity, narrative non-fiction)
+> 3. **Not sure** — I'll use the fast method and warn you if quality seems limited"
+
+Store the answer as `BOOK_TYPE`:
+- Option 1 → `BOOK_TYPE=technical`
+- Option 2 → `BOOK_TYPE=text`
+- Option 3 → `BOOK_TYPE=text`
+
+**If `BOOK_TYPE=technical`**, inform the user before proceeding:
+> "📐 Technical mode selected — using Docling for structure-aware extraction (tables, code blocks, formulas preserved as markdown). This takes ~1.5s per page, so expect a few minutes for longer sources. Starting now…"
+
+**If `BOOK_TYPE=text`**, inform:
+> "📄 Text mode selected — using the fastest suitable extractor for each file type. Plain text/Markdown/HTML are usually ready in seconds; PDFs use pdftotext when available."
+
+---
+
+## Step 2 — Extract text from the source documents
+
+Run the extraction script, passing the input paths:
 
 ```bash
-BTS_DIR=""
-for cand in "$(pwd)/.agents/skills/book-to-skill" "$HOME/.ptc-agent/skills/book-to-skill" "$(pwd)/.claude/skills/book-to-skill" "$HOME/.claude/skills/book-to-skill"; do
-  if [ -f "$cand/scripts/extract.py" ]; then BTS_DIR="$cand"; break; fi
+SCRIPT_PATH=""
+HERMES_HOME_RESOLVED="${HERMES_HOME:-$HOME/.hermes}"
+OPENCLAW_STATE_DIR_RESOLVED="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+HERMES_PROJECT_TRUSTED=false
+if [ -n "$PROJECT_ROOT" ] && [ "${HERMES_AGENT:-}" = true ] && \
+  command -v hermes >/dev/null 2>&1 && \
+  command -v python3 >/dev/null 2>&1 && \
+  hermes config get skills.trusted_project_dirs --json 2>/dev/null | PROJECT_ROOT="$PROJECT_ROOT" python3 -c 'import json, os, pathlib, sys; root=pathlib.Path(os.environ["PROJECT_ROOT"]).resolve(); sys.exit(not any(pathlib.Path(p).expanduser().resolve() == root for p in json.load(sys.stdin)))' 2>/dev/null
+then
+  HERMES_PROJECT_TRUSTED=true
+fi
+
+CANDIDATES=(
+  "$HOME/.workbuddy/skills/book-to-skill/scripts/extract.py"
+  "$HOME/.copilot/skills/book-to-skill/scripts/extract.py"
+  "$HOME/.agents/skills/book-to-skill/scripts/extract.py"
+  "$HOME/.claude/skills/book-to-skill/scripts/extract.py"
+  "${OPENCLAW_STATE_DIR_RESOLVED}/skills/book-to-skill/scripts/extract.py"
+  "${OPENCLAW_STATE_DIR_RESOLVED}/skills"/*/book-to-skill/scripts/extract.py
+  "${OPENCLAW_STATE_DIR_RESOLVED}/skills"/*/*/book-to-skill/scripts/extract.py
+  "${OPENCLAW_STATE_DIR_RESOLVED}/skills"/*/*/*/book-to-skill/scripts/extract.py
+  "${OPENCLAW_STATE_DIR_RESOLVED}/skills"/*/*/*/*/book-to-skill/scripts/extract.py
+  "${OPENCLAW_STATE_DIR_RESOLVED}/skills"/*/*/*/*/*/book-to-skill/scripts/extract.py
+  "${OPENCLAW_STATE_DIR_RESOLVED}/skills"/*/*/*/*/*/*/book-to-skill/scripts/extract.py
+  "$HERMES_HOME_RESOLVED/skills/book-to-skill/scripts/extract.py"
+  "$HERMES_HOME_RESOLVED"/skills/*/book-to-skill/scripts/extract.py
+)
+if [ "${HERMES_AGENT:-}" != true ]; then
+  CANDIDATES+=(
+    ".github/skills/book-to-skill/scripts/extract.py"
+    ".claude/skills/book-to-skill/scripts/extract.py"
+    ".agents/skills/book-to-skill/scripts/extract.py"
+    "skills/book-to-skill/scripts/extract.py"
+    "skills"/*/book-to-skill/scripts/extract.py
+    "skills"/*/*/book-to-skill/scripts/extract.py
+    "skills"/*/*/*/book-to-skill/scripts/extract.py
+    "skills"/*/*/*/*/book-to-skill/scripts/extract.py
+    "skills"/*/*/*/*/*/book-to-skill/scripts/extract.py
+    "skills"/*/*/*/*/*/*/book-to-skill/scripts/extract.py
+  )
+  if [ -n "$PROJECT_ROOT" ]; then
+    CANDIDATES+=(
+      "$PROJECT_ROOT/skills/book-to-skill/scripts/extract.py"
+      "$PROJECT_ROOT/skills"/*/book-to-skill/scripts/extract.py
+      "$PROJECT_ROOT/skills"/*/*/book-to-skill/scripts/extract.py
+      "$PROJECT_ROOT/skills"/*/*/*/book-to-skill/scripts/extract.py
+      "$PROJECT_ROOT/skills"/*/*/*/*/book-to-skill/scripts/extract.py
+      "$PROJECT_ROOT/skills"/*/*/*/*/*/book-to-skill/scripts/extract.py
+      "$PROJECT_ROOT/skills"/*/*/*/*/*/*/book-to-skill/scripts/extract.py
+    )
+  fi
+fi
+CANDIDATES+=(
+  "$HOME/.config/agents/skills/book-to-skill/scripts/extract.py"
+  "$HOME/.config/amp/skills/book-to-skill/scripts/extract.py"
+)
+if [ "$HERMES_PROJECT_TRUSTED" = true ]; then
+  CANDIDATES=(
+    "$PROJECT_ROOT/.hermes/skills/book-to-skill/scripts/extract.py"
+    "$PROJECT_ROOT/.hermes/skills"/*/book-to-skill/scripts/extract.py
+    "$PROJECT_ROOT/.agents/skills/book-to-skill/scripts/extract.py"
+    "$PROJECT_ROOT/.agents/skills"/*/book-to-skill/scripts/extract.py
+    "${CANDIDATES[@]}"
+  )
+fi
+for candidate in "${CANDIDATES[@]}"
+do
+  if [ -f "$candidate" ]; then
+    SCRIPT_PATH="$candidate"
+    break
+  fi
 done
-test -n "$BTS_DIR" || { echo "book-to-skill: install not found"; exit 1; }
-```
 
-Every reference below to `${BTS_DIR}` is this resolved path. Do not hard-code
-either location.
-
-## Step 0.6 — Flag shortcuts (optional)
-
-The invocation may carry any of these flags alongside the path/slug. **Strip
-them from the arguments before resolving `skill_name`** — a `--…` token must
-never become the slug — and set the matching toggle. Each flag is exactly
-equivalent to the user saying the corresponding phrase at Step 4:
-
-| Flag | Effect |
-|---|---|
-| `--complete`, `--complete-coverage` | `WITH_COVERAGE=complete` — verified full coverage (every element, audited + gap-filled) |
-| `--practice`, `--with-practice` | `WITH_PRACTICE=yes` — Stage 3 per-chapter quizzes + runnable labs + open tasks |
-| `--course` | **both** of the above — the "I want an interactive `/the-knowledge-guy course`" shortcut |
-| `--regenerate` | overwrite an existing skill's outputs (re-run stages even if files exist) |
-
-When a flag has pre-decided a choice, still show the Step-4 cost estimate (cost
-stays explicit) but **don't re-prompt that option** — only wait for the final
-"proceed?" confirmation. No flags = today's fully-interactive default, unchanged.
-
-## Step 1 — Validate input and dependencies
-
-```bash
-test -f "$0" && file "$0"
-```
-
-Confirm the extension is `.pdf`/`.epub` or the magic bytes are `%PDF`/`PK`.
-Then ensure the extraction libraries are present:
-
-```bash
-bash "${BTS_DIR}/scripts/setup.sh"
-```
-
-`setup.sh` requires [`uv`](https://docs.astral.sh/uv/) — it creates a venv at
-`${BTS_DIR}/.venv` and installs PyMuPDF, ebooklib,
-beautifulsoup4, and pypdf into it via `uv pip install`. PyMuPDF is
-the primary backend (text + images + tables + outline + page rendering in one
-library). If it cannot be installed, the extractor falls back to text-only and
-**images and scanned pages will be skipped** — tell the user if that happens.
-
-This isolated extractor is the current implementation of a replaceable
-contract: book input -> extracted text, images, chapters, and metadata ->
-generated knowledge skill. A future provider may replace the extraction
-implementation only if it preserves that contract and generated skill schema.
-
-## Step 2 — Identify the genre
-
-Read `reference/genre-profiles.md`. Then ask the user:
-
-> "What kind of book is this? It changes how I extract.
->
-> ─ Preserve tables / code / exact wording ─
->  1. **Technical** — programming, engineering, architecture
->  2. **Vuln-hunting / security** — offensive security, exploitation, RE
->  3. **Financial** — investing, valuation, markets, quant
->  4. **Scientific** — academic, research methods, dense reference
->  5. **Legal / regulatory** — statutes, case law, compliance, doctrine
->  6. **Textbook** — pedagogical, sections + exercises
->  7. **Reference / cookbook** — recipe-style, self-contained primitives
->
-> ─ Prose-driven ─
->  8. **Business / leadership** — org-level frameworks, decision rules
->  9. **Psychology** — biases, effects, popular cog-sci (Kahneman, Ariely)
-> 10. **History** — eras, events, causes, dated actors
-> 11. **Productivity** — habits, decision-making, mental models
-> 12. **Biography / memoir** — life arcs, turning-point decisions
-> 13. **Narrative non-fiction** — case-study or argument-driven
-> 14. **Not sure** — I'll treat it as general"
-
-Store the choice as `GENRE`. It selects the profile that governs the chunk
-boundary, the chapter schema, and the reduce emphasis for the rest of the
-run. If the user is unsure between two, consult the **Selector heuristics**
-section at the bottom of `genre-profiles.md` before committing.
-
-## Step 3 — Extract (Stage 0)
-
-Best-effort sweep of stale staging dirs from previous runs (never fail
-the run on this):
-
-```bash
-find /tmp -maxdepth 1 -name 'book_skill_work*' -type d -mtime +1 \
-  -exec rm -rf {} \; 2>/dev/null || true
-```
-
-```bash
-uv run --python "${BTS_DIR}/.venv/bin/python" \
-  "${BTS_DIR}/scripts/extract.py" "$0" \
-  --mode <technical|text> --genre <GENRE> --coverage <standard|complete> \
-  --work-dir /tmp/book_skill_work
-```
-
-Pass `--coverage complete` when the user chose complete-coverage mode (Step 4,
-`WITH_COVERAGE=complete`); otherwise `--coverage standard` (the default). In
-complete mode the extractor floors the image threshold to 110px so real figures
-aren't dropped before the LLM ever sees them.
-
-(Equivalent: `"${BTS_DIR}/.venv/bin/python" "${BTS_DIR}/scripts/extract.py"
-…` — the venv created by `setup.sh` is the single source of truth for the
-extractor's dependencies.)
-
-Use `--mode technical` for genres **1–7** (anything that needs tables,
-code, or exact wording preserved — technical, vuln-hunting, financial,
-scientific, legal, textbook, reference). Use `--mode text` for genres
-**8–13** (prose-driven — business, psychology, history, productivity,
-biography, narrative). For `general` (14), default to `--mode text` unless
-the user overrides.
-
-The work-dir is a staging area; Step 6 moves everything into the generated
-skill at `<slug>/raw/` once the slug is known. This writes to
-`/tmp/book_skill_work/`:
-
-- `full_text.txt` — assembled reading-order text, with `[[IMAGE: ...]]` and
-  `[[PAGE_SCAN: ...]]` placeholders anchored where they occur.
-- `raw_chapters/chNN.txt` — each chapter pre-cut as its own file.
-- `images/` — every kept figure, plus rendered pages of scanned PDFs.
-- `metadata.json` — chapter offset map, image manifest, token estimates,
-  granularity diagnosis, and scan-ratio fields:
-  - `chapters_source` — `"raw_chapters"` initially, becomes `"chapters_split"`
-    when a manual re-split is in effect.
-  - `granularity_warning` — non-null when chapters look over-merged.
-  - `scan_cost_warning` — true when ≥ 10% of pages are image-only.
-  - `is_scanned_document` — true when ≥ 55% are image-only.
-
-Read `metadata.json`. Surface both warnings to the user before continuing:
-- `is_scanned_document: true` → chapter text will come from vision OCR;
-  expect higher cost.
-- `scan_cost_warning: true` (and not fully scanned) → some pages are
-  image-only; vision-OCR cost will be elevated.
-
-### Granularity check — automatic re-split (no manual opt-in)
-
-The pipeline never ships a few merged mega-chapters or a single "Full Text"
-blob. Always run the heading detector and capture its candidate count:
-
-```bash
-"${BTS_DIR}/.venv/bin/python" "${BTS_DIR}/scripts/detect_chapters.py" \
-  /tmp/book_skill_work/full_text.txt --table
-```
-
-Let `A = metadata.json["chapter_count"]` and `B = detector candidate count`.
-**Re-split automatically** (don't wait for the user — just surface the
-before/after counts) when ANY of these holds:
-
-- `metadata.json["granularity_warning"]` is non-null **and** `B ≥ max(5, A+2)`,
-- `A == 1` **or** the sole chapter title is `"Full Text"`,
-- `WITH_COVERAGE=complete` **and** `B ≥ A+2`.
-
-Say e.g. *"Granularity: extractor found A chapters; detector found B —
-auto-re-splitting into the finer set."* Otherwise keep `raw_chapters/` (and say
-so). To re-split:
-
-1. For each candidate `i` with `char_start=S_i` (and next start `S_{i+1}`,
-   or end-of-file), write `/tmp/book_skill_work/chapters_split/chNN.txt`
-   containing `full_text[S_i:S_{i+1}]`.
-2. Overwrite `metadata.json["chapters"]` with the new list of
-   `{index, title, slug, char_start, char_end, est_tokens, book_number,
-   raw_text_path}` entries pointing at `chapters_split/` (run the same
-   `assign_book_numbers` labelling).
-3. Set `metadata.json["chapters_source"] = "chapters_split"` and refresh
-   `chapter_count` / `granularity_warning` (now null).
-
-**Worst case — the detector also returns < 2 candidates** (no outline, no
-headings at all, so the extractor produced a single `"Full Text"` chapter):
-do not proceed merged. Fixed-size tile instead — split `full_text.txt` into
-`ceil(len/40000)` equal slices (~10K tokens each), titled `"Section 1..N"`,
-written to `chapters_split/` exactly as above. (The char ranges still tile the
-whole document with no gaps — `finalize_chapter_ranges`' contract.)
-
-From this point onward, Stage 1 reads `chapters_split/` instead of
-`raw_chapters/`. Step 6 moves both directories into the skill's `raw/`
-so the original auto-extraction is preserved as a record.
-
-## Step 4 — Pre-flight cost estimate
-
-Read pricing from `${BTS_DIR}/reference/pricing.json` and inject it into
-the estimate. If `pricing.as_of` is more than 90 days behind today's
-date, prepend: `⚠ Reference prices are dated <as_of> — verify current
-rates at the source URL before committing.`
-
-From `metadata.json`, present an estimate **before generating anything**:
-
-```
-📖 <title> (<format>) — <page_count> pages, <chapter_count> chapters
-📄 Text ~<estimated_text_tokens/1000>K tokens | Images <image_count> (~<estimated_image_tokens/1000>K vision tokens)
-⚠ <scanned_pages> of <page_count> pages are image-only (~10× vision cost)   ← only if scan_cost_warning
-⚠ Chapter granularity: <granularity_warning>                                 ← only if non-null
-
-💰 Estimated token cost (full conversion):
-   Input  ≈ <estimated_total_tokens × 1.4>   (chapter reads + image reads + prompts)
-   Output ≈ <chapter_count × 1,100 + 9,000>  (chapter files + SKILL.md + supporting files)
-
-   Reference API prices (per MTok, as of <pricing.as_of>):
-     <for each model in pricing.models: label — $<input> in / $<output> out>
-
-📁 Will generate: SKILL.md + <chapter_count> chapter files + glossary + patterns + cheatsheet + nutshell + chapters_manifest.json
-➡  Proceed with full conversion? (or say "analyze only" to preview first)
-
-🎓 Optional — interactive practice (Stage 3): add a per-chapter practice set
-   (auto-checked quizzes + in-browser code labs + open tasks) so the book can
-   be rendered as an interactive `/the-knowledge-guy course`. Best for technical
-   / textbook / vuln-hunting books. Adds ~1 subagent per eligible chapter
-   (≈ +<chapter_count × 1,400> output tokens). Say "with practice" to include it.
-
-🔎 Optional — COMPLETE coverage (verified): by default I extract dense, capped
-   toolkits (~800–1,400 tokens/chapter; signal over completeness). In COMPLETE
-   mode I instead capture EVERY load-bearing element in every chapter (each
-   framework, code example, figure, table, anti-pattern, exercise, definition),
-   with no token cap, then run a per-chapter COVERAGE AUDIT and automatically
-   re-run any chapter with gaps until every chapter passes. Materially more
-   expensive — roughly 2.5–4× standard:
-     Toolkits ≈ <chapter_count × 3,000> output (no cap)
-     Audit    ≈ <chapter_count × 700> output × ~1.6 rounds (reads RAW + toolkit)
-     Gap-fill ≈ re-runs the thinnest ~<round(chapter_count × 0.6)> chapters once
-   Say "complete coverage" for verified-complete extraction; otherwise I use
-   standard mode.
-```
-
-Wait for confirmation. If the user says "analyze only", switch to Mode 2. If
-the user opts in with "with practice" (or passed `--practice`/`--course` per
-Step 0.6, or the genre is technical / textbook /
-vuln-hunting and they accept the suggestion), set `WITH_PRACTICE=yes` and run
-**Step 8.6** after the nutshell. If the user says "complete coverage" (or passed
-`--complete`/`--course` per Step 0.6; phrases:
-"complete coverage", "cover everything", "don't skip anything"), set
-`WITH_COVERAGE=complete` — this passes `--coverage complete` to extract.py
-(Step 3), makes the auto-re-split mandatory, injects the complete-mode mandate in
-Step 7, and runs the **Step 7.5** audit + gap-fill loop with the Step-10 coverage
-gate. `WITH_COVERAGE` is independent of `WITH_PRACTICE` (both can be on). Default
-is `standard` — today's cheap path, unchanged. Otherwise skip Stage 3 — it is
-purely additive and can be run later by re-invoking with `--regenerate` once
-practice support
-is wanted.
-
-## Step 5 — Pass 0: build the spine
-
-A chapter extractor that hasn't seen the whole book cannot tell what is central
-versus incidental. Fix that cheaply first.
-
-Build the spine **mechanically**, not impressionistically — every chapter
-extractor reads it, so weak input here propagates everywhere.
-
-1. Read `full_text.txt` chars `0–8,000` (front matter + ToC region).
-2. For each chapter listed in `metadata.json["chapters"]`, read the first
-   1,000 characters of its raw file (whichever directory
-   `metadata.json["chapters_source"]` points at).
-3. Synthesise the three sections below from those fragments only. Do not
-   pull from the full chapter bodies — that's Stage 1's job.
-
-Write to `/tmp/book_skill_work/spine.md`:
-
-```markdown
-# Spine — <Title> by <Author>
-## Thesis
-<2–3 sentences: what the whole book argues.>
-## Framework Inventory
-- <Framework name> — <one line> (≈ ch<N>)
-## Domain & Vocabulary
-<the subject area and 5–10 distinctive terms the book uses.>
-```
-
-The spine is passed to **every** chapter extractor in Stage 1 so each one
-extracts in light of where the book is going.
-
-**If Mode 2 (analyze only):** produce the extraction report now from the spine
-plus a skim of the chapter files — frameworks, principles, techniques,
-anti-patterns, a suggested skill name, and a detected-chapters table — then
-stop.
-
-## Step 6 — Purpose, skill name, scaffolding
-
-Ask the purpose (weights what the Core section foregrounds):
-> "What should this skill help you do? (1) apply the author's frameworks while
-> working (2) think with the author's mental models (3) reference specific
-> chapters (4) all of the above"
-
-Determine the skill slug: use argument `$1` if given; otherwise propose
-`{author-lastname}-{core-concept}` and `{book-title-hyphenated}` and let the
-user pick.
-
-**Output destination — PTC skill runtime.** The generated skill is written to
-the current workspace's `.agents/skills/<slug>/`, where the PTC skill loader
-can discover it. Resolve once and reuse:
-
-```bash
-SKILLS_ROOT="$(pwd)/.agents/skills"
-SKILL_DIR="${SKILLS_ROOT}/<slug>"
-mkdir -p "${SKILL_DIR}/chapters" "${SKILL_DIR}/raw" || {
-  echo "FATAL: cannot create ${SKILL_DIR} — check permissions on $(pwd)/.agents/skills/" >&2
-  exit 1
-}
-```
-
-`mkdir -p` will also create `$(pwd)/.agents/skills/` if missing. If the hard error fires, stop;
-do not silently fall back to `~/.ptc-agent/skills/`. Confirm `${SKILL_DIR}/`
-does not already exist with content; if it does, append `-2` or ask.
-
-**Legacy-skill check.** If `${SKILL_DIR}/chapters_manifest.json`
-already exists from a prior run, inspect it:
-
-```bash
-sv=$(python3 -c "import json,sys;print(json.load(open('${SKILL_DIR}/chapters_manifest.json')).get('schema_version',1))" 2>/dev/null)
-if [ "$sv" != "2" ]; then
-  echo "⚠  Existing manifest is schema_version=$sv (legacy chapter numbering)."
-  echo "   Run: ${BTS_DIR}/scripts/backfill_book_numbers.py ${SKILL_DIR}"
-  echo "   Or delete the manifest to start fresh, then re-run /book-to-skill."
+if [ -z "$SCRIPT_PATH" ]; then
+  echo "Could not find scripts/extract.py for book-to-skill" >&2
   exit 1
 fi
+
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+fi
+
+"$PYTHON_BIN" "$SCRIPT_PATH" $INPUT_PATHS --mode <BOOK_TYPE> --install-missing ask
 ```
 
-This stops Stage 1 before it would overwrite chapter files with the
-wrong numbering, which would silently corrupt SKILL.md links and
-nutshell citations. The user can resolve by either running
-`backfill_book_numbers.py` (preferred — preserves any existing chapter
-content) or deleting the manifest (preferred only for a full re-extract).
+Before extraction, the script checks optional Python packages needed for the detected format. If a better extractor is missing, it prompts the user with the available fallback. Non-interactive sessions default to fallback unless install mode is explicitly `yes`.
 
-**Move the raw extraction into the skill.** The work-dir from Step 3 is
-staging; the raw extraction is part of the skill from now on. Move it in and
-write `progress.json` inside it:
+**Tip — preflight the environment:** run `"$PYTHON_BIN" "$SCRIPT_PATH" --check` to print a per-format report of which extractors are installed and the exact command to install whatever is missing, without processing any file. Useful when a user reports a setup or quality problem.
+
+This creates a **per-run** work directory — `<tempdir>/book_skill_work-<pid>/` by default, or exactly the path you set in `BOOK_SKILL_WORKDIR` — containing:
+- `full_text.txt` — combined extracted text of all sources with clear visually demarcated boundaries.
+- `metadata.json` — overall combined size, words, pages, token counts, dropped EPUB image counts, the resolved `workdir`, and a detailed list of individual processed `sources`.
+
+The run prints all three paths on completion (`Workdir ->`, `Text ->`, `Meta ->`). **Take the paths from that output (or from `metadata.json`'s own `workdir` field) rather than assuming a fixed location** — the directory name differs per run so that concurrent extractions on one machine cannot overwrite each other's results.
+
+Read that run's `metadata.json` to inspect the results.
+
+**Always confirm the extraction is the document you asked for** before generating anything: check `filename` / `source_file` in `metadata.json`, or the `SOURCE:` header on the first line of `full_text.txt`. If you are waiting on a background run, wait on *its* specific workdir — polling a shared path can surface a different run's output.
+
+---
+
+## Step 2.5 — Pre-flight cost estimate
+
+Read this run's `metadata.json` (the `Meta ->` path from the extraction output) and present the user with an estimate **before doing any generation**:
+
+```
+📖 Sources detected: <total_sources> source(s)
+<list each source filename and format from the sources metadata list>
+<if images_dropped > 5: warn that N source images were not read>
+📄 Combined Pages/Sections: ~<N> | Words: ~<N> | Total tokens: ~<N>K
+
+💰 Estimated token cost (Full Conversion / Update):
+   Input  (reading + prompts): ~<N>K tokens
+   Output (skill files generated/updated):  ~<N>K tokens
+   Total:                           ~<N>K tokens
+
+   Cost: multiply the token counts above by your model's current
+   input/output per-1M-token rates (prices and model names change often —
+   do not hardcode them; quote today's rate and label it as an estimate).
+
+   ⏱  Estimated time: ~<N> minutes
+
+📁 Files to be generated/updated:
+   SKILL.md + chapter files + glossary + patterns + cheatsheet
+
+➡  Proceed with Full Conversion / Update? (or type "analyze only" to preview first)
+```
+
+**How to estimate:**
+- Input tokens ≈ `estimated_tokens` from metadata × 1.3 (prompts overhead per chapter pass)
+- Output tokens ≈ chapters × per-chapter budget + 4,000 (SKILL.md) + 4,500 (glossary + patterns + cheatsheet)
+  - Per-chapter budget midpoint by `BOOK_TYPE` (DEPTH is decided later in Step 4 and can raise it): `text` ≈ 1,000, `technical` ≈ 1,800. If the user has already indicated reference-only vs deep study, use the matching row of the Step 7 matrix.
+- Cost: report the token counts and multiply by the user's current per-1M-token input/output rates. Do NOT hardcode dollar figures — model names and prices change; if you show one, label it an estimate and date it.
+
+Wait for the user to confirm before proceeding. If they say "analyze only", switch to Mode 2.
+
+---
+
+## Step 2.6 — REPL-style access for large books (> 50k tokens)
+
+Inspired by the Recursive Language Model (RLM) paradigm: treat `full_text.txt` as a queryable corpus, not a single read. Loading the whole file into context burns budget you will need later for generation.
+
+For books over ~50k tokens, prefer programmatic probes over `Read(full_text.txt)` without bounds:
 
 ```bash
-mv /tmp/book_skill_work/full_text.txt    "${SKILL_DIR}/raw/"
-mv /tmp/book_skill_work/raw_chapters     "${SKILL_DIR}/raw/"
-mv /tmp/book_skill_work/chapters_split   "${SKILL_DIR}/raw/" 2>/dev/null || true
-mv /tmp/book_skill_work/images           "${SKILL_DIR}/raw/" 2>/dev/null || true
-mv /tmp/book_skill_work/metadata.json    "${SKILL_DIR}/raw/"
-mv /tmp/book_skill_work/spine.md         "${SKILL_DIR}/raw/"
-echo '{"stage1_done": [], "stage2_done": false}' > "${SKILL_DIR}/raw/progress.json"
+# Size check before any Read
+wc -w "$FULL_TEXT_PATH"
+
+# Find chapter offsets without loading the whole file
+grep -n -E "^\s*(Chapter|CHAPTER)\s+[0-9]+" "$FULL_TEXT_PATH" | head -40
+
+# Pull only the chapter you need (lines start..end inclusive)
+sed -n '<start>,<end>p' "$FULL_TEXT_PATH"
+
+# Verify a framework is actually mentioned before claiming it in SKILL.md
+grep -c -i "westrum\|dora" "$FULL_TEXT_PATH"
+
+# Targeted Read with offset/limit avoids dumping the full file
+# Read(file_path=full_text.txt, offset=<line>, limit=<lines>)
 ```
 
-`chapters_split/` only exists if a manual re-split was performed in Step 3.
-When present, it takes precedence in Stage 1.
+Use this approach for Step 3 (structure analysis), Step 7 (per-chapter summaries), and Step 8 (glossary / patterns extraction). On books under 50k tokens, a single `Read` is fine.
 
-From this point onward, **every path that used to point into
-`/tmp/book_skill_work/` now points into `${SKILL_DIR}/raw/`** (chapter raw
-text, spine, metadata, images, progress).
+Why this matters: a 200-page book is ~75k tokens. Re-reading it once per chapter (28 passes) costs ~2M input tokens; using grep + sed to pull only relevant slices keeps generation cost proportional to the output, not the source.
 
-## Step 7 — Stage 1: MAP (chapter extraction)
+---
 
-Read `reference/chapter-template.md`. Then, for each chapter in
-`metadata.json`, generate
-`${SKILLS_ROOT}/<slug>/chapters/<book_number>-<slug>.md` (the
-project-local skills root resolved in Step 6).
+## Step 3 — Analyze book structure
 
-**Filename prefix uses `book_number`, not the manifest `index`.**
-`metadata.json["chapters"][*].book_number` is the book-native label
-that `extract.py` assigns: `ch07` for "Chapter 7 — …", `intro` for
-the Introduction, `preface`, `appendix-a`, `fm` / `fm-2` for front
-matter, `bm` for back matter, `part-1` for "Part I". The `index`
-field is still present but is extraction order only — never use it
-in filenames or in user-facing labels. If `book_number` is missing
-(extremely old skills), fall back to `ch{index:02d}` and log it.
+Read the first 8,000 characters of the extracted `full_text.txt` to identify:
+- Book **title** and **author(s)**
+- **Chapter structure** (look for "Chapter N", "PART I", numbered headings, table of contents)
+- **Core themes** and subject domain
+- Approximate number of chapters
 
-**Choose the chapter source directory once, up front:**
+Then read the Table of Contents section if present to map all chapters.
 
+**If mode is "Analyze Only":** produce the extraction report now and stop. Structure:
 ```
-if metadata.json["chapters_source"] == "chapters_split":
-    CHAPTERS_DIR = "${SKILL_DIR}/raw/chapters_split"
-else:
-    CHAPTERS_DIR = "${SKILL_DIR}/raw/raw_chapters"
-```
+## Extraction Report — <Title>
 
-Pass `CHAPTERS_DIR` into every subagent task. Don't hardcode `raw_chapters/`
-— a manual re-split won't take effect otherwise.
+### Author's Core Frameworks
+- **<Framework Name>**: <what it is and when to apply>
 
-**Resume = filesystem is ground truth.** Before spawning subagents, list
-existing files in `${SKILL_DIR}/chapters/`. For every
-`<book_number>-*.md` that already exists and is `> 500 bytes` and does
-not contain "extraction failed", that chapter is done — skip it.
-`progress.json` is a running log only; do not use it to drive resume
-decisions.
+### Key Principles
+- <Principle>: <actionable rule>
 
-**Parallelise.** Spawn the chapters as parallel subagents with the `Task` tool
-— independent contexts keep each extraction sharp and the run survives length.
-Batch them (e.g. 5–8 at a time) for a long book. Give each subagent this task:
+### Techniques & Methods
+- <Technique>: <step-by-step or how-to>
 
-```
-Extract one chapter into a Claude Code skill chapter file.
+### Anti-patterns
+- <What to avoid>: <why>
 
-Inputs (substitute <SKILL_DIR> with the absolute project-local path from
-Step 6 and <CHAPTERS_DIR> with the source chosen above):
+### Suggested Skill Name
+`{author-lastname}-{core-concept}` — e.g. `cialdini-influence`
 
-  - Chapter raw text:  <CHAPTERS_DIR>/<book_number>.txt
-  - Book spine:        <SKILL_DIR>/raw/spine.md   (read for context)
-  - Genre profile:     <paste the relevant profile from genre-profiles.md>
-  - Chapter template:  <BTS_DIR>/reference/chapter-template.md
-                       (substitute the path resolved in Step 0.5)
-
-Steps:
-  1. Read the spine, then the chapter raw text.
-  2. If the raw text is < 300 chars or obviously garbled (e.g. < 50% real
-     words), do NOT invent content. Write a stub:
-       # <Book number> — extraction failed
-       Raw source is <X> chars / appears corrupted. Inspect
-       <CHAPTERS_DIR>/<book_number>.txt and re-extract if needed.
-     Save to <SKILL_DIR>/chapters/<book_number>-extraction-failed.md and
-     report "CHAPTER FAILED: <book_number>" to the orchestrator. Do not
-     proceed.
-  3. For every [[IMAGE: images/..]] or [[PAGE_SCAN: images/..]] placeholder,
-     Read <SKILL_DIR>/raw/<that path> and fold its meaning into the chapter
-     file as text (per the template's image-handling section — including
-     its rules for failed reads).
-  4. Write the chapter summary file to:
-     <SKILL_DIR>/chapters/<book_number>-<chapter-slug>.md
-     following the chapter template, adapted to the genre profile. The raw
-     source remains at <CHAPTERS_DIR>/<book_number>.txt — do not delete or
-     modify it.
-
-Extract structure, not summary. Preserve exact framework names. 800–1,400
-tokens. Report the chapter title and key frameworks when done.
-```
-
-**Complete-coverage mode (`WITH_COVERAGE=complete`).** Replace that final
-paragraph of the subagent prompt with the complete-mode mandate:
-
-```
-Extract structure, not summary. Preserve exact framework names. COMPLETE-COVERAGE
-MODE: no token cap — produce a toolkit containing EVERY load-bearing element
-present in this chapter (every named framework, code example, figure, reference
-table, anti-pattern, exercise, key definition). Condense prose/narration; never
-drop a load-bearing element. Omit a template section only if that element is
-genuinely absent from THIS chapter — the genre profile's de-emphasis is NOT a
-reason to drop a present element. For every fenced code block, [[IMAGE]] /
-[[PAGE_SCAN]] placeholder, and table in the raw text, ensure a corresponding
-entry exists in the toolkit (or a one-line "decorative" / "could not be read"
-note). Report the chapter title, key frameworks, and a one-line element tally
-(frameworks/code/figures/tables/anti-patterns/exercises/definitions) when done.
-```
-
-(A Step-7.5 audit verifies this and re-runs any chapter that skipped something,
-so completeness here avoids a re-run.)
-
-After each batch, append completed chapter numbers to
-`${SKILL_DIR}/raw/progress.json`. If a subagent fails, retry that one
-chapter — do not restart the run.
-
-## Step 7.5 — COVERAGE AUDIT + gap-fill (complete mode only)
-
-**Run this only if `WITH_COVERAGE=complete`** (Step 4). Skip it entirely in
-standard mode (zero cost there). It *proves* every chapter toolkit captured every
-load-bearing element in its raw chapter, and re-runs any chapter that didn't —
-ingest will not reach "done" with a known gap. Read the frozen contract first:
-`${BTS_DIR}/reference/coverage-audit-template.md` (schema, the
-load-bearing/decorative/needs-manual-review rules, `THRESHOLD=0.95`,
-`N_ROUNDS=3`). Like Stage 1, this is a parallel per-chapter fan-out.
-
-`mkdir -p "${SKILL_DIR}/raw/coverage"`. Eligible chapters = the same set Stage 1
-extracted (skip `fm`/`bm` and `word_count < 300`).
-
-**The loop** (`THRESHOLD = 0.95`, `N_ROUNDS = 3`):
-
-```
-for round in 1..3:
-  1. MECHANICAL pre-check (cheap, all chapters):
-        "${BTS_DIR}/.venv/bin/python" "${BTS_DIR}/scripts/lint_chapters.py" \
-          "${SKILL_DIR}" --coverage --json   →  {book_number: [figure deficits]}
-  2. AUDIT (LLM, parallel, batched 5–8) every chapter NOT already passing on disk
-     (a chapter is passing iff raw/coverage/<bn>.json exists, parses, and
-     verdict=="complete"). Each audit subagent uses the prompt in
-     coverage-audit-template.md, reads the raw slice + the toolkit, and writes its
-     JSON verdict to ${SKILL_DIR}/raw/coverage/<book_number>.json. Spawn them with
-     a recognizable label (coverage-audit-<bn>) so measure_ingest.sh attributes them.
-  3. failing = chapters where audit.verdict=="gaps" OR audit.coverage < 0.95
-               OR audit.missing is nonempty OR the mechanical pre-check found a deficit.
-  4. if failing is empty: break — every chapter is covered.
-  5. if round == 3: stop looping; record residuals (below).
-  6. GAP-FILL: re-run the Stage-1 subagent (complete-mode mandate) for each failing
-     chapter, appending the gap-fill addendum from coverage-audit-template.md —
-     "keep everything already present and ADD: <missing[].name + raw_evidence>,
-      <mechanical deficits>". Overwrite chapters/<bn>-<slug>.md. DELETE that
-     chapter's raw/coverage/<bn>.json so it is re-audited next round. Label these
-     gapfill-<bn>.
-```
-
-**Residuals.** After the loop, any chapter that never reached `verdict=="complete"`
-is written to `${SKILL_DIR}/raw/coverage/RESIDUALS.json`
-(`{book_number: {coverage, missing, needs_manual_review}}`) and **surfaced loudly**
-— it is carried to the Step-10 gate. `needs_manual_review` figures (genuinely
-unreadable) are reported for inspection but are **not** gaps.
-
-**Resume** is filesystem-driven and idempotent: a chapter with a passing
-`raw/coverage/<bn>.json` is skipped on re-run; gap-fill deletes the JSON so only
-re-extracted chapters are re-audited. `progress.json` stays a log only.
-
-## Step 8 — Stage 2: REDUCE (concept map)
-
-**Lint first.** Run the quality check on the chapter files before reduce
-reads them — surfaces runaway word counts, missing structural headings,
-and verbatim-quote copy-pastes:
-
-```bash
-"${BTS_DIR}/.venv/bin/python" "${BTS_DIR}/scripts/lint_chapters.py" \
-  "${SKILL_DIR}"
-```
-
-Lint warnings are advisory: show them to the user. Re-run any chapter
-that fails badly before reading on (a chapter with "extraction failed"
-or 6,000 words will degrade the concept map). Do not block — the user
-decides.
-
-Read `reference/concept-map-spec.md`. Then:
-
-1. Read **every** generated `chapters/ch*.md` file and `spine.md`.
-2. **Consolidate** — dedupe recurring frameworks into single nodes, resolve
-   refinements, pick the 6–10 load-bearing frameworks. (For financial/
-   scientific genres, do not over-merge terms that differ subtly.)
-3. Build the **concept map** (node list + typed edges).
-4. Build the **topic index** — map the vocabulary a user would actually ask
-   in, with synonyms and multi-chapter pointers. This is the bridge between
-   the two tiers; a weak index makes "go to the chapter" fail.
-5. Generate `glossary.md`, `patterns.md`, `cheatsheet.md`, sizing/sharding
-   them to the book per the spec's scaling table.
-6. If the topic index exceeds ~2,000 tokens (cap in `concept-map-spec.md`),
-   keep the highest-frequency ~60 terms inline in `SKILL.md` and write the
-   full version to `${SKILL_DIR}/topic-index-full.md`, linked from `SKILL.md`.
-7. Write `${SKILL_DIR}/chapters_manifest.json` (schema in
-   `concept-map-spec.md`).
-   - Set `schema_version: 2` at the top.
-   - Read `${SKILL_DIR}/raw/metadata.json` once. For each manifest
-     entry, **copy `book_number` verbatim** from the matching
-     metadata chapter (matched by `index`). `book_number` is the
-     canonical label — never reconstruct it from `index` or from
-     filenames; the source of truth is `extract.py:assign_book_numbers`
-     and its output already lives in `metadata.json`.
-   - `file` must equal `chapters/<book_number>-<slug>.md` (the
-     filename Stage 1 actually wrote).
-   - `status` is `extracted` | `failed`, derived from whether the
-     file contains an "extraction failed" stub.
-   - Refuse to write the manifest if any chapter is missing
-     `book_number` in metadata — print the failing entries and stop;
-     a missing `book_number` indicates extract.py did not run with
-     `assign_book_numbers`, and proceeding would corrupt downstream
-     renderers.
-
-Set `stage2_done: true` in `${SKILL_DIR}/raw/progress.json` (log only).
-
-## Step 8.5 — Stage 2.5: NUTSHELL (per-chapter micro-summaries)
-
-Produce `${SKILL_DIR}/nutshell.md` — a per-chapter micro-summary skim
-of the whole book, one ~100-word block per chapter, that the user can
-scroll in a single response via `/the-knowledge-guy nutshell <slug>`.
-
-This stage maps over the **chapter toolkit files**, not the raw text,
-so cost scales with chapter count, not book size.
-
-1. Read `${BTS_DIR}/reference/nutshell-template.md` (the schema and
-   voice rules).
-2. Read `${SKILL_DIR}/chapters_manifest.json`. **Skip** an entry if
-   *any* of the following holds:
-   - `word_count < 300` (front matter, acknowledgments, dedications,
-     stubs).
-   - `book_number` equals `fm` / `bm` or starts with `fm-` / `bm-`
-     (any front- or back-matter slot, even if it happens to exceed the
-     word threshold — the user wants chapters in a nutshell skim,
-     not indexes or copyright pages).
-3. For every remaining entry, spawn a parallel subagent (single
-   message, N `Task` calls). Each subagent gets:
-   - The template (inline).
-   - The chapter's toolkit file path (`${SKILL_DIR}/<file>`).
-   - The chapter index, title, and skill slug.
-   - The one-line thesis from `${SKILL_DIR}/raw/spine.md` for tone.
-
-   Each subagent returns exactly one nutshell block (80-120 words,
-   3-5 bullets) following the template's "Required shape" section.
-   No preamble, no closing remarks — just the block.
-
-4. Concatenate the returned blocks in manifest order. Prepend:
-
-   ```
-   # <Book title> — in a nutshell
-
-   > <one-line thesis pulled from spine.md>
-   ```
-
-5. Write to `${SKILL_DIR}/nutshell.md`. Target total length: ~2-3K
-   tokens for a typical 15-25 chapter book.
-
-If a subagent fails or returns a malformed block (no
-`## <book_number>` heading, or >180 words), retry once. If it fails
-twice, write a single-line stub for that chapter
-(`## <book_number> — <title>\n\n*Nutshell generation failed.*`) and
-continue — do not block the whole stage.
-
-## Step 8.6 — Stage 3: PRACTICE (per-chapter exercises) — opt-in
-
-**Run this only if `WITH_PRACTICE=yes`** (Step 4). It is purely additive:
-it produces a per-chapter practice set that `/the-knowledge-guy course`
-renders as an interactive learn-by-doing site (auto-checked quizzes,
-in-browser runnable code labs, open tasks). Skipping it changes nothing
-else; it can be added later by re-running with `--regenerate`.
-
-Like Stage 1, this is a **parallel per-chapter subagent fan-out**; like the
-nutshell, it maps over the **chapter toolkit files** (plus the raw slice),
-so cost scales with chapter count. The frozen output contract is
-`${BTS_DIR}/reference/practice-template.md` — read it first.
-
-### Prep (orchestrator, once)
-
-1. Read `${BTS_DIR}/reference/practice-template.md` (schema, the three
-   exercise families, the extract/generate/research decision tree, the lab
-   safety rails).
-2. Resolve the genre from `metadata.json` (normalize a stored menu-number
-   to a slug — `lint_practice.py:resolve_genre` has the mapping). Compute
-   `is_codey = genre in {technical, vuln-hunting, textbook, scientific, reference}`
-   and `is_cyber = genre == vuln-hunting` (or the spine vocabulary is
-   security-heavy). Stage 3 targets technical / textbook / vuln-hunting
-   first; other genres degrade to `auto` + `open` only.
-3. Resolve `<CHAPTERS_DIR>` exactly as Step 7 does (the dir named by
-   `metadata.json["chapters_source"]` — `chapters_split/` if a re-split
-   happened, else `raw_chapters/`). **Do not hardcode `raw_chapters/`.**
-4. `mkdir -p "${SKILL_DIR}/practice" "${SKILL_DIR}/raw/research"`.
-5. Eligible chapters = manifest entries **excluding** `book_number` starting
-   `fm`/`bm` and `word_count < 300` (same skip rule as the nutshell).
-6. **Resume (filesystem-driven):** a chapter is done iff
-   `practice/<book_number>-<slug>.json` exists, parses, and has ≥ 1
-   exercise. Skip those. (An empty/failed stub does **not** count — retry it.)
-
-### Fan-out (one subagent per remaining chapter, batched 5–8)
-
-Each subagent reads: the chapter toolkit `chapters/<book_number>-<slug>.md`
-(primary), the raw slice `<CHAPTERS_DIR>/<book_number>.txt`, `raw/spine.md`,
-the genre's profile block, `reference/practice-template.md`, and
-`raw/research/<book_number>.md` **if it already exists**. Its task prompt:
-
-```
-Generate a PRACTICE set for ONE chapter, following the frozen schema in
-practice-template.md (read it). Inputs (absolute paths substituted):
-  - Chapter toolkit:  <SKILL_DIR>/chapters/<book_number>-<slug>.md
-  - Raw chapter text: <CHAPTERS_DIR>/<book_number>.txt
-  - Spine:            <SKILL_DIR>/raw/spine.md
-  - Schema + genre profile: practice-template.md + the <genre> block (inline)
-  - Research cache (READ if it exists): <SKILL_DIR>/raw/research/<book_number>.md
-  - Web tools (ONLY if is_cyber/is_codey AND a realistic lab needs current
-    external detail AND no cache exists yet): WebSearch, WebFetch
-
-Steps:
-  1. Read the toolkit, then the raw slice. Decide extract-vs-generate
-     (does the raw text contain exercises? signals: "Exercise", "Problems",
-     "Lab", "Challenge", "Q1"…). Extract & complete the book's own where
-     present; otherwise generate from the toolkit's Frameworks / Anti-patterns
-     / Code Examples — every exercise's tests.framework MUST name a real one.
-  2. If web research is warranted and no cache exists: WebSearch/WebFetch,
-     then distil findings to <SKILL_DIR>/raw/research/<book_number>.md with
-     source URLs + today's date (one `date +%Y-%m-%d` call). If a cache
-     exists, READ it — do not search again.
-  3. Produce 4–8 exercises: ≥2 auto, ≥1 runnable (ONLY if a code example
-     exists; prefer runtime "js" so it runs offline), ≥1 open.
-     - For every runnable lab: write solution_code AND a deterministic
-       assert/stdout check, and TRACE the solution through the check to
-       confirm it passes and the starter fails. Pure functions only — no
-       I/O, network, clock, randomness (the lint will EXECUTE it).
-     - For every MCQ-shaped item: exactly ONE correct option; distractors
-       are plausible misconceptions, not nonsense.
-     - For every open task: include rubric + model_answer (server-side only).
-  4. Write <SKILL_DIR>/practice/<book_number>-<slug>.json (canonical) and a
-     <book_number>-<slug>.md mirror. Cite by book_number; preserve exact
-     framework names. A faithful 4-exercise set beats a padded 8.
-```
-
-A subagent that fails writes a stub `{"exercises": []}` (which resume will
-retry); never block the whole stage on one chapter.
-
-### Validate (orchestrator)
-
-Run the lint — it **executes** every runnable lab and hard-fails any whose
-model solution doesn't pass its own check:
-
-```bash
-${BTS_DIR}/.venv/bin/python ${BTS_DIR}/scripts/lint_practice.py "${SKILL_DIR}"
-```
-
-**Re-run any chapter the lint flags with a hard ERROR** (broken lab, bad
-MCQ, bad book_number) before declaring Stage 3 done. Warnings are advisory.
-Set `stage3_done: true` in `raw/progress.json` (log only). Stage 3 does
-**not** bump `chapters_manifest.json` — practice is discovered by file
-presence, and `schema_version` stays `2`.
-
-## Step 9 — Write the master SKILL.md
-
-Using the template in `concept-map-spec.md`, write
-`${SKILLS_ROOT}/<slug>/SKILL.md`. Keep the body under ~4,000 tokens and
-front-load it (truncation eats the end). It must contain: the book thesis, the
-concept map, the Core Frameworks section, the chapter index (linked), the
-topic index, and the supporting-files links.
-
-## Step 10 — Validate, clean up, report
-
-Validate before declaring done:
-
-```bash
-test -f "${SKILLS_ROOT}/<slug>/SKILL.md"
-test -f "${SKILLS_ROOT}/<slug>/chapters_manifest.json"
-test -f "${SKILLS_ROOT}/<slug>/nutshell.md"
-ls "${SKILLS_ROOT}/<slug>/chapters/" | wc -l   # == chapter_count
-# Surface any chapters that bailed out during Stage 1:
-grep -l "extraction failed" "${SKILLS_ROOT}/<slug>/chapters/"*.md || true
-# Surface any nutshell blocks that failed:
-grep -l "Nutshell generation failed" "${SKILLS_ROOT}/<slug>/nutshell.md" || true
-# schema_version + book_number presence — every entry must have one,
-# and every `file` field must reference a chapter that actually exists.
-python3 - <<'PYEOF'
-import json, os, sys
-p = "${SKILLS_ROOT}/<slug>/chapters_manifest.json"
-m = json.load(open(p))
-assert m.get("schema_version") == 2, f"manifest schema_version != 2 ({m.get('schema_version')!r}); see Step 8."
-bad = [c for c in m["chapters"] if not c.get("book_number")]
-assert not bad, f"{len(bad)} chapter(s) missing book_number: {[c.get('title') for c in bad]}"
-unc = [c for c in m["chapters"] if c["book_number"].endswith("-unclassified")]
-if unc:
-    print(f"⚠  {len(unc)} chapter(s) fell back to chNN-unclassified — titles the parser couldn't classify:")
-    for c in unc: print(f"     idx={c['index']} title={c.get('title')!r}")
-miss = [c["file"] for c in m["chapters"] if not os.path.isfile("${SKILLS_ROOT}/<slug>/" + c["file"])]
-assert not miss, f"{len(miss)} manifest file(s) point at non-existent chapters: {miss}"
-print(f"✅ Schema version: 2 ({len(m['chapters'])} chapters, all with book_number)")
-PYEOF
-```
-
-If any chapter file contains "extraction failed", list those chapter
-numbers prominently in the final report — the user needs to know which
-chapters are stubs, not silently treat the run as fully successful.
-
-Check that every chapter index entry links to a file that exists and that the
-topic index points only to real chapters. Also confirm the raw extraction was
-preserved inside the skill:
-
-```bash
-test -d "${SKILL_DIR}/raw/raw_chapters"
-test -f "${SKILL_DIR}/raw/full_text.txt"
-test -f "${SKILL_DIR}/raw/metadata.json"
-test -f "${SKILL_DIR}/raw/spine.md"
-```
-
-If Stage 3 ran (`WITH_PRACTICE=yes`), validate the practice sets — the lint
-**executes** every runnable lab, so a green run proves every lab's solution
-passes its own check:
-
-```bash
-${BTS_DIR}/.venv/bin/python ${BTS_DIR}/scripts/lint_practice.py "${SKILL_DIR}"
-```
-
-Any hard ERROR means a broken practice file shipped — re-run that chapter's
-Stage 3 subagent before declaring done. (No practice/ dir is fine — it just
-means Stage 3 was skipped.)
-
-If complete coverage ran (`WITH_COVERAGE=complete`), enforce the **coverage
-gate** — ingest must not claim success with a known gap:
-
-```bash
-python3 - "${SKILL_DIR}" <<'PYEOF'
-import json, sys, pathlib
-sd = pathlib.Path(sys.argv[1]); cov = sd / "raw" / "coverage"
-THRESHOLD = 0.95
-offenders, review = [], []
-for jf in sorted(cov.glob("*.json")):
-    if jf.name == "RESIDUALS.json": continue
-    d = json.loads(jf.read_text())
-    if d.get("verdict") != "complete" or d.get("coverage", 0) < THRESHOLD:
-        offenders.append((d.get("book_number"), d.get("coverage"),
-                          [m.get("name") for m in d.get("missing", [])]))
-    for n in d.get("needs_manual_review", []):
-        review.append((d.get("book_number"), n.get("name"), n.get("reason")))
-res = cov / "RESIDUALS.json"
-if res.is_file():
-    for bn, info in json.loads(res.read_text()).items():
-        offenders.append((bn, info.get("coverage"),
-                          [m.get("name") for m in info.get("missing", [])]))
-print("📊 Coverage report:")
-for jf in sorted(cov.glob("*.json")):
-    if jf.name == "RESIDUALS.json": continue
-    d = json.loads(jf.read_text())
-    flag = "✓" if (d.get("verdict") == "complete" and d.get("coverage",0) >= THRESHOLD) else "❌"
-    print(f"   {d.get('book_number')}  {int(d.get('coverage',0)*100)}%  {flag}")
-if review:
-    print("🔍 Figures needing manual review (surfaced, NOT gate failures):")
-    for bn, name, reason in review: print(f"   {bn}: {name} — {reason}")
-if offenders:
-    print("❌ COVERAGE GATE FAILED — chapters with known gaps after gap-fill:")
-    for bn, c, miss in offenders: print(f"   {bn}: coverage={c} missing={miss}")
-    sys.exit(1)
-print("✅ Coverage gate: every chapter ≥ 0.95 with no missing load-bearing elements.")
-PYEOF
-```
-
-A non-zero exit means the final report must **not** claim full success — list the
-offending `book_number`s and their residual `missing[]` (just as "extraction
-failed" stubs are surfaced). `needs_manual_review` figures are reported for the
-user to inspect; they are not gate failures. The `schema_version` assertion above
-is **unchanged** — coverage is orthogonal to chapter numbering.
-
-Then remove the staging directory only (the raw lives inside the skill now):
-
-```bash
-rm -rf /tmp/book_skill_work
-```
-
-**Do not delete `${SKILL_DIR}/raw/`** — it is part of the skill. The
-generated `SKILL.md` should reference it so future invocations of the skill
-can re-read original passages, quote exactly, or re-extract a chapter
-without re-running Stage 0.
-
-Report:
-
-```
-✅ Skill created: ./skills/<slug>/   (project-local)
-
-📚 <Title> — <Author>   (<page_count> pages, <chapter_count> chapters)
-
-  SKILL.md                  — concept map + core frameworks + indexes
-  chapters/                 — <N> chapter summary files (loaded on demand)
-  chapters_manifest.json    — canonical chapter list with status per file
-  raw/                      — original extraction: full_text.txt, raw_chapters/,
-                              chapters_split/ (if re-split), images/,
-                              metadata.json, spine.md
-  glossary.md / patterns.md / cheatsheet.md
-  nutshell.md               — per-chapter micro-summary skim (use via /the-knowledge-guy nutshell <slug>)
-  topic-index-full.md       — only when topic index exceeded the inline cap
-
-Usage:
-  /<slug>            → load the concept map and core frameworks
-  /<slug> <topic>    → find and explain a topic (jumps to the right chapter)
-  /<slug> ch<N>      → open a specific chapter
+### Chapters Detected
+| # | Title | Main Frameworks |
 ```
 
 ---
 
-## Resuming an interrupted run
+## Step 4 — Ask purpose (Full Conversion only)
 
-A long book is a long run; make it survivable. Re-running `/book-to-skill` with
-the same arguments is always safe:
+Before generating, ask the user:
 
-- **Extraction**: `extract.py --resume` reuses a prior extraction when the
-  source file hash matches — no re-extraction.
-- **Stage 1**: chapter files in `${SKILL_DIR}/chapters/` are the authoritative
-  checkpoint. A `chNN-*.md` that exists, is `> 500 bytes`, and does NOT
-  contain "extraction failed" is considered done — skip it. Recompute the
-  todo set from the filesystem on every resume; do not trust
-  `progress.json` (it is a running log, not the source of truth).
-- **Stage 2**: only runs once all chapter files exist (failed stubs count
-  as "exists" — they will be flagged in the final report, not retried
-  automatically).
-- **Stage 2.5 (nutshell)**: if `${SKILL_DIR}/nutshell.md` already exists
-  and is non-empty, skip it on resume. To regenerate, delete the file
-  and re-run.
-- **Step 7.5 (coverage audit, complete mode)**: a chapter whose
-  `${SKILL_DIR}/raw/coverage/<book_number>.json` exists, parses, and has
-  `verdict == "complete"` is done — skip its audit. Gap-fill deletes that JSON,
-  so re-running re-audits only the chapters that were re-extracted. The whole
-  loop is filesystem-driven; `progress.json` is not consulted.
+> "What should this skill help you do? (Pick one or more)
+> 1. Apply the author's frameworks while working
+> 2. Think with the author's mental models
+> 3. Reference specific chapters and concepts
+> 4. All of the above"
 
-If a run dies at chapter 28 of 40, re-running picks up at chapter 29.
+Use the answer to weight what gets highlighted in the SKILL.md Core section.
 
-## Upgrading legacy skills
+**Derive `DEPTH` from the answer (no extra prompt):**
+- Answer is **only** option 3 (reference) → `DEPTH=reference` — lean, fast-lookup chapters.
+- Answer includes option 1, 2, or 4 → `DEPTH=study` — deeper chapters with more worked detail, examples, and reasoning.
 
-Skills generated before `extract.py:assign_book_numbers` existed have
-`chapters_manifest.json` with `schema_version: 1` (or no version field),
-meaning their chapter filenames use extraction-order indices instead of
-the book's own chapter numbers — Sethi's Introduction lives at
-`chapters/ch07-…` instead of `chapters/intro-…`, etc. The Step 6
-legacy-check stops a fresh run on such a skill; the fix is to upgrade
-in place.
+`DEPTH` and `BOOK_TYPE` together set the per-chapter token budget in Step 7. Do **not** ask a separate "study vs reference" question — it is inferred here. (In Modes 2/3, where Step 4 is skipped, default `DEPTH=study`.)
 
-Two scripts handle this. Both are idempotent (re-running is a no-op):
+---
 
-- **`scripts/backfill_book_numbers.py <skill-dir>`** — parses each
-  manifest title, computes the canonical `book_number`, renames every
-  `chapters/<old>-<slug>.md` to `chapters/<book_number>-<slug>.md`,
-  rewrites cross-references inside the chapter bodies and SKILL.md,
-  and bumps `schema_version` to 2. Supports `--dry-run` to preview.
-- **`scripts/relabel_nutshell.py <skill-dir>`** — after backfill, fixes
-  the cached `nutshell.md` headings (`## ch07 — …` becomes
-  `## intro — …`) and the `*From [skill ch07].*` citations.
-  Deterministic; no LLM cost.
+## Step 5 — Determine skill name
 
-Detect a legacy skill in one line:
+If `SKILL_NAME` was provided, use it as the skill slug.
+Otherwise, propose two options and let the user choose:
+- **By author-concept**: `{author-lastname}-{core-concept}` (e.g. `cialdini-influence`, `meadows-systems`)
+- **By title**: lowercase hyphens from book title (e.g. `designing-data-intensive-apps`)
+
+Default to author-concept format if the book has a strong methodological identity.
+
+Choose the destination skill root (`SKILLS_HOME`). First resolve **scope** from an explicit user request or `BOOK_TO_SKILL_SCOPE`, then probe **host**. A request for project-local/project output selects the project-local row; a request for personal/global output selects the personal row. If neither scope is requested, preserve the established personal default (`~/.agents/skills` for non-Hermes hosts). Do not ask a mandatory scope question solely because project-local roots exist. The selected root may still require host approval before writing.
+
+| Host agent | Personal skill root | Project-local root |
+|---|---|---|
+| **WorkBuddy** | `~/.workbuddy/skills` (discovered natively) | `<project>/.workbuddy/skills` |
+| **GitHub Copilot CLI** | `~/.agents/skills` (discovered natively) | `.github/skills` → `.claude/skills` → `.agents/skills` |
+| **Amp** | `~/.agents/skills` (discovered natively) | `.agents/skills` |
+| **OpenAI Codex** | `~/.agents/skills` (discovered natively; follows symlinks) | `.agents/skills` |
+| **Hermes Agent** | `$HERMES_HOME/skills/<category>` (defaults to `~/.hermes/skills/<category>`) | `.hermes/skills/<category>` → `.agents/skills` |
+| **Claude Code** | `~/.agents/skills` + symlink from `~/.claude/skills/<skill_name>` | `.claude/skills` |
+| **OpenClaw** | `${OPENCLAW_STATE_DIR:-~/.openclaw}/skills` (active state; `~/.agents/skills` only with default state) | `.agents/skills` → `skills/` |
+
+Hermes Agent is the one host that keeps its own personal root: it partitions personal skills by category and does not scan the cross-agent root. Use the active profile's `HERMES_HOME` and choose a category that matches the generated skill's subject. Do not construct profile paths manually. If the user selects a project-local Hermes root, run `hermes skills trust <project-root>` after generation and verify discovery with `hermes skills list`; project skills remain unavailable until the project is trusted.
+
+For OpenClaw, use the active state directory's `skills/` root: `${OPENCLAW_STATE_DIR:-~/.openclaw}/skills/`. The shared `~/.agents/skills` compatibility root is discoverable only when `OPENCLAW_STATE_DIR` is unset or the default `~/.openclaw`; with a non-default state, do not claim that OpenClaw will see a shared-root install. Verify discovery with `openclaw skills list` after generation.
+
+Selection rules:
+0. **WorkBuddy install**: set `SKILLS_HOME` to `~/.workbuddy/skills` (personal) or `<project>/.workbuddy/skills` (project-local). WorkBuddy scans this root natively — take no symlink, and skip Step 10's Claude Code linking.
+1. Personal install: set `SKILLS_HOME` to `~/.agents/skills` (create the directory if missing). One exception, so the default does not invent a convention in someone else's house: if `~/.agents/skills` does not exist **and** the host's private root already contains skills, use the private root instead and say why in the report.
+2. **Claude Code does not scan `~/.agents/skills`** — after generation completes, Step 10 links the skill in with `ln -sfn "$HOME/.agents/skills/<skill_name>" "$HOME/.claude/skills/<skill_name>"`.
+3. **Hermes Agent personal installs use the Hermes row above**, not the cross-agent root, and take no symlink.
+4. If the user explicitly asks for a host-private root (`~/.copilot/skills`, `~/.claude/skills`, `~/.config/agents/skills`, `~/.config/amp/skills`), honor it and skip the symlink.
+5. If the user explicitly asked for project-local output, use the project-local row for their host.
+6. If the choice requires knowing the host (project-local output, the Hermes personal root, the OpenClaw state root, or the Claude Code symlink) and you cannot identify it, ask: "Which agent are you running in — OpenClaw, Hermes Agent, GitHub Copilot CLI, Amp, Codex, or Claude Code?"
+7. For OpenClaw personal output, use `${OPENCLAW_STATE_DIR:-$HOME/.openclaw}/skills`. The shared `~/.agents/skills` root is a valid OpenClaw destination only when `OPENCLAW_STATE_DIR` is unset or equals the default `$HOME/.openclaw`; otherwise use the active state root or a project/extra directory.
+8. If the user explicitly asks for an OpenClaw-managed personal root, use the active state root and verify discovery with `openclaw skills list`.
+
+Set `SKILLS_HOME` to the selected root and check if `$SKILLS_HOME/<skill_name>/` already exists. On Claude Code, also check whether `~/.claude/skills/<skill_name>` exists as a **real directory** (not a symlink) — a previous install may live there; if so, offer to migrate it (move the directory into `~/.agents/skills/` and replace the original path with the symlink) before continuing.
+If the skill already exists, prompt the user to choose:
+1. **Update / Fold-in** (Mode 4) — integrate new files/content into the existing skill components.
+2. **Overwrite** — delete and regenerate the skill from scratch.
+3. **Rename** — append `-2` or use a different custom slug.
+
+If the user selects **Update / Fold-in**, proceed immediately to the **Update / Fold-in Workflow** section after Step 2.5 (skipping Steps 3, 4, 6, 7, 8, 9).
+
+---
+
+## Step 6 — Create skill directory structure
 
 ```bash
-python3 -c "import json,sys;m=json.load(open(sys.argv[1]));sys.exit(0 if m.get('schema_version')==2 else 1)" "${SKILL_DIR}/chapters_manifest.json" \
-  || echo "legacy schema — run scripts/backfill_book_numbers.py ${SKILL_DIR}"
+mkdir -p "$SKILLS_HOME/<skill_name>/chapters"
 ```
 
-Run both after pulling a skill from elsewhere, or any time
-`/book-to-skill` complains "Skill uses legacy numbering".
+---
 
-## Quality rules
+## Step 7 — Generate chapter summaries
 
-1. Extract structure, not summaries — frameworks and exact formulations, never
-   chapter recaps.
-2. Preserve the author's precision — "The 5 Whys" ≠ "ask why a few times".
-3. Density over completeness — a tight 1,000-token extraction beats a 6,000-
-   token excerpt.
-4. Stage 2 builds a concept map; it does not summarise the summaries.
-5. The topic index is critical — it is how the two tiers connect.
-6. Read images, don't guess them — a figure's meaning comes from a real vision
-   read; the description goes into the chapter file as text.
-7. Never copy raw book text — always synthesise.
-8. Front-load `SKILL.md` — compaction keeps the start, drops the end.
+**TOKEN BUDGET RULE — CRITICAL (adaptive):**
+
+The per-chapter budget scales with `BOOK_TYPE` and `DEPTH`. Technical chapters need room for code and tables; study depth needs room for worked reasoning. Pick the budget from this matrix:
+
+| | `DEPTH=reference` | `DEPTH=study` |
+|---|---|---|
+| `BOOK_TYPE=text` | 800–1,200 tokens | 1,000–1,800 tokens |
+| `BOOK_TYPE=technical` | 1,200–1,800 tokens | 2,000–3,000 tokens |
+
+- These are per-file targets, not hard caps — a dense chapter may run over, a thin one under. Density still beats length (Quality Rule #3): never pad to hit a number.
+- Files are loaded on-demand, so a larger chapter only costs tokens when that chapter is actually read.
+- When in doubt between two cells (e.g. mixed-content book), use the lower budget and let depth come from precision, not volume.
+
+**`DEPTH=study` is earned with content, not a bigger number.** The standard section template (Core Idea → Connects To) naturally lands a dense prose chapter around 700–900 tokens. To reach the study budget *honestly* — not by padding — a study-depth chapter must add concrete material:
+- **Reproduce one worked example or artifact** from the chapter (e.g. the example press release, a sample dialogue, a filled-in template, a decision the author walks through) under a `## Worked Example` section. This is the single biggest lever and the main thing a learner returns for.
+- **Expand the "How" of each framework** into explicit steps or criteria, not a one-liner.
+- **Add a short "Why it works / failure mode" note** to the top 1–2 frameworks.
+
+If a chapter genuinely has no worked example and resists expansion, let it land below the study floor rather than padding — and note that the chapter is thin in its Core Idea. A `reference`-depth chapter, by contrast, deliberately omits worked examples and keeps only the decision-ready essentials.
+
+For EACH chapter/major section identified in Step 3:
+
+Read the corresponding section of the extracted `full_text.txt` (use character offsets or grep for chapter headings).
+
+Create `$SKILLS_HOME/<skill_name>/chapters/ch<NN>-<slug>.md` using the structure below.
+
+**Adapt emphasis based on `BOOK_TYPE`:**
+- `technical` → prioritize "Code Examples", "Reference Tables", and "Commands & APIs" sections; preserve exact syntax
+- `text` → prioritize "Frameworks Introduced", "Mental Models", and "Key Takeaways"; skip empty technical sections
+
+```markdown
+# Chapter N: <Full Title>
+
+## Core Idea
+<1–2 sentences: the single most important thing this chapter teaches>
+
+## Frameworks Introduced
+- **<Framework Name>**: <exact formulation — preserve the author's naming>
+  - When to use: <specific situation>
+  - How: <steps or criteria>
+
+## Key Concepts
+- **<Term>**: <precise definition in 1 sentence>
+(5–10 most important terms from this chapter)
+
+## Mental Models
+<2–4 frameworks or thinking tools. Write as "Use X when Y" or "Think of X as Y">
+
+## Anti-patterns
+- **<What to avoid>**: <why it fails>
+
+## Code Examples *(technical books only — omit if BOOK_TYPE=text)*
+<!-- Copy the most instructive snippet from the chapter. Preserve indentation exactly. -->
+```<language>
+<key code example from this chapter>
+```
+- **What it demonstrates**: <one line>
+
+## Reference Tables *(technical books only — omit if BOOK_TYPE=text)*
+<!-- Reproduce any comparison matrix, parameter table, or decision table from the chapter in markdown. -->
+
+## Worked Example *(DEPTH=study only — omit for DEPTH=reference)*
+<!-- Reproduce or reconstruct one concrete example the author works through: a
+     sample document, a dialogue, a filled-in template, a before/after, or a
+     decision walked end-to-end. This is what makes a study chapter worth its
+     budget. Keep it faithful to the source; never copy long raw passages —
+     reconstruct the example compactly. -->
+
+## Key Takeaways
+1. <Actionable insight>
+2. <Actionable insight>
+3. <Actionable insight>
+(3–7 takeaways a practitioner must remember)
+
+## Connects To
+- **Ch N**: <why this chapter relates>
+- **<Concept>**: <external concept or standard it connects with>
+```
+
+---
+
+## Step 8 — Generate supporting files
+
+### glossary.md
+Create `$SKILLS_HOME/<skill_name>/glossary.md`:
+- Every significant term from the book, alphabetically sorted
+- Format: `**Term** — definition (Ch N)`
+- Max 1,500 tokens
+
+### patterns.md
+Create `$SKILLS_HOME/<skill_name>/patterns.md`:
+- All concrete techniques, design patterns, algorithms from the book
+- Format: `## Pattern Name\n**When to use**: ...\n**How**: ...\n**Trade-offs**: ...`
+- Max 2,000 tokens
+
+### cheatsheet.md
+Create `$SKILLS_HOME/<skill_name>/cheatsheet.md`:
+
+**This is the most differentiated layer of the skill — treat it as a reasoning aid, not a keyword list.** Anyone can grep the glossary for a term. The cheatsheet captures the author's *judgment*: the decisions they'd make and why. It's the file that turns "I know the words" into "I'd act the way the author would".
+
+Prioritize, in order:
+1. **Decision rules** — "When X, do Y, because Z." The if/then logic the author applies, stated so the reader can apply it without re-reading the book.
+2. **Decision trees / flowcharts** (as nested bullets or a small table) — for choices with more than two branches.
+3. **Trade-off matrices** — competing options scored on the dimensions the author cares about, so the reader can pick under their own constraints.
+4. **Thresholds & defaults** — the specific numbers, ratios, or rules of thumb the author commits to (e.g. "keep functions under ~20 lines", "alert when error budget < 10%").
+5. **Tells & smells** — fast heuristics for recognizing a situation ("if you see X, you're probably in trouble Y").
+
+Avoid: bare term→definition rows (that's the glossary), and prose paragraphs (that's the chapters). Every line should help the reader *decide* something.
+
+- Format mostly as compact tables and decision rules; the content you'd want on a single printed page kept beside you while working.
+- Max 1,200 tokens.
+
+---
+
+## Step 9 — Generate the master SKILL.md
+
+**CRITICAL TOKEN BUDGET: Keep SKILL.md body under 4,000 tokens.**
+Compaction truncates from the END — put the most important content FIRST.
+
+Create `$SKILLS_HOME/<skill_name>/SKILL.md`:
+
+```markdown
+---
+name: <skill_name>
+description: "Knowledge base from \"<Full Title>\" by <Author(s)>. Use when applying <author>'s frameworks for <key topics, 3–6 terms>, studying the book, or referencing its concepts."
+---
+
+<!-- argument-hint: [topic, framework name, or chapter number] -->
+
+# <Full Title>
+**Author**: <Author(s)> | **Pages**: ~<N> | **Chapters**: <N> | **Generated**: <YYYY-MM-DD>
+
+## How to Use This Skill
+
+- **Without arguments** — load core frameworks for reference
+- **With a topic** — ask about `replication`, `pricing`, or another indexed topic; I find and read the relevant chapter
+- **With chapter** — ask for `ch05`; I load that specific chapter
+- **Browse** — ask "what chapters do you have?" to see the full index
+
+When you ask about a topic not covered in Core Frameworks below, I will read
+the relevant chapter file before answering.
+
+---
+
+## Core Frameworks & Mental Models
+<!-- ~2,000 tokens: the author's most important named frameworks and principles.
+     Preserve exact names. Write as "Use X when Y", "Prefer X over Y because Z".
+     This is a toolkit, not a summary. -->
+
+<generate 2,000 tokens of the most critical frameworks and insights here>
+
+---
+
+## Chapter Index
+
+| # | Title | Key Frameworks |
+|---|-------|----------------|
+| [ch01](chapters/ch01-<slug>.md) | <Title> | <framework1>, <framework2> |
+| [ch02](chapters/ch02-<slug>.md) | <Title> | <framework1>, <framework2> |
+...
+
+## Topic Index
+
+<!-- Alphabetical. Major terms/frameworks → chapter(s) that cover them. -->
+- **<Term>** → ch<N>[, ch<N>]
+- **<Term>** → ch<N>
+
+## Supporting Files
+
+- [glossary.md](glossary.md) — all key terms with definitions
+- [patterns.md](patterns.md) — all techniques and design patterns
+- [cheatsheet.md](cheatsheet.md) — quick reference tables and decision guides
+
+---
+
+## Scope & Limits
+
+This skill covers the book content only. For hands-on implementation in your codebase,
+combine with project-specific tools. For topics beyond this book, check related skills
+or ask the agent directly.
+<if images_dropped > 5: state that N source images were not read>
+```
+
+---
+
+## Step 9.5 — Scan the generated skill
+
+Before reporting success, loading the skill in another session, or publishing it, run the advisory security scan:
+
+```bash
+SKILL_CONVERTER_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+"$PYTHON_BIN" "$SKILL_CONVERTER_ROOT/tools/scan_generated_skill.py" "$SKILLS_HOME/<skill_name>"
+```
+
+If the scanner exits non-zero, stop and ask a human to review its file/line findings. Do not silently rewrite the generated files, and do not load or publish the skill until the findings are resolved or explicitly accepted.
+
+---
+
+## Step 10 — Cleanup and report
+
+If the host is Claude Code and `SKILLS_HOME` is `~/.agents/skills` (the default personal install), expose the skill to Claude Code with a symlink — Claude Code only scans `~/.claude/skills`:
+
+```bash
+mkdir -p "$HOME/.claude/skills"
+LINK="$HOME/.claude/skills/<skill_name>"
+TARGET="$HOME/.agents/skills/<skill_name>"
+if [ -d "$LINK" ] && [ ! -L "$LINK" ]; then
+  CLAUDE_STATUS="skipped-realdir"                 # Step 5 migration declined; leave the old dir
+else
+  ln -sfn "$TARGET" "$LINK" 2>/dev/null || true
+  # Read the link back — do NOT trust that `ln` did what was asked. On Windows/MSYS
+  # `ln -s` may COPY instead of link (or need Developer Mode / an elevated shell), and
+  # PowerShell/cmd have no `ln` at all. The report must reflect what is on disk, not the
+  # fact that the command ran.
+  if [ -L "$LINK" ] && [ "$(readlink "$LINK")" = "$TARGET" ]; then
+    CLAUDE_STATUS="linked"
+  elif [ -e "$LINK" ]; then
+    CLAUDE_STATUS="copy"                           # a real file/dir landed instead of a link
+  else
+    CLAUDE_STATUS="absent"                         # ln unavailable or refused
+  fi
+fi
+```
+
+The real-directory guard is required: `ln -sfn` into an existing real directory would nest the link *inside* it (`~/.claude/skills/<skill_name>/<skill_name>`), leaving Claude Code loading the stale copy. If the user declined the Step 5 migration, skip the symlink and say so in the report — Claude Code keeps using the old directory until it is migrated.
+
+**Read the link back before you report anything about it.** The symlink is a claim, not a fact: fill the "Discoverable by" line from `CLAUDE_STATUS` (what is actually on disk), never from "the command was issued". **Do not hard-fail when the link is missing or is a copy** — the skill exists at the hub and every other host still finds it; the honest report is "written to `~/.agents/skills/<skill_name>`; Claude Code will not see it until the link is created", not an abort. (Windows lead, unverified: a directory junction — `mklink /J` in an elevated `cmd`, or `New-Item -ItemType Junction` in PowerShell — needs neither Developer Mode nor a symlink privilege; if you attempt it, it does not change the read-back-then-report rule.)
+
+Skip this when the user chose a host-private or project-local root (Step 5, rules 3-4).
+
+Then clean up the extraction workdir:
+
+```bash
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+fi
+
+Remove **the work directory this run actually used** — the `Workdir ->` path from the
+extraction output, which is also stored as `workdir` in `metadata.json`. Never delete a
+directory you did not create: another extraction may be running beside yours.
+
+```bash
+# WORKDIR is the path this run reported; quote it in case of spaces.
+rm -rf "$WORKDIR"
+```
+
+Equivalently, if you still have the metadata file:
+
+```bash
+"$PYTHON_BIN" - "$WORKDIR_METADATA_JSON" <<'PY'
+import json
+import shutil
+import sys
+from pathlib import Path
+
+meta_path = Path(sys.argv[1])
+workdir = json.loads(meta_path.read_text(encoding="utf-8")).get("workdir")
+if workdir:
+    shutil.rmtree(workdir, ignore_errors=True)
+PY
+```
+
+Older copies of this file removed a single fixed `book_skill_work` directory. That path is
+no longer used, so such a cleanup is now a harmless no-op rather than something that could
+delete a concurrent run's output.
+
+Then report to the user:
+
+```
+✅ Skill created: $SKILLS_HOME/<skill_name>/
+
+📚 Book: <Full Title> — <Author>
+📄 Pages: ~<N> | Chapters: <N>
+
+Files generated:
+  SKILL.md         — core frameworks + index   (~X tokens)
+  chapters/        — <N> chapter summaries     (~X tokens each, ~X total)
+  glossary.md      — key terms                 (~X tokens)
+  patterns.md      — techniques & patterns     (~X tokens)
+  cheatsheet.md    — quick reference           (~X tokens)
+  ─────────────────────────────────────────────────────
+  Total skill size: ~X tokens (loaded on-demand, not all at once)
+
+💡 Tip: check your agent's session cost/usage command to see actual token usage.
+
+Usage:
+  Ask for <skill_name>                  → load core frameworks
+  Ask <skill_name> about <topic>        → find and explain a topic
+  Ask <skill_name> for ch<N>            → dive into a specific chapter
+
+Discoverable by: <only what is true for the chosen destination — see below>
+
+Somewhere else?  mv ~/.agents/skills/<skill_name> <dest_root>/<skill_name> \
+                   && ln -sfn <dest_root>/<skill_name> ~/.claude/skills/<skill_name>
+
+Prompted for permission on every file? That is your host gating writes outside the
+working directory. Say "save it in this project" and re-run to write inside it.
+
+Reload (if your agent doesn't auto-detect new skills):
+  GitHub Copilot CLI:  /skills reload
+  Claude Code:         restart the session
+  Amp:                 restart the session
+  Hermes Agent:         start a new session
+  OpenClaw:             openclaw skills list (new session if watcher disabled)
+
+Share this skill (optional):
+  GitHub repo, installable on any host (Step 11):  say "publish"
+  Copilot ecosystem:  gh skill publish $SKILLS_HOME/<skill_name>
+```
+
+Fill the "Discoverable by" line from `CLAUDE_STATUS` (the read-back result), never from the fact that `ln` ran — for `~/.agents/skills` installs:
+- `linked` → "Copilot CLI, Amp, Codex (natively); Claude Code via symlink ~/.claude/skills/<skill_name>"
+- `skipped-realdir` → "Copilot CLI, Amp, Codex (natively); **NOT** Claude Code — migrate the real directory at ~/.claude/skills/<skill_name> first"
+- `copy` or `absent` → "Copilot CLI, Amp, Codex (natively); **NOT** Claude Code — the host could not create the symlink (a plain copy drifts on the next Update/Fold-in). Enable Developer Mode / create the link manually, or run the skill from ~/.agents/skills"
+- Hermes Agent personal root → "Hermes Agent (from `$HERMES_HOME/skills/<category>`)"; no symlink claim, and no cross-agent claim, because the other hosts do not scan the Hermes root
+- other host-private or project-local root → name only the host(s) that scan that root; no symlink claim
+
+The "Somewhere else?" relocation line must be correct for the path actually taken, so it never breaks the symlink the run just created. **`mv` always targets the final skill directory, `<dest_root>/<skill_name>`, never `<dest_root>` itself.** `mv ~/.agents/skills/mybook ~/.copilot/skills && ln -sfn ~/.copilot/skills ~/.claude/skills/mybook` reads as valid and is not: the skill lands at `~/.copilot/skills/mybook` while the link points one level up at the root, so Claude Code resolves to a directory with no `SKILL.md`, which is the exact breakage this line exists to avoid. Substitute the destination the user actually named, so the printed command carries real paths and there is nothing left to interpret:
+- `~/.agents/skills` + symlink → `mv ~/.agents/skills/<skill_name> <dest_root>/<skill_name> && ln -sfn <dest_root>/<skill_name> ~/.claude/skills/<skill_name>`
+- host-private root, Hermes Agent included → `mv <src_root>/<skill_name> <dest_root>/<skill_name>`
+- project-local root → `mv <project_root>/<skill_name> <dest_root>/<skill_name>`
+
+The "Prompted for permission on every file?" line is the answer to a host that gates writes outside the working directory (any personal-scope root is out-of-cwd): the destination was announced above, and the one-line fix — re-run asking for the project-local root — sits next to it. Keep it only for personal-scope installs; drop it when the user already chose project-local.
+
+---
+
+## Step 11 — Publish the generated skill to GitHub (optional)
+
+After the Step 10 report, offer once — and only if the Step 9.5 scan passed:
+
+> "Want me to publish this skill to GitHub so any Agent Skills host can install it with `npx skills add`? (yes / skip)"
+
+If the user declines, stop here. Requirements: the `gh` CLI, authenticated (check `gh auth status`). If `gh` is missing or unauthenticated, offer to set it up (`brew install gh` or https://cli.github.com, then `gh auth login`) — or use the no-`gh` path: the user creates an empty repo of the chosen visibility in the GitHub web UI, then you run the `git init`/`add`/`commit` commands below followed by `git remote add origin <repo-url> && git push -u origin main`. The visibility rule below applies to the web-created repo exactly the same.
+
+**Visibility is a separate closed question — never inferred, never read out of an earlier answer.** Once the user accepts, ask it on its own and require a one-word reply:
+
+> "Private or public repository? Reply with one word: `private` or `public`."
+
+**The reply must *be* `public`, not merely contain it — a hard rule, not a suggestion.** Run `gh repo create` with `--private` in every case except one: the answer to the visibility question is the bare word `public`. Substring matching is forbidden, because a sentence about **the source's licence is not a visibility answer** — "it's public domain", "the book is public domain", "it's publicly available" all describe the material, not the repository, and all resolve to `--private`. A paraphrase, a sentence, an ambiguous answer, silence, or your own inference is NOT consent: re-ask once, and if the reply is still not the bare word, use `--private` and say so in the report. A private repo can be flipped public later; a public push of book-derived content cannot be un-published.
+
+**Copyright gate — always apply before creating the repo:** chapter files are synthesized summaries, not raw text, but they still derive from the source material. Per the README's Copyright & fair use policy, skills generated from **third-party copyrighted books must stay private**; offer public only when the source is the user's own writing, openly licensed content, or material the user explicitly confirms they are authorized to redistribute publicly — and state which case applies. Having access to internal company material is not permission to disclose it: skills from internal docs stay **private** unless the user states they hold publication rights.
+
+If accepted:
+
+1. Add a repo `README.md` inside `$SKILLS_HOME/<skill_name>/` (never overwrite an existing file) — the skill title, a one-paragraph description ("Agent skill generated from *<Title>* by <Author> with [book-to-skill](https://github.com/virgiliojr94/book-to-skill)"), the install command from step 3 below, the file inventory, and a note that the content is synthesized summaries, not the book text.
+2. Initialize the skill folder as a git repository and create the remote (default repo name `<skill_name>`; let the user override — some prefer a `<skill_name>-skill` suffix). **Nested-repo guard:** first check whether the skill folder already sits inside a git repository (`git -C "$SKILLS_HOME/<skill_name>" rev-parse --show-toplevel` — always the case for project-local roots like `.claude/skills/`). If it does, do NOT `git init` in place: the outer repository would record the folder as an embedded repo (gitlink, mode 160000) without `.gitmodules`, and fresh clones of the outer project would silently omit the skill. Instead, copy the skill folder to a scratch directory, run the commands below from the copy, and tell the user the published repo — not the project-local folder — is the remote's working copy.
+
+```bash
+cd "$SKILLS_HOME/<skill_name>"
+git init -b main
+git add -A
+git commit -m "Add <skill_name> skill"
+gh repo create <repo_name> --private --source . --push
+# --private is the default; substitute --public ONLY under the visibility rule above
+# (the visibility answer WAS the bare word "public" AND the copyright gate allows it)
+```
+
+3. Report the repo URL and the cross-host install command:
+
+```
+✅ Published: https://github.com/<owner>/<repo_name> (<private|public>)
+
+Install on any Agent Skills host:
+  npx skills add https://github.com/<owner>/<repo_name> --skill <skill_name>
+```
+
+   When the nested-repo guard fired and the repo was published from a scratch copy, add one line — that local folder never gains a remote, so the Update/Fold-in push offer will never appear for it:
+
+```
+⚠️  Published from a copy: <skill folder> sits inside another git repository, so it has
+    no remote of its own. To publish a later update, re-run Step 11, or clone
+    https://github.com/<owner>/<repo_name> and fold new material into the clone.
+```
+
+The root-level `SKILL.md` layout is exactly what the `skills` CLI detects, so the repo is installable as-is — no restructuring needed. Outside the nested-repo case the local folder stays the live install for this machine and is the remote's working copy, so later Update/Fold-in runs can commit and push their changes to the same remote.
+
+---
+
+## Update / Fold-in Workflow
+
+When performing an Update/Fold-in operation on an existing skill at `$SKILLS_HOME/<skill_name>/`:
+
+### 1. Read Existing Skill Structure
+Read and parse the existing skill's files:
+- Read `$SKILLS_HOME/<skill_name>/SKILL.md` to parse the existing **Chapter Index**, **Topic Index**, metadata (author, total chapters), and **Core Frameworks**.
+- List all files in `$SKILLS_HOME/<skill_name>/chapters/` to find the highest chapter number (e.g. `ch12`).
+- Read `$SKILLS_HOME/<skill_name>/glossary.md`, `$SKILLS_HOME/<skill_name>/patterns.md`, and `$SKILLS_HOME/<skill_name>/cheatsheet.md` to see what terms and frameworks are already indexed.
+
+### 2. Match Content & Identify Revisions vs. Additions
+Analyze the new extracted text in this run's `full_text.txt` (the `Text ->` path from the extraction output) to identify if the new content represents:
+- **Updates/Revisions to existing chapters**: If a section of the new content directly updates or expands an existing chapter's topic, read the existing chapter file, merge the new details into it, and rewrite the file.
+- **New additions**: If the content introduces new chapters, papers, or separate sections, create **new chapter summary files** under `chapters/`. Start numbering these files after the highest existing chapter number (e.g. if the existing chapters stop at `ch12`, create `ch13-*.md`, `ch14-*.md`, etc.).
+
+### 3. Generate or Update Chapter Summary Files
+For each new or revised chapter:
+- Read the corresponding section of the extracted new text.
+- Follow the formatting guidelines in **Step 7** to build the summary.
+- Write/update the file in `$SKILLS_HOME/<skill_name>/chapters/`.
+
+### 4. Merge Supporting Files
+- **Merge glossary.md**:
+  - Read the existing `$SKILLS_HOME/<skill_name>/glossary.md`.
+  - Extract all new terms and definitions from the new content (Step 8 glossary guidelines).
+  - Combine and alphabetize the list of existing and new terms.
+  - If a term already exists, append the new chapter/source references to it (e.g. `**Term** — definition (Ch 4, Ch 13)`).
+  - Rewrite `$SKILLS_HOME/<skill_name>/glossary.md` with the fully merged, alphabetized list.
+- **Merge patterns.md**:
+  - Read existing `$SKILLS_HOME/<skill_name>/patterns.md`.
+  - Extract any new techniques, algorithms, or patterns from the new content.
+  - Append the new patterns, ensuring consistent formatting, and keeping the total length concise (under 2,500 tokens).
+- **Merge cheatsheet.md**:
+  - Read existing `$SKILLS_HOME/<skill_name>/cheatsheet.md`.
+  - Extract new comparison rules, decision tables, or parameter guides.
+  - Integrate them cleanly into the cheatsheet structure.
+
+### 5. Re-generate the Master SKILL.md
+Update the master skill file `$SKILLS_HOME/<skill_name>/SKILL.md`:
+- **Metadata**: Increment the chapter count, update the estimated page count, and add the new source names if appropriate. Update the `Generated` date to the current date.
+- **Core Frameworks**: Fold in the most high-impact mental models or principles from the new content (ensuring the overall file remains under 4,000 tokens).
+- **Chapter Index**: Append the new chapters to the index table, linking to the newly created files.
+- **Topic Index**: Merge the new topics alphabetically. If an existing topic is also covered in the new chapters, append the new chapter links to its line (e.g. `- **Topic** → ch05, ch13`).
+
+### 6. Scan, Cleanup, and Report
+Once the files are successfully written and merged, run **Step 9.5**, then proceed to **Step 10** to perform cleanup and print a custom update report summarizing the newly added chapters, merged glossary terms, and updated indices. If the skill folder is a git repository with a remote (published via **Step 11**), offer to commit the update and push it.
+
+---
+
+## Quality Rules
+
+1. **Extract structure, not summaries** — capture named frameworks, exact formulations, anti-patterns; not chapter recaps
+2. **Preserve the author's precision** — "The 5 Whys" ≠ "ask why multiple times"; keep exact naming
+3. **Density over completeness** — a 1,000-token summary beats a 10,000-token excerpt
+4. **Practitioner voice** — write "Use X when Y", not "The book explains X"
+5. **Front-load SKILL.md** — compaction keeps the first 5,000 tokens; most important content comes first
+6. **Chapter files are on-demand** — they don't count against skill budget until loaded
+7. **Never copy raw book text** — always synthesize, summarize, extract signal
+8. **Topic index is critical** — it's how the agent navigates to the right chapter file

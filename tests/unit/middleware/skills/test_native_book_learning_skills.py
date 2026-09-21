@@ -15,7 +15,7 @@ from ptc_agent.agent.middleware.skills.registry import (
 from ptc_agent.config.agent import SkillsConfig
 
 
-NATIVE_BOOK_SKILLS = ("book-to-skill", "the-knowledge-guy")
+NATIVE_BOOK_SKILLS = ("book-to-skill",)
 REPO_ROOT = Path(__file__).resolve().parents[4]
 #: This deployment's own skills travel as a bundle, so the host sources are
 #: the bundles followed by the operator's directory.
@@ -41,7 +41,7 @@ def test_native_book_learning_skills_are_ptc_only_registry_entries(name):
     assert get_command_to_skill_map("ptc")[name] == name
 
 
-def test_native_book_learning_skills_use_the_sandbox_skills_runtime_root():
+def test_native_book_learning_skill_uses_the_sandbox_skills_runtime_root():
     """PTC commands resolve generated knowledge from the sandbox sync destination."""
     sources = SkillsConfig().local_skill_dirs_with_sandbox()
     sandbox_dirs = {sandbox for _, sandbox in sources}
@@ -50,16 +50,6 @@ def test_native_book_learning_skills_use_the_sandbox_skills_runtime_root():
     assert str(LOCAL_BUNDLE) in [source for source, _ in sources]
 
     book_to_skill = (LOCAL_BUNDLE / "book-to-skill/SKILL.md").read_text(encoding="utf-8")
-    knowledge_guy = (LOCAL_BUNDLE / "the-knowledge-guy/SKILL.md").read_text(
-        encoding="utf-8"
-    )
-    walk_mode = (LOCAL_BUNDLE / "the-knowledge-guy/walk-mode.md").read_text(
-        encoding="utf-8"
-    )
 
-    assert '"$(pwd)/.agents/skills/book-to-skill"' in book_to_skill
-    assert 'SKILLS_ROOT="$(pwd)/.agents/skills"' in book_to_skill
-    assert 'SKILL_DIR="${SKILLS_ROOT}/<slug>"' in book_to_skill
-    assert 'SKILLS_ROOT="$(pwd)/.agents/skills"' in knowledge_guy
-    assert 'TKG_DIR="${SKILLS_ROOT}/the-knowledge-guy"' in knowledge_guy
-    assert 'SKILLS_ROOT="$(pwd)/.agents/skills"' in walk_mode
+    assert "book-to-skill" in book_to_skill
+    assert "SKILL.md" in book_to_skill

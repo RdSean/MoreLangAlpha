@@ -21,7 +21,7 @@ DEFAULT_PROFILE = {
     "depth": "standard",
     "question_types": ["choice", "mixed"],
     "prompt_fragment": "",
-    "allowed_skills": ["book-to-skill", "the-knowledge-guy"],
+    "allowed_skills": ["book-to-skill"],
 }
 _SUBJECTS = {"english", "math", "chinese", "science", "other"}
 _GRADE_BANDS = {"primary", "middle", "high", "adult"}
