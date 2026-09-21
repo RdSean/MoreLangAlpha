@@ -437,6 +437,65 @@ async def test_stage_teaching_inputs_precreates_the_fixed_v2_output_directories(
 
 
 @pytest.mark.asyncio
+async def test_stage_reading_asset_inputs_uploads_only_fixed_reading_slices():
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+    markdown = (
+        "# Unit 1\n\n"
+        "### THE WORLD'S GAME\n\n"
+        "Soccer is global.\n\n"
+        "### SOCCER WITHOUT BORDERS\n\n"
+        "The game crosses borders.\n"
+    )
+    first = markdown.index("### THE WORLD'S GAME")
+    second = markdown.index("### SOCCER WITHOUT BORDERS")
+    job = {
+        "job_id": _job()["job_id"],
+        "generation_job_id": _job()["job_id"],
+        "units": [
+            {
+                "unit_id": "unit-1",
+                "position": 1,
+                "slug": "unit-1-sports",
+                "title": "Unit 1: Sports",
+            }
+        ],
+    }
+    frozen_input = {
+        "sources": [{"source_id": "source-1", "markdown": markdown}],
+    }
+    scopes = [
+        {
+            "unit_id": "unit-1",
+            "slot": "reading_a",
+            "title": "The World's Game",
+            "source_id": "source-1",
+            "line_start": 3,
+            "line_end": 5,
+            "char_start": first,
+            "char_end": second,
+        }
+    ]
+
+    manifest = await education_teaching_storage.stage_reading_asset_inputs(
+        job,
+        frozen_input,
+        scopes,
+        sandbox,
+    )
+
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+    uploaded = {
+        call.args[0]: call.args[1]
+        for call in sandbox.aupload_file_bytes.await_args_list
+    }
+    assert uploaded[
+        f"{root}inputs/readings/01-unit-1-sports/reading_a.md"
+    ].startswith(b"### THE WORLD'S GAME")
+    assert manifest["readings"][0]["slot"] == "reading_a"
+
+
+@pytest.mark.asyncio
 async def test_stage_managed_teaching_skills_stages_complete_static_builtin_skill_catalogs():
     sandbox = AsyncMock(spec=["aupload_file_bytes"])
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)

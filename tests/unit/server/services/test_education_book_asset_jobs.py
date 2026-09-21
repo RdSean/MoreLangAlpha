@@ -22,6 +22,12 @@ async def test_queue_book_assets_creates_assets_job(monkeypatch):
             "structure_id": "structure-1",
             "version_id": "version-1",
             "status": "accepted",
+            "units": [
+                {
+                    "unit_id": "unit-1",
+                    "scopes": [{"slot": "reading_a", "verified": True}],
+                }
+            ],
         }
 
     async def create_job(**kwargs):
@@ -52,6 +58,29 @@ async def test_queue_book_assets_creates_assets_job(monkeypatch):
     assert captured["scope"] == "assets"
     assert captured["structure_id"] == "structure-1"
     assert captured["knowledge_point_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_queue_book_assets_rejects_structure_without_reading_scopes(monkeypatch):
+    async def get_structure(**_kwargs):
+        return {
+            "structure_id": "structure-1",
+            "version_id": "version-1",
+            "status": "accepted",
+            "units": [{"unit_id": "unit-1", "scopes": []}],
+        }
+
+    monkeypatch.setattr(
+        education_book_asset_jobs,
+        "get_textbook_structure_for_parent",
+        get_structure,
+    )
+
+    with pytest.raises(ValueError, match="verified Reading scopes"):
+        await education_book_asset_jobs.queue_book_assets_for_parent(
+            parent_user_id="parent-1",
+            structure_id="structure-1",
+        )
 
 
 @pytest.mark.asyncio
@@ -117,7 +146,8 @@ def test_book_asset_prompt_is_separate_from_structure_and_lessons() -> None:
         "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
     )
 
-    assert "chapters_manifest.json" in prompt
+    assert "readings_manifest.json" in prompt
+    assert "inputs/readings/" in prompt
     assert "glossary.md" in prompt
     assert "不要生成 structure.json" in prompt
     assert "lesson.md" in prompt

@@ -16,6 +16,13 @@ from src.server.services.education_book_assets import (
     validate_book_asset_content,
     validate_book_asset_manifest,
 )
+from src.server.services.education_reading_assets import (
+    READING_ASSET_FORMAT,
+    build_reading_asset_inputs,
+    expected_reading_asset_files,
+    validate_reading_asset_content,
+    validate_reading_asset_manifest,
+)
 from src.server.services.education_textbook_snapshot_reads import (
     TextbookSnapshotDigestError,
     TextbookSnapshotReadError,
@@ -607,9 +614,17 @@ async def download_book_asset_outputs(
         raise TeachingPackageStorageError(
             "Managed book asset manifest is invalid"
         ) from exc
-    manifest = validate_book_asset_manifest(candidate)
+    if (
+        isinstance(candidate, Mapping)
+        and candidate.get("format") == READING_ASSET_FORMAT
+    ):
+        manifest = validate_reading_asset_manifest(candidate)
+        expected_files = expected_reading_asset_files(manifest)
+    else:
+        manifest = validate_book_asset_manifest(candidate)
+        expected_files = expected_book_asset_files(manifest)
     outputs: dict[str, bytes] = {}
-    for relative_path in expected_book_asset_files(manifest):
+    for relative_path in expected_files:
         content = await sandbox.adownload_file_bytes(
             f"{root}/outputs/{relative_path}"
         )
@@ -623,6 +638,28 @@ async def download_book_asset_outputs(
             )
         outputs[relative_path] = content
     return manifest, outputs
+
+
+async def stage_reading_asset_inputs(
+    job: Mapping[str, Any],
+    frozen_input: Mapping[str, Any],
+    scopes: list[Mapping[str, Any]],
+    sandbox: ManagedTeachingSandbox,
+) -> dict[str, Any]:
+    """Stage only the service-produced per-Reading slices for one asset job."""
+    job_id = str(job.get("generation_job_id") or job.get("job_id") or "")
+    if not job_id:
+        raise TeachingPackageStorageError("Reading asset job is unavailable")
+    built = build_reading_asset_inputs(job, frozen_input, scopes)
+    root = managed_job_root(job_id)
+    await _upload_staged_files(
+        sandbox,
+        [
+            (f"{root}/{relative_path}", content)
+            for relative_path, content in built["files"].items()
+        ],
+    )
+    return built["manifest"]
 
 
 async def stage_kp_lesson_inputs(
@@ -840,8 +877,17 @@ async def write_book_asset_bundle(
 ) -> tuple[str, dict[str, Any]]:
     """Archive optional chapter assets under the immutable structure bundle."""
     prefix = f"{structure_bundle_prefix(job)}/book-assets"
-    validated = validate_book_asset_content(manifest, outputs)
-    for entry in validated["files"]:
+    if manifest.get("format") == READING_ASSET_FORMAT:
+        validated = validate_reading_asset_content(manifest, outputs)
+        file_entries = [
+            file_entry
+            for reading in validated["readings"]
+            for file_entry in reading["files"].values()
+        ]
+    else:
+        validated = validate_book_asset_content(manifest, outputs)
+        file_entries = list(validated["files"])
+    for entry in file_entries:
         relative_path = str(entry["path"])
         await _put(
             f"{prefix}/{relative_path}",

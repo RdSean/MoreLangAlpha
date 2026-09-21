@@ -36,8 +36,8 @@ from src.server.services.education_structure_jobs import (
 from src.server.services.education_teaching_storage import (
     download_book_asset_outputs,
     hydrate_source_asset_manifests,
+    stage_reading_asset_inputs,
     stage_managed_teaching_skills,
-    stage_teaching_inputs,
     write_book_asset_bundle,
 )
 from src.server.services.runs.coordinator import RunCoordinator
@@ -55,17 +55,19 @@ def managed_book_assets_prompt(job_id: str) -> str:
     root = f"/managed/textbook-job/{UUID(job_id)}"
     return (
         "这是服务托管的教材知识包生成任务，不是与用户的对话或课程生成任务。"
-        f"任务编号为 {job_id}。读取 {root}/inputs/manifest.json、"
-        f"{root}/inputs/sources/ 和 {root}/.agents/skills/book-to-skill/，"
-        "使用 managed chapter asset mode 生成可复用的章节知识包。"
+        f"任务编号为 {job_id}。读取 {root}/inputs/readings_manifest.json、"
+        f"{root}/inputs/readings/ 和 {root}/.agents/skills/book-to-skill/，"
+        "使用 canonical book-to-skill 的 managed generate pass。"
+        "manifest 中的每个 Reading 都必须独立处理：只读取它自己的 input_path，"
+        "不得读取同书其他 Reading 的切片，也不得重新计算章节或行号边界。"
+        "为每个 Reading 生成知识稿、词表和速查表三类内容。"
         "只写以下输出："
-        f"{root}/outputs/chapters_manifest.json；"
-        f"{root}/outputs/chapters/*.md；"
-        f"{root}/outputs/glossary.md；"
-        f"{root}/outputs/patterns.md；"
-        f"{root}/outputs/cheatsheet.md；"
-        f"{root}/outputs/nutshell.md。"
-        "manifest 必须使用 langalpha-managed-book-assets/v1，并列出所有章节 Markdown 路径。"
+        f"{root}/outputs/readings_manifest.json；"
+        f"{root}/outputs/readings/<unit-slug>/<slot>/knowledge.md；"
+        f"{root}/outputs/readings/<unit-slug>/<slot>/glossary.md；"
+        f"{root}/outputs/readings/<unit-slug>/<slot>/cheatsheet.md。"
+        "输出 manifest 必须保持 langalpha-managed-reading-assets/v2，"
+        "并逐项回填每个 Reading 的三条固定 outputs 路径，不能新增、改名或遗漏。"
         "不要生成 structure.json、lesson.md、practice.json、HTML 或任何其他文件。"
         "不要访问网络、MCP、Vault、普通工作区或发布资产。"
     )
@@ -99,6 +101,14 @@ async def queue_book_assets_for_parent(
         raise LookupError("Textbook structure not found")
     if structure.get("status") not in {"accepted", "review"}:
         raise ValueError("Textbook structure is not ready for book assets")
+    if not any(
+        scope
+        for unit in structure.get("units", [])
+        if isinstance(unit, Mapping)
+        for scope in unit.get("scopes", [])
+        if isinstance(scope, Mapping) and scope.get("verified") is True
+    ):
+        raise ValueError("Textbook structure has no verified Reading scopes")
     job = await create_generation_job(
         version_id=str(structure["version_id"]),
         scope="assets",
@@ -286,12 +296,33 @@ async def launch_book_asset_generation(
         frozen_input = await hydrate_source_asset_manifests(frozen_input)
         frozen_input = dict(frozen_input)
         frozen_input["job_id"] = generation_job_id
+        structure = await get_textbook_structure_for_parent(
+            parent_user_id=parent_user_id,
+            structure_id=str(job["structure_id"]),
+        )
+        if not structure:
+            raise LookupError("Textbook structure is unavailable")
+        reading_scopes = [
+            {**scope}
+            for unit in structure.get("units", [])
+            if isinstance(unit, Mapping)
+            for scope in unit.get("scopes", [])
+            if isinstance(scope, Mapping)
+        ]
+        if not reading_scopes:
+            raise ValueError("Textbook structure has no verified Reading scopes")
+        job = {**job, "units": structure.get("units", [])}
         await stage_managed_teaching_skills(
             generation_job_id,
             session.sandbox,
             skill_names=("book-to-skill",),
         )
-        await stage_teaching_inputs(frozen_input, session.sandbox)
+        await stage_reading_asset_inputs(
+            job,
+            frozen_input,
+            reading_scopes,
+            session.sandbox,
+        )
         run_id = str(uuid4())
         prompt = managed_book_assets_prompt(generation_job_id)
         run_handle = await RunCoordinator.get_instance().start_run(

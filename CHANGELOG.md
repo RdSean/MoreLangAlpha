@@ -2,6 +2,14 @@
 
 ## 2026-09-21
 
+### 改进：按 Reading 生成教材知识资产
+
+- 章节知识包生成改为 canonical `book-to-skill` generate pass：每个 Reading 使用服务端裁剪后的独立 Markdown 输入，不再把整本书作为无边界上下文交给模型。
+- 新增 `langalpha-managed-reading-assets/v2` 输入/输出契约，为每个 Reading 固定生成 `knowledge.md`、`glossary.md` 和 `cheatsheet.md`，服务和模型之间不传递自由文件名。
+- Reading 产物按 Unit 与 Reading slot 的稳定路径归档，manifest 记录文件路径、大小和 SHA-256；下载端只接受 manifest 明确列出的文件。
+- 没有已验证 Reading scope 的结构不能启动知识包生成。
+- 验证：教材知识包与 Reading 资产聚焦测试 `37 passed`，修改文件 Ruff 通过。
+
 ### 改进：结构审阅显示 Reading 范围验证状态
 
 - 教材结构响应现在为每个 Unit 返回已持久化的 Reading A/B scope，包含标题、行号与字符区间以及 `verified` 状态。
