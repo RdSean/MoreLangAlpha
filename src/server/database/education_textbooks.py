@@ -633,10 +633,15 @@ async def get_textbook_structure_for_parent(
                        knowledge_points.summary,
                        knowledge_points.source_refs,
                        knowledge_points.confidence,
-                       knowledge_points.status
+                       knowledge_points.status,
+                       lessons.status AS lesson_status,
+                       lessons.latest_revision_id AS lesson_revision_id
                 FROM education_structure_knowledge_points AS knowledge_points
                 JOIN education_structure_units AS units
                   ON units.unit_id = knowledge_points.unit_id
+                LEFT JOIN education_kp_lessons AS lessons
+                  ON lessons.knowledge_point_id =
+                     knowledge_points.knowledge_point_id
                 WHERE units.structure_id = %s
                 ORDER BY units.position, knowledge_points.position
                 """,

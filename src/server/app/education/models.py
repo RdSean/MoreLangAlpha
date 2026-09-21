@@ -381,6 +381,8 @@ class CreateTextbookStructureRequest(BaseModel):
 class StructureKnowledgePointResponse(StructureKnowledgePointWrite):
     knowledge_point_id: UUID
     status: str
+    lesson_status: str | None = None
+    lesson_revision_id: UUID | None = None
 
 
 class StructureUnitResponse(StructureUnitWrite):

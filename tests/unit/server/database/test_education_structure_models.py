@@ -91,6 +91,8 @@ async def test_get_structure_returns_units_and_knowledge_points_for_parent(
                 "slug": "world-game",
                 "title": "世界运动",
                 "status": "review",
+                "lesson_status": "approved",
+                "lesson_revision_id": "revision-1",
             }
         ],
     ]
@@ -102,9 +104,13 @@ async def test_get_structure_returns_units_and_knowledge_points_for_parent(
 
     assert result is not None
     assert result["units"][0]["knowledge_points"][0]["knowledge_point_id"] == "kp-1"
+    assert result["units"][0]["knowledge_points"][0]["lesson_status"] == "approved"
+    assert result["units"][0]["knowledge_points"][0]["lesson_revision_id"] == "revision-1"
     structure_sql = mock_cursor.execute.call_args_list[0].args[0]
     assert "education_textbook_structures" in structure_sql
     assert "memberships.role = 'parent'" in structure_sql
+    knowledge_point_sql = mock_cursor.execute.call_args_list[2].args[0]
+    assert "LEFT JOIN education_kp_lessons AS lessons" in knowledge_point_sql
 
 
 @pytest.mark.asyncio

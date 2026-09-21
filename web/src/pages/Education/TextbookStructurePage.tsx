@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AlertTriangle, BookOpenCheck, CheckCircle2, CircleHelp, GitMerge, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
+import { AlertTriangle, BookOpenCheck, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleHelp, Clock3, FileText, GitMerge, Loader2, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/components/ui/use-toast';
+import EducationMarkdown from './components/EducationMarkdown';
 import ProcessingProfileDialog, { type ProcessingProfileValue } from './components/ProcessingProfileDialog';
 import TextbookWorkflowStepper, { type TextbookWorkflowStep } from './components/TextbookWorkflowStepper';
-import { useLatestTextbookStructure, useStructureGenerationJob, useStructureMutations } from './queries';
+import { useKnowledgePointLessonByPoint, useLatestTextbookStructure, useStructureGenerationJob, useStructureMutations } from './queries';
 import type { TextbookKnowledgePoint, TextbookStructureUnit } from './types';
 
 function messageOf(error: unknown, fallback: string) {
@@ -58,12 +59,140 @@ function cloneUnits(units: TextbookStructureUnit[]): TextbookStructureUnit[] {
   }));
 }
 
+function KnowledgePointWorkspace({
+  textbookId,
+  versionId,
+  unit,
+  point,
+  structureStatus,
+}: {
+  textbookId: string | undefined;
+  versionId: string | undefined;
+  unit: TextbookStructureUnit;
+  point: TextbookKnowledgePoint;
+  structureStatus: string;
+}) {
+  const [jobId, setJobId] = useState<string>();
+  const [autoGrading, setAutoGrading] = useState(false);
+  const lesson = useKnowledgePointLessonByPoint(point.knowledge_point_id, true);
+  const generation = useStructureGenerationJob(jobId, Boolean(jobId));
+  const mutations = useStructureMutations();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (generation.data?.status !== 'completed') return;
+    void lesson.refetch();
+  }, [generation.data?.status, lesson]);
+
+  const generate = async () => {
+    try {
+      const job = await mutations.generateLesson.mutateAsync({
+        knowledgePointId: point.knowledge_point_id,
+        autoGrading,
+      });
+      setJobId(job.generation_job_id);
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: '无法生成课程',
+        description: messageOf(error, '请稍后重试。'),
+      });
+    }
+  };
+
+  const generating = generation.data?.status === 'queued'
+    || generation.data?.status === 'preparing'
+    || generation.data?.status === 'running'
+    || generation.data?.status === 'validating';
+
+  return (
+    <section className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b px-5 py-5 lg:px-8" style={{ borderColor: 'var(--color-border-muted)' }}>
+        <div className="min-w-0">
+          <p className="font-mono text-[11px] text-muted-foreground">
+            Unit {unit.position} · {unit.title}
+          </p>
+          <h1 className="title-font mt-2 text-2xl font-semibold">{point.title}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{point.summary || '暂无知识点说明'}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {lesson.data && (
+            <span className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs" style={{ borderColor: lesson.data.status === 'approved' ? 'var(--color-success)' : 'var(--color-border-muted)', color: lesson.data.status === 'approved' ? 'var(--color-success)' : 'var(--color-text-secondary)' }}>
+              {lesson.data.status === 'approved' ? <CheckCircle2 className="size-3.5" /> : <Clock3 className="size-3.5" />}
+              {lesson.data.status === 'approved' ? '课程已通过' : '课程待审阅'}
+            </span>
+          )}
+          <Link
+            to={`/textbooks/${textbookId}/versions/${versionId}/knowledge/${point.knowledge_point_id}`}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs hover:bg-[var(--color-bg-hover)]"
+            style={{ borderColor: 'var(--color-border-muted)' }}
+          >
+            <FileText className="size-3.5" />
+            打开完整审阅页
+          </Link>
+        </div>
+      </div>
+
+      {lesson.isLoading ? (
+        <div className="flex min-h-[520px] items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          正在读取课程 Markdown…
+        </div>
+      ) : lesson.data ? (
+        <article className="mx-auto max-w-[920px] px-5 py-8 lg:px-10">
+          <EducationMarkdown content={lesson.data.content_markdown} variant="lesson" className="text-base leading-7" />
+        </article>
+      ) : (
+        <div className="flex min-h-[560px] items-center justify-center px-6 py-12">
+          <div className="max-w-md text-center">
+            <div className="mx-auto flex size-14 items-center justify-center rounded-full" style={{ backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-accent-primary)' }}>
+              <BookOpenCheck className="size-6" />
+            </div>
+            <span className="mt-4 inline-flex rounded border px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-muted-foreground" style={{ borderColor: 'var(--color-border-muted)' }}>
+              {structureStatus === 'accepted' ? 'ready' : 'structure review'}
+            </span>
+            <h2 className="title-font mt-3 text-xl font-semibold">
+              {structureStatus === 'accepted' ? '准备就绪' : '先接受教材结构'}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {structureStatus === 'accepted'
+                ? '这个知识点还没有课程 Markdown。点击下方按钮，让 book-to-skill 基于已确认的来源片段生成完整课程。'
+                : '结构仍处于审阅状态。先返回当前 Unit 编辑并接受结构，再为知识点生成课程。'}
+            </p>
+            {structureStatus === 'accepted' && (
+              <>
+                <label className="mt-5 inline-flex items-center gap-2 text-sm text-muted-foreground">
+                  <input type="checkbox" checked={autoGrading} onChange={(event) => setAutoGrading(event.target.checked)} />
+                  同时生成自动判题练习
+                </label>
+                <div className="mt-5">
+                  <Button onClick={() => void generate()} disabled={generating || mutations.generateLesson.isPending}>
+                    {generating ? <Loader2 className="mr-2 size-4 animate-spin" /> : <WandSparkles className="mr-2 size-4" />}
+                    {generating ? '正在生成课程' : '生成课程'}
+                  </Button>
+                </div>
+              </>
+            )}
+            {generation.data?.status === 'failed' && (
+              <p className="mt-4 text-sm" style={{ color: 'var(--color-loss)' }}>
+                {generation.data.error_message ?? '课程生成失败，请重试。'}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function TextbookStructurePage() {
   const { textbookId, versionId } = useParams();
   const [jobId, setJobId] = useState<string>();
   const [profileOpen, setProfileOpen] = useState(false);
   const [units, setUnits] = useState<TextbookStructureUnit[]>([]);
   const [selectedUnitId, setSelectedUnitId] = useState<string>();
+  const [selectedPointId, setSelectedPointId] = useState<string>();
+  const [expandedUnitIds, setExpandedUnitIds] = useState<Set<string>>(new Set());
   const structure = useLatestTextbookStructure(versionId, true);
   const generation = useStructureGenerationJob(jobId, Boolean(jobId));
   const mutations = useStructureMutations();
@@ -72,7 +201,13 @@ export default function TextbookStructurePage() {
   useEffect(() => {
     if (!structure.data) return;
     setUnits(cloneUnits(structure.data.units));
-    setSelectedUnitId((current) => current ?? structure.data?.units[0]?.unit_id);
+    const initialUnit = structure.data.units.find((unit) => unit.knowledge_points.length > 0)
+      ?? structure.data.units[0];
+    setSelectedUnitId((current) => current ?? initialUnit?.unit_id);
+    setSelectedPointId((current) => current ?? initialUnit?.knowledge_points[0]?.knowledge_point_id);
+    setExpandedUnitIds((current) => current.size > 0 || !initialUnit
+      ? current
+      : new Set([initialUnit.unit_id]));
     // The structure identity/status are the stable reload keys; using the whole
     // query object here would refetch-sync on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -87,6 +222,34 @@ export default function TextbookStructurePage() {
     () => units.find((unit) => unit.unit_id === selectedUnitId) ?? units[0],
     [selectedUnitId, units],
   );
+  const selectedPoint = useMemo(
+    () => units
+      .flatMap((unit) => unit.knowledge_points)
+      .find((point) => point.knowledge_point_id === selectedPointId),
+    [selectedPointId, units],
+  );
+
+  const toggleUnit = (unitId: string) => {
+    setExpandedUnitIds((current) => {
+      const next = new Set(current);
+      if (next.has(unitId)) next.delete(unitId);
+      else next.add(unitId);
+      return next;
+    });
+  };
+
+  const selectUnit = (unitId: string) => {
+    setSelectedUnitId(unitId);
+    setSelectedPointId(undefined);
+    setExpandedUnitIds((current) => current.has(unitId)
+      ? current
+      : new Set([...current, unitId]));
+  };
+
+  const selectPoint = (unitId: string, pointId: string) => {
+    setSelectedUnitId(unitId);
+    setSelectedPointId(pointId);
+  };
 
   const updateUnit = (patch: Partial<TextbookStructureUnit>) => {
     setUnits((current) => current.map((unit) => unit.unit_id === selectedUnit?.unit_id ? { ...unit, ...patch } : unit));
@@ -314,32 +477,93 @@ export default function TextbookStructurePage() {
           </div>
         </div>
       )}
-      <div className="mx-auto grid w-full max-w-[1720px] lg:grid-cols-[300px_minmax(0,1fr)_320px]">
+      <div className="mx-auto grid w-full max-w-[1720px] lg:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="border-b px-4 py-6 lg:min-h-[calc(100dvh-80px)] lg:border-b-0 lg:border-r" style={{ borderColor: 'var(--color-border-muted)' }}>
-          <h1 className="title-font text-lg font-semibold">教材结构</h1>
+          <h1 className="title-font text-lg font-semibold">知识点</h1>
           <p className="mt-1 font-mono text-xs text-muted-foreground">v{data.sequence} · {data.status}</p>
-          <nav className="mt-5 grid gap-1" aria-label="结构单元">
-            {units.map((unit) => (
-              <button
-                key={unit.unit_id}
-                type="button"
-                title={unit.title}
-                onClick={() => setSelectedUnitId(unit.unit_id)}
-                className="flex min-h-14 w-full min-w-0 flex-col justify-center overflow-hidden border-l-2 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--color-bg-hover)]"
-                style={{
-                  borderColor: unit.unit_id === selectedUnit.unit_id ? 'var(--color-accent-primary)' : 'transparent',
-                  color: 'var(--color-text-primary)',
-                  backgroundColor: unit.unit_id === selectedUnit.unit_id ? 'var(--color-bg-subtle)' : undefined,
-                }}
-              >
-                <span className="block w-full truncate whitespace-nowrap">{unit.position}. {unit.title}</span>
-                <span className="mt-1 block truncate whitespace-nowrap font-mono text-[11px] text-muted-foreground">
-                  {unit.unit_type} · {unit.knowledge_points.length} 个知识点
-                </span>
-              </button>
-            ))}
+          <nav className="mt-5 grid gap-1" aria-label="教材知识点树">
+            {units.map((unit) => {
+              const expanded = expandedUnitIds.has(unit.unit_id);
+              const unitSelected = !selectedPoint && unit.unit_id === selectedUnit.unit_id;
+              return (
+                <div key={unit.unit_id}>
+                  <div
+                    className="flex min-w-0 items-stretch rounded-md border"
+                    style={{
+                      borderColor: unitSelected ? 'var(--color-accent-primary)' : 'transparent',
+                      backgroundColor: unitSelected ? 'var(--color-bg-subtle)' : undefined,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="inline-flex w-7 shrink-0 items-center justify-center text-muted-foreground hover:bg-[var(--color-bg-hover)]"
+                      aria-label={`${expanded ? '收起' : '展开'} ${unit.title}`}
+                      onClick={() => toggleUnit(unit.unit_id)}
+                    >
+                      {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      title={unit.title}
+                      aria-label={`选择 ${unit.title}`}
+                      onClick={() => selectUnit(unit.unit_id)}
+                      className="flex min-h-11 min-w-0 flex-1 flex-col justify-center overflow-hidden px-2 py-2 text-left text-sm hover:bg-[var(--color-bg-hover)]"
+                      style={{ color: 'var(--color-text-primary)' }}
+                    >
+                      <span className="block w-full truncate whitespace-nowrap font-medium">{unit.position}. {unit.title}</span>
+                      <span className="mt-0.5 block truncate whitespace-nowrap font-mono text-[10px] text-muted-foreground">
+                        {unit.unit_type} · {unit.knowledge_points.length} 个知识点
+                      </span>
+                    </button>
+                  </div>
+                  {expanded && (
+                    <div className="ml-7 mt-0.5 grid gap-0.5 border-l pl-2" style={{ borderColor: 'var(--color-border-muted)' }}>
+                      {unit.knowledge_points.length === 0 ? (
+                        <p className="px-2 py-1.5 text-xs text-muted-foreground">无知识点</p>
+                      ) : unit.knowledge_points.map((point) => {
+                        const active = point.knowledge_point_id === selectedPointId;
+                        return (
+                          <button
+                            key={point.knowledge_point_id}
+                            type="button"
+                            title={point.title}
+                            aria-label={`选择知识点 ${point.title}`}
+                            onClick={() => selectPoint(unit.unit_id, point.knowledge_point_id)}
+                            className="flex min-h-9 w-full min-w-0 items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--color-bg-hover)]"
+                            style={{
+                              color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                              backgroundColor: active ? 'var(--color-bg-subtle)' : undefined,
+                            }}
+                          >
+                            <span className="w-4 shrink-0 text-right font-mono text-[10px] text-muted-foreground">{point.position}</span>
+                            <span className="min-w-0 flex-1 truncate">{point.title}</span>
+                            {point.lesson_status === 'approved' ? (
+                              <CheckCircle2 className="size-3.5 shrink-0" aria-label="课程已通过" style={{ color: 'var(--color-success)' }} />
+                            ) : point.lesson_revision_id ? (
+                              <Clock3 className="size-3.5 shrink-0" aria-label="课程待审阅" style={{ color: 'var(--color-warning)' }} />
+                            ) : (
+                              <Circle className="size-3 shrink-0" aria-label="课程未生成" style={{ color: 'var(--color-text-tertiary)' }} />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </nav>
         </aside>
+        {selectedPoint ? (
+          <KnowledgePointWorkspace
+            textbookId={textbookId}
+            versionId={versionId}
+            unit={selectedUnit}
+            point={selectedPoint}
+            structureStatus={data.status}
+          />
+        ) : (
+        <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_300px]">
         <section className="min-w-0 px-4 py-6 lg:px-8">
           <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-5" style={{ borderColor: 'var(--color-border-muted)' }}>
             <label className="grid min-w-[320px] flex-1 gap-1.5">
@@ -457,6 +681,8 @@ export default function TextbookStructurePage() {
             </ActionTip>
           )}
         </aside>
+        </div>
+        )}
       </div>
     </main>
     </TooltipProvider>

@@ -71,10 +71,16 @@ vi.mock('../queries', () => ({
     refetch,
   }),
   useStructureGenerationJob: () => ({ data: undefined }),
+  useKnowledgePointLessonByPoint: () => ({
+    data: null,
+    isLoading: false,
+    refetch,
+  }),
   useStructureMutations: () => ({
     create: { mutateAsync: create, isPending: false },
     save: { mutateAsync: save, isPending: false },
     accept: { mutateAsync: accept, isPending: false },
+    generateLesson: { mutateAsync: vi.fn().mockResolvedValue({ generation_job_id: 'lesson-1' }), isPending: false },
   }),
 }));
 
@@ -99,9 +105,10 @@ describe('TextbookStructurePage', () => {
   it('renders Unit and knowledge-point review tree', () => {
     renderPage();
 
-    expect(screen.getByDisplayValue('Unit 1: Sports')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('世界运动')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('足球之爱')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择 Unit 1: Sports' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择知识点 世界运动' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择知识点 足球之爱' })).toBeInTheDocument();
+    expect(screen.getByText('先接受教材结构')).toBeInTheDocument();
     expect(screen.getByTestId('structure-warning-summary')).toHaveTextContent(
       '部分引用暂时无法定位到解析 Markdown',
     );
@@ -112,16 +119,19 @@ describe('TextbookStructurePage', () => {
     const user = userEvent.setup();
     let view = renderPage();
 
+    await user.click(screen.getByRole('button', { name: '选择 Unit 1: Sports' }));
     await user.click(screen.getByRole('button', { name: '添加知识点' }));
     expect(screen.getByDisplayValue('新知识点')).toBeInTheDocument();
 
     view.unmount();
     view = renderPage();
+    await user.click(screen.getByRole('button', { name: '选择 Unit 1: Sports' }));
     await user.click(screen.getByRole('button', { name: '拆分 世界运动' }));
     expect(screen.getByDisplayValue('世界运动（拆分）')).toBeInTheDocument();
 
     view.unmount();
     view = renderPage();
+    await user.click(screen.getByRole('button', { name: '选择 Unit 1: Sports' }));
     await user.click(screen.getByRole('button', { name: '合并 足球之爱' }));
     expect(screen.getByDisplayValue('世界运动 / 足球之爱')).toBeInTheDocument();
 
@@ -133,6 +143,7 @@ describe('TextbookStructurePage', () => {
     const user = userEvent.setup();
     renderPage();
 
+    await user.click(screen.getByRole('button', { name: '选择 Unit 1: Sports' }));
     await user.hover(screen.getByRole('button', { name: '拆分 世界运动' }));
 
     expect(await screen.findAllByText(
@@ -143,6 +154,7 @@ describe('TextbookStructurePage', () => {
   it('saves edits and accepts the structure', async () => {
     const user = userEvent.setup();
     renderPage();
+    await user.click(screen.getByRole('button', { name: '选择 Unit 1: Sports' }));
     const title = screen.getByDisplayValue('世界运动');
     fireEvent.change(title, { target: { value: '世界运动（修订）' } });
 

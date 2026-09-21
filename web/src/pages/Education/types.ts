@@ -175,6 +175,8 @@ export interface TextbookKnowledgePoint {
   source_refs: StructureSourceRef[];
   confidence: number;
   status: 'review' | 'accepted' | 'blocked';
+  lesson_status?: 'review' | 'approved' | 'blocked' | null;
+  lesson_revision_id?: string | null;
 }
 
 export interface TextbookStructureUnit {
