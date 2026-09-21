@@ -31,6 +31,7 @@ from src.server.services.education_lesson_validation import (
     KnowledgePointLessonValidationError,
     validate_kp_lesson_outputs,
 )
+from src.server.services.education_source_refs import resolve_quote_range
 from src.server.services.education_processing_profiles import (
     processing_profile_prompt,
 )
@@ -58,6 +59,9 @@ from src.server.utils.error_sanitization import sanitize_error_text
 
 
 logger = logging.getLogger(__name__)
+
+_LESSON_EXCERPT_MIN_CHARS = 3_000
+_LESSON_EXCERPT_PADDING_CHARS = 1_200
 _MANAGED_KIND = "education_lesson"
 _PROFILE_VERSION = "kp-lesson-v1"
 MAX_LESSON_GENERATION_ATTEMPTS = 3
@@ -129,8 +133,14 @@ def managed_lesson_prompt(job: Mapping[str, Any]) -> str:
 def build_lesson_source_context(
     job: Mapping[str, Any],
     frozen_input: Mapping[str, Any],
-) -> str:
-    """Slice only the target knowledge point's referenced source ranges."""
+) -> tuple[str, list[str]]:
+    """Slice the target knowledge point's referenced sources.
+
+    Returns the assembled excerpt plus warnings. A knowledge point whose
+    source offsets could not be resolved must not fail the whole lesson job:
+    the quote can still be located approximately, and as a last resort the
+    source document's leading section is used with a warning.
+    """
     raw_sources = frozen_input.get("sources")
     if not isinstance(raw_sources, list):
         raw_sources = frozen_input.get("chapters")
@@ -147,6 +157,7 @@ def build_lesson_source_context(
     if not isinstance(source_refs, list) or not source_refs:
         raise ValueError("Knowledge-point lesson source refs are unavailable")
     excerpts: list[str] = []
+    warnings: list[str] = []
     for reference in source_refs:
         if not isinstance(reference, Mapping):
             raise ValueError("Knowledge-point lesson source ref is invalid")
@@ -157,19 +168,33 @@ def build_lesson_source_context(
         markdown = source.get("markdown")
         start = reference.get("start")
         end = reference.get("end")
+        if not isinstance(markdown, str) or not markdown.strip():
+            raise ValueError("Knowledge-point lesson source range is invalid")
         if (
-            not isinstance(markdown, str)
-            or not isinstance(start, int)
+            not isinstance(start, int)
             or not isinstance(end, int)
             or start < 0
             or end <= start
             or end > len(markdown)
         ):
-            raise ValueError("Knowledge-point lesson source range is invalid")
+            resolved = resolve_quote_range(
+                markdown,
+                str(reference.get("quote") or ""),
+                source_id=source_id,
+            )
+            start = resolved["start"]
+            end = resolved["end"]
+            warnings.append(f"source_ref_{resolved['resolution_status']}")
+        # A located quote can be a single sentence; give the lesson writer a
+        # wider window so it has enough surrounding material to teach from.
+        if end - start < _LESSON_EXCERPT_MIN_CHARS:
+            padding = _LESSON_EXCERPT_PADDING_CHARS
+            start = max(0, start - padding)
+            end = min(len(markdown), end + padding)
         excerpts.append(
             f"## {source_id} [{start}:{end}]\n{markdown[start:end].strip()}"
         )
-    return "\n\n".join(excerpts)
+    return "\n\n".join(excerpts), warnings
 
 
 async def queue_kp_lesson_generation_for_parent(
@@ -482,6 +507,12 @@ async def launch_kp_lesson_generation(
             parent_user_id=parent_user_id
         )
     except BaseException:
+        # The user-visible error is intentionally generic, so keep the real
+        # staging failure in the server log for diagnosis.
+        logger.exception(
+            "Knowledge-point lesson staging failed",
+            extra={"generation_job_id": generation_job_id},
+        )
         await _fail_lesson_attempt(
             job=job,
             attempt_id=attempt_id,
@@ -508,7 +539,17 @@ async def launch_kp_lesson_generation(
         if not frozen_input:
             raise LookupError("Knowledge-point lesson input is unavailable")
         frozen_input = await hydrate_source_asset_manifests(frozen_input)
-        source_context = build_lesson_source_context(job, frozen_input)
+        source_context, source_warnings = build_lesson_source_context(
+            job, frozen_input
+        )
+        if source_warnings:
+            logger.warning(
+                "Knowledge-point lesson used fallback source ranges",
+                extra={
+                    "generation_job_id": generation_job_id,
+                    "warnings": source_warnings,
+                },
+            )
         return await _dispatch_kp_lesson_root_run(
             job=job,
             source_context=source_context,

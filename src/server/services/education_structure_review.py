@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-import re
 from typing import Any
 
 from src.server.database.education_textbooks import (
@@ -27,6 +26,7 @@ from src.server.services.education_structure_validation import (
 )
 from src.server.services.education_source_refs import (
     SourceReferenceResolutionError,
+    locate_quote_approximately,
     resolve_source_ref,
 )
 from src.server.services.education_textbooks import (
@@ -38,28 +38,9 @@ from src.server.services.education_textbooks import (
 )
 
 
-_WHITESPACE = re.compile(r"\s+")
-
-
 def _locate_normalized_quote(markdown: str, quote: str) -> tuple[int, int] | None:
-    """Locate a quote despite Markdown markers and PDF line wrapping.
-
-    Offsets are approximate: the quote's leading words are matched with
-    whitespace tolerated, then a window the size of the quote is returned.
-    """
-    words = [word for word in _WHITESPACE.split(quote) if word]
-    if not words:
-        return None
-    for length in (6, 5, 4, 3, 2, 1):
-        prefix = " ".join(words[:length])
-        pattern = re.compile(
-            r"\s+".join(re.escape(word) for word in prefix.split()),
-            re.IGNORECASE,
-        )
-        match = pattern.search(markdown)
-        if match:
-            return match.start(), min(len(markdown), match.start() + len(quote) + 8)
-    return None
+    """Backwards-compatible wrapper around the shared approximate locator."""
+    return locate_quote_approximately(markdown, quote)
 
 
 async def queue_structure_for_parent(

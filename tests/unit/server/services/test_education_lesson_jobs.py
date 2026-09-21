@@ -19,7 +19,11 @@ FROZEN_INPUT = {
             "title": "Reading Explorer",
             "content_sha256": "a" * 64,
             "path": "sources/01-reading-explorer.md",
-            "markdown": "# Unit 1\n\nThe first paragraph.\n\nThe second paragraph.\n",
+            "markdown": (
+                "# Unit 1\n\nThe first paragraph.\n\n"
+                + ("filler sentence. " * 400)
+                + "\n\nThe second paragraph.\n"
+            ),
         }
     ],
 }
@@ -62,17 +66,81 @@ def test_managed_lesson_prompt_contains_only_target_contract() -> None:
 
 
 def test_build_lesson_source_context_uses_only_target_offsets() -> None:
-    context = education_lesson_jobs.build_lesson_source_context(
+    context, warnings = education_lesson_jobs.build_lesson_source_context(
         LESSON_JOB,
         FROZEN_INPUT,
     )
 
-    assert context == (
-        "## source-1 [0:30]\n"
-        "# Unit 1\n\n"
-        "The first paragraph."
-    )
+    assert warnings == []
+    assert context.startswith("## source-1 [0:1230]\n# Unit 1")
+    assert "The first paragraph." in context
     assert "second paragraph" not in context
+
+
+def test_build_lesson_source_context_resolves_quote_when_offsets_are_missing() -> None:
+    markdown = FROZEN_INPUT["sources"][0]["markdown"]
+    quote = "The second paragraph."
+    target_start = markdown.index(quote)
+    job = {
+        **LESSON_JOB,
+        "knowledge_point_source_refs": [
+            {
+                "source_id": "source-1",
+                "start": None,
+                "end": None,
+                "quote": quote,
+            }
+        ],
+    }
+
+    context, warnings = education_lesson_jobs.build_lesson_source_context(
+        job,
+        FROZEN_INPUT,
+    )
+
+    assert warnings == ["source_ref_resolved"]
+    assert quote in context
+    assert context.startswith(f"## source-1 [{max(0, target_start - 1200)}:")
+
+
+def test_build_lesson_source_context_approximates_wrapped_quote() -> None:
+    job = {
+        **LESSON_JOB,
+        "knowledge_point_source_refs": [
+            {
+                "source_id": "source-1",
+                "start": None,
+                "end": None,
+                "quote": "The first\n**paragraph**.",
+            }
+        ],
+    }
+
+    context, warnings = education_lesson_jobs.build_lesson_source_context(
+        job,
+        FROZEN_INPUT,
+    )
+
+    assert warnings == ["source_ref_approximate"]
+    assert "The first" in context
+
+
+def test_build_lesson_source_context_uses_document_prefix_as_last_resort() -> None:
+    job = {
+        **LESSON_JOB,
+        "knowledge_point_source_refs": [
+            {"source_id": "source-1", "start": None, "end": None, "quote": ""}
+        ],
+    }
+
+    context, warnings = education_lesson_jobs.build_lesson_source_context(
+        job,
+        FROZEN_INPUT,
+    )
+
+    assert warnings == ["source_ref_document_prefix"]
+    assert context.startswith("## source-1 [0:")
+    assert "# Unit 1" in context
 
 
 @pytest.mark.asyncio
