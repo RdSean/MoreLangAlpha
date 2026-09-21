@@ -734,6 +734,26 @@ async def get_textbook_structure_for_parent(
             units = [dict(row) for row in await cur.fetchall()]
             await cur.execute(
                 """
+                SELECT scopes.unit_id, scopes.slot, scopes.title, scopes.summary,
+                       scopes.reading_skill, scopes.vocabulary_building,
+                       scopes.critical_thinking, scopes.source_id,
+                       scopes.line_start, scopes.line_end,
+                       scopes.char_start, scopes.char_end
+                FROM education_textbook_scopes AS scopes
+                JOIN education_structure_units AS units
+                  ON units.unit_id = scopes.unit_id
+                WHERE units.structure_id = %s
+                ORDER BY units.position, scopes.line_start
+                """,
+                (structure_id,),
+            )
+            scopes = [dict(row) for row in await cur.fetchall()]
+            scopes_by_unit: dict[str, list[dict[str, Any]]] = {}
+            for scope in scopes:
+                scope["verified"] = True
+                scopes_by_unit.setdefault(str(scope["unit_id"]), []).append(scope)
+            await cur.execute(
+                """
                 SELECT knowledge_points.knowledge_point_id,
                        knowledge_points.unit_id,
                        knowledge_points.position,
@@ -763,6 +783,7 @@ async def get_textbook_structure_for_parent(
                     str(knowledge_point["unit_id"]), []
                 ).append(knowledge_point)
             for unit in units:
+                unit["scopes"] = scopes_by_unit.get(str(unit["unit_id"]), [])
                 unit["knowledge_points"] = by_unit.get(str(unit["unit_id"]), [])
             result["units"] = units
             await cur.execute(
@@ -1175,6 +1196,31 @@ async def replace_structure_contents(
                     if row.get("knowledge_point_id") is not None
                     and row.get("knowledge_point_slug") is not None
                 }
+                preserved_scopes: dict[str, list[dict[str, Any]]] = {}
+                if scopes is None:
+                    await cur.execute(
+                        """
+                        SELECT scopes.unit_id, scopes.slot, scopes.title,
+                               scopes.summary, scopes.reading_skill,
+                               scopes.vocabulary_building,
+                               scopes.critical_thinking, scopes.source_id,
+                               scopes.line_start, scopes.line_end,
+                               scopes.char_start, scopes.char_end
+                        FROM education_textbook_scopes AS scopes
+                        JOIN education_structure_units AS units
+                          ON units.unit_id = scopes.unit_id
+                        WHERE units.structure_id = %s
+                        ORDER BY units.position, scopes.line_start
+                        """,
+                        (structure_id,),
+                    )
+                    for row in await cur.fetchall():
+                        scope = dict(row)
+                        if "slot" not in scope or "unit_id" not in scope:
+                            continue
+                        preserved_scopes.setdefault(
+                            str(scope["unit_id"]), []
+                        ).append(scope)
                 await cur.execute(
                     """
                     DELETE FROM education_structure_knowledge_points
@@ -1267,39 +1313,45 @@ async def replace_structure_contents(
                             }
                         )
                     stored_units.append(stored_unit)
+                    unit_scopes: list[Mapping[str, Any]]
                     if scopes is not None:
-                        for scope in scopes:
-                            if scope.get("unit_index") != unit_index:
-                                continue
-                            await cur.execute(
-                                """
-                                INSERT INTO education_textbook_scopes (
-                                    scope_id, structure_id, unit_id, slot, title,
-                                    summary, reading_skill, vocabulary_building,
-                                    critical_thinking, source_id, line_start,
-                                    line_end, char_start, char_end
-                                ) VALUES (
-                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                    %s, %s, %s, %s
-                                )
-                                """,
-                                (
-                                    str(uuid4()),
-                                    structure_id,
-                                    unit_id,
-                                    scope["slot"],
-                                    scope["title"],
-                                    scope.get("summary", ""),
-                                    scope.get("reading_skill", ""),
-                                    scope.get("vocabulary_building", ""),
-                                    scope.get("critical_thinking", ""),
-                                    scope.get("source_id", ""),
-                                    scope["line_start"],
-                                    scope["line_end"],
-                                    scope["char_start"],
-                                    scope["char_end"],
-                                ),
+                        unit_scopes = [
+                            scope
+                            for scope in scopes
+                            if scope.get("unit_index") == unit_index
+                        ]
+                    else:
+                        unit_scopes = preserved_scopes.get(unit_id, [])
+                    for scope in unit_scopes:
+                        await cur.execute(
+                            """
+                            INSERT INTO education_textbook_scopes (
+                                scope_id, structure_id, unit_id, slot, title,
+                                summary, reading_skill, vocabulary_building,
+                                critical_thinking, source_id, line_start,
+                                line_end, char_start, char_end
+                            ) VALUES (
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s
                             )
+                            """,
+                            (
+                                str(uuid4()),
+                                structure_id,
+                                unit_id,
+                                scope["slot"],
+                                scope["title"],
+                                scope.get("summary", ""),
+                                scope.get("reading_skill", ""),
+                                scope.get("vocabulary_building", ""),
+                                scope.get("critical_thinking", ""),
+                                scope.get("source_id", ""),
+                                scope["line_start"],
+                                scope["line_end"],
+                                scope["char_start"],
+                                scope["char_end"],
+                            ),
+                        )
     return stored_units
 
 

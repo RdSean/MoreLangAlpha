@@ -141,6 +141,22 @@ async def test_get_structure_returns_units_and_knowledge_points_for_parent(
         ],
         [
             {
+                "unit_id": "unit-1",
+                "slot": "reading_a",
+                "title": "The World's Game",
+                "summary": "Reading summary",
+                "reading_skill": "Analyzing Infographics",
+                "vocabulary_building": "Prefix uni-",
+                "critical_thinking": "Evaluating Evidence",
+                "source_id": "source-1",
+                "line_start": 10,
+                "line_end": 40,
+                "char_start": 100,
+                "char_end": 900,
+            }
+        ],
+        [
+            {
                 "knowledge_point_id": "kp-1",
                 "unit_id": "unit-1",
                 "position": 1,
@@ -162,10 +178,31 @@ async def test_get_structure_returns_units_and_knowledge_points_for_parent(
     assert result["units"][0]["knowledge_points"][0]["knowledge_point_id"] == "kp-1"
     assert result["units"][0]["knowledge_points"][0]["lesson_status"] == "approved"
     assert result["units"][0]["knowledge_points"][0]["lesson_revision_id"] == "revision-1"
+    assert result["units"][0]["scopes"] == [
+        {
+            "unit_id": "unit-1",
+            "slot": "reading_a",
+            "title": "The World's Game",
+            "summary": "Reading summary",
+            "reading_skill": "Analyzing Infographics",
+            "vocabulary_building": "Prefix uni-",
+            "critical_thinking": "Evaluating Evidence",
+            "source_id": "source-1",
+            "line_start": 10,
+            "line_end": 40,
+            "char_start": 100,
+            "char_end": 900,
+            "verified": True,
+        }
+    ]
     structure_sql = mock_cursor.execute.call_args_list[0].args[0]
     assert "education_textbook_structures" in structure_sql
     assert "memberships.role = 'parent'" in structure_sql
-    knowledge_point_sql = mock_cursor.execute.call_args_list[2].args[0]
+    knowledge_point_sql = next(
+        call.args[0]
+        for call in mock_cursor.execute.call_args_list
+        if "LEFT JOIN education_kp_lessons AS lessons" in call.args[0]
+    )
     assert "LEFT JOIN education_kp_lessons AS lessons" in knowledge_point_sql
 
 
@@ -324,6 +361,72 @@ async def test_replace_structure_contents_preserves_ids_for_matching_slugs(
 
     assert result[0]["unit_id"] == "existing-unit"
     assert result[0]["knowledge_points"][0]["knowledge_point_id"] == "existing-kp"
+
+
+@pytest.mark.asyncio
+async def test_replace_structure_contents_preserves_existing_reading_scopes(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"structure_id": "structure-1"},
+        {"unit_id": "unit-1"},
+    ]
+    mock_cursor.fetchall.side_effect = [
+        [
+            {
+                "unit_id": "unit-1",
+                "unit_slug": "unit-1",
+                "knowledge_point_id": None,
+                "knowledge_point_slug": None,
+            }
+        ],
+        [
+            {
+                "unit_id": "unit-1",
+                "slot": "reading_a",
+                "title": "The World's Game",
+                "summary": "Reading summary",
+                "reading_skill": "Analyzing Infographics",
+                "vocabulary_building": "Prefix uni-",
+                "critical_thinking": "Evaluating Evidence",
+                "source_id": "source-1",
+                "line_start": 10,
+                "line_end": 40,
+                "char_start": 100,
+                "char_end": 900,
+            }
+        ],
+    ]
+
+    await education_textbooks.replace_structure_contents(
+        structure_id="structure-1",
+        units=[
+            {
+                "position": 1,
+                "slug": "unit-1",
+                "title": "Unit 1",
+                "summary": "",
+                "unit_type": "teaching",
+                "source_refs": [],
+                "confidence": 1.0,
+                "status": "review",
+                "knowledge_points": [],
+            }
+        ],
+    )
+
+    scope_insert = next(
+        call
+        for call in mock_cursor.execute.call_args_list
+        if "INSERT INTO education_textbook_scopes" in call.args[0]
+    )
+    assert scope_insert.args[1][2] == "unit-1"
+    assert scope_insert.args[1][3] == "reading_a"
 
 
 @pytest.mark.asyncio

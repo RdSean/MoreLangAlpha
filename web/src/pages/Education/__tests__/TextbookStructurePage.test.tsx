@@ -50,6 +50,23 @@ vi.mock('../queries', () => ({
           confidence: 0.96,
           status: 'review',
           source_refs: [{ source_id: 'source-1', start: 0, end: 50, quote: 'Unit 1' }],
+          scopes: [
+            {
+              scope_id: 'scope-1',
+              slot: 'reading_a',
+              title: 'The World’s Game',
+              summary: '',
+              reading_skill: '',
+              vocabulary_building: '',
+              critical_thinking: '',
+              source_id: 'source-1',
+              line_start: 10,
+              line_end: 40,
+              char_start: 100,
+              char_end: 900,
+              verified: false,
+            },
+          ],
           knowledge_points: [
             {
               knowledge_point_id: 'kp-1',
@@ -188,6 +205,13 @@ describe('TextbookStructurePage', () => {
     expect(await screen.findByText('Reading Explorer 3')).toBeInTheDocument();
     expect(screen.getAllByText('Unit 1').length).toBeGreaterThan(0);
     expect(screen.getByText(/足球的历史与流行原因/)).toBeInTheDocument();
+  });
+
+  it('flags a reading without a verified scope', () => {
+    renderPage();
+
+    expect(screen.getByTestId('scope-warning')).toHaveTextContent('范围待确认');
+    expect(screen.getByTestId('scope-warning')).toHaveTextContent('The World’s Game');
   });
 
   it('shows a processing timeline while a structure job is active', () => {

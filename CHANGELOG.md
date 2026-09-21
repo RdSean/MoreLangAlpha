@@ -2,6 +2,13 @@
 
 ## 2026-09-21
 
+### 改进：结构审阅显示 Reading 范围验证状态
+
+- 教材结构响应现在为每个 Unit 返回已持久化的 Reading A/B scope，包含标题、行号与字符区间以及 `verified` 状态。
+- 结构审阅页新增“范围待确认”提示；Unit 没有有效 scope 或 scope 未通过验证时，知识点课程生成按钮会锁定，避免再次基于无依据范围生成课程。
+- 人工编辑并保存结构时会保留匹配 Unit 的既有 Reading scope，不再因 Unit 重建而级联删除权威范围。
+- 验证：结构数据库与审阅服务测试 `24 passed`，结构页 Vitest `9 passed`，`pnpm typecheck` 通过。
+
 ### 改进：教材结构审阅进度与原文依据
 
 - 结构生成改为原子去重：内容版本行锁加事务级 advisory lock，同一版本存在 queued/running 任务时直接复用，重复点击不会再创建并行的 sandbox 任务。

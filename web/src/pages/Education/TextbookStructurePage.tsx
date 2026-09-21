@@ -97,6 +97,7 @@ function HoverScrollText({ text, className = '' }: { text: string; className?: s
 function cloneUnits(units: TextbookStructureUnit[]): TextbookStructureUnit[] {
   return units.map((unit) => ({
     ...unit,
+    scopes: (unit.scopes ?? []).map((scope) => ({ ...scope })),
     source_refs: [...unit.source_refs],
     knowledge_points: unit.knowledge_points.map((point) => ({
       ...point,
@@ -204,6 +205,9 @@ function KnowledgePointWorkspace({
   const [activeTab, setActiveTab] = useState<'lesson' | 'source'>('lesson');
   const [tabTouched, setTabTouched] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const scopes = unit.scopes ?? [];
+  const unverifiedScopes = scopes.filter((scope) => !scope.verified);
+  const scopeReady = scopes.length > 0 && unverifiedScopes.length === 0;
   const lesson = useKnowledgePointLessonByPoint(point.knowledge_point_id, true);
   const sourcePreview = useKnowledgePointSourcePreview(point.knowledge_point_id, true);
   const lessonGeneration = useLessonGenerationStatus(point.knowledge_point_id, true);
@@ -217,6 +221,7 @@ function KnowledgePointWorkspace({
   }, [generation.data?.status, lesson]);
 
   const generate = async () => {
+    if (!scopeReady) return;
     setRegenerating(true);
     try {
       const job = await mutations.generateLesson.mutateAsync({
@@ -377,6 +382,25 @@ function KnowledgePointWorkspace({
         </div>
       )}
 
+      {!scopeReady && (
+        <div
+          className="flex flex-wrap items-center gap-2 border-b px-5 py-3 text-xs lg:px-8"
+          data-testid="scope-warning"
+          style={{
+            borderColor: 'var(--color-border-muted)',
+            background: 'var(--color-warning-soft)',
+          }}
+        >
+          <AlertTriangle className="size-4 shrink-0" />
+          <span className="font-medium">范围待确认</span>
+          <span className="text-muted-foreground">
+            {scopes.length === 0
+              ? '这个 Unit 没有可验证的 Reading 范围，暂不能生成课程。'
+              : `${unverifiedScopes.map((scope) => scope.title || scope.slot).join('、')} 的范围未通过验证，暂不能生成课程。`}
+          </span>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3 lg:px-8" style={{ borderColor: 'var(--color-border-muted)' }}>
         <div className="textbook-structure-tabs" role="tablist" aria-label="知识点内容视图">
           <button
@@ -450,9 +474,9 @@ function KnowledgePointWorkspace({
                   同时生成自动判题练习
                 </label>
                 <div className="mt-5">
-                  <Button onClick={() => void generate()} disabled={generationInFlight || mutations.generateLesson.isPending}>
+                  <Button onClick={() => void generate()} disabled={!scopeReady || generationInFlight || mutations.generateLesson.isPending}>
                     {generationInFlight ? <Loader2 className="mr-2 size-4 animate-spin" /> : <WandSparkles className="mr-2 size-4" />}
-                    {generationInFlight ? '正在生成课程' : '生成课程'}
+                    {generationInFlight ? '正在生成课程' : scopeReady ? '生成课程' : '范围待确认'}
                   </Button>
                 </div>
               </>

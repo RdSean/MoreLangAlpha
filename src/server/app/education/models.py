@@ -341,6 +341,22 @@ class StructureKnowledgePointWrite(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
+class StructureScopeResponse(BaseModel):
+    unit_id: UUID
+    slot: Literal["reading_a", "reading_b"]
+    title: str
+    summary: str = ""
+    reading_skill: str = ""
+    vocabulary_building: str = ""
+    critical_thinking: str = ""
+    source_id: str
+    line_start: int
+    line_end: int
+    char_start: int
+    char_end: int
+    verified: bool
+
+
 class StructureUnitWrite(BaseModel):
     position: int = Field(gt=0)
     slug: str = Field(min_length=1, max_length=255)
@@ -388,6 +404,7 @@ class StructureKnowledgePointResponse(StructureKnowledgePointWrite):
 class StructureUnitResponse(StructureUnitWrite):
     unit_id: UUID
     status: str
+    scopes: list[StructureScopeResponse] = Field(default_factory=list)
     knowledge_points: list[StructureKnowledgePointResponse]
 
 

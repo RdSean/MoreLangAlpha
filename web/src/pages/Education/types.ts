@@ -179,6 +179,21 @@ export interface TextbookKnowledgePoint {
   lesson_revision_id?: string | null;
 }
 
+export interface TextbookStructureScope {
+  slot: 'reading_a' | 'reading_b';
+  title: string;
+  summary: string;
+  reading_skill: string;
+  vocabulary_building: string;
+  critical_thinking: string;
+  source_id: string;
+  line_start: number;
+  line_end: number;
+  char_start: number;
+  char_end: number;
+  verified: boolean;
+}
+
 export interface TextbookStructureUnit {
   unit_id: string;
   position: number;
@@ -189,6 +204,7 @@ export interface TextbookStructureUnit {
   source_refs: StructureSourceRef[];
   confidence: number;
   status: 'review' | 'accepted' | 'blocked';
+  scopes: TextbookStructureScope[];
   knowledge_points: TextbookKnowledgePoint[];
 }
 
