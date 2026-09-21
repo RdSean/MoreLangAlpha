@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import EducationMarkdown from './components/EducationMarkdown';
-import { useKnowledgePointLessonByPoint, useStructureGenerationJob, useStructureMutations } from './queries';
+import { useKnowledgePointLessonByPoint, useLatestTextbookStructure, useStructureGenerationJob, useStructureMutations } from './queries';
 
 function messageOf(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -17,9 +17,11 @@ export default function KnowledgePointLessonReviewPage() {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const lesson = useKnowledgePointLessonByPoint(knowledgePointId, true);
+  const structure = useLatestTextbookStructure(versionId, true);
   const generation = useStructureGenerationJob(jobId, Boolean(jobId));
   const mutations = useStructureMutations();
   const { toast } = useToast();
+  const structureAccepted = structure.data?.status === 'accepted';
 
   useEffect(() => {
     if (!lesson.data) return;
@@ -77,7 +79,30 @@ export default function KnowledgePointLessonReviewPage() {
     return <main className="h-full overflow-y-auto bg-canvas p-8 text-sm text-muted-foreground">正在加载知识点课程…</main>;
   }
 
+  if (structure.isPending) {
+    return <main className="h-full overflow-y-auto bg-canvas p-8 text-sm text-muted-foreground">正在确认教材结构状态…</main>;
+  }
+
   if (!lesson.data) {
+    if (!structureAccepted) {
+      return (
+        <main className="h-full overflow-y-auto bg-canvas" data-testid="knowledge-point-lesson-review">
+          <div className="mx-auto max-w-3xl px-6 py-12">
+            <Link to={`/textbooks/${textbookId}/versions/${versionId}/structure`} className="text-sm text-muted-foreground">返回结构审阅</Link>
+            <h1 className="title-font mt-6 text-2xl font-semibold">先接受教材结构，再生成课程</h1>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              当前结构状态是 {structure.data?.status ?? '未加载'}。知识点课程只能在整份结构被接受后生成，否则生成请求会被服务端拒绝。
+            </p>
+            <Link
+              to={`/textbooks/${textbookId}/versions/${versionId}/structure`}
+              className="mt-6 inline-flex min-h-9 items-center justify-center rounded-md bg-[var(--color-accent-primary)] px-4 text-sm text-white"
+            >
+              返回结构审阅并接受结构
+            </Link>
+          </div>
+        </main>
+      );
+    }
     return (
       <main className="h-full overflow-y-auto bg-canvas" data-testid="knowledge-point-lesson-review">
         <div className="mx-auto max-w-3xl px-6 py-12">

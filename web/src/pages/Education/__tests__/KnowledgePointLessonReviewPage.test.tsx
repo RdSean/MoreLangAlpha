@@ -10,6 +10,7 @@ const approveLesson = vi.fn().mockResolvedValue({});
 const publish = vi.fn().mockResolvedValue({ publication_id: 'publication-1' });
 const refetch = vi.fn().mockResolvedValue({});
 let lessonData: Record<string, unknown> | null = null;
+let structureStatus = 'accepted';
 
 vi.mock('../components/EducationMarkdown', () => ({
   default: ({ content }: { content: string }) => <div data-testid="education-markdown">{content}</div>,
@@ -19,6 +20,12 @@ vi.mock('../queries', () => ({
   useKnowledgePointLessonByPoint: () => ({
     data: lessonData,
     isLoading: false,
+    refetch,
+  }),
+  useLatestTextbookStructure: () => ({
+    data: { structure_id: 'structure-1', status: structureStatus },
+    isLoading: false,
+    isPending: false,
     refetch,
   }),
   useStructureGenerationJob: () => ({ data: undefined }),
@@ -47,6 +54,7 @@ describe('KnowledgePointLessonReviewPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     lessonData = null;
+    structureStatus = 'accepted';
   });
 
   it('generates a new lesson with the auto-grading option', async () => {
@@ -60,6 +68,14 @@ describe('KnowledgePointLessonReviewPage', () => {
       knowledgePointId: 'kp-1',
       autoGrading: true,
     }));
+  });
+
+  it('blocks lesson generation until the structure is accepted', () => {
+    structureStatus = 'review';
+    renderPage();
+
+    expect(screen.getByText('先接受教材结构，再生成课程')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '生成课程' })).not.toBeInTheDocument();
   });
 
   it('renders Markdown, saves revisions, approves, and publishes', async () => {
