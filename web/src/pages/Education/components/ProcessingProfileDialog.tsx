@@ -27,6 +27,25 @@ export default function ProcessingProfileDialog({
   const [depth, setDepth] = useState<ProcessingProfileValue['depth']>('standard');
   const [questionTypes, setQuestionTypes] = useState<ProcessingProfileValue['question_types']>(['choice', 'mixed']);
   const [promptFragment, setPromptFragment] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const confirm = async () => {
+    if (submitting || questionTypes.length === 0) return;
+    setSubmitting(true);
+    try {
+      await onConfirm({
+        subject,
+        grade_band: gradeBand,
+        language,
+        depth,
+        question_types: questionTypes,
+        prompt_fragment: promptFragment,
+        allowed_skills: [],
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const toggleQuestionType = (kind: ProcessingProfileValue['question_types'][number]) => {
     setQuestionTypes((current) => current.includes(kind) ? current.filter((item) => item !== kind) : [...current, kind]);
@@ -45,7 +64,7 @@ export default function ProcessingProfileDialog({
           </div>
           <fieldset><legend className="text-sm font-medium">题型偏好</legend><div className="mt-2 flex flex-wrap gap-3 text-sm">{([['choice', '选择'], ['fill', '填空'], ['short_answer', '问答'], ['mixed', '混合']] as const).map(([value, label]) => <label key={value} className="flex items-center gap-2"><input type="checkbox" checked={questionTypes.includes(value)} onChange={() => toggleQuestionType(value)} />{label}</label>)}</div></fieldset>
           <label className="grid gap-1.5 text-sm">补充要求<textarea value={promptFragment} onChange={(event) => setPromptFragment(event.target.value)} maxLength={2000} className="min-h-24 border bg-background p-3" placeholder="例如：重点训练阅读策略，解释尽量简洁" /></label>
-          <DialogFooter><Button onClick={() => void onConfirm({ subject, grade_band: gradeBand, language, depth, question_types: questionTypes, prompt_fragment: promptFragment, allowed_skills: [] })} disabled={questionTypes.length === 0}>开始结构分析</Button></DialogFooter>
+          <DialogFooter><Button onClick={() => void confirm()} disabled={questionTypes.length === 0 || submitting}>{submitting ? '正在创建任务…' : '开始结构分析'}</Button></DialogFooter>
         </div>
       </DialogContent>
     </Dialog>

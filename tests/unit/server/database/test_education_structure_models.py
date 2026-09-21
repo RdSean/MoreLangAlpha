@@ -19,6 +19,7 @@ async def test_queue_structure_authorizes_parent_and_creates_generation_job(
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
     mock_cursor.fetchone.side_effect = [
         {"version_id": "version-1"},
+        None,
         {"sequence": 1},
         {
             "structure_id": "structure-1",
@@ -45,12 +46,57 @@ async def test_queue_structure_authorizes_parent_and_creates_generation_job(
     assert result is not None
     assert result["structure_id"] == "structure-1"
     assert result["generation_job_id"] == "generation-1"
-    authorization_sql = mock_cursor.execute.call_args_list[0].args[0]
+    authorization_sql = next(
+        call.args[0]
+        for call in mock_cursor.execute.call_args_list
+        if "education_memberships" in call.args[0]
+    )
     assert "education_memberships" in authorization_sql
     assert "memberships.role = 'parent'" in authorization_sql
     job_sql = mock_cursor.execute.call_args_list[-1].args[0]
     assert "INSERT INTO education_generation_jobs" in job_sql
     assert "'structure'" in job_sql
+
+
+@pytest.mark.asyncio
+async def test_queue_structure_reuses_active_job_without_inserting_another(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"version_id": "version-1"},
+        {
+            "generation_job_id": "generation-existing",
+            "version_id": "version-1",
+            "scope": "structure",
+            "structure_id": "structure-existing",
+            "status": "running",
+            "attempt_count": 1,
+            "structure_sequence": 2,
+            "structure_status": "running",
+        },
+    ]
+
+    result = await education_textbooks.queue_textbook_structure(
+        parent_user_id="parent-1",
+        content_version_id="version-1",
+        processing_profile_id=None,
+        processing_profile_sha256="a" * 64,
+        input_manifest_sha256="b" * 64,
+        source_revision="source-v1",
+    )
+
+    assert result is not None
+    assert result["generation_job_id"] == "generation-existing"
+    assert result["status"] == "running"
+    executed = "\n".join(call.args[0] for call in mock_cursor.execute.call_args_list)
+    assert "pg_advisory_xact_lock" in executed
+    assert "INSERT INTO education_textbook_structures" not in executed
+    assert "INSERT INTO education_generation_jobs" not in executed
 
 
 @pytest.mark.asyncio
@@ -70,7 +116,17 @@ async def test_get_structure_returns_units_and_knowledge_points_for_parent(
             "status": "review",
         },
         {"total": 1, "accepted": 0, "generated": 0, "approved": 0},
-        {"generation_job_id": "generation-1"},
+        {
+            "generation_job_id": "generation-1",
+            "status": "review",
+            "attempt_count": 1,
+            "error_message": None,
+            "created_at": None,
+            "updated_at": None,
+            "root_run_id": None,
+            "started_at": None,
+            "heartbeat_at": None,
+        },
     ]
     mock_cursor.fetchall.side_effect = [
         [

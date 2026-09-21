@@ -1,5 +1,5 @@
 import { api } from '@/api/client';
-import type { CompletedParseJob, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, ParentLearningTranscript, StructureGenerationJob, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit } from './types';
+import type { CompletedParseJob, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, KnowledgePointSourcePreview, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, ParentLearningTranscript, StructureGenerationJob, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit } from './types';
 
 export async function listEducationTasks(): Promise<EducationTask[]> {
   const { data } = await api.get<EducationTask[]>('/api/v1/education/tasks');
@@ -141,6 +141,11 @@ export async function getKnowledgePointLesson(lessonId: string): Promise<Knowled
 
 export async function getKnowledgePointLessonByPoint(knowledgePointId: string): Promise<KnowledgePointLesson | null> {
   const { data } = await api.get<KnowledgePointLesson | null>(`/api/v1/education/knowledge-points/${knowledgePointId}/lesson`);
+  return data;
+}
+
+export async function getKnowledgePointSourcePreview(knowledgePointId: string): Promise<KnowledgePointSourcePreview> {
+  const { data } = await api.get<KnowledgePointSourcePreview>(`/api/v1/education/knowledge-points/${knowledgePointId}/source-preview`);
   return data;
 }
 

@@ -398,6 +398,18 @@ class TextbookLessonSummaryResponse(BaseModel):
     approved: int = 0
 
 
+class StructureGenerationJobSummaryResponse(BaseModel):
+    generation_job_id: UUID
+    status: str
+    attempt_count: int
+    error_message: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    root_run_id: UUID | None = None
+    started_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+
+
 class TextbookStructureResponse(BaseModel):
     structure_id: UUID
     version_id: UUID
@@ -418,6 +430,7 @@ class TextbookStructureResponse(BaseModel):
         default_factory=TextbookLessonSummaryResponse
     )
     latest_generation_job_id: UUID | None = None
+    latest_generation_job: StructureGenerationJobSummaryResponse | None = None
 
 
 class StructureGenerationJobResponse(BaseModel):
@@ -431,6 +444,9 @@ class StructureGenerationJobResponse(BaseModel):
     error_message: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    root_run_id: UUID | None = None
+    started_at: datetime | None = None
+    heartbeat_at: datetime | None = None
     structure_sequence: int | None = None
     structure_status: str | None = None
     structure_bundle_prefix: str | None = None
@@ -461,6 +477,25 @@ class KnowledgePointLessonResponse(BaseModel):
     unit_title: str
     content_markdown: str
     revisions: list[KnowledgePointLessonRevisionResponse]
+
+
+class KnowledgePointSourceSnippetResponse(BaseModel):
+    source_id: str
+    source_title: str | None = None
+    start: int | None = None
+    end: int | None = None
+    quote: str | None = None
+    markdown: str
+    truncated_before: bool = False
+    truncated_after: bool = False
+
+
+class KnowledgePointSourcePreviewResponse(BaseModel):
+    knowledge_point_id: UUID
+    knowledge_point_title: str
+    unit_id: UUID
+    unit_title: str
+    snippets: list[KnowledgePointSourceSnippetResponse]
 
 
 class CreateKnowledgePointLessonRevisionRequest(BaseModel):

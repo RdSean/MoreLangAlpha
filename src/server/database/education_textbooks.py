@@ -398,6 +398,12 @@ async def queue_textbook_structure(
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
+                # Serialize concurrent starts for one content version so a
+                # double click cannot create two structure jobs.
+                await cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"education-structure:{content_version_id}",),
+                )
                 await cur.execute(
                     """
                     SELECT versions.version_id
@@ -416,6 +422,28 @@ async def queue_textbook_structure(
                 )
                 if not await cur.fetchone():
                     return None
+                await cur.execute(
+                    """
+                    SELECT jobs.generation_job_id, jobs.version_id, jobs.scope,
+                           jobs.structure_id, jobs.status, jobs.attempt_count,
+                           structures.sequence AS structure_sequence,
+                           structures.status AS structure_status
+                    FROM education_generation_jobs AS jobs
+                    LEFT JOIN education_textbook_structures AS structures
+                      ON structures.structure_id = jobs.structure_id
+                    WHERE jobs.version_id = %s
+                      AND jobs.scope = 'structure'
+                      AND jobs.status IN (
+                          'queued', 'preparing', 'running', 'validating'
+                      )
+                    ORDER BY jobs.created_at DESC
+                    LIMIT 1
+                    """,
+                    (content_version_id,),
+                )
+                active_job = await cur.fetchone()
+                if active_job:
+                    return dict(active_job)
                 await cur.execute(
                     """
                     SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
@@ -467,6 +495,48 @@ async def queue_textbook_structure(
                 )
                 job = dict(await cur.fetchone())
     return {**structure, **job}
+
+
+async def get_active_structure_generation_for_parent(
+    *, parent_user_id: str, content_version_id: str
+) -> dict[str, Any] | None:
+    """Return the newest queued/running structure job for one content version.
+
+    This is a best-effort fast path used before staging inputs. Correctness
+    against concurrent double clicks is enforced by the advisory lock inside
+    ``queue_textbook_structure``.
+    """
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT jobs.generation_job_id, jobs.version_id, jobs.scope,
+                       jobs.structure_id, jobs.status, jobs.attempt_count,
+                       structures.sequence AS structure_sequence,
+                       structures.status AS structure_status
+                FROM education_generation_jobs AS jobs
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = jobs.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                LEFT JOIN education_textbook_structures AS structures
+                  ON structures.structure_id = jobs.structure_id
+                WHERE jobs.version_id = %s
+                  AND jobs.scope = 'structure'
+                  AND jobs.status IN (
+                      'queued', 'preparing', 'running', 'validating'
+                  )
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                ORDER BY jobs.created_at DESC
+                LIMIT 1
+                """,
+                (content_version_id, parent_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
 
 
 async def create_processing_profile(
@@ -682,10 +752,15 @@ async def get_textbook_structure_for_parent(
             result["lesson_summary"] = dict(await cur.fetchone())
             await cur.execute(
                 """
-                SELECT generation_job_id
-                FROM education_generation_jobs
-                WHERE structure_id = %s
-                ORDER BY created_at DESC
+                SELECT jobs.generation_job_id, jobs.status, jobs.attempt_count,
+                       jobs.error_message, jobs.created_at, jobs.updated_at,
+                       attempts.root_run_id, attempts.started_at,
+                       attempts.heartbeat_at
+                FROM education_generation_jobs AS jobs
+                LEFT JOIN education_generation_attempts AS attempts
+                  ON attempts.attempt_id = jobs.latest_attempt_id
+                WHERE jobs.structure_id = %s
+                ORDER BY jobs.created_at DESC
                 LIMIT 1
                 """,
                 (structure_id,),
@@ -696,18 +771,38 @@ async def get_textbook_structure_for_parent(
                 if latest_generation_job
                 else None
             )
+            result["latest_generation_job_status"] = (
+                latest_generation_job["status"] if latest_generation_job else None
+            )
+            result["latest_generation_job_created_at"] = (
+                latest_generation_job["created_at"]
+                if latest_generation_job
+                else None
+            )
+            result["latest_generation_job_updated_at"] = (
+                latest_generation_job["updated_at"]
+                if latest_generation_job
+                else None
+            )
+            result["latest_generation_job"] = dict(latest_generation_job) if latest_generation_job else None
     return result
 
 
 async def get_latest_textbook_structure_for_parent(
     *, parent_user_id: str, content_version_id: str
 ) -> dict[str, Any] | None:
-    """Return the newest structure for one version, if the parent owns it."""
+    """Return the newest structure for one version, if the parent owns it.
+
+    A structure still being generated is returned as ``queued``/``running``
+    so callers can render live progress before the reviewable Units exist.
+    """
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
-                SELECT structures.structure_id
+                SELECT structures.structure_id, structures.status,
+                       jobs.status AS job_status,
+                       jobs.generation_job_id
                 FROM education_textbook_structures AS structures
                 JOIN education_textbook_versions AS versions
                   ON versions.version_id = structures.version_id
@@ -715,6 +810,14 @@ async def get_latest_textbook_structure_for_parent(
                   ON textbooks.textbook_id = versions.textbook_id
                 JOIN education_memberships AS memberships
                   ON memberships.household_id = textbooks.household_id
+                LEFT JOIN LATERAL (
+                    SELECT generation_job_id, status
+                    FROM education_generation_jobs
+                    WHERE structure_id = structures.structure_id
+                      AND scope = 'structure'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ) AS jobs ON TRUE
                 WHERE structures.version_id = %s
                   AND memberships.user_id = %s
                   AND memberships.role = 'parent'
@@ -726,10 +829,17 @@ async def get_latest_textbook_structure_for_parent(
             row = await cur.fetchone()
     if not row:
         return None
-    return await get_textbook_structure_for_parent(
+    structure = await get_textbook_structure_for_parent(
         parent_user_id=parent_user_id,
         structure_id=str(row["structure_id"]),
     )
+    if not structure:
+        return None
+    if row.get("job_status") in ("queued", "preparing", "running", "validating"):
+        structure["latest_generation_job_id"] = row.get("generation_job_id")
+        if row["status"] in ("queued", "running"):
+            structure["status"] = row["status"]
+    return structure
 
 
 async def get_generation_job_for_parent(
@@ -746,6 +856,8 @@ async def get_generation_job_for_parent(
                        jobs.auto_grading,
                        jobs.processing_profile_sha256, jobs.error_code,
                        jobs.error_message, jobs.created_at, jobs.updated_at,
+                       attempts.root_run_id, attempts.started_at,
+                       attempts.heartbeat_at,
                        versions.sequence AS content_version_sequence,
                        textbooks.textbook_id, textbooks.household_id,
                        textbooks.slug, textbooks.title,
@@ -787,6 +899,8 @@ async def get_generation_job_for_parent(
                      COALESCE(jobs.structure_id, units.structure_id)
                 LEFT JOIN education_processing_profiles AS profiles
                   ON profiles.profile_id = structures.processing_profile_id
+                LEFT JOIN education_generation_attempts AS attempts
+                  ON attempts.attempt_id = jobs.latest_attempt_id
                 WHERE jobs.generation_job_id = %s
                   AND memberships.user_id = %s
                   AND memberships.role = 'parent'
@@ -837,6 +951,42 @@ async def get_knowledge_point_for_parent(
                   AND knowledge_points.status = 'accepted'
                   AND units.status = 'accepted'
                   AND structures.status = 'accepted'
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (knowledge_point_id, parent_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_knowledge_point_source_preview_for_parent(
+    *, parent_user_id: str, knowledge_point_id: str
+) -> dict[str, Any] | None:
+    """Read one reviewable knowledge point without requiring accepted status."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT knowledge_points.knowledge_point_id,
+                       knowledge_points.title AS knowledge_point_title,
+                       knowledge_points.source_refs AS knowledge_point_source_refs,
+                       units.unit_id,
+                       units.title AS unit_title,
+                       versions.version_id,
+                       structures.structure_id
+                FROM education_structure_knowledge_points AS knowledge_points
+                JOIN education_structure_units AS units
+                  ON units.unit_id = knowledge_points.unit_id
+                JOIN education_textbook_structures AS structures
+                  ON structures.structure_id = units.structure_id
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = structures.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                WHERE knowledge_points.knowledge_point_id = %s
                   AND memberships.user_id = %s
                   AND memberships.role = 'parent'
                 """,

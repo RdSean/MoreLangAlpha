@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from typing import Any
 
 from src.server.database.education_textbooks import (
     accept_textbook_structure,
     get_generation_job_for_parent,
+    get_knowledge_point_source_preview_for_parent,
     get_latest_textbook_structure_for_parent,
     get_teaching_input_for_parent,
     get_textbook_structure_for_parent,
@@ -23,6 +25,10 @@ from src.server.services.education_structure_validation import (
     TextbookStructureValidationError,
     validate_textbook_structure,
 )
+from src.server.services.education_source_refs import (
+    SourceReferenceResolutionError,
+    resolve_source_ref,
+)
 from src.server.services.education_textbooks import (
     TextbookError,
     TextbookNotFoundError,
@@ -30,6 +36,30 @@ from src.server.services.education_textbooks import (
     TextbookTransitionError,
     get_household_context_for_parent,
 )
+
+
+_WHITESPACE = re.compile(r"\s+")
+
+
+def _locate_normalized_quote(markdown: str, quote: str) -> tuple[int, int] | None:
+    """Locate a quote despite Markdown markers and PDF line wrapping.
+
+    Offsets are approximate: the quote's leading words are matched with
+    whitespace tolerated, then a window the size of the quote is returned.
+    """
+    words = [word for word in _WHITESPACE.split(quote) if word]
+    if not words:
+        return None
+    for length in (6, 5, 4, 3, 2, 1):
+        prefix = " ".join(words[:length])
+        pattern = re.compile(
+            r"\s+".join(re.escape(word) for word in prefix.split()),
+            re.IGNORECASE,
+        )
+        match = pattern.search(markdown)
+        if match:
+            return match.start(), min(len(markdown), match.start() + len(quote) + 8)
+    return None
 
 
 async def queue_structure_for_parent(
@@ -50,10 +80,11 @@ async def queue_structure_for_parent(
             profile_input=profile_input,
             profile_id=profile_id,
         )
-        await launch_structure_generation(
-            parent_user_id=parent_user_id,
-            generation_job_id=str(queued["generation_job_id"]),
-        )
+        if queued.get("status") == "queued":
+            await launch_structure_generation(
+                parent_user_id=parent_user_id,
+                generation_job_id=str(queued["generation_job_id"]),
+            )
     except LookupError as exc:
         raise TextbookNotFoundError(
             "Reviewable textbook content version not found"
@@ -99,6 +130,105 @@ async def get_latest_structure_for_parent(
         parent_user_id=parent_user_id,
         content_version_id=content_version_id,
     )
+
+
+async def get_knowledge_point_source_preview(
+    *, parent_user_id: str, knowledge_point_id: str
+) -> dict[str, Any]:
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can review textbook sources")
+    point = await get_knowledge_point_source_preview_for_parent(
+        parent_user_id=parent_user_id,
+        knowledge_point_id=knowledge_point_id,
+    )
+    if not point:
+        raise TextbookNotFoundError("Knowledge point not found")
+    frozen_input = await get_teaching_input_for_parent(
+        parent_user_id=parent_user_id,
+        content_version_id=str(point["version_id"]),
+    )
+    if not frozen_input:
+        raise TextbookNotFoundError("Textbook source input not found")
+    sources = {
+        str(source.get("source_id") or source.get("content_chapter_id") or ""): source
+        for source in frozen_input.get("sources", [])
+        if isinstance(source, Mapping)
+    }
+    snippets: list[dict[str, Any]] = []
+    for raw_ref in point.get("knowledge_point_source_refs", []):
+        if not isinstance(raw_ref, Mapping):
+            continue
+        quote = str(raw_ref.get("quote") or "").strip()
+        source_id = str(raw_ref.get("source_id") or "").strip()
+        source = sources.get(source_id)
+        markdown = str(source.get("markdown") or "") if source else ""
+        start = raw_ref.get("start")
+        end = raw_ref.get("end")
+        if (
+            markdown
+            and quote
+            and (
+                not isinstance(start, int)
+                or not isinstance(end, int)
+                or start < 0
+                or end <= start
+                or end > len(markdown)
+            )
+        ):
+            try:
+                resolved = resolve_source_ref(
+                    sources={source_id: markdown},
+                    source_id=source_id,
+                    quote=quote,
+                )
+                start = resolved.get("start")
+                end = resolved.get("end")
+            except SourceReferenceResolutionError:
+                start = None
+                end = None
+            if not isinstance(start, int) or not isinstance(end, int):
+                located = _locate_normalized_quote(markdown, quote)
+                if located:
+                    start, end = located
+        if not markdown:
+            snippets.append(
+                {
+                    "source_id": source_id or "unknown",
+                    "source_title": None,
+                    "start": None,
+                    "end": None,
+                    "quote": quote or None,
+                    "markdown": quote,
+                    "truncated_before": False,
+                    "truncated_after": False,
+                }
+            )
+            continue
+        if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(markdown):
+            context_start = max(0, start - 1_200)
+            context_end = min(len(markdown), end + 1_200)
+        else:
+            context_start = 0
+            context_end = min(len(markdown), 2_400)
+        snippets.append(
+            {
+                "source_id": source_id or "unknown",
+                "source_title": str(source.get("title") or source.get("filename") or "") or None,
+                "start": start if isinstance(start, int) else None,
+                "end": end if isinstance(end, int) else None,
+                "quote": quote or None,
+                "markdown": markdown[context_start:context_end].strip(),
+                "truncated_before": context_start > 0,
+                "truncated_after": context_end < len(markdown),
+            }
+        )
+    return {
+        "knowledge_point_id": point["knowledge_point_id"],
+        "knowledge_point_title": point["knowledge_point_title"],
+        "unit_id": point["unit_id"],
+        "unit_title": point["unit_title"],
+        "snippets": snippets,
+    }
 
 
 async def resume_structure_generation_for_parent(

@@ -109,3 +109,113 @@
   color: var(--color-text-primary);
   font-weight: 500;
 }
+
+.textbook-structure-tabs {
+  display: flex;
+  min-width: 0;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 999px;
+}
+
+.textbook-structure-tab {
+  min-height: 30px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.textbook-structure-tab.is-active {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.textbook-structure-tab:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.textbook-timeline {
+  display: grid;
+  gap: 2px;
+}
+
+.textbook-timeline-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.textbook-timeline-row.is-active {
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.textbook-timeline-row.is-failed {
+  color: var(--color-loss);
+}
+
+.textbook-timeline-dot {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-muted);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+}
+
+.textbook-timeline-row.is-active .textbook-timeline-dot {
+  border-color: var(--color-accent-primary);
+  color: var(--color-accent-primary);
+}
+
+.textbook-timeline-row.is-done .textbook-timeline-dot {
+  border-color: var(--color-success);
+  background: var(--color-success);
+  color: white;
+}
+
+.textbook-timeline-row.is-failed .textbook-timeline-dot {
+  border-color: var(--color-loss);
+  background: var(--color-loss);
+  color: white;
+}
+
+.textbook-timeline-time {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.6875rem;
+  color: var(--color-text-tertiary, var(--color-text-secondary));
+}
+
+.textbook-source-snippet {
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  padding: 14px 16px;
+}
+
+.textbook-source-quote {
+  border-left: 3px solid var(--color-accent-primary);
+  padding-left: 10px;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+}
+
+.textbook-source-markdown {
+  margin-top: 12px;
+  border-top: 1px dashed var(--color-border-muted);
+  padding-top: 12px;
+}

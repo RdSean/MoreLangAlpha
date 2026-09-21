@@ -4,14 +4,18 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TextbookStructurePage from '../TextbookStructurePage';
 
+const structureState = vi.hoisted(() => ({
+  data: undefined as Record<string, unknown> | undefined,
+}));
+
 const save = vi.fn().mockResolvedValue({});
 const accept = vi.fn().mockResolvedValue({});
 const create = vi.fn().mockResolvedValue({ generation_job_id: 'generation-1' });
 const refetch = vi.fn().mockResolvedValue({});
 
 vi.mock('../queries', () => ({
-  useLatestTextbookStructure: () => ({
-    data: {
+  useLatestTextbookStructure: () => {
+    structureState.data ??= {
       structure_id: 'structure-1',
       version_id: 'version-1',
       sequence: 1,
@@ -66,18 +70,45 @@ vi.mock('../queries', () => ({
         generated: 0,
         approved: 0,
       },
-    },
-    isLoading: false,
-    refetch,
-  }),
+    };
+    return {
+      data: structureState.data,
+      isLoading: false,
+      refetch,
+    };
+  },
   useStructureGenerationJob: () => ({ data: undefined }),
   useKnowledgePointLessonByPoint: () => ({
     data: null,
     isLoading: false,
     refetch,
   }),
+  useKnowledgePointSourcePreview: () => ({
+    data: {
+      knowledge_point_id: 'kp-1',
+      knowledge_point_title: '世界运动',
+      unit_id: 'unit-1',
+      unit_title: 'Unit 1: Sports',
+      snippets: [
+        {
+          source_id: 'source-1',
+          source_title: 'Reading Explorer 3',
+          start: 2,
+          end: 8,
+          quote: 'Unit 1',
+          markdown: '# Unit 1\n\n足球的历史与流行原因。',
+          truncated_before: false,
+          truncated_after: false,
+        },
+      ],
+    },
+    isLoading: false,
+    isError: false,
+  }),
   useStructureMutations: () => ({
     create: { mutateAsync: create, isPending: false },
+    resumeStructure: { mutateAsync: vi.fn().mockResolvedValue({ generation_job_id: 'generation-resume' }), isPending: false },
+    generateBookAssets: { mutateAsync: vi.fn().mockResolvedValue({ generation_job_id: 'assets-1' }), isPending: false },
     save: { mutateAsync: save, isPending: false },
     accept: { mutateAsync: accept, isPending: false },
     generateLesson: { mutateAsync: vi.fn().mockResolvedValue({ generation_job_id: 'lesson-1' }), isPending: false },
@@ -100,19 +131,63 @@ function renderPage() {
 describe('TextbookStructurePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    structureState.data = undefined;
   });
 
-  it('renders Unit and knowledge-point review tree', () => {
+  it('renders Unit and knowledge-point review tree', async () => {
+    const user = userEvent.setup();
     renderPage();
 
     expect(screen.getByRole('button', { name: '选择 Unit 1: Sports' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '选择知识点 世界运动' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '选择知识点 足球之爱' })).toBeInTheDocument();
-    expect(screen.getByText('先接受教材结构')).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: '课程' }));
+    expect(screen.getByText('还没有课程 Markdown')).toBeInTheDocument();
     expect(screen.getByTestId('structure-warning-summary')).toHaveTextContent(
       '部分引用暂时无法定位到解析 Markdown',
     );
     expect(screen.getByTestId('structure-warning-summary')).toHaveTextContent('（2 处）');
+  });
+
+  it('shows original markdown before a lesson exists', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('tab', { name: '原文依据' }));
+
+    expect(await screen.findByText('Reading Explorer 3')).toBeInTheDocument();
+    expect(screen.getAllByText('Unit 1').length).toBeGreaterThan(0);
+    expect(screen.getByText(/足球的历史与流行原因/)).toBeInTheDocument();
+  });
+
+  it('shows a processing timeline while a structure job is active', () => {
+    structureState.data = {
+      structure_id: 'structure-1',
+      version_id: 'version-1',
+      sequence: 1,
+      status: 'running',
+      schema_version: 'langalpha-managed-textbook-structure/v1',
+      processing_profile_sha256: 'a'.repeat(64),
+      input_manifest_sha256: 'b'.repeat(64),
+      source_revision: 'c'.repeat(64),
+      validation_warnings: [],
+      units: [],
+      lesson_summary: { total: 0, accepted: 0, generated: 0, approved: 0 },
+      latest_generation_job_id: 'generation-1',
+      latest_generation_job: {
+        generation_job_id: 'generation-1',
+        status: 'running',
+        attempt_count: 1,
+        created_at: new Date().toISOString(),
+        started_at: new Date().toISOString(),
+        heartbeat_at: new Date().toISOString(),
+      },
+    };
+
+    renderPage();
+
+    expect(screen.getByTestId('structure-generation-timeline')).toHaveTextContent('分析教材结构');
+    expect(screen.getByText(/可以关闭页面，处理会继续在后台进行/)).toBeInTheDocument();
   });
 
   it('supports add, split, merge, and delete knowledge-point actions', async () => {

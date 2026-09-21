@@ -21,6 +21,7 @@ from src.server.database.education_textbooks import (
     claim_generation_job,
     complete_structure_generation,
     fail_structure_generation,
+    get_active_structure_generation_for_parent,
     get_generation_job_for_parent,
     get_teaching_input_for_parent,
     mark_generation_attempt_running,
@@ -97,6 +98,12 @@ async def queue_structure_generation_for_parent(
     profile_id: str | None = None,
 ) -> dict[str, Any]:
     """Freeze one content version and create its structure generation job."""
+    active = await get_active_structure_generation_for_parent(
+        parent_user_id=parent_user_id,
+        content_version_id=content_version_id,
+    )
+    if active:
+        return active
     generation_job_id = str(uuid4())
     frozen_input = await get_teaching_input_for_parent(
         parent_user_id=parent_user_id,
@@ -574,6 +581,9 @@ async def get_structure_generation_job_for_parent(
             "error_message",
             "created_at",
             "updated_at",
+            "root_run_id",
+            "started_at",
+            "heartbeat_at",
             "structure_sequence",
             "structure_status",
             "structure_bundle_prefix",

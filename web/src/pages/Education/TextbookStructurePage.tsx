@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, BookOpenCheck, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CircleHelp, Clock3, FileText, GitMerge, ListTree, Loader2, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
+import { AlertTriangle, BookOpenCheck, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CircleHelp, Clock3, FileText, GitMerge, ListTree, Loader2, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -8,8 +8,8 @@ import { cn } from '@/lib/utils';
 import EducationMarkdown from './components/EducationMarkdown';
 import ProcessingProfileDialog, { type ProcessingProfileValue } from './components/ProcessingProfileDialog';
 import TextbookWorkflowStepper, { type TextbookWorkflowStep } from './components/TextbookWorkflowStepper';
-import { useKnowledgePointLessonByPoint, useLatestTextbookStructure, useStructureGenerationJob, useStructureMutations } from './queries';
-import type { TextbookKnowledgePoint, TextbookStructureUnit } from './types';
+import { useKnowledgePointLessonByPoint, useKnowledgePointSourcePreview, useLatestTextbookStructure, useStructureGenerationJob, useStructureMutations } from './queries';
+import type { KnowledgePointSourcePreview, StructureGenerationJob, TextbookKnowledgePoint, TextbookStructureUnit } from './types';
 import './TextbookStructurePage.css';
 
 function messageOf(error: unknown, fallback: string) {
@@ -104,22 +104,180 @@ function cloneUnits(units: TextbookStructureUnit[]): TextbookStructureUnit[] {
   }));
 }
 
+type StructureTimelineStatus = 'queued' | 'preparing' | 'running' | 'validating' | 'completed' | 'failed' | 'cancelled';
+
+const timelineStages: Array<{ id: string; label: string }> = [
+  { id: 'queued', label: '任务已排队' },
+  { id: 'preparing', label: '准备解析输入' },
+  { id: 'running', label: '分析教材结构' },
+  { id: 'validating', label: '校验并归档结果' },
+  { id: 'done', label: '进入人工审阅' },
+];
+
+function timelineStageIndex(status: StructureTimelineStatus | undefined) {
+  switch (status) {
+    case 'queued': return 0;
+    case 'preparing': return 1;
+    case 'running': return 2;
+    case 'validating': return 3;
+    case 'completed': return 4;
+    default: return -1;
+  }
+}
+
+function formatElapsed(from: string | null | undefined, to: string | null | undefined) {
+  if (!from) return undefined;
+  const start = new Date(from).getTime();
+  const end = to ? new Date(to).getTime() : Date.now();
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return undefined;
+  const totalSeconds = Math.floor((end - start) / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes} 分 ${seconds} 秒` : `${seconds} 秒`;
+}
+
+function StructureGenerationTimeline({ job }: { job: StructureGenerationJob }) {
+  const activeIndex = timelineStageIndex(job.status);
+  const failed = job.status === 'failed' || job.status === 'cancelled';
+  const elapsed = formatElapsed(job.started_at ?? job.created_at, job.updated_at);
+  return (
+    <div className="textbook-timeline" data-testid="structure-generation-timeline">
+      {timelineStages.map((stage, index) => {
+        const done = !failed && activeIndex > index;
+        const active = !failed && activeIndex === index;
+        const stageFailed = failed && index === Math.max(activeIndex, 0);
+        return (
+          <div
+            key={stage.id}
+            className={cn(
+              'textbook-timeline-row',
+              done && 'is-done',
+              active && 'is-active',
+              stageFailed && 'is-failed',
+            )}
+          >
+            <span className="textbook-timeline-dot">
+              {done
+                ? <Check className="size-3" />
+                : active
+                  ? <Loader2 className="size-3 animate-spin" />
+                  : stageFailed
+                    ? <AlertTriangle className="size-3" />
+                    : <span className="size-1.5 rounded-full bg-current" />}
+            </span>
+            <span className="min-w-0 truncate">{stage.label}</span>
+            {active && <span className="textbook-timeline-time">进行中</span>}
+          </div>
+        );
+      })}
+      <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+        状态 {job.status} · 第 {job.attempt_count} 次尝试
+        {elapsed ? ` · 已耗时 ${elapsed}` : ''}
+      </p>
+      {job.heartbeat_at && (
+        <p className="font-mono text-[11px] text-muted-foreground">
+          最近心跳 {new Date(job.heartbeat_at).toLocaleTimeString()}
+        </p>
+      )}
+      {job.error_message && (
+        <p className="mt-1 text-xs" style={{ color: 'var(--color-loss)' }}>{job.error_message}</p>
+      )}
+    </div>
+  );
+}
+
+function KnowledgePointSourcePreviewPanel({
+  preview,
+  isLoading,
+  isError,
+}: {
+  preview: KnowledgePointSourcePreview | undefined;
+  isLoading: boolean;
+  isError: boolean;
+}) {
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[320px] items-center justify-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+        正在读取原文依据…
+      </div>
+    );
+  }
+  if (isError) {
+    return (
+      <p className="px-5 py-8 text-sm" style={{ color: 'var(--color-loss)' }}>
+        暂时无法读取原文依据，请稍后重试。
+      </p>
+    );
+  }
+  if (!preview || preview.snippets.length === 0) {
+    return (
+      <div className="flex min-h-[320px] items-center justify-center px-6 py-12">
+        <div className="max-w-md text-center">
+          <div className="mx-auto flex size-12 items-center justify-center rounded-full" style={{ backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-accent-primary)' }}>
+            <FileText className="size-5" />
+          </div>
+          <h2 className="title-font mt-4 text-lg font-semibold">暂无原文依据</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            这个知识点没有可定位的原文摘录。可以先生成课程，或回到 Unit 列表补充来源引用。
+          </p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="mx-auto grid max-w-[920px] gap-4 px-5 py-6 lg:px-10">
+      {preview.snippets.map((snippet, index) => (
+        <article key={`${snippet.source_id}-${index}`} className="textbook-source-snippet">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span className="truncate font-medium text-foreground">
+              {snippet.source_title || snippet.source_id}
+            </span>
+            <span className="font-mono">
+              {snippet.start != null && snippet.end != null
+                ? `Markdown [${snippet.start}:${snippet.end}]`
+                : '未定位偏移'}
+            </span>
+          </div>
+          {snippet.quote && (
+            <p className="textbook-source-quote mt-3 text-sm leading-6">{snippet.quote}</p>
+          )}
+          <div className="textbook-source-markdown">
+            {snippet.truncated_before && (
+              <p className="mb-1 text-xs text-muted-foreground">…前文已省略…</p>
+            )}
+            <EducationMarkdown content={snippet.markdown} variant="compact" className="text-sm leading-6" />
+            {snippet.truncated_after && (
+              <p className="mt-1 text-xs text-muted-foreground">…后文已省略…</p>
+            )}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function KnowledgePointWorkspace({
   textbookId,
   versionId,
   unit,
   point,
   structureStatus,
+  onDelete,
 }: {
   textbookId: string | undefined;
   versionId: string | undefined;
   unit: TextbookStructureUnit;
   point: TextbookKnowledgePoint;
   structureStatus: string;
+  onDelete: (() => void) | undefined;
 }) {
   const [jobId, setJobId] = useState<string>();
   const [autoGrading, setAutoGrading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'lesson' | 'source'>('lesson');
+  const [tabTouched, setTabTouched] = useState(false);
   const lesson = useKnowledgePointLessonByPoint(point.knowledge_point_id, true);
+  const sourcePreview = useKnowledgePointSourcePreview(point.knowledge_point_id, true);
   const generation = useStructureGenerationJob(jobId, Boolean(jobId));
   const mutations = useStructureMutations();
   const { toast } = useToast();
@@ -150,6 +308,22 @@ function KnowledgePointWorkspace({
     || generation.data?.status === 'running'
     || generation.data?.status === 'validating';
 
+  useEffect(() => {
+    setTabTouched(false);
+    setActiveTab('lesson');
+    setJobId(undefined);
+  }, [point.knowledge_point_id]);
+
+  useEffect(() => {
+    if (tabTouched || lesson.isLoading) return;
+    setActiveTab(lesson.data ? 'lesson' : 'source');
+  }, [lesson.data, lesson.isLoading, tabTouched]);
+
+  const selectTab = (tab: 'lesson' | 'source') => {
+    setTabTouched(true);
+    setActiveTab(tab);
+  };
+
   return (
     <section className="min-h-0 min-w-0 overflow-y-auto">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b px-5 py-5 lg:px-8" style={{ borderColor: 'var(--color-border-muted)' }}>
@@ -175,10 +349,58 @@ function KnowledgePointWorkspace({
             <FileText className="size-3.5" />
             打开完整审阅页
           </Link>
+          {structureStatus === 'review' && onDelete && (
+            <ActionTip label="删除知识点：只删除当前草稿中的这一项；保存或接受结构后才会写入数据库。删除后顺序号会自动重排。">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-label={`删除知识点 ${point.title}`}
+                onClick={onDelete}
+              >
+                <Trash2 className="mr-2 size-3.5" />
+                删除
+              </Button>
+            </ActionTip>
+          )}
         </div>
       </div>
 
-      {lesson.isLoading ? (
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3 lg:px-8" style={{ borderColor: 'var(--color-border-muted)' }}>
+        <div className="textbook-structure-tabs" role="tablist" aria-label="知识点内容视图">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'lesson'}
+            className={cn('textbook-structure-tab', activeTab === 'lesson' && 'is-active')}
+            onClick={() => selectTab('lesson')}
+          >
+            课程
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'source'}
+            className={cn('textbook-structure-tab', activeTab === 'source' && 'is-active')}
+            onClick={() => selectTab('source')}
+          >
+            原文依据
+          </button>
+        </div>
+        {point.source_refs.length > 0 && (
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {point.source_refs.length} 条来源引用
+          </span>
+        )}
+      </div>
+
+      {activeTab === 'source' ? (
+        <KnowledgePointSourcePreviewPanel
+          preview={sourcePreview.data}
+          isLoading={sourcePreview.isLoading}
+          isError={sourcePreview.isError}
+        />
+      ) : lesson.isLoading ? (
         <div className="flex min-h-[520px] items-center justify-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
           正在读取课程 Markdown…
@@ -197,14 +419,14 @@ function KnowledgePointWorkspace({
               {structureStatus === 'accepted' ? 'ready' : 'structure review'}
             </span>
             <h2 className="title-font mt-3 text-xl font-semibold">
-              {structureStatus === 'accepted' ? '准备就绪' : '先接受教材结构'}
+              {structureStatus === 'accepted' ? '准备就绪' : '还没有课程 Markdown'}
             </h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               {structureStatus === 'accepted'
                 ? '这个知识点还没有课程 Markdown。点击下方按钮，让 book-to-skill 基于已确认的来源片段生成完整课程。'
-                : '结构仍处于审阅状态。先返回当前 Unit 编辑并接受结构，再为知识点生成课程。'}
+                : '结构还在审阅中。可以先查看“原文依据”，确认拆分和合并是否合理，再决定是否接受结构。'}
             </p>
-            {structureStatus === 'accepted' && (
+            {structureStatus === 'accepted' ? (
               <>
                 <label className="mt-5 inline-flex items-center gap-2 text-sm text-muted-foreground">
                   <input type="checkbox" checked={autoGrading} onChange={(event) => setAutoGrading(event.target.checked)} />
@@ -217,6 +439,11 @@ function KnowledgePointWorkspace({
                   </Button>
                 </div>
               </>
+            ) : (
+              <Button className="mt-5" variant="outline" onClick={() => selectTab('source')}>
+                <FileText className="mr-2 size-4" />
+                查看原文依据
+              </Button>
             )}
             {generation.data?.status === 'failed' && (
               <p className="mt-4 text-sm" style={{ color: 'var(--color-loss)' }}>
@@ -239,10 +466,23 @@ export default function TextbookStructurePage() {
   const [selectedPointId, setSelectedPointId] = useState<string>();
   const [expandedUnitIds, setExpandedUnitIds] = useState<Set<string>>(new Set());
   const [treeCollapsed, setTreeCollapsed] = useState(false);
+  const [structureSubmitting, setStructureSubmitting] = useState(false);
   const structure = useLatestTextbookStructure(versionId, true);
-  const generation = useStructureGenerationJob(jobId, Boolean(jobId));
+  const activeJobId = jobId ?? structure.data?.latest_generation_job_id ?? undefined;
+  const generation = useStructureGenerationJob(activeJobId, Boolean(activeJobId));
   const mutations = useStructureMutations();
   const { toast } = useToast();
+
+  const activeJob = (() => {
+    if (generation.data && ['queued', 'preparing', 'running', 'validating'].includes(generation.data.status)) {
+      return generation.data;
+    }
+    const summary = structure.data?.latest_generation_job;
+    if (summary && ['queued', 'preparing', 'running', 'validating'].includes(summary.status)) {
+      return summary as StructureGenerationJob;
+    }
+    return undefined;
+  })();
 
   useEffect(() => {
     if (!structure.data) return;
@@ -287,9 +527,6 @@ export default function TextbookStructurePage() {
   const selectUnit = (unitId: string) => {
     setSelectedUnitId(unitId);
     setSelectedPointId(undefined);
-    setExpandedUnitIds((current) => current.has(unitId)
-      ? current
-      : new Set([...current, unitId]));
   };
 
   const selectPoint = (unitId: string, pointId: string) => {
@@ -372,26 +609,46 @@ export default function TextbookStructurePage() {
     updateUnit({ knowledge_points: knowledge_points.map((point, position) => ({ ...point, position: position + 1 })) });
   };
 
+  const deleteUnit = (unitId: string) => {
+    const target = units.find((unit) => unit.unit_id === unitId);
+    if (!target) return;
+    if (!window.confirm(`删除「${target.title}」及其 ${target.knowledge_points.length} 个知识点？保存或接受结构后才会写入数据库。`)) return;
+    const remaining = units
+      .filter((unit) => unit.unit_id !== unitId)
+      .map((unit, position) => ({ ...unit, position: position + 1 }));
+    setUnits(remaining);
+    const next = remaining[0];
+    setSelectedUnitId(next?.unit_id);
+    setSelectedPointId(undefined);
+  };
+
   const createStructure = async (profile: ProcessingProfileValue) => {
     if (!versionId) return;
+    if (structureSubmitting || activeJob) return;
+    setStructureSubmitting(true);
     try {
       const job = await mutations.create.mutateAsync({ versionId, profile: profile as unknown as Record<string, unknown> });
       setProfileOpen(false);
       setJobId(job.generation_job_id);
     } catch (error) {
       toast({ variant: 'destructive', title: '无法生成教材结构', description: messageOf(error, '请稍后重试。') });
+    } finally {
+      setStructureSubmitting(false);
     }
   };
 
-  const resumeStructure = async () => {
-    const generationJobId = structure.data?.latest_generation_job_id;
-    if (!generationJobId) return;
+  const resumeStructure = async (generationJobIdOverride?: string) => {
+    const generationJobId = generationJobIdOverride ?? structure.data?.latest_generation_job_id;
+    if (!generationJobId || structureSubmitting || activeJob) return;
+    setStructureSubmitting(true);
     try {
       const job = await mutations.resumeStructure.mutateAsync(generationJobId);
       setJobId(job.generation_job_id);
       await structure.refetch();
     } catch (error) {
       toast({ variant: 'destructive', title: '无法继续结构分析', description: messageOf(error, '请稍后重试。') });
+    } finally {
+      setStructureSubmitting(false);
     }
   };
 
@@ -432,11 +689,11 @@ export default function TextbookStructurePage() {
   }
 
   if (!structure.data && !jobId) {
-    return <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page"><div className="mx-auto max-w-3xl px-6 py-12"><Link to={`/textbooks/${textbookId}`} className="text-sm text-muted-foreground">返回教材</Link><h1 className="title-font mt-6 text-2xl font-semibold">生成教材结构</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">先从 Markdown 中识别 Unit、知识点和来源定位。非教学单元可以没有知识点，生成后再由你审阅。</p><Button className="mt-6" onClick={() => setProfileOpen(true)} disabled={mutations.create.isPending}><WandSparkles className="mr-2 size-4" />{mutations.create.isPending ? '正在创建任务' : '开始结构分析'}</Button><ProcessingProfileDialog open={profileOpen} onOpenChange={setProfileOpen} onConfirm={createStructure} /></div></main>;
+    return <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page"><div className="mx-auto max-w-3xl px-6 py-12"><Link to={`/textbooks/${textbookId}`} className="text-sm text-muted-foreground">返回教材</Link><h1 className="title-font mt-6 text-2xl font-semibold">生成教材结构</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">先从 Markdown 中识别 Unit、知识点和来源定位。非教学单元可以没有知识点，生成后再由你审阅。</p><Button className="mt-6" onClick={() => setProfileOpen(true)} disabled={structureSubmitting || mutations.create.isPending}><WandSparkles className="mr-2 size-4" />{structureSubmitting || mutations.create.isPending ? '正在创建任务' : '开始结构分析'}</Button><ProcessingProfileDialog open={profileOpen} onOpenChange={setProfileOpen} onConfirm={createStructure} /></div></main>;
   }
 
   if (!structure.data && generation.data) {
-    return <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page"><div className="mx-auto max-w-3xl px-6 py-12"><h1 className="title-font text-2xl font-semibold">正在分析教材结构</h1><p className="mt-3 text-sm text-muted-foreground">任务状态：{generation.data.status}，尝试 {generation.data.attempt_count} 次。</p>{generation.data.error_message && <p className="mt-3 text-sm" style={{ color: 'var(--color-loss)' }}>{generation.data.error_message}</p>}</div></main>;
+    return <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page"><div className="mx-auto max-w-3xl px-6 py-12"><h1 className="title-font text-2xl font-semibold">正在分析教材结构</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">任务已提交，下面会显示当前进度；可以关闭页面，处理会继续在后台进行。</p><div className="mt-6 rounded-lg border p-4" style={{ borderColor: 'var(--color-border-muted)' }}><StructureGenerationTimeline job={generation.data} /></div>{generation.data.status === 'failed' && <Button className="mt-6" onClick={() => void resumeStructure(generation.data.generation_job_id)} disabled={structureSubmitting || mutations.resumeStructure.isPending}><RefreshCcw className="mr-2 size-4" />{structureSubmitting || mutations.resumeStructure.isPending ? '正在继续' : '重新运行结构分析'}</Button>}</div></main>;
   }
 
   const data = structure.data;
@@ -472,6 +729,23 @@ export default function TextbookStructurePage() {
     },
     { id: 'publish', label: '发布', status: 'pending' },
   ];
+  if (activeJob && (data.status === 'queued' || data.status === 'running')) {
+    return (
+      <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page">
+        <div className="mx-auto w-full max-w-3xl px-6 py-12">
+          <Link to={`/textbooks/${textbookId}`} className="text-sm text-muted-foreground">返回教材</Link>
+          <div className="mt-6">
+            <TextbookWorkflowStepper steps={steps} />
+          </div>
+          <h1 className="title-font mt-8 text-2xl font-semibold">正在分析教材结构</h1>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">任务已提交，下面会显示当前进度；可以关闭页面，处理会继续在后台进行。</p>
+          <div className="mt-6 rounded-lg border p-4" style={{ borderColor: 'var(--color-border-muted)' }}>
+            <StructureGenerationTimeline job={activeJob} />
+          </div>
+        </div>
+      </main>
+    );
+  }
   if (!selectedUnit) {
     return (
       <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page">
@@ -486,10 +760,10 @@ export default function TextbookStructurePage() {
               ? '结构分析没有生成可审阅的 Unit，请重新运行结构分析。'
               : '结构分析尚未产生 Unit。'}
           </p>
-          {data.status === 'failed' && data.latest_generation_job_id && (
-            <Button className="mt-6" onClick={() => void resumeStructure()} disabled={mutations.resumeStructure.isPending}>
+            {data.status === 'failed' && data.latest_generation_job_id && (
+            <Button className="mt-6" onClick={() => void resumeStructure()} disabled={structureSubmitting || mutations.resumeStructure.isPending}>
               <RefreshCcw className="mr-2 size-4" />
-              {mutations.resumeStructure.isPending ? '正在继续' : '重新运行结构分析'}
+              {structureSubmitting || mutations.resumeStructure.isPending ? '正在继续' : '重新运行结构分析'}
             </Button>
           )}
         </div>
@@ -508,6 +782,15 @@ export default function TextbookStructurePage() {
         <div className="mt-5">
           <TextbookWorkflowStepper steps={steps} />
         </div>
+        {activeJob && (
+          <div className="mt-4 rounded-lg border p-4" style={{ borderColor: 'var(--color-border-muted)' }} data-testid="structure-active-job">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium">教材结构处理进度</p>
+              <p className="text-xs text-muted-foreground">可以关闭页面，处理会继续在后台进行。</p>
+            </div>
+            <StructureGenerationTimeline job={activeJob} />
+          </div>
+        )}
       </div>
       {warningCounts.size > 0 && (
         <div
@@ -618,7 +901,10 @@ export default function TextbookStructurePage() {
                       type="button"
                       title={unit.title}
                       aria-label={`选择 ${unit.title}`}
-                      onClick={() => selectUnit(unit.unit_id)}
+                      onClick={() => {
+                        selectUnit(unit.unit_id);
+                        toggleUnit(unit.unit_id);
+                      }}
                       className="textbook-structure-tree-unit min-w-0 flex-1"
                     >
                       <HoverScrollText
@@ -684,6 +970,10 @@ export default function TextbookStructurePage() {
             unit={selectedUnit}
             point={selectedPoint}
             structureStatus={data.status}
+            onDelete={() => {
+              deleteKnowledgePoint(selectedPoint.knowledge_point_id);
+              setSelectedPointId(undefined);
+            }}
           />
         ) : (
         <div className="grid h-full min-h-0 min-w-0 overflow-hidden lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -702,6 +992,11 @@ export default function TextbookStructurePage() {
             <ActionTip label="添加知识点：在当前 Unit 末尾新增一个待审阅知识点。">
               <Button variant="outline" size="sm" onClick={addKnowledgePoint} disabled={readOnly}>
                 <Plus className="mr-2 size-4" />添加知识点
+              </Button>
+            </ActionTip>
+            <ActionTip label="删除当前 Unit：删除这个 Unit 及其全部知识点；保存或接受结构后才会写入数据库。剩余 Unit 会重新编号。">
+              <Button variant="outline" size="sm" onClick={() => deleteUnit(selectedUnit.unit_id)} disabled={readOnly}>
+                <Trash2 className="mr-2 size-4" />删除 Unit
               </Button>
             </ActionTip>
           </div>

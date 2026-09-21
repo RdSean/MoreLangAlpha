@@ -329,6 +329,42 @@ async def test_parent_reads_latest_structure_and_lesson_by_knowledge_point(clien
 
 
 @pytest.mark.asyncio
+async def test_parent_reads_knowledge_point_source_preview(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    knowledge_point_id = uuid4()
+    preview = {
+        "knowledge_point_id": knowledge_point_id,
+        "knowledge_point_title": "世界运动",
+        "unit_id": uuid4(),
+        "unit_title": "Unit 1: Sports and Fitness",
+        "snippets": [
+            {
+                "source_id": "source-1",
+                "source_title": "Reading Explorer",
+                "start": 2,
+                "end": 8,
+                "quote": "Unit 1",
+                "markdown": "# Unit 1\n\n正文内容",
+                "truncated_before": False,
+                "truncated_after": False,
+            }
+        ],
+    }
+    with patch(
+        "src.server.app.education.textbooks.get_knowledge_point_source_preview",
+        new=AsyncMock(return_value=preview),
+    ) as source_preview:
+        response = await client.get(
+            f"/api/v1/education/knowledge-points/{knowledge_point_id}/source-preview"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["snippets"][0]["quote"] == "Unit 1"
+    source_preview.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_student_reads_only_published_structure_and_lesson(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "student-1"

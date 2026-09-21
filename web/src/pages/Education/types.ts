@@ -215,6 +215,19 @@ export interface TextbookStructure {
     approved: number;
   };
   latest_generation_job_id?: string | null;
+  latest_generation_job?: StructureGenerationJobSummary | null;
+}
+
+export interface StructureGenerationJobSummary {
+  generation_job_id: string;
+  status: string;
+  attempt_count: number;
+  error_message?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  root_run_id?: string | null;
+  started_at?: string | null;
+  heartbeat_at?: string | null;
 }
 
 export interface StructureGenerationJob {
@@ -228,6 +241,9 @@ export interface StructureGenerationJob {
   error_message?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  root_run_id?: string | null;
+  started_at?: string | null;
+  heartbeat_at?: string | null;
   structure_sequence?: number | null;
   structure_status?: string | null;
   structure_bundle_prefix?: string | null;
@@ -254,6 +270,25 @@ export interface KnowledgePointLesson {
   unit_title: string;
   content_markdown: string;
   revisions: KnowledgePointLessonRevision[];
+}
+
+export interface KnowledgePointSourceSnippet {
+  source_id: string;
+  source_title?: string | null;
+  start?: number | null;
+  end?: number | null;
+  quote?: string | null;
+  markdown: string;
+  truncated_before: boolean;
+  truncated_after: boolean;
+}
+
+export interface KnowledgePointSourcePreview {
+  knowledge_point_id: string;
+  knowledge_point_title: string;
+  unit_id: string;
+  unit_title: string;
+  snippets: KnowledgePointSourceSnippet[];
 }
 
 export interface StudentKnowledgePoint {

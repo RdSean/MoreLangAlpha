@@ -111,6 +111,14 @@ async def test_queue_structure_generation_persists_frozen_hashes(monkeypatch) ->
             "status": "queued",
         }
 
+    async def no_active_job(**_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        education_structure_jobs,
+        "get_active_structure_generation_for_parent",
+        no_active_job,
+    )
     monkeypatch.setattr(
         education_structure_jobs,
         "get_teaching_input_for_parent",
@@ -141,6 +149,41 @@ async def test_queue_structure_generation_persists_frozen_hashes(monkeypatch) ->
     assert len(captured["input_manifest_sha256"]) == 64
     assert captured["source_revision"] == captured["input_manifest_sha256"]
     assert len(captured["processing_profile_sha256"]) == 64
+
+
+@pytest.mark.asyncio
+async def test_queue_structure_generation_reuses_active_job_without_staging(
+    monkeypatch,
+) -> None:
+    active = {
+        "generation_job_id": "generation-active",
+        "structure_id": "structure-active",
+        "status": "running",
+    }
+
+    async def active_job(**_kwargs):
+        return active
+
+    async def unexpected_staging(**_kwargs):
+        raise AssertionError("duplicate click must not stage a new input")
+
+    monkeypatch.setattr(
+        education_structure_jobs,
+        "get_active_structure_generation_for_parent",
+        active_job,
+    )
+    monkeypatch.setattr(
+        education_structure_jobs,
+        "get_teaching_input_for_parent",
+        unexpected_staging,
+    )
+
+    queued = await education_structure_jobs.queue_structure_generation_for_parent(
+        parent_user_id="parent-1",
+        content_version_id="version-1",
+    )
+
+    assert queued is active
 
 
 @pytest.mark.asyncio

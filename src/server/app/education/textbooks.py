@@ -13,6 +13,7 @@ from src.server.app.education.models import (
     CreateTextbookStructureRequest,
     GenerateKnowledgePointLessonRequest,
     KnowledgePointLessonResponse,
+    KnowledgePointSourcePreviewResponse,
     LearningItemResponse,
     PublishTextbookStructureRequest,
     StartTextbookProcessingRequest,
@@ -35,6 +36,7 @@ from src.server.services.education_structure_review import (
     get_structure_for_parent,
     get_structure_generation_job,
     get_latest_structure_for_parent,
+    get_knowledge_point_source_preview,
     queue_structure_for_parent,
     replace_structure_for_parent,
     resume_structure_generation_for_parent,
@@ -327,6 +329,23 @@ async def get_family_knowledge_point_lesson_by_point(
 ):
     try:
         return await get_lesson_for_knowledge_point(
+            parent_user_id=user_id,
+            knowledge_point_id=str(knowledge_point_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/knowledge-points/{knowledge_point_id}/source-preview",
+    response_model=KnowledgePointSourcePreviewResponse,
+)
+async def get_family_knowledge_point_source_preview(
+    knowledge_point_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_knowledge_point_source_preview(
             parent_user_id=user_id,
             knowledge_point_id=str(knowledge_point_id),
         )
