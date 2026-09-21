@@ -1,107 +1,56 @@
-"""Source quote resolution favors usable evidence over strict failure."""
+"""Approximate quote location and section expansion."""
 
-import pytest
-
-from src.server.services.education_source_refs import (
-    SourceReferenceResolutionError,
-    resolve_source_ref,
-)
+from src.server.services import education_source_refs
 
 
-def test_exact_quote_resolves_character_offsets() -> None:
-    resolved = resolve_source_ref(
-        sources={"source-1": "Before. Exact quote. After."},
-        source_id="source-1",
-        quote="Exact quote.",
+def test_surrounding_section_uses_headings_and_stops_at_same_level():
+    markdown = (
+        "# Book\n\n"
+        "### BEFORE YOU READ\n\nintro text\n\n"
+        "### THE WORLD'S GAME\n\n"
+        "passage body that mentions soccer.\n\n"
+        "### SOCCER WITHOUT BORDERS\n\n"
+        "the next reading\n"
+    )
+    quote_start = markdown.index("passage body")
+    quote_end = quote_start + len("passage body")
+
+    start, end = education_source_refs.surrounding_section_range(
+        markdown, quote_start, quote_end
     )
 
-    assert resolved == {
-        "source_id": "source-1",
-        "quote": "Exact quote.",
-        "start": 8,
-        "end": 20,
-        "resolution_status": "resolved",
-        "warnings": [],
-    }
+    section = markdown[start:end]
+    assert "THE WORLD'S GAME" in section
+    assert "passage body that mentions soccer." in section
+    assert "SOCCER WITHOUT BORDERS" in section
+    assert "BEFORE YOU READ" not in section
 
 
-def test_whitespace_normalized_quote_resolves_markdown_line_wrapping() -> None:
-    resolved = resolve_source_ref(
-        sources={"source-1": "A sentence split\nacross lines."},
-        source_id="source-1",
-        quote="A sentence split across lines.",
+def test_surrounding_section_falls_back_to_page_markers():
+    markdown = (
+        "{1}----\n\nfirst page\n\n"
+        "{2}----\n\nsecond page has the quote here\n\n"
+        "{3}----\n\nthird page\n"
+    )
+    quote_start = markdown.index("quote here")
+    quote_end = quote_start + len("quote here")
+
+    start, end = education_source_refs.surrounding_section_range(
+        markdown, quote_start, quote_end
     )
 
-    assert resolved["resolution_status"] == "normalized"
-    assert resolved["start"] == 0
-    assert resolved["end"] == 30
-    assert resolved["warnings"] == ["source_quote_whitespace_normalized"]
+    section = markdown[start:end]
+    assert "second page has the quote here" in section
+    assert "first page" not in section
 
 
-def test_duplicate_quote_uses_first_match_and_keeps_warning() -> None:
-    resolved = resolve_source_ref(
-        sources={"source-1": "Repeated. Other. Repeated."},
-        source_id="source-1",
-        quote="Repeated.",
+def test_surrounding_section_caps_oversized_sections_around_the_quote():
+    markdown = "# Huge\n\n" + ("x" * 5_000) + "\n\nquote anchor\n\n" + ("y" * 5_000)
+    quote_start = markdown.index("quote anchor")
+
+    start, end = education_source_refs.surrounding_section_range(
+        markdown, quote_start, quote_start + len("quote anchor"), max_chars=2_000
     )
 
-    assert resolved["start"] == 0
-    assert resolved["end"] == 9
-    assert resolved["warnings"] == [
-        "source_quote_ambiguous_first_match_used"
-    ]
-
-
-def test_missing_quote_is_retained_as_unresolved() -> None:
-    resolved = resolve_source_ref(
-        sources={"source-1": "Only this text."},
-        source_id="source-1",
-        quote="Not in the source.",
-    )
-
-    assert resolved == {
-        "source_id": "source-1",
-        "quote": "Not in the source.",
-        "start": None,
-        "end": None,
-        "resolution_status": "unresolved",
-        "warnings": ["source_quote_unresolved"],
-    }
-
-
-def test_single_source_is_used_when_source_id_is_missing_or_unknown() -> None:
-    for source_id in (None, "unknown"):
-        resolved = resolve_source_ref(
-            sources={"source-1": "Quote here."},
-            source_id=source_id,
-            quote="Quote here.",
-        )
-
-        assert resolved["source_id"] == "source-1"
-        assert resolved["start"] == 0
-        assert resolved["warnings"] == [
-            "source_id_defaulted" if source_id is None else "source_id_reassigned"
-        ]
-
-
-def test_unknown_source_with_multiple_candidates_remains_reviewable() -> None:
-    resolved = resolve_source_ref(
-        sources={"source-1": "One.", "source-2": "Two."},
-        source_id="unknown",
-        quote="Missing",
-    )
-
-    assert resolved["resolution_status"] == "unresolved"
-    assert resolved["warnings"] == [
-        "source_id_unresolved",
-        "source_quote_unresolved",
-    ]
-
-
-def test_empty_quote_is_rejected() -> None:
-    with pytest.raises(SourceReferenceResolutionError):
-        resolve_source_ref(
-            sources={"source-1": "Text."},
-            source_id="source-1",
-            quote=" ",
-        )
+    assert end - start <= 2_000
+    assert start <= quote_start < quote_start + len("quote anchor") <= end

@@ -106,6 +106,73 @@ def resolve_source_ref(
 
 
 _WHITESPACE = re.compile(r"\s+")
+_PAGE_MARKER = re.compile(r"^\{(\d+)\}-+$", re.MULTILINE)
+
+
+def locate_page_markers(markdown: str) -> list[tuple[int, int]]:
+    """Return (start, end) offsets of the extraction's page delimiters."""
+    return [(match.start(), match.end()) for match in _PAGE_MARKER.finditer(markdown)]
+
+
+def surrounding_section_range(
+    markdown: str,
+    start: int,
+    end: int,
+    *,
+    pad: int = 16,
+    max_chars: int | None = None,
+) -> tuple[int, int]:
+    """Expand a located span to the extraction page (or heading) containing it.
+
+    Markdown headings are the primary boundary because they match the book's
+    own sectioning; ``{n}-----`` PDF page delimiters are the fallback for
+    extracts that lost their heading structure.
+    """
+    if not markdown:
+        return start, end
+    headings = [
+        (match.start(), len(match.group(1)))
+        for match in re.finditer(r"^(#{1,6})\s+\S", markdown, re.MULTILINE)
+    ]
+    previous = [item for item in headings if item[0] <= start]
+    section_start = 0
+    section_end = len(markdown)
+    if previous:
+        heading_start, level = previous[-1]
+        following = [
+            item[0] for item in headings if item[0] >= end and item[1] <= level
+        ]
+        # A heading is a complete section opener; do not pad backwards past it
+        # or the preview starts mid-way through the previous section.
+        section_start = heading_start
+        if following:
+            # Keep the next section's heading line readable as the boundary
+            # marker instead of cutting it off mid-title.
+            line_end = markdown.find("\n", following[0]) if following else -1
+            section_end = line_end if line_end != -1 else following[0]
+        else:
+            section_end = len(markdown)
+    else:
+        markers = locate_page_markers(markdown)
+        previous_markers = [item for item in markers if item[1] <= start]
+        following_markers = [item for item in markers if item[1] >= end]
+        section_start = (
+            previous_markers[-1][1] if previous_markers else max(0, start - pad)
+        )
+        section_end = (
+            following_markers[0][0] if following_markers else len(markdown)
+        )
+        section_end = min(len(markdown), max(section_end, end) + pad)
+    if max_chars is None or section_end - section_start <= max_chars:
+        return section_start, section_end
+    # Oversized section: prefer reading it from the start, but never let the
+    # located quote fall outside the window.
+    window_start = section_start
+    window_end = min(section_end, window_start + max_chars)
+    if start < window_start or end > window_end:
+        window_start = max(section_start, start - 400)
+        window_end = min(section_end, window_start + max_chars)
+    return window_start, window_end
 
 
 def locate_quote_approximately(

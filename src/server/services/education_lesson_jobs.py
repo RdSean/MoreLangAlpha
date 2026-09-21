@@ -31,7 +31,10 @@ from src.server.services.education_lesson_validation import (
     KnowledgePointLessonValidationError,
     validate_kp_lesson_outputs,
 )
-from src.server.services.education_source_refs import resolve_quote_range
+from src.server.services.education_source_refs import (
+    resolve_quote_range,
+    surrounding_section_range,
+)
 from src.server.services.education_processing_profiles import (
     processing_profile_prompt,
 )
@@ -185,8 +188,11 @@ def build_lesson_source_context(
             start = resolved["start"]
             end = resolved["end"]
             warnings.append(f"source_ref_{resolved['resolution_status']}")
-        # A located quote can be a single sentence; give the lesson writer a
-        # wider window so it has enough surrounding material to teach from.
+        # Give the lesson writer the whole containing section, not just the
+        # located sentence, so it has enough material to teach from.
+        start, end = surrounding_section_range(
+            markdown, start, end, max_chars=18_000
+        )
         if end - start < _LESSON_EXCERPT_MIN_CHARS:
             padding = _LESSON_EXCERPT_PADDING_CHARS
             start = max(0, start - padding)

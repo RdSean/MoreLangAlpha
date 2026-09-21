@@ -28,6 +28,7 @@ from src.server.services.education_source_refs import (
     SourceReferenceResolutionError,
     locate_quote_approximately,
     resolve_source_ref,
+    surrounding_section_range,
 )
 from src.server.services.education_textbooks import (
     TextbookError,
@@ -186,9 +187,14 @@ async def get_knowledge_point_source_preview(
             )
             continue
         if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(markdown):
-            context_start = max(0, start - 1_200)
-            context_end = min(len(markdown), end + 1_200)
+            # Show the whole section, but bound very large sections so the
+            # response stays reasonable.
+            section_start, section_end = surrounding_section_range(markdown, start, end)
+            context_start, context_end = surrounding_section_range(
+                markdown, start, end, max_chars=18_000
+            )
         else:
+            section_start, section_end = 0, len(markdown)
             context_start = 0
             context_end = min(len(markdown), 2_400)
         snippets.append(
@@ -198,9 +204,9 @@ async def get_knowledge_point_source_preview(
                 "start": start if isinstance(start, int) else None,
                 "end": end if isinstance(end, int) else None,
                 "quote": quote or None,
-                "markdown": markdown[context_start:context_end].strip(),
-                "truncated_before": context_start > 0,
-                "truncated_after": context_end < len(markdown),
+                "markdown": markdown[context_start:context_end],
+                "truncated_before": context_start > section_start,
+                "truncated_after": context_end < section_end,
             }
         )
     return {
