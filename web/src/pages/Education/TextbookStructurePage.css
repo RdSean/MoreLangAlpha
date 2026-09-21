@@ -28,7 +28,7 @@
 .textbook-structure-tree-children {
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .textbook-structure-tree-unit-row.is-active {
@@ -46,6 +46,7 @@
   min-height: 32px;
   gap: 8px;
   padding: 4px 8px;
+  overflow: visible;
   color: var(--color-text-secondary);
 }
 
@@ -83,4 +84,28 @@
 
 .textbook-structure-tree-point.is-approved::before {
   background: var(--color-success);
+}
+
+.textbook-structure-view-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 999px;
+  font-size: 0.75rem;
+}
+
+.textbook-structure-view-switch button {
+  min-height: 32px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.textbook-structure-view-switch button.is-active {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  font-weight: 500;
 }

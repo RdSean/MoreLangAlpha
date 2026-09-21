@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, BookOpenCheck, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Clock3, FileText, GitMerge, Loader2, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
+import { AlertTriangle, BookOpenCheck, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CircleHelp, Clock3, FileText, GitMerge, ListTree, Loader2, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Save, Scissors, Trash2, WandSparkles } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -151,7 +151,7 @@ function KnowledgePointWorkspace({
     || generation.data?.status === 'validating';
 
   return (
-    <section className="min-w-0">
+    <section className="min-h-0 min-w-0 overflow-y-auto">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b px-5 py-5 lg:px-8" style={{ borderColor: 'var(--color-border-muted)' }}>
         <div className="min-w-0">
           <p className="font-mono text-[11px] text-muted-foreground">
@@ -238,6 +238,7 @@ export default function TextbookStructurePage() {
   const [selectedUnitId, setSelectedUnitId] = useState<string>();
   const [selectedPointId, setSelectedPointId] = useState<string>();
   const [expandedUnitIds, setExpandedUnitIds] = useState<Set<string>>(new Set());
+  const [treeCollapsed, setTreeCollapsed] = useState(false);
   const structure = useLatestTextbookStructure(versionId, true);
   const generation = useStructureGenerationJob(jobId, Boolean(jobId));
   const mutations = useStructureMutations();
@@ -296,6 +297,12 @@ export default function TextbookStructurePage() {
     setSelectedPointId(pointId);
   };
 
+  const setAllUnitsExpanded = (expanded: boolean) => {
+    setExpandedUnitIds(expanded
+      ? new Set(units.map((unit) => unit.unit_id))
+      : new Set());
+  };
+
   const updateUnit = (patch: Partial<TextbookStructureUnit>) => {
     setUnits((current) => current.map((unit) => unit.unit_id === selectedUnit?.unit_id ? { ...unit, ...patch } : unit));
   };
@@ -326,7 +333,10 @@ export default function TextbookStructurePage() {
 
   const deleteKnowledgePoint = (knowledgePointId: string) => {
     if (!selectedUnit) return;
-    updateUnit({ knowledge_points: selectedUnit.knowledge_points.filter((point) => point.knowledge_point_id !== knowledgePointId) });
+    const remaining = selectedUnit.knowledge_points
+      .filter((point) => point.knowledge_point_id !== knowledgePointId)
+      .map((point, position) => ({ ...point, position: position + 1 }));
+    updateUnit({ knowledge_points: remaining });
   };
 
   const splitKnowledgePoint = (knowledgePoint: TextbookKnowledgePoint) => {
@@ -489,9 +499,9 @@ export default function TextbookStructurePage() {
 
   return (
     <TooltipProvider delayDuration={150}>
-    <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="textbook-structure-page">
+    <main className="flex h-full min-h-0 flex-col overflow-hidden bg-canvas" data-testid="textbook-structure-page">
       <div
-        className="mx-auto w-full max-w-[1720px] border-b px-4 py-5 sm:px-8"
+        className="mx-auto w-full max-w-[1720px] shrink-0 border-b px-4 py-5 sm:px-8"
         style={{ borderColor: 'var(--color-border-muted)' }}
       >
         <Link to={`/textbooks/${textbookId}`} className="text-sm text-muted-foreground">返回教材</Link>
@@ -501,7 +511,7 @@ export default function TextbookStructurePage() {
       </div>
       {warningCounts.size > 0 && (
         <div
-          className="border-b px-4 py-3 sm:px-8"
+          className="shrink-0 border-b px-4 py-3 sm:px-8"
           data-testid="structure-warning-summary"
           style={{ borderColor: 'var(--color-border-muted)', background: 'var(--color-warning-soft)' }}
         >
@@ -522,11 +532,72 @@ export default function TextbookStructurePage() {
           </div>
         </div>
       )}
-      <div className="mx-auto grid w-full max-w-[1720px] lg:grid-cols-[360px_minmax(0,1fr)]">
-        <aside className="min-w-0 overflow-hidden border-b px-4 py-6 lg:min-h-[calc(100dvh-80px)] lg:border-b-0 lg:border-r" style={{ borderColor: 'var(--color-border-muted)' }}>
-          <h1 className="title-font text-lg font-semibold">知识点</h1>
-          <p className="mt-1 font-mono text-xs text-muted-foreground">v{data.sequence} · {data.status}</p>
-          <nav className="mt-5 grid min-w-0 gap-1 overflow-hidden" aria-label="教材知识点树">
+      <div className={cn(
+        'mx-auto grid min-h-0 w-full max-w-[1720px] flex-1 overflow-hidden',
+        treeCollapsed
+          ? 'lg:grid-cols-[56px_minmax(0,1fr)]'
+          : 'lg:grid-cols-[360px_minmax(0,1fr)]',
+      )}>
+        <aside
+          className={cn(
+            'flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-b lg:border-b-0 lg:border-r',
+            treeCollapsed ? 'px-2 py-3' : '',
+          )}
+          style={{ borderColor: 'var(--color-border-muted)' }}
+        >
+          {treeCollapsed ? (
+            <div className="flex h-full min-h-0 flex-col items-center">
+              <button
+                type="button"
+                className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--color-bg-hover)]"
+                aria-label="展开知识点栏"
+                title="展开知识点栏"
+                onClick={() => setTreeCollapsed(false)}
+              >
+                <PanelLeftOpen className="size-4" />
+              </button>
+              <ListTree className="mt-3 size-4 text-muted-foreground" aria-hidden="true" />
+            </div>
+          ) : (
+            <>
+              <div className="shrink-0 border-b px-3 py-3" style={{ borderColor: 'var(--color-border-muted)' }}>
+                <div className="flex min-w-0 items-center gap-2">
+                  <ListTree className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <h1 className="title-font min-w-0 flex-1 truncate text-lg font-semibold">知识点</h1>
+                  <ActionTip label="全部展开">
+                    <button
+                      type="button"
+                      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--color-bg-hover)]"
+                      aria-label="全部展开"
+                      onClick={() => setAllUnitsExpanded(true)}
+                    >
+                      <ChevronsUpDown className="size-3.5" />
+                    </button>
+                  </ActionTip>
+                  <ActionTip label="全部收起">
+                    <button
+                      type="button"
+                      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--color-bg-hover)]"
+                      aria-label="全部收起"
+                      onClick={() => setAllUnitsExpanded(false)}
+                    >
+                      <ChevronsDownUp className="size-3.5" />
+                    </button>
+                  </ActionTip>
+                  <ActionTip label="收起知识点栏">
+                    <button
+                      type="button"
+                      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--color-bg-hover)]"
+                      aria-label="收起知识点栏"
+                      onClick={() => setTreeCollapsed(true)}
+                    >
+                      <PanelLeftClose className="size-3.5" />
+                    </button>
+                  </ActionTip>
+                </div>
+                <p className="mt-2 font-mono text-xs text-muted-foreground">v{data.sequence} · {data.status}</p>
+              </div>
+              <nav className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-2" aria-label="教材知识点树">
             {units.map((unit) => {
               const expanded = expandedUnitIds.has(unit.unit_id);
               const unitSelected = !selectedPoint && unit.unit_id === selectedUnit.unit_id;
@@ -592,7 +663,19 @@ export default function TextbookStructurePage() {
                 </div>
               );
             })}
-          </nav>
+              </nav>
+              <div className="shrink-0 border-t p-2" style={{ borderColor: 'var(--color-border-muted)' }}>
+                <div className="textbook-structure-view-switch">
+                  <button type="button" className="is-active">
+                    知识点学习
+                  </button>
+                  <button type="button" disabled title="后续开放">
+                    个性化总结
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </aside>
         {selectedPoint ? (
           <KnowledgePointWorkspace
@@ -603,8 +686,8 @@ export default function TextbookStructurePage() {
             structureStatus={data.status}
           />
         ) : (
-        <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <section className="min-w-0 px-4 py-6 lg:px-8">
+        <div className="grid h-full min-h-0 min-w-0 overflow-hidden lg:grid-cols-[minmax(0,1fr)_300px]">
+        <section className="h-full min-h-0 min-w-0 overflow-y-auto px-4 py-6 lg:px-8">
           <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-5" style={{ borderColor: 'var(--color-border-muted)' }}>
             <label className="grid min-w-[320px] flex-1 gap-1.5">
               <span className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">当前 Unit</span>
@@ -707,7 +790,7 @@ export default function TextbookStructurePage() {
             })}
           </div>
         </section>
-        <aside className="border-t px-4 py-6 lg:min-h-[calc(100dvh-80px)] lg:border-t-0 lg:border-l" style={{ borderColor: 'var(--color-border-muted)' }}>
+        <aside className="h-full min-h-0 overflow-y-auto border-t px-4 py-6 lg:border-t-0 lg:border-l" style={{ borderColor: 'var(--color-border-muted)' }}>
           <p className="font-mono text-xs text-muted-foreground">来源定位</p>
           <div className="mt-3 grid gap-3">{selectedUnit.source_refs.map((ref) => <div key={`${ref.source_id}-${ref.start}-${ref.end}`} className="border-l-2 pl-3 text-xs leading-5" style={{ borderColor: 'var(--color-border-muted)' }}><p className="font-mono">{ref.source_id} {sourceRefRange(ref)}</p>{ref.quote && <p className="mt-1 text-muted-foreground">{ref.quote}</p>}</div>)}</div>
           {data.status === 'review' && <div className="mt-8 grid gap-2"><Button onClick={() => void saveStructure()} disabled={mutations.save.isPending}><Save className="mr-2 size-4" />保存结构</Button><Button variant="outline" onClick={() => void acceptStructure()} disabled={mutations.accept.isPending}><CheckCircle2 className="mr-2 size-4" />接受结构</Button></div>}
