@@ -168,6 +168,7 @@ export const queryKeys = {
     knowledgePointLesson: (id: string) => [...queryKeys.education.all, 'knowledge-point-lessons', id],
     knowledgePointLessonByPoint: (id: string) => [...queryKeys.education.all, 'knowledge-points', id, 'lesson'],
     knowledgePointSourcePreview: (id: string) => [...queryKeys.education.all, 'knowledge-points', id, 'source-preview'],
+    lessonGenerationStatus: (id: string) => [...queryKeys.education.all, 'knowledge-points', id, 'lesson-generation'],
     learning: () => [...queryKeys.education.all, 'learning'],
     assignment: (id: string) => [...queryKeys.education.learning(), id],
     assignmentStructure: (id: string) => [...queryKeys.education.assignment(id), 'structure'],

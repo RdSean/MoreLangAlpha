@@ -261,6 +261,17 @@ export function useKnowledgePointSourcePreview(knowledgePointId: string | undefi
   });
 }
 
+export function useLessonGenerationStatus(knowledgePointId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.education.lessonGenerationStatus(knowledgePointId ?? ''),
+    queryFn: () => educationApi.getLessonGenerationStatus(knowledgePointId ?? ''),
+    enabled: Boolean(knowledgePointId) && enabled,
+    staleTime: 2_000,
+    refetchInterval: (query) => (query.state.data?.generating ? 4_000 : false),
+    refetchIntervalInBackground: true,
+  });
+}
+
 export function useTextbookMutations() {
   const queryClient = useQueryClient();
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.education.all });

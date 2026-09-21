@@ -329,6 +329,37 @@ async def test_parent_reads_latest_structure_and_lesson_by_knowledge_point(clien
 
 
 @pytest.mark.asyncio
+async def test_parent_reads_lesson_generation_status(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    knowledge_point_id = uuid4()
+    status_payload = {
+        "knowledge_point_id": knowledge_point_id,
+        "generating": True,
+        "generation_job_id": uuid4(),
+        "status": "running",
+        "attempt_count": 1,
+        "auto_grading": False,
+        "error_code": None,
+        "error_message": None,
+        "started_at": None,
+        "heartbeat_at": None,
+        "root_run_id": None,
+    }
+    with patch(
+        "src.server.app.education.textbooks.get_lesson_generation_status_for_parent",
+        new=AsyncMock(return_value=status_payload),
+    ) as status_call:
+        response = await client.get(
+            f"/api/v1/education/knowledge-points/{knowledge_point_id}/lesson-generation"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["generating"] is True
+    status_call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_parent_reads_structure_generation_progress(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-1"

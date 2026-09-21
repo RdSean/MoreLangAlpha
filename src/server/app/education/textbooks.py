@@ -15,6 +15,7 @@ from src.server.app.education.models import (
     KnowledgePointLessonResponse,
     KnowledgePointProgressResponse,
     KnowledgePointSourcePreviewResponse,
+    LessonGenerationStatusResponse,
     LearningItemResponse,
     PublishTextbookStructureRequest,
     StartTextbookProcessingRequest,
@@ -50,6 +51,7 @@ from src.server.services.education_lesson_review import (
     create_manual_lesson_revision,
     get_lesson_for_parent,
     get_lesson_for_knowledge_point,
+    get_lesson_generation_status_for_parent,
     publish_structure_for_parent,
     queue_lesson_for_parent,
 )
@@ -350,6 +352,23 @@ async def get_family_knowledge_point_lesson_by_point(
 ):
     try:
         return await get_lesson_for_knowledge_point(
+            parent_user_id=user_id,
+            knowledge_point_id=str(knowledge_point_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/knowledge-points/{knowledge_point_id}/lesson-generation",
+    response_model=LessonGenerationStatusResponse,
+)
+async def get_family_lesson_generation_status(
+    knowledge_point_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_lesson_generation_status_for_parent(
             parent_user_id=user_id,
             knowledge_point_id=str(knowledge_point_id),
         )

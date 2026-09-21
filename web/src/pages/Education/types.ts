@@ -309,6 +309,20 @@ export interface StructureGenerationProgress {
   truncated: boolean;
 }
 
+export interface LessonGenerationStatus {
+  knowledge_point_id: string;
+  generating: boolean;
+  generation_job_id?: string | null;
+  status?: StructureGenerationJob['status'] | null;
+  attempt_count: number;
+  auto_grading: boolean;
+  error_code?: string | null;
+  error_message?: string | null;
+  started_at?: string | null;
+  heartbeat_at?: string | null;
+  root_run_id?: string | null;
+}
+
 export interface StudentKnowledgePoint {
   knowledge_point_id: string;
   position: number;

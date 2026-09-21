@@ -1,5 +1,5 @@
 import { api } from '@/api/client';
-import type { CompletedParseJob, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, KnowledgePointSourcePreview, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, ParentLearningTranscript, StructureGenerationJob, StructureGenerationProgress, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit } from './types';
+import type { CompletedParseJob, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, KnowledgePointSourcePreview, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, LessonGenerationStatus, ParentLearningTranscript, StructureGenerationJob, StructureGenerationProgress, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit } from './types';
 
 export async function listEducationTasks(): Promise<EducationTask[]> {
   const { data } = await api.get<EducationTask[]>('/api/v1/education/tasks');
@@ -151,6 +151,11 @@ export async function getKnowledgePointLessonByPoint(knowledgePointId: string): 
 
 export async function getKnowledgePointSourcePreview(knowledgePointId: string): Promise<KnowledgePointSourcePreview> {
   const { data } = await api.get<KnowledgePointSourcePreview>(`/api/v1/education/knowledge-points/${knowledgePointId}/source-preview`);
+  return data;
+}
+
+export async function getLessonGenerationStatus(knowledgePointId: string): Promise<LessonGenerationStatus> {
+  const { data } = await api.get<LessonGenerationStatus>(`/api/v1/education/knowledge-points/${knowledgePointId}/lesson-generation`);
   return data;
 }
 

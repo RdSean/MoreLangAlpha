@@ -539,6 +539,45 @@ async def get_active_structure_generation_for_parent(
     return dict(row) if row else None
 
 
+async def get_active_lesson_generation_for_parent(
+    *, parent_user_id: str, knowledge_point_id: str
+) -> dict[str, Any] | None:
+    """Return the newest queued/running lesson job for one knowledge point."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT jobs.generation_job_id, jobs.version_id, jobs.scope,
+                       jobs.knowledge_point_id, jobs.status, jobs.attempt_count,
+                       jobs.auto_grading, jobs.error_code, jobs.error_message,
+                       jobs.created_at, jobs.updated_at,
+                       attempts.root_run_id, attempts.started_at,
+                       attempts.heartbeat_at
+                FROM education_generation_jobs AS jobs
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = jobs.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                LEFT JOIN education_generation_attempts AS attempts
+                  ON attempts.attempt_id = jobs.latest_attempt_id
+                WHERE jobs.knowledge_point_id = %s
+                  AND jobs.scope = 'lesson'
+                  AND jobs.status IN (
+                      'queued', 'preparing', 'running', 'validating'
+                  )
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                ORDER BY jobs.created_at DESC
+                LIMIT 1
+                """,
+                (knowledge_point_id, parent_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def create_processing_profile(
     *,
     parent_user_id: str,

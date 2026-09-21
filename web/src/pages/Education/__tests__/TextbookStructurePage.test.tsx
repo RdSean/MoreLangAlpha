@@ -6,6 +6,7 @@ import TextbookStructurePage from '../TextbookStructurePage';
 
 const structureState = vi.hoisted(() => ({
   data: undefined as Record<string, unknown> | undefined,
+  statusOverride: undefined as string | undefined,
 }));
 
 const save = vi.fn().mockResolvedValue({});
@@ -13,6 +14,14 @@ const accept = vi.fn().mockResolvedValue({});
 const create = vi.fn().mockResolvedValue({ generation_job_id: 'generation-1' });
 const refetch = vi.fn().mockResolvedValue({});
 let progressData: Record<string, unknown> | null = null;
+let lessonGenerationStatus: Record<string, unknown> = {
+  knowledge_point_id: 'kp-1',
+  generating: false,
+  generation_job_id: null,
+  status: null,
+  attempt_count: 0,
+  auto_grading: false,
+};
 
 vi.mock('../queries', () => ({
   useLatestTextbookStructure: () => {
@@ -20,7 +29,7 @@ vi.mock('../queries', () => ({
       structure_id: 'structure-1',
       version_id: 'version-1',
       sequence: 1,
-      status: 'review',
+      status: structureState.statusOverride ?? 'review',
       schema_version: 'langalpha-managed-textbook-structure/v1',
       processing_profile_sha256: 'a'.repeat(64),
       input_manifest_sha256: 'b'.repeat(64),
@@ -111,6 +120,11 @@ vi.mock('../queries', () => ({
     isLoading: false,
     isError: false,
   }),
+  useLessonGenerationStatus: () => ({
+    data: lessonGenerationStatus,
+    isPending: false,
+    isError: false,
+  }),
   useStructureMutations: () => ({
     create: { mutateAsync: create, isPending: false },
     resumeStructure: { mutateAsync: vi.fn().mockResolvedValue({ generation_job_id: 'generation-resume' }), isPending: false },
@@ -138,7 +152,16 @@ describe('TextbookStructurePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     structureState.data = undefined;
+    structureState.statusOverride = undefined;
     progressData = null;
+    lessonGenerationStatus = {
+      knowledge_point_id: 'kp-1',
+      generating: false,
+      generation_job_id: null,
+      status: null,
+      attempt_count: 0,
+      auto_grading: false,
+    };
   });
 
   it('renders Unit and knowledge-point review tree', async () => {
@@ -219,29 +242,79 @@ describe('TextbookStructurePage', () => {
 
     renderPage();
 
-    expect(screen.getByTestId('structure-generation-timeline')).toHaveTextContent('分析教材结构');
-    expect(screen.getByText(/可以关闭页面，处理会继续在后台进行/)).toBeInTheDocument();
-    expect(screen.getByTestId('structure-activity-list')).toHaveTextContent('扫描源文档：01-rex-3e-sb3.pdf.md');
-    expect(screen.getByTestId('structure-activity-list')).toHaveTextContent('派出并行子任务分析单元');
-    expect(screen.getByTestId('structure-activity-list')).toHaveTextContent('×3');
+    const progressCard = screen.getByTestId('structure-active-job');
+    expect(progressCard).toHaveTextContent('分析教材结构');
+    expect(progressCard).toHaveTextContent('扫描源文档：01-rex-3e-sb3.pdf.md');
+    expect(progressCard).toHaveTextContent('派出并行子任务分析单元');
+    expect(progressCard).toHaveTextContent('×3');
+  });
+
+  it('shows a lesson generation timeline in the knowledge-point workspace', () => {
+    structureState.statusOverride = 'accepted';
+    lessonGenerationStatus = {
+      knowledge_point_id: 'kp-1',
+      generating: true,
+      generation_job_id: 'lesson-generation-1',
+      status: 'running',
+      attempt_count: 1,
+      auto_grading: false,
+      started_at: new Date().toISOString(),
+      heartbeat_at: new Date().toISOString(),
+    };
+    progressData = {
+      generation_job_id: 'lesson-generation-1',
+      status: 'running',
+      truncated: false,
+      events: [
+        {
+          sequence: 0,
+          kind: 'tool',
+          label: '读取冻结输入清单',
+          detail: null,
+          status: 'completed',
+          timestamp: '2026-09-21T04:45:46Z',
+          count: 1,
+        },
+        {
+          sequence: 1,
+          kind: 'tool',
+          label: '生成课程草稿',
+          detail: null,
+          status: 'running',
+          timestamp: '2026-09-21T04:46:10Z',
+          count: 1,
+        },
+      ],
+    };
+
+    renderPage();
+
+    const lessonProgress = screen.getByTestId('lesson-generation-progress');
+    expect(lessonProgress).toHaveTextContent('课程生成进度');
+    expect(lessonProgress).toHaveTextContent('分析教材结构');
+    expect(lessonProgress).toHaveTextContent('读取冻结输入清单');
+    expect(screen.getByText(/任务已提交，上方会显示阶段进度和实时处理步骤/)).toBeInTheDocument();
   });
 
   it('supports add, split, merge, and delete knowledge-point actions', async () => {
     const user = userEvent.setup();
     let view = renderPage();
 
+    await user.click(screen.getByRole('tab', { name: '原文依据' }));
     await user.click(screen.getByRole('button', { name: '选择 Unit 1: Sports' }));
     await user.click(screen.getByRole('button', { name: '添加知识点' }));
     expect(screen.getByDisplayValue('新知识点')).toBeInTheDocument();
 
     view.unmount();
     view = renderPage();
+    await user.click(screen.getByRole('tab', { name: '原文依据' }));
     await user.click(screen.getByRole('button', { name: '选择 Unit 1: Sports' }));
     await user.click(screen.getByRole('button', { name: '拆分 世界运动' }));
     expect(screen.getByDisplayValue('世界运动（拆分）')).toBeInTheDocument();
 
     view.unmount();
     view = renderPage();
+    await user.click(screen.getByRole('tab', { name: '原文依据' }));
     await user.click(screen.getByRole('button', { name: '选择 Unit 1: Sports' }));
     await user.click(screen.getByRole('button', { name: '合并 足球之爱' }));
     expect(screen.getByDisplayValue('世界运动 / 足球之爱')).toBeInTheDocument();

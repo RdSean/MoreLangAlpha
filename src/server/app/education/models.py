@@ -516,6 +516,20 @@ class KnowledgePointProgressResponse(BaseModel):
     truncated: bool = False
 
 
+class LessonGenerationStatusResponse(BaseModel):
+    knowledge_point_id: UUID
+    generating: bool
+    generation_job_id: UUID | None = None
+    status: str | None = None
+    attempt_count: int = 0
+    auto_grading: bool = False
+    error_code: str | None = None
+    error_message: str | None = None
+    started_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    root_run_id: UUID | None = None
+
+
 class CreateKnowledgePointLessonRevisionRequest(BaseModel):
     content_markdown: str = Field(min_length=1, max_length=200_000)
 

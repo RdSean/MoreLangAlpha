@@ -6,9 +6,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import EducationMarkdown from './components/EducationMarkdown';
+import GenerationProgressCard, { type GenerationJobView } from './components/GenerationProgressCard';
 import ProcessingProfileDialog, { type ProcessingProfileValue } from './components/ProcessingProfileDialog';
 import TextbookWorkflowStepper, { type TextbookWorkflowStep } from './components/TextbookWorkflowStepper';
-import { useKnowledgePointLessonByPoint, useKnowledgePointSourcePreview, useLatestTextbookStructure, useStructureGenerationJob, useStructureGenerationProgress, useStructureMutations } from './queries';
+import { useKnowledgePointLessonByPoint, useKnowledgePointSourcePreview, useLatestTextbookStructure, useLessonGenerationStatus, useStructureGenerationJob, useStructureMutations } from './queries';
 import type { KnowledgePointSourcePreview, StructureGenerationJob, TextbookKnowledgePoint, TextbookStructureUnit } from './types';
 import './TextbookStructurePage.css';
 
@@ -102,213 +103,6 @@ function cloneUnits(units: TextbookStructureUnit[]): TextbookStructureUnit[] {
       source_refs: [...point.source_refs],
     })),
   }));
-}
-
-type StructureTimelineStatus = 'queued' | 'preparing' | 'running' | 'validating' | 'completed' | 'failed' | 'cancelled';
-
-const timelineStages: Array<{ id: string; label: string }> = [
-  { id: 'queued', label: '任务已排队' },
-  { id: 'preparing', label: '准备解析输入' },
-  { id: 'running', label: '分析教材结构' },
-  { id: 'validating', label: '校验并归档结果' },
-  { id: 'done', label: '进入人工审阅' },
-];
-
-function timelineStageIndex(status: StructureTimelineStatus | undefined) {
-  switch (status) {
-    case 'queued': return 0;
-    case 'preparing': return 1;
-    case 'running': return 2;
-    case 'validating': return 3;
-    case 'completed': return 4;
-    default: return -1;
-  }
-}
-
-function formatElapsed(from: string | null | undefined, to: string | null | undefined) {
-  if (!from) return undefined;
-  const start = new Date(from).getTime();
-  const end = to ? new Date(to).getTime() : Date.now();
-  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return undefined;
-  const totalSeconds = Math.floor((end - start) / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes} 分 ${seconds} 秒` : `${seconds} 秒`;
-}
-
-function StructureGenerationTimeline({ job }: { job: StructureGenerationJob }) {
-  const activeIndex = timelineStageIndex(job.status);
-  const failed = job.status === 'failed' || job.status === 'cancelled';
-  const elapsed = formatElapsed(job.started_at ?? job.created_at, job.updated_at);
-  return (
-    <div className="textbook-timeline" data-testid="structure-generation-timeline">
-      {timelineStages.map((stage, index) => {
-        const done = !failed && activeIndex > index;
-        const active = !failed && activeIndex === index;
-        const stageFailed = failed && index === Math.max(activeIndex, 0);
-        return (
-          <div
-            key={stage.id}
-            className={cn(
-              'textbook-timeline-row',
-              done && 'is-done',
-              active && 'is-active',
-              stageFailed && 'is-failed',
-            )}
-          >
-            <span className="textbook-timeline-dot">
-              {done
-                ? <Check className="size-3" />
-                : active
-                  ? <Loader2 className="size-3 animate-spin" />
-                  : stageFailed
-                    ? <AlertTriangle className="size-3" />
-                    : <span className="size-1.5 rounded-full bg-current" />}
-            </span>
-            <span className="min-w-0 truncate">{stage.label}</span>
-            {active && <span className="textbook-timeline-time">进行中</span>}
-          </div>
-        );
-      })}
-      <p className="mt-2 font-mono text-[11px] text-muted-foreground">
-        状态 {job.status} · 第 {job.attempt_count} 次尝试
-        {elapsed ? ` · 已耗时 ${elapsed}` : ''}
-      </p>
-      {job.heartbeat_at && (
-        <p className="font-mono text-[11px] text-muted-foreground">
-          最近心跳 {new Date(job.heartbeat_at).toLocaleTimeString()}
-        </p>
-      )}
-      {job.error_message && (
-        <p className="mt-1 text-xs" style={{ color: 'var(--color-loss)' }}>{job.error_message}</p>
-      )}
-    </div>
-  );
-}
-
-const progressStatusIcon: Record<string, ReactNode> = {
-  completed: <Check className="size-3" />,
-  failed: <AlertTriangle className="size-3" />,
-  running: <Loader2 className="size-3 animate-spin" />,
-  skipped: <span className="size-1.5 rounded-full bg-current opacity-60" />,
-};
-
-function StructureActivityPanel({
-  jobId,
-  job,
-}: {
-  jobId: string | undefined;
-  job: StructureGenerationJob;
-}) {
-  const progress = useStructureGenerationProgress(jobId, Boolean(jobId));
-  const running = ['queued', 'preparing', 'running', 'validating'].includes(job.status);
-  const [expanded, setExpanded] = useState(true);
-  const [showAll, setShowAll] = useState(false);
-  const listRef = useRef<HTMLDivElement>(null);
-  const events = progress.data?.events ?? [];
-  const visibleEvents = !showAll && events.length > 12 ? events.slice(-8) : events;
-  const hiddenCount = events.length - visibleEvents.length;
-
-  useEffect(() => {
-    setExpanded(running);
-  }, [running]);
-
-  useEffect(() => {
-    const node = listRef.current;
-    if (!node || !running) return;
-    node.scrollTop = node.scrollHeight;
-  }, [running, events.length]);
-
-  return (
-    <div className="textbook-activity-panel" data-testid="structure-activity-panel">
-      <div className="textbook-activity-header">
-        <div className="min-w-0">
-          <p className="text-sm font-medium">处理活动</p>
-          <p className="text-xs text-muted-foreground">
-            {running
-              ? '正在同步服务端处理事件，可关闭页面，任务会继续。'
-              : events.length > 0
-                ? `已完成 ${events.length} 个可读处理步骤。`
-                : '暂无可读处理事件。'}
-          </p>
-        </div>
-        <button
-          type="button"
-          className="textbook-activity-toggle"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          {expanded ? '收起' : '展开'}
-          <ChevronDown className={cn('size-3.5 transition-transform', expanded && 'rotate-180')} />
-        </button>
-      </div>
-      {expanded && (
-        <>
-          <div className="textbook-activity-list" ref={listRef} data-testid="structure-activity-list">
-            {progress.isPending ? (
-              <p className="textbook-activity-empty">
-                <Loader2 className="mr-2 inline size-3 animate-spin" />
-                正在读取处理活动…
-              </p>
-            ) : progress.isError ? (
-              <p className="textbook-activity-empty">暂时无法读取处理活动。</p>
-            ) : events.length === 0 ? (
-              <p className="textbook-activity-empty">
-                {running ? '任务已启动，等待首个处理事件…' : '没有记录到可读处理事件。'}
-              </p>
-            ) : (
-              <>
-                {hiddenCount > 0 && (
-                  <button
-                    type="button"
-                    className="textbook-activity-more"
-                    onClick={() => setShowAll(true)}
-                  >
-                    还有 {hiddenCount} 条较早记录，展开查看
-                  </button>
-                )}
-                {visibleEvents.map((event) => (
-                  <div
-                    key={`${event.sequence}-${event.label}`}
-                    className={cn(
-                      'textbook-activity-row',
-                      event.status === 'running' && 'is-running',
-                      event.status === 'failed' && 'is-failed',
-                    )}
-                  >
-                    <span className="textbook-activity-dot">
-                      {progressStatusIcon[event.status] ?? <span className="size-1.5 rounded-full bg-current" />}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate" title={event.label}>
-                        {event.label}
-                        {event.count > 1 && (
-                          <span className="ml-1.5 font-mono text-[11px] text-muted-foreground">×{event.count}</span>
-                        )}
-                      </p>
-                      {event.detail && (
-                        <p className="truncate font-mono text-[11px] text-muted-foreground" title={event.detail}>
-                          {event.detail}
-                        </p>
-                      )}
-                    </div>
-                    {event.timestamp && (
-                      <span className="textbook-timeline-time shrink-0">
-                        {new Date(event.timestamp).toLocaleTimeString()}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-          {progress.data?.truncated && (
-            <p className="mt-2 text-[11px] text-muted-foreground">只展示最近的处理记录。</p>
-          )}
-        </>
-      )}
-    </div>
-  );
 }
 
 function KnowledgePointSourcePreviewPanel({
@@ -409,8 +203,10 @@ function KnowledgePointWorkspace({
   const [autoGrading, setAutoGrading] = useState(false);
   const [activeTab, setActiveTab] = useState<'lesson' | 'source'>('lesson');
   const [tabTouched, setTabTouched] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const lesson = useKnowledgePointLessonByPoint(point.knowledge_point_id, true);
   const sourcePreview = useKnowledgePointSourcePreview(point.knowledge_point_id, true);
+  const lessonGeneration = useLessonGenerationStatus(point.knowledge_point_id, true);
   const generation = useStructureGenerationJob(jobId, Boolean(jobId));
   const mutations = useStructureMutations();
   const { toast } = useToast();
@@ -421,6 +217,7 @@ function KnowledgePointWorkspace({
   }, [generation.data?.status, lesson]);
 
   const generate = async () => {
+    setRegenerating(true);
     try {
       const job = await mutations.generateLesson.mutateAsync({
         knowledgePointId: point.knowledge_point_id,
@@ -428,6 +225,7 @@ function KnowledgePointWorkspace({
       });
       setJobId(job.generation_job_id);
     } catch (error) {
+      setRegenerating(false);
       toast({
         variant: 'destructive',
         title: '无法生成课程',
@@ -441,16 +239,51 @@ function KnowledgePointWorkspace({
     || generation.data?.status === 'running'
     || generation.data?.status === 'validating';
 
+  const serverGenerationJobId = lessonGeneration.data?.generating
+    ? lessonGeneration.data.generation_job_id ?? undefined
+    : undefined;
+  const activeGenerationJobId = jobId ?? serverGenerationJobId;
+  const generationInFlight = generating || Boolean(serverGenerationJobId) || regenerating;
+  const generationJob: GenerationJobView | undefined = generation.data
+    ? {
+        generation_job_id: generation.data.generation_job_id,
+        status: generation.data.status,
+        attempt_count: generation.data.attempt_count,
+        created_at: generation.data.created_at,
+        updated_at: generation.data.updated_at,
+        started_at: generation.data.started_at,
+        heartbeat_at: generation.data.heartbeat_at,
+        error_message: generation.data.error_message,
+      }
+    : serverGenerationJobId && lessonGeneration.data?.status
+      ? {
+          generation_job_id: serverGenerationJobId,
+          status: lessonGeneration.data.status,
+          attempt_count: lessonGeneration.data.attempt_count,
+          started_at: lessonGeneration.data.started_at,
+          heartbeat_at: lessonGeneration.data.heartbeat_at,
+          error_message: lessonGeneration.data.error_message,
+        }
+      : undefined;
+
   useEffect(() => {
     setTabTouched(false);
     setActiveTab('lesson');
     setJobId(undefined);
+    setRegenerating(false);
   }, [point.knowledge_point_id]);
 
   useEffect(() => {
+    if (!generationInFlight) setRegenerating(false);
+  }, [generationInFlight]);
+
+  useEffect(() => {
     if (tabTouched || lesson.isLoading) return;
-    setActiveTab(lesson.data ? 'lesson' : 'source');
-  }, [lesson.data, lesson.isLoading, tabTouched]);
+    // Before acceptance the useful view is the original evidence; once the
+    // structure is accepted the user is here to build or read the lesson.
+    if (lesson.data) setActiveTab('lesson');
+    else setActiveTab(structureStatus === 'accepted' ? 'lesson' : 'source');
+  }, [lesson.data, lesson.isLoading, structureStatus, tabTouched]);
 
   const selectTab = (tab: 'lesson' | 'source') => {
     setTabTouched(true);
@@ -527,6 +360,23 @@ function KnowledgePointWorkspace({
         </div>
       </div>
 
+      {(generationInFlight || generationJob) && (
+        <div className="border-b px-5 py-4 lg:px-8" style={{ borderColor: 'var(--color-border-muted)' }}>
+          <GenerationProgressCard
+            className="rounded-lg border p-4"
+            data-testid="lesson-generation-progress"
+            jobId={activeGenerationJobId}
+            job={generationJob ?? {
+              generation_job_id: activeGenerationJobId ?? 'pending',
+              status: 'queued',
+              attempt_count: 1,
+            }}
+            heading="课程生成进度"
+            note="可以关闭页面，生成会继续在后台进行。"
+          />
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3 lg:px-8" style={{ borderColor: 'var(--color-border-muted)' }}>
         <div className="textbook-structure-tabs" role="tablist" aria-label="知识点内容视图">
           <button
@@ -580,12 +430,18 @@ function KnowledgePointWorkspace({
               {structureStatus === 'accepted' ? 'ready' : 'structure review'}
             </span>
             <h2 className="title-font mt-3 text-xl font-semibold">
-              {structureStatus === 'accepted' ? '准备就绪' : '还没有课程 Markdown'}
+              {generationInFlight
+                ? '正在生成课程'
+                : structureStatus === 'accepted'
+                  ? '准备就绪'
+                  : '还没有课程 Markdown'}
             </h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              {structureStatus === 'accepted'
-                ? '这个知识点还没有课程 Markdown。点击下方按钮，让 book-to-skill 基于已确认的来源片段生成完整课程。'
-                : '结构还在审阅中。可以先查看“原文依据”，确认拆分和合并是否合理，再决定是否接受结构。'}
+              {generationInFlight
+                ? '任务已提交，上方会显示阶段进度和实时处理步骤；可以关闭页面，生成会继续在后台进行。'
+                : structureStatus === 'accepted'
+                  ? '这个知识点还没有课程 Markdown。点击下方按钮，让 book-to-skill 基于已确认的来源片段生成完整课程。'
+                  : '结构还在审阅中。可以先查看“原文依据”，确认拆分和合并是否合理，再决定是否接受结构。'}
             </p>
             {structureStatus === 'accepted' ? (
               <>
@@ -594,9 +450,9 @@ function KnowledgePointWorkspace({
                   同时生成自动判题练习
                 </label>
                 <div className="mt-5">
-                  <Button onClick={() => void generate()} disabled={generating || mutations.generateLesson.isPending}>
-                    {generating ? <Loader2 className="mr-2 size-4 animate-spin" /> : <WandSparkles className="mr-2 size-4" />}
-                    {generating ? '正在生成课程' : '生成课程'}
+                  <Button onClick={() => void generate()} disabled={generationInFlight || mutations.generateLesson.isPending}>
+                    {generationInFlight ? <Loader2 className="mr-2 size-4 animate-spin" /> : <WandSparkles className="mr-2 size-4" />}
+                    {generationInFlight ? '正在生成课程' : '生成课程'}
                   </Button>
                 </div>
               </>
@@ -854,7 +710,7 @@ export default function TextbookStructurePage() {
   }
 
   if (!structure.data && generation.data) {
-    return <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page"><div className="mx-auto max-w-3xl px-6 py-12"><h1 className="title-font text-2xl font-semibold">正在分析教材结构</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">任务已提交，下面会显示当前进度；可以关闭页面，处理会继续在后台进行。</p><div className="mt-6 grid gap-4 rounded-lg border p-4" style={{ borderColor: 'var(--color-border-muted)' }}><StructureGenerationTimeline job={generation.data} /><StructureActivityPanel jobId={generation.data.generation_job_id} job={generation.data} /></div>{generation.data.status === 'failed' && <Button className="mt-6" onClick={() => void resumeStructure(generation.data.generation_job_id)} disabled={structureSubmitting || mutations.resumeStructure.isPending}><RefreshCcw className="mr-2 size-4" />{structureSubmitting || mutations.resumeStructure.isPending ? '正在继续' : '重新运行结构分析'}</Button>}</div></main>;
+    return <main className="h-full overflow-y-auto bg-canvas" data-testid="textbook-structure-page"><div className="mx-auto max-w-3xl px-6 py-12"><h1 className="title-font text-2xl font-semibold">正在分析教材结构</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">任务已提交，下面会显示当前进度；可以关闭页面，处理会继续在后台进行。</p><GenerationProgressCard className="mt-6 rounded-lg border p-4" jobId={generation.data.generation_job_id} job={generation.data} heading="教材结构处理进度" />{generation.data.status === 'failed' && <Button className="mt-6" onClick={() => void resumeStructure(generation.data.generation_job_id)} disabled={structureSubmitting || mutations.resumeStructure.isPending}><RefreshCcw className="mr-2 size-4" />{structureSubmitting || mutations.resumeStructure.isPending ? '正在继续' : '重新运行结构分析'}</Button>}</div></main>;
   }
 
   const data = structure.data;
@@ -900,12 +756,14 @@ export default function TextbookStructurePage() {
           </div>
           <h1 className="title-font mt-8 text-2xl font-semibold">正在分析教材结构</h1>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">任务已提交，下面会显示当前进度；可以关闭页面，处理会继续在后台进行。</p>
-          <div className="mt-6 grid gap-4 rounded-lg border p-4 lg:grid-cols-[minmax(260px,340px)_minmax(0,1fr)]" style={{ borderColor: 'var(--color-border-muted)' }}>
-            <div className="min-w-0">
-              <StructureGenerationTimeline job={activeJob} />
-            </div>
-            <StructureActivityPanel jobId={activeJob.generation_job_id} job={activeJob} />
-          </div>
+          <GenerationProgressCard
+            className="mt-6 rounded-lg border p-4"
+            data-testid="structure-active-job"
+            jobId={activeJob.generation_job_id}
+            job={activeJob}
+            heading="教材结构处理进度"
+            note="可以关闭页面，处理会继续在后台进行。"
+          />
         </div>
       </main>
     );
@@ -947,14 +805,14 @@ export default function TextbookStructurePage() {
           <TextbookWorkflowStepper steps={steps} />
         </div>
         {activeJob && (
-          <div className="mt-4 grid gap-4 rounded-lg border p-4 lg:grid-cols-[minmax(260px,360px)_minmax(0,1fr)]" style={{ borderColor: 'var(--color-border-muted)' }} data-testid="structure-active-job">
-            <div className="min-w-0">
-              <p className="text-sm font-medium">教材结构处理进度</p>
-              <p className="mb-3 text-xs text-muted-foreground">可以关闭页面，处理会继续在后台进行。</p>
-              <StructureGenerationTimeline job={activeJob} />
-            </div>
-            <StructureActivityPanel jobId={activeJob.generation_job_id} job={activeJob} />
-          </div>
+          <GenerationProgressCard
+            className="mt-4 rounded-lg border p-4"
+            data-testid="structure-active-job"
+            jobId={activeJob.generation_job_id}
+            job={activeJob}
+            heading="教材结构处理进度"
+            note="可以关闭页面，处理会继续在后台进行。"
+          />
         )}
       </div>
       {warningCounts.size > 0 && (

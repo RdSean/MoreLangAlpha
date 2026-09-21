@@ -8,6 +8,7 @@ from typing import Any
 from src.server.database.education_textbooks import (
     approve_kp_lesson_revision,
     create_kp_lesson_revision,
+    get_active_lesson_generation_for_parent,
     get_generation_job_for_parent,
     get_kp_lesson_by_knowledge_point_for_parent,
     get_kp_lesson_for_parent,
@@ -214,3 +215,28 @@ async def publish_structure_for_parent(
             "Textbook structure requires approved lessons for every knowledge point"
         )
     return publication
+
+
+async def get_lesson_generation_status_for_parent(
+    *, parent_user_id: str, knowledge_point_id: str
+) -> dict[str, Any]:
+    """Return the active lesson run for one knowledge point, if any."""
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError("Only a parent can read lesson progress")
+    job = await get_active_lesson_generation_for_parent(
+        parent_user_id=parent_user_id,
+        knowledge_point_id=knowledge_point_id,
+    )
+    return {
+        "knowledge_point_id": knowledge_point_id,
+        "generating": bool(job),
+        "generation_job_id": str(job["generation_job_id"]) if job else None,
+        "status": str(job["status"]) if job else None,
+        "attempt_count": int(job["attempt_count"] or 0) if job else 0,
+        "auto_grading": bool(job["auto_grading"]) if job else False,
+        "error_code": job.get("error_code") if job else None,
+        "error_message": job.get("error_message") if job else None,
+        "started_at": job.get("started_at") if job else None,
+        "heartbeat_at": job.get("heartbeat_at") if job else None,
+        "root_run_id": str(job["root_run_id"]) if job and job.get("root_run_id") else None,
+    }
