@@ -33,7 +33,13 @@ from src.server.database.runs.lifecycle import QuerySpec
 from src.server.database.workspace import create_workspace
 from src.server.services.education_structure_validation import (
     TextbookStructureValidationError,
+    normalize_v2_units,
     validate_textbook_structure,
+)
+from src.server.services.education_structure_scope_validation import (
+    STRUCTURE_FORMAT_V2,
+    ScopeValidationError,
+    validate_structure_scopes,
 )
 from src.server.services.education_processing_profiles import (
     processing_profile_prompt,
@@ -63,6 +69,21 @@ logger = logging.getLogger(__name__)
 
 _MANAGED_KIND = "education_structure"
 _HEARTBEAT_INTERVAL_SECONDS = 15.0
+
+
+def _primary_source(frozen_input: Mapping[str, Any]) -> tuple[str, str]:
+    """Return the (source_id, markdown) the scope line ranges refer to."""
+    sources = frozen_input.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise ScopeValidationError("Frozen input has no source document")
+    source = sources[0]
+    if not isinstance(source, Mapping):
+        raise ScopeValidationError("Frozen source document is invalid")
+    source_id = str(source.get("source_id") or source.get("content_chapter_id") or "")
+    markdown = source.get("markdown")
+    if not source_id or not isinstance(markdown, str):
+        raise ScopeValidationError("Frozen source document is incomplete")
+    return source_id, markdown
 def managed_structure_prompt(
     job_id: str, profile: Mapping[str, Any] | None = None
 ) -> str:
@@ -284,11 +305,27 @@ async def finalize_structure_generation(
             str(job["generation_job_id"]),
             sandbox,
         )
-        validated = validate_textbook_structure(candidate, frozen_input)
+        if (
+            isinstance(candidate, Mapping)
+            and candidate.get("format") == STRUCTURE_FORMAT_V2
+        ):
+            source_id, markdown = _primary_source(frozen_input)
+            scopes = validate_structure_scopes(
+                candidate,
+                markdown=markdown,
+                source_id=source_id,
+            )
+            warnings: list[str] = []
+            units = normalize_v2_units(candidate, warnings=warnings)
+            validated = {"format": STRUCTURE_FORMAT_V2, "units": units, "warnings": warnings}
+        else:
+            validated = validate_textbook_structure(candidate, frozen_input)
+            scopes = None
         await replace_structure_contents(
             structure_id=str(job["structure_id"]),
             units=validated["units"],
             warnings=list(validated.get("warnings", [])),
+            scopes=scopes,
         )
         bundle_prefix = await write_structure_bundle(job, validated)
         completed = await complete_structure_generation(

@@ -216,6 +216,63 @@ async def test_replace_structure_contents_generates_service_owned_ids(
 
 
 @pytest.mark.asyncio
+async def test_replace_structure_contents_persists_reading_scopes(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"structure_id": "structure-1"},
+        {"unit_id": "unit-1"},
+    ]
+
+    await education_textbooks.replace_structure_contents(
+        structure_id="structure-1",
+        units=[
+            {
+                "position": 1,
+                "slug": "unit-1",
+                "title": "Unit 1",
+                "summary": "",
+                "unit_type": "teaching",
+                "source_refs": [],
+                "confidence": 1.0,
+                "status": "review",
+                "knowledge_points": [],
+            }
+        ],
+        scopes=[
+            {
+                "unit_index": 0,
+                "slot": "reading_a",
+                "title": "The World's Game",
+                "source_id": "source-1",
+                "line_start": 10,
+                "line_end": 40,
+                "char_start": 100,
+                "char_end": 900,
+            }
+        ],
+    )
+
+    statements = [call.args[0] for call in mock_cursor.execute.call_args_list]
+    assert any(
+        "DELETE FROM education_textbook_scopes" in statement
+        for statement in statements
+    )
+    scope_inserts = [
+        call for call in mock_cursor.execute.call_args_list
+        if "INSERT INTO education_textbook_scopes" in call.args[0]
+    ]
+    assert len(scope_inserts) == 1
+    assert scope_inserts[0].args[1][3] == "reading_a"
+    assert scope_inserts[0].args[1][10:14] == (10, 40, 100, 900)
+
+
+@pytest.mark.asyncio
 async def test_replace_structure_contents_preserves_ids_for_matching_slugs(
     mock_connection, mock_cursor, monkeypatch
 ):

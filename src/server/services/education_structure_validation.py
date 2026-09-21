@@ -350,3 +350,56 @@ def validate_textbook_structure(
         "units": units,
         "warnings": warnings,
     }
+
+
+def normalize_v2_units(
+    payload: Mapping[str, Any],
+    *,
+    warnings: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Turn a v2 reading-scope payload into units for the review projection.
+
+    Knowledge points are intentionally absent: the canonical skill declares
+    Reading boundaries, and the parent adds or edits knowledge points inside
+    those boundaries during structure review.
+    """
+    collected = warnings if warnings is not None else []
+    units: list[dict[str, Any]] = []
+    unit_slugs: set[str] = set()
+    for index, raw_unit in enumerate(payload.get("units", []), start=1):
+        if not isinstance(raw_unit, Mapping):
+            collected.append("unit_skipped_invalid")
+            continue
+        number = raw_unit.get("unit")
+        theme = _text(
+            raw_unit.get("theme"),
+            fallback=f"Unit {index}",
+            limit=_MAX_TITLE_LENGTH,
+        )
+        title = (
+            f"Unit {number}: {theme}"
+            if isinstance(number, int) and not isinstance(number, bool)
+            else theme
+        )
+        units.append(
+            {
+                "position": index,
+                "slug": _unique_slug(
+                    title,
+                    fallback=f"unit-{index}",
+                    used=unit_slugs,
+                    warning_code="unit_slug_deduplicated",
+                    warnings=collected,
+                ),
+                "title": title,
+                "summary": str(raw_unit.get("summary") or ""),
+                "unit_type": "teaching",
+                "source_refs": [],
+                "confidence": 1.0,
+                "status": "review",
+                "knowledge_points": [],
+            }
+        )
+    if not units:
+        raise TextbookStructureValidationError("Structure has no usable Units")
+    return units

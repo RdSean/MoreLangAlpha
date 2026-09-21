@@ -1088,6 +1088,7 @@ async def replace_structure_contents(
     structure_id: str,
     units: list[dict[str, Any]],
     warnings: list[str] | None = None,
+    scopes: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Replace a mutable structure projection with service-owned IDs."""
     async with get_db_connection() as conn:
@@ -1157,8 +1158,16 @@ async def replace_structure_contents(
                     """,
                     (structure_id,),
                 )
+                if scopes is not None:
+                    await cur.execute(
+                        """
+                        DELETE FROM education_textbook_scopes
+                        WHERE structure_id = %s
+                        """,
+                        (structure_id,),
+                    )
                 stored_units: list[dict[str, Any]] = []
-                for unit in units:
+                for unit_index, unit in enumerate(units):
                     unit_id = existing_unit_ids.get(
                         str(unit["slug"]), str(uuid4())
                     )
@@ -1223,6 +1232,39 @@ async def replace_structure_contents(
                             }
                         )
                     stored_units.append(stored_unit)
+                    if scopes is not None:
+                        for scope in scopes:
+                            if scope.get("unit_index") != unit_index:
+                                continue
+                            await cur.execute(
+                                """
+                                INSERT INTO education_textbook_scopes (
+                                    scope_id, structure_id, unit_id, slot, title,
+                                    summary, reading_skill, vocabulary_building,
+                                    critical_thinking, source_id, line_start,
+                                    line_end, char_start, char_end
+                                ) VALUES (
+                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                    %s, %s, %s, %s
+                                )
+                                """,
+                                (
+                                    str(uuid4()),
+                                    structure_id,
+                                    unit_id,
+                                    scope["slot"],
+                                    scope["title"],
+                                    scope.get("summary", ""),
+                                    scope.get("reading_skill", ""),
+                                    scope.get("vocabulary_building", ""),
+                                    scope.get("critical_thinking", ""),
+                                    scope.get("source_id", ""),
+                                    scope["line_start"],
+                                    scope["line_end"],
+                                    scope["char_start"],
+                                    scope["char_end"],
+                                ),
+                            )
     return stored_units
 
 
