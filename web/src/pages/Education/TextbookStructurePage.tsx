@@ -373,26 +373,30 @@ function KnowledgePointWorkspace({
           )}
           {structureStatus === 'review' && (
             <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onSave}
-                disabled={isSaving || isAccepting}
-              >
-                <Save className="mr-2 size-3.5" />
-                {isSaving ? '正在保存' : '保存结构'}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onAccept}
-                disabled={isSaving || isAccepting}
-              >
-                <CheckCircle2 className="mr-2 size-3.5" />
-                {isAccepting ? '正在接受' : '接受结构'}
-              </Button>
+              <ActionTip label="保存整个教材结构：会把本次修改的全部 Unit 和知识点一起写入，不是只保存当前 Unit。">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onSave}
+                  disabled={isSaving || isAccepting}
+                >
+                  <Save className="mr-2 size-3.5" />
+                  {isSaving ? '正在保存' : '保存结构'}
+                </Button>
+              </ActionTip>
+              <ActionTip label="接受整个教材结构：会一次性确认全部 Unit 和知识点，接受后结构不能再编辑，只能逐知识点生成课程。">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onAccept}
+                  disabled={isSaving || isAccepting}
+                >
+                  <CheckCircle2 className="mr-2 size-3.5" />
+                  {isAccepting ? '正在接受' : '接受结构'}
+                </Button>
+              </ActionTip>
             </>
           )}
         </div>
@@ -1122,9 +1126,19 @@ export default function TextbookStructurePage() {
           </div>
         </section>
         <aside className="h-full min-h-0 overflow-y-auto border-t px-4 py-6 lg:border-t-0 lg:border-l" style={{ borderColor: 'var(--color-border-muted)' }}>
-          <p className="font-mono text-xs text-muted-foreground">来源定位</p>
+          <p className="font-mono text-xs text-muted-foreground">当前 Unit 来源定位</p>
           <div className="mt-3 grid gap-3">{selectedUnit.source_refs.map((ref) => <div key={`${ref.source_id}-${ref.start}-${ref.end}`} className="border-l-2 pl-3 text-xs leading-5" style={{ borderColor: 'var(--color-border-muted)' }}><p className="font-mono">{ref.source_id} {sourceRefRange(ref)}</p>{ref.quote && <p className="mt-1 text-muted-foreground">{ref.quote}</p>}</div>)}</div>
-          {data.status === 'review' && <div className="mt-8 grid gap-2"><Button onClick={() => void saveStructure()} disabled={mutations.save.isPending}><Save className="mr-2 size-4" />保存结构</Button><Button variant="outline" onClick={() => void acceptStructure()} disabled={mutations.accept.isPending}><CheckCircle2 className="mr-2 size-4" />接受结构</Button></div>}
+          {data.status === 'review' && (
+            <div className="mt-8 grid gap-2">
+              <p className="font-mono text-xs text-muted-foreground">整个教材结构（全部 Unit）</p>
+              <ActionTip label="保存整个教材结构：会把本次修改的全部 Unit 和知识点一起写入，不是只保存当前 Unit。">
+                <Button onClick={() => void saveStructure()} disabled={mutations.save.isPending}><Save className="mr-2 size-4" />保存结构</Button>
+              </ActionTip>
+              <ActionTip label="接受整个教材结构：会一次性确认全部 Unit 和知识点，接受后结构不能再编辑，只能逐知识点生成课程。">
+                <Button variant="outline" onClick={() => void acceptStructure()} disabled={mutations.accept.isPending}><CheckCircle2 className="mr-2 size-4" />接受结构</Button>
+              </ActionTip>
+            </div>
+          )}
           {data.status === 'accepted' && <p className="mt-8 border-l-2 pl-3 text-sm" style={{ borderColor: 'var(--color-success)', color: 'var(--color-text-secondary)' }}>结构已接受，可以逐知识点生成课程。</p>}
           {data.status === 'accepted' && (
             <ActionTip label="生成整本知识包：会基于当前已接受结构的全部 Unit 和知识点生成章节知识包，不是只处理当前选中的 Unit。">
