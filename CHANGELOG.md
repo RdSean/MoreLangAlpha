@@ -20,6 +20,7 @@
 - 知识点树增加课程状态标记：未生成、待审阅、已通过；结构请求补充每个知识点的 `lesson_status` 和 `lesson_revision_id`，不修改课程数据。
 - 树状目录进一步贴近 Mentrix：Unit 数量以内联括号显示，二级缩进收紧，长标题 hover 后横向滚动；课程状态改为左侧贴边 accent bar，已通过使用绿色。
 - accent bar 改为复刻 `.sidebar-panel-item.active::before` 的独立 CSS class 实现，移除二级容器的 `border-l` 和按钮上的 box-shadow，避免内外弧形边。
+- 收紧树状导航的 grid/flex 宽度链路，给 aside、nav、Unit 包裹层、子级列表和按钮统一增加 `min-width: 0` / `max-width: 100%` / `overflow-hidden`；超长标题只在自身容器内 hover 滚动，不再穿过中栏。
 - 宽屏使用更宽主区域，树中长 Unit 标题强制截断并提供完整悬停标题，Unit 编辑区仍保留独立的来源面板。
 - 知识点行改为“编号、标题、来源、操作”结构，四个操作按钮统一放入独立工具栏，并增加中文 tooltip：查看课程、拆分知识点、与上一个合并、删除知识点。
 - “知识点”标题旁新增操作说明，“生成教材知识包”明确提示其作用于整本当前已接受结构，而不是当前 Unit。

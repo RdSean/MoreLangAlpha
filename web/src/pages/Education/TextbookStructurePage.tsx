@@ -74,7 +74,7 @@ function HoverScrollText({ text, className = '' }: { text: string; className?: s
   return (
     <span
       ref={containerRef}
-      className={`block min-w-0 overflow-hidden ${className}`}
+      className={`block min-w-0 max-w-full overflow-hidden ${className}`}
       title={text}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -523,15 +523,15 @@ export default function TextbookStructurePage() {
         </div>
       )}
       <div className="mx-auto grid w-full max-w-[1720px] lg:grid-cols-[360px_minmax(0,1fr)]">
-        <aside className="border-b px-4 py-6 lg:min-h-[calc(100dvh-80px)] lg:border-b-0 lg:border-r" style={{ borderColor: 'var(--color-border-muted)' }}>
+        <aside className="min-w-0 overflow-hidden border-b px-4 py-6 lg:min-h-[calc(100dvh-80px)] lg:border-b-0 lg:border-r" style={{ borderColor: 'var(--color-border-muted)' }}>
           <h1 className="title-font text-lg font-semibold">知识点</h1>
           <p className="mt-1 font-mono text-xs text-muted-foreground">v{data.sequence} · {data.status}</p>
-          <nav className="mt-5 grid gap-1" aria-label="教材知识点树">
+          <nav className="mt-5 grid min-w-0 gap-1 overflow-hidden" aria-label="教材知识点树">
             {units.map((unit) => {
               const expanded = expandedUnitIds.has(unit.unit_id);
               const unitSelected = !selectedPoint && unit.unit_id === selectedUnit.unit_id;
               return (
-                <div key={unit.unit_id}>
+                <div key={unit.unit_id} className="min-w-0 max-w-full overflow-hidden">
                   <div
                     className={cn('textbook-structure-tree-unit-row', unitSelected && 'is-active')}
                   >
@@ -557,7 +557,7 @@ export default function TextbookStructurePage() {
                     </button>
                   </div>
                   {expanded && (
-                    <div className="ml-4 mt-0.5 grid gap-0.5 pl-1.5">
+                    <div className="textbook-structure-tree-children ml-4 mt-0.5 grid gap-0.5 pl-1.5">
                       {unit.knowledge_points.length === 0 ? (
                         <p className="px-2 py-1.5 text-xs text-muted-foreground">无知识点</p>
                       ) : unit.knowledge_points.map((point) => {

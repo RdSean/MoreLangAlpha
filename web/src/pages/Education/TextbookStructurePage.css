@@ -5,6 +5,8 @@
   align-items: center;
   width: 100%;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -16,9 +18,17 @@
 .textbook-structure-tree-unit-row {
   display: flex;
   min-width: 0;
+  max-width: 100%;
   align-items: stretch;
+  overflow: hidden;
   border: 1px solid transparent;
   border-radius: 6px;
+}
+
+.textbook-structure-tree-children {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .textbook-structure-tree-unit-row.is-active {
