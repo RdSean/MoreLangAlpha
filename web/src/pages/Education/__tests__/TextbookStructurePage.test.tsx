@@ -241,4 +241,15 @@ describe('TextbookStructurePage', () => {
     await user.click(screen.getByRole('button', { name: '接受结构' }));
     await waitFor(() => expect(accept).toHaveBeenCalledWith('structure-1'));
   });
+
+  it('keeps save and accept reachable from a knowledge point workspace', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(screen.getByRole('tab', { name: '原文依据' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '保存结构' }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      structureId: 'structure-1',
+    })));
+  });
 });

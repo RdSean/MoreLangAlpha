@@ -264,6 +264,10 @@ function KnowledgePointWorkspace({
   point,
   structureStatus,
   onDelete,
+  onSave,
+  onAccept,
+  isSaving,
+  isAccepting,
 }: {
   textbookId: string | undefined;
   versionId: string | undefined;
@@ -271,6 +275,10 @@ function KnowledgePointWorkspace({
   point: TextbookKnowledgePoint;
   structureStatus: string;
   onDelete: (() => void) | undefined;
+  onSave: () => void;
+  onAccept: () => void;
+  isSaving: boolean;
+  isAccepting: boolean;
 }) {
   const [jobId, setJobId] = useState<string>();
   const [autoGrading, setAutoGrading] = useState(false);
@@ -359,9 +367,33 @@ function KnowledgePointWorkspace({
                 onClick={onDelete}
               >
                 <Trash2 className="mr-2 size-3.5" />
-                删除
-              </Button>
+              删除
+            </Button>
             </ActionTip>
+          )}
+          {structureStatus === 'review' && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onSave}
+                disabled={isSaving || isAccepting}
+              >
+                <Save className="mr-2 size-3.5" />
+                {isSaving ? '正在保存' : '保存结构'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onAccept}
+                disabled={isSaving || isAccepting}
+              >
+                <CheckCircle2 className="mr-2 size-3.5" />
+                {isAccepting ? '正在接受' : '接受结构'}
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -974,6 +1006,10 @@ export default function TextbookStructurePage() {
               deleteKnowledgePoint(selectedPoint.knowledge_point_id);
               setSelectedPointId(undefined);
             }}
+            onSave={() => void saveStructure()}
+            onAccept={() => void acceptStructure()}
+            isSaving={mutations.save.isPending}
+            isAccepting={mutations.accept.isPending}
           />
         ) : (
         <div className="grid h-full min-h-0 min-w-0 overflow-hidden lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -994,7 +1030,7 @@ export default function TextbookStructurePage() {
                 <Plus className="mr-2 size-4" />添加知识点
               </Button>
             </ActionTip>
-            <ActionTip label="删除当前 Unit：删除这个 Unit 及其全部知识点；保存或接受结构后才会写入数据库。剩余 Unit 会重新编号。">
+            <ActionTip label="删除当前 Unit：删除这个 Unit 及其全部知识点。删除只改动当前草稿，必须再点“保存结构”或“接受结构”才会写入数据库，否则刷新后会恢复。剩余 Unit 会重新编号。">
               <Button variant="outline" size="sm" onClick={() => deleteUnit(selectedUnit.unit_id)} disabled={readOnly}>
                 <Trash2 className="mr-2 size-4" />删除 Unit
               </Button>
