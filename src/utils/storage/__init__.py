@@ -136,6 +136,9 @@ if STORAGE_PROVIDER == "none":
     def delete_object(key: str) -> bool:
         return False
 
+    def list_object_keys(prefix: str) -> list[str]:
+        return []
+
     def get_public_url(key: str) -> str:
         return ""
 
@@ -182,6 +185,7 @@ elif STORAGE_PROVIDER == "oss":
         get_signed_upload_url,
         delete_object,
         does_object_exist,
+        list_object_keys,
         get_bytes,
         get_bytes_range,
         get_public_url,
@@ -203,6 +207,7 @@ else:
         get_signed_upload_url,
         delete_object,
         does_object_exist,
+        list_object_keys,
         get_bytes,
         get_bytes_range,
         get_public_url,
@@ -221,6 +226,7 @@ else:
 __all__ = [
     "delete_object",
     "does_object_exist",
+    "list_object_keys",
     "get_bytes",
     "get_bytes_range",
     "get_provider_id",

@@ -531,6 +531,26 @@ def delete_object(key: str) -> bool:
         return False
 
 
+def list_object_keys(prefix: str) -> list[str]:
+    """Return every object key under one exact bucket prefix."""
+    try:
+        client = _get_client()
+        paginator = client.get_paginator("list_objects_v2")
+        keys: list[str] = []
+        for page in paginator.paginate(
+            Bucket=StorageConfig.BUCKET_NAME,
+            Prefix=prefix,
+        ):
+            for item in page.get("Contents", []):
+                key = item.get("Key")
+                if isinstance(key, str):
+                    keys.append(key)
+        return keys
+    except Exception:
+        logger.exception("Unexpected error listing objects under %s", prefix)
+        return []
+
+
 def get_public_url(key: str) -> str:
     """Get the public URL for an uploaded object."""
     return f"{StorageConfig.get_public_url_base()}/{key}"

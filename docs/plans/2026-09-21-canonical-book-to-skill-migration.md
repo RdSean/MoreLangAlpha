@@ -606,33 +606,21 @@ git commit -m "feat(textbooks): ground lessons in reading scope and chapter asse
 
 ---
 
-### Task 9: Delete the legacy data and tables
+### Task 9: Delete the legacy textbook data
 
 **Files:**
-- Create: `migrations/versions/073_reset_textbook_pipeline.py`
+- Create: `migrations/versions/075_reset_textbook_pipeline.py`
 - Create: `scripts/education_purge_prefix.py`
 - Test: `tests/unit/migrations/test_reset_textbook_pipeline.py`
 
 **Step 1: Write the failing test**
 
 ```python
-def test_reset_migration_drops_legacy_textbook_tables():
-    source = Path("migrations/versions/073_reset_textbook_pipeline.py").read_text()
+def test_reset_migration_clears_the_textbook_dependency_graph():
+    source = Path("migrations/versions/075_reset_textbook_pipeline.py").read_text()
 
-    for table in (
-        "education_generation_attempts",
-        "education_generation_jobs",
-        "education_kp_lesson_revisions",
-        "education_kp_lessons",
-        "education_structure_knowledge_points",
-        "education_structure_units",
-        "education_textbook_scopes",
-        "education_textbook_structures",
-        "education_textbook_source_asset_manifest",
-        "education_textbook_versions",
-        "education_textbooks",
-    ):
-        assert table in source
+    assert "TRUNCATE TABLE education_textbooks" in source
+    assert "RESTART IDENTITY CASCADE" in source
 ```
 
 **Step 2: Run it to verify it fails**
@@ -642,9 +630,11 @@ Expected: FAIL.
 
 **Step 3: Write the reset migration**
 
-Drop the textbook tables in dependency order, then recreate them with the
-scope-aware shape from Task 4. Record a clear `revision` / `down_revision`
-chain and a destructive `downgrade()` that is a no-op with a comment.
+The schema is already scope-aware after migrations 073 and 074, so truncate
+the `education_textbooks` root with `CASCADE` instead of replaying the whole
+textbook table graph. This removes every dependent version, structure, lesson,
+assignment, progress and artifact-source row while leaving shared
+`education_assets` untouched.
 
 **Step 4: Purge the MinIO prefix**
 
@@ -653,7 +643,8 @@ uv run python scripts/education_purge_prefix.py --dry-run
 uv run python scripts/education_purge_prefix.py --apply
 ```
 
-The script refuses to touch any key that does not start with `education/`.
+The script touches only versioned textbook keys below `education/` and textbook
+`source-bundles/`; shared homework attachments under `education/` are skipped.
 
 **Step 5: Run the migration tests**
 

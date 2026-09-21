@@ -366,6 +366,25 @@ def delete_object(key: str) -> bool:
         return False
 
 
+def list_object_keys(prefix: str) -> list[str]:
+    """Return every object key under one exact bucket prefix."""
+    try:
+        client = get_oss_client()
+        request = oss.ListObjectsV2Request(
+            bucket=OSSConfig.BUCKET_NAME,
+            prefix=prefix,
+        )
+        result = client.list_objects_v2(request)
+        return [
+            item.key
+            for item in getattr(result, "contents", [])
+            if isinstance(getattr(item, "key", None), str)
+        ]
+    except Exception:
+        logger.exception("Unexpected error listing objects under %s", prefix)
+        return []
+
+
 def get_public_url(key: str) -> str:
     """Get the public URL for an uploaded object.
 
