@@ -639,12 +639,15 @@ assignment, progress and artifact-source row while leaving shared
 **Step 4: Purge the MinIO prefix**
 
 ```bash
-uv run python scripts/education_purge_prefix.py --dry-run
-uv run python scripts/education_purge_prefix.py --apply
+uv run python scripts/education_purge_prefix.py \
+  --prefix education/<household>/<textbook>/
+uv run python scripts/education_purge_prefix.py \
+  --prefix education/<household>/<textbook>/ --apply
 ```
 
-The script touches only versioned textbook keys below `education/` and textbook
-`source-bundles/`; shared homework attachments under `education/` are skipped.
+The script requires one exact textbook prefix per `--prefix`. It touches only
+versioned textbook keys below that prefix and its textbook `source-bundles/`;
+shared homework attachments under `education/` are neither scanned nor deleted.
 
 **Step 5: Run the migration tests**
 

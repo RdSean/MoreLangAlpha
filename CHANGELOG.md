@@ -6,7 +6,7 @@
 
 - 新增迁移 `075`：通过 `TRUNCATE education_textbooks ... CASCADE` 清除所有旧版本、结构、Reading scope、知识点课程、发布、作业和学习进度，不再兼容旧结构数据。
 - 重置不删除共享的 `education_assets`，也不会影响非教材对象；真实执行前仍保留独立脚本用于清点并删除明确的教材对象。
-- 新增 `scripts/education_purge_prefix.py`：默认 dry-run，只匹配 `education/<household>/<textbook>/vN/...` 与教材 `source-bundles/`，显式跳过同前缀下的普通教育附件。
+- 新增 `scripts/education_purge_prefix.py`：默认 dry-run，并要求显式传入每本教材的 `education/<household>/<textbook>/` 精确前缀；只匹配该前缀下的 `vN/...` 与 `source-bundles/`，不扫描或删除同命名空间中的普通教育附件。
 - 存储层补充受控的前缀列举能力；清理脚本不会接受或删除前缀之外的对象。
 - 验证：重置迁移与清理脚本聚焦测试 `4 passed`，修改文件 Ruff 通过。
 

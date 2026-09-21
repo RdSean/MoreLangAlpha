@@ -34,13 +34,14 @@ def test_purge_dry_run_never_deletes() -> None:
         "education/household/homework.pdf",
     ]
 
-    result = module.purge_education_textbook_objects(
+    result = module.purge_education_textbook_prefixes(
+        prefixes=["education/household/textbook/"],
         apply=False,
         list_keys=lambda prefix: listed.append(prefix) or keys,
         delete_key=deleted.append,
     )
 
-    assert listed == ["education/"]
+    assert listed == ["education/household/textbook/"]
     assert deleted == []
     assert result["selected"] == 2
     assert result["skipped"] == 1
@@ -56,7 +57,8 @@ def test_purge_apply_deletes_only_versioned_textbook_objects() -> None:
         "documents/unrelated.pdf",
     ]
 
-    result = module.purge_education_textbook_objects(
+    result = module.purge_education_textbook_prefixes(
+        prefixes=["education/household/textbook/"],
         apply=True,
         list_keys=lambda _prefix: keys,
         delete_key=lambda key: deleted.append(key) or True,
@@ -65,3 +67,19 @@ def test_purge_apply_deletes_only_versioned_textbook_objects() -> None:
     assert deleted == keys[:2]
     assert result["deleted"] == 2
     assert result["skipped"] == 2
+
+
+def test_purge_rejects_an_unsafe_prefix() -> None:
+    module = _load_script()
+
+    try:
+        module.purge_education_textbook_prefixes(
+            prefixes=["education/"],
+            apply=False,
+            list_keys=lambda _prefix: [],
+            delete_key=lambda _key: True,
+        )
+    except module.PurgeSafetyError as exc:
+        assert "education/<household>/<textbook>/" in str(exc)
+    else:
+        raise AssertionError("unsafe prefix was accepted")

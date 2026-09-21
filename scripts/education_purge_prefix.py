@@ -1,9 +1,8 @@
-"""Delete only versioned textbook objects from the configured object store.
+"""Delete objects for explicitly selected textbook prefixes.
 
-The script intentionally does not purge the whole ``education/`` prefix:
-homework attachments share that prefix. It targets only textbook content
-versions (``education/<household>/<textbook>/v<N>/...``) and textbook source
-bundles.
+Each prefix must identify one textbook. The script intentionally does not
+accept ``education/`` or a household prefix because homework attachments share
+that namespace.
 """
 
 from __future__ import annotations
@@ -18,8 +17,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.utils.storage import delete_object, list_object_keys
 
 
+_TEXTBOOK_PREFIX_RE = re.compile(
+    r"^education/[0-9A-Za-z][0-9A-Za-z.-]*/"
+    r"[0-9A-Za-z][0-9A-Za-z._-]*/$"
+)
 _TEXTBOOK_OBJECT_RE = re.compile(
-    r"^education/[^/]+/(?:[^/]+/v[0-9]+/|[^/]+/source-bundles/)"
+    r"^(?P<prefix>education/[^/]+/[^/]+/)(?:v[0-9]+/|source-bundles/)"
 )
 
 
@@ -31,15 +34,37 @@ def _is_textbook_object(key: str) -> bool:
     return bool(_TEXTBOOK_OBJECT_RE.match(key))
 
 
-def purge_education_textbook_objects(
+def _normalize_prefix(prefix: str) -> str:
+    normalized = prefix.rstrip("/") + "/"
+    if not _TEXTBOOK_PREFIX_RE.fullmatch(normalized):
+        raise PurgeSafetyError(
+            "Prefix must match education/<household>/<textbook>/"
+        )
+    return normalized
+
+
+def purge_education_textbook_prefixes(
     *,
+    prefixes: Iterable[str],
     apply: bool,
     list_keys: Callable[[str], Iterable[str]],
     delete_key: Callable[[str], bool],
 ) -> dict[str, int]:
     """Return counts while deleting only canonical textbook object keys."""
-    keys = list(list_keys("education/"))
-    selected = [key for key in keys if _is_textbook_object(key)]
+    normalized_prefixes = sorted({_normalize_prefix(prefix) for prefix in prefixes})
+    if not normalized_prefixes:
+        raise PurgeSafetyError("At least one textbook prefix is required")
+    keys = [
+        key
+        for prefix in normalized_prefixes
+        for key in list_keys(prefix)
+    ]
+    selected = [
+        key
+        for key in keys
+        if _is_textbook_object(key)
+        and any(key.startswith(prefix) for prefix in normalized_prefixes)
+    ]
     skipped = len(keys) - len(selected)
     deleted = 0
     if apply:
@@ -62,6 +87,12 @@ def purge_education_textbook_objects(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
+        "--prefix",
+        action="append",
+        required=True,
+        help="Exact education/<household>/<textbook>/ prefix. Repeat for each textbook.",
+    )
+    parser.add_argument(
         "--apply",
         action="store_true",
         help="Delete selected objects. Default is dry-run.",
@@ -72,7 +103,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        result = purge_education_textbook_objects(
+        result = purge_education_textbook_prefixes(
+            prefixes=args.prefix,
             apply=args.apply,
             list_keys=list_object_keys,
             delete_key=delete_object,
