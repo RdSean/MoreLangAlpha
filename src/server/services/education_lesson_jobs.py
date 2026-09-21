@@ -185,7 +185,7 @@ def build_lesson_source_context(
     if end <= start:
         raise ValueError("Knowledge-point lesson source range is invalid")
     header = (
-        f"## {scope.get('scope_title') or scope.get('slot') or source_id} "
+        f"## {scope.get('scope_title') or scope.get('title') or scope.get('slot') or source_id} "
         f"[{scope.get('line_start')}:{scope.get('line_end')}]"
     )
     return f"{header}\n{markdown[start:end]}", []

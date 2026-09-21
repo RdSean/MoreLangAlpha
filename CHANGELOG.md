@@ -2,6 +2,14 @@
 
 ## 2026-09-21
 
+### 验证：canonical 教材流水线端到端契约
+
+- 新增真实 REX 3 Markdown 集成测试：从实际 Unit / Reading 行号验证 scope 换算、Reading A/B 独立切片、知识资产输入和 lesson 原文上下文没有串读。
+- 集成测试发现并修复 lesson 标题字段兼容问题：持久化 scope 使用 `title`，课程上下文现在同时兼容审核投影里的 `scope_title` 与数据库的 `title`。
+- 本地数据库已升级到 `075_reset_textbook_pipeline`；旧教材根记录、结构、scope、课程和任务计数均为 0，旧教材对象已按 3 个精确前缀删除 329 个，未扫描其他教育对象。
+- 验证：后端完整单测 `7886 passed, 1 xfailed`，真实 Markdown integration `1 passed`，Education 前端 `56 passed`，类型检查、生产构建和关键路径预算通过，修改文件 Ruff 通过。
+- 已知仓库级验证噪音：直接执行 `uv run pytest -m integration` 会在收集 `libs/ptc-cli/tests` 时触发既有 `tests.conftest` 模块路径冲突；本变更使用独立 integration 文件验证，不涉及该库。
+
 ### 改进：重置旧教材流水线数据
 
 - 新增迁移 `075`：通过 `TRUNCATE education_textbooks ... CASCADE` 清除所有旧版本、结构、Reading scope、知识点课程、发布、作业和学习进度，不再兼容旧结构数据。
