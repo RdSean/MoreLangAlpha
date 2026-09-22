@@ -113,7 +113,32 @@ def test_preserves_generic_hierarchy_and_derives_canonical_quotes() -> None:
     )
     assert "unknown_node_type" in warnings
     assert "source_refs_missing" in warnings
-    assert package["content_nodes"][2]["node_type"] == "other"
+    assert package["content_nodes"][2]["node_type"] == "project"
+
+
+def test_unknown_open_node_and_point_types_are_preserved_with_warnings() -> None:
+    candidate = _candidate()
+    candidate["content_nodes"][2]["node_type"] = "  Project_Workspace  "
+    candidate["knowledge_points"][0]["point_type"] = "  Argument_Analysis  "
+
+    package, warnings = validate_book_package(candidate, markdown=MARKDOWN)
+
+    assert package["content_nodes"][2]["node_type"] == "project_workspace"
+    assert package["knowledge_points"][0]["point_type"] == "argument_analysis"
+    assert "unknown_node_type" in warnings
+    assert "unknown_point_type" in warnings
+
+
+def test_open_node_and_point_types_reject_control_characters() -> None:
+    node_candidate = _candidate()
+    node_candidate["content_nodes"][2]["node_type"] = "project\u0000workspace"
+    with pytest.raises(BookPackageValidationError):
+        validate_book_package(node_candidate, markdown=MARKDOWN)
+
+    point_candidate = _candidate()
+    point_candidate["knowledge_points"][0]["point_type"] = "concept\nvariant"
+    with pytest.raises(BookPackageValidationError):
+        validate_book_package(point_candidate, markdown=MARKDOWN)
 
 
 def test_char_range_is_authoritative_and_quote_is_ignored() -> None:
@@ -345,13 +370,58 @@ def test_invalid_asset_sizes_are_hard_failures(size_bytes: object) -> None:
         validate_book_package(candidate, markdown=MARKDOWN)
 
 
-@pytest.mark.parametrize("path", ["../outside.md", "/absolute.md", "a\\b.md"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../outside.md",
+        "/absolute.md",
+        "/outputs/absolute.md",
+        "a\\b.md",
+        "inputs/manifest.md",
+        ".agents/skills/example.md",
+        ".langalpha/progress.jsonl",
+        "outputs",
+        "archive.bin",
+        "outputs/archive.bin",
+        "outputs/content",
+        "outputs/../outside.md",
+        "outputs/\x00bad.md",
+        "outputs/bad\rname.md",
+        "outputs/bad\nname.md",
+        "outputs/bad\tname.md",
+        "\toutputs/bad.md",
+        "outputs/bad.md\t",
+    ],
+)
 def test_unsafe_asset_paths_are_rejected(path: str) -> None:
     candidate = _candidate()
     candidate["assets"][0]["path"] = path
 
     with pytest.raises(BookPackageValidationError, match="path"):
         validate_book_package(candidate, markdown=MARKDOWN)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "outputs/knowledge.md",
+        "outputs/data.json",
+        "outputs/notes.txt",
+        "outputs/table.csv",
+        "outputs/figure.png",
+        "outputs/photo.jpg",
+        "outputs/photo.jpeg",
+        "outputs/diagram.webp",
+        "outputs/diagram.svg",
+    ],
+)
+def test_supported_asset_paths_are_allowed(path: str) -> None:
+    candidate = _candidate()
+    candidate["assets"][0]["path"] = path
+
+    package, _ = validate_book_package(candidate, markdown=MARKDOWN)
+
+    assert package["assets"][0]["path"] == path
 
 
 @pytest.mark.parametrize("nul_location", ["source_revision", "title", "metadata"])

@@ -54,6 +54,10 @@ _POINT_TYPES = frozenset(
 _SAFE_SLUG_RE = re.compile(r"[^0-9A-Za-z._-]+")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _LINE_BREAK_RE = re.compile(r"\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]")
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
+_ASSET_EXTENSIONS = frozenset(
+    {".md", ".json", ".txt", ".csv", ".png", ".jpg", ".jpeg", ".webp", ".svg"}
+)
 
 
 class BookPackageValidationError(ValueError):
@@ -146,6 +150,13 @@ def _warn(warnings: list[str], warning: str) -> None:
         warnings.append(warning)
 
 
+def _open_type(value: object, *, label: str) -> str:
+    normalized = _text(value, label=label, limit=64, required=True).lower()
+    if _CONTROL_CHAR_RE.search(normalized):
+        raise BookPackageValidationError(f"{label} must not contain control characters")
+    return normalized
+
+
 def _require_mapping(value: object, *, label: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise BookPackageValidationError(f"{label} must be an object")
@@ -198,12 +209,15 @@ def _slug(value: object, *, fallback: str) -> str:
 def _safe_asset_path(value: object) -> str:
     if not isinstance(value, str):
         raise BookPackageValidationError("asset path must be a string")
+    if any(ord(character) < 32 for character in value):
+        raise BookPackageValidationError(
+            "asset path must stay inside the managed output root"
+        )
     raw = value.strip()
     components = raw.split("/")
     if (
         not raw
         or "\\" in raw
-        or "\x00" in raw
         or raw.startswith("/")
         or any(component in {"", ".", ".."} for component in components)
     ):
@@ -211,7 +225,13 @@ def _safe_asset_path(value: object) -> str:
             "asset path must stay inside the managed output root"
         )
     path = PurePosixPath(raw)
-    if path.is_absolute() or not path.parts:
+    if (
+        path.is_absolute()
+        or not path.parts
+        or path.parts[0] != "outputs"
+        or not path.name
+        or path.suffix.casefold() not in _ASSET_EXTENSIONS
+    ):
         raise BookPackageValidationError(
             "asset path must stay inside the managed output root"
         )
@@ -495,14 +515,8 @@ def _normalize_nodes(
         for parent_key, positions in explicit_sibling_positions.items()
     }
     for index, node, node_key, parent_key in node_contexts:
-        raw_type = _text(
-            node.get("node_type"),
-            label="node_type",
-            limit=64,
-            required=True,
-        ).lower()
-        node_type = raw_type if raw_type in _COMMON_NODE_TYPES else "other"
-        if node_type != raw_type:
+        node_type = _open_type(node.get("node_type"), label="node_type")
+        if node_type not in _COMMON_NODE_TYPES:
             _warn(warnings, "unknown_node_type")
         title = _text(
             node.get("title"),
@@ -653,14 +667,8 @@ def _normalize_knowledge_points(
                 "knowledge point source refs must stay inside its node span "
                 "and one node source ref"
             )
-        raw_type = _text(
-            point.get("point_type"),
-            label="point_type",
-            limit=64,
-            required=True,
-        ).lower()
-        point_type = raw_type if raw_type in _POINT_TYPES else "other"
-        if point_type != raw_type:
+        point_type = _open_type(point.get("point_type"), label="point_type")
+        if point_type not in _POINT_TYPES:
             _warn(warnings, "unknown_point_type")
         title = _text(
             point.get("title"),

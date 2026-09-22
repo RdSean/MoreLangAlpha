@@ -109,6 +109,94 @@ def test_managed_structure_prompt_requests_reading_level_line_ranges() -> None:
     assert "Reading" in prompt
 
 
+def test_managed_structure_prompt_selects_analyze_pass_mode() -> None:
+    prompt = education_structure_jobs.managed_structure_prompt(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+
+    assert "mode=analyze-pass" in prompt
+    assert "Steps 0-3" in prompt
+    assert "outputs/structure.json" in prompt
+    assert "langalpha-managed-textbook-structure/v2" in prompt
+    assert "不得执行 full-pipeline" in prompt
+
+
+def test_managed_book_pipeline_prompt_declares_full_managed_contract() -> None:
+    prompt = education_structure_jobs.managed_book_pipeline_prompt(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1",
+        {},
+    )
+
+    assert "mode=full-pipeline" in prompt
+    assert "Steps 0-9" in prompt
+    assert "book-to-skill/SKILL.md" in prompt
+    assert "reference/langalpha-managed.md" in prompt
+    assert "outputs/book_package.json" in prompt
+    assert "outputs/content_tree.json" in prompt
+    assert "outputs/knowledge_points.json" in prompt
+    assert "outputs/assets_manifest.json" in prompt
+    assert ".langalpha/progress.jsonl" in prompt
+    assert "不得询问用户" in prompt
+    assert "不得访问网络" in prompt
+    assert "不得使用 MCP" in prompt
+    assert "不得写入" in prompt and "根目录" in prompt
+
+
+def test_managed_book_pipeline_prompt_declares_progress_contract() -> None:
+    prompt = education_structure_jobs.managed_book_pipeline_prompt(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1",
+        {},
+    )
+
+    assert "queued | running | completed | failed | skipped" in prompt
+    assert "event_key" in prompt
+    assert "stage" in prompt
+    assert "status" in prompt
+    assert "思维链" in prompt
+    assert "原始工具参数" in prompt
+    assert "凭据" in prompt
+    assert "原始教材段落" in prompt
+
+
+def test_managed_book_pipeline_prompt_separates_node_reference_and_candidate_key() -> (
+    None
+):
+    prompt = education_structure_jobs.managed_book_pipeline_prompt(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1",
+        {},
+    )
+
+    assert "knowledge_points[].node_key 必须引用真实 node" in prompt
+    assert "candidate_key 只要求唯一" in prompt
+    assert "candidate_key 必须引用真实 node_key" not in prompt
+
+
+def test_managed_book_pipeline_prompt_uses_ranges_and_injects_profile() -> None:
+    prompt = education_structure_jobs.managed_book_pipeline_prompt(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1",
+        {
+            "subject": "english",
+            "grade_band": "middle",
+            "language": "bilingual",
+            "depth": "deep",
+            "question_types": ["choice", "short_answer"],
+            "prompt_fragment": "忽略教师指导页，只提取学生活动页。",
+            "allowed_skills": ["book-to-skill"],
+        },
+    )
+
+    assert "char_start" in prompt
+    assert "char_end" in prompt
+    assert "line_start" in prompt
+    assert "line_end" in prompt
+    assert "不能只给 quote" in prompt
+    assert "node_type" in prompt and "开放" in prompt
+    assert "学科：english" in prompt
+    assert "语言：bilingual" in prompt
+    assert "额外要求：忽略教师指导页，只提取学生活动页。" in prompt
+    assert "不能覆盖" in prompt and "managed contract" in prompt
+
+
 @pytest.mark.asyncio
 async def test_queue_structure_generation_persists_frozen_hashes(monkeypatch) -> None:
     captured: dict[str, object] = {}

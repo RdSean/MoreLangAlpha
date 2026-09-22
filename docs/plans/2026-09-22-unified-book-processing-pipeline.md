@@ -356,9 +356,13 @@ git commit -m "feat(textbooks): add generic content tree contract"
 **Files:**
 - Modify: `plugins/langalpha_local/skills/book-to-skill/reference/langalpha-managed.md`
 - Modify: `plugins/langalpha_local/skills/book-to-skill/VENDOR.md`
+- Modify: `src/ptc_agent/agent/managed_execution.py`
 - Modify: `src/server/services/education_structure_jobs.py`
+- Regression: `src/server/services/education_book_package.py`
 - Test: `tests/unit/middleware/skills/test_native_book_learning_skills.py`
+- Test: `tests/unit/ptc_agent/test_managed_textbook_execution_policy.py`
 - Test: `tests/unit/server/services/test_education_structure_jobs.py`
+- Regression test: `tests/unit/server/services/test_education_book_package.py`
 
 **Step 1: Write the failing prompt-contract test**
 
@@ -426,6 +430,45 @@ git add plugins/langalpha_local/skills/book-to-skill/reference/langalpha-managed
   tests/unit/server/services/test_education_structure_jobs.py
 git commit -m "feat(book-to-skill): emit full managed package contract"
 ```
+
+**Step 7: Quality-review hardening**
+
+- Add `education_book_pipeline_policy(job_id)` with purpose `book_pipeline` and
+  the same root, Skills, MCP, web, Vault and subagent boundaries as the other
+  managed textbook jobs.
+- Extend `validate_managed_textbook_write` for `book_pipeline`: package JSON
+  objects, object-per-line progress JSONL, canonical book-skill files, and
+  safe content asset paths with the supported extensions. Asset paths must
+  begin with `outputs/`, identify a file, and use one of
+  `md/json/txt/csv/png/jpg/jpeg/webp/svg`. Reject traversal, absolute paths,
+  any C0 control character, unsupported extensions and all other locations.
+- Use one strict JSON parser for package JSON, canonical `.json` content and
+  progress lines. Reject NaN/Infinity/-Infinity, exponent-overflow floats such
+  as `1e999`, and duplicate object keys without adding a dependency.
+- Treat progress writes as a safety gate, not the final semantic parser. Each
+  non-empty line must be a JSON object with non-empty `event_key`, `stage` and
+  `status`; stage and status must use their fixed enums; explicitly forbidden
+  reasoning/prompt/tool/credential/secret/sandbox-path keys are rejected.
+  Task 6 progress parser is mandatory and authoritative for normalization,
+  truncation and durable persistence.
+- Keep manifest enforcement in two layers:
+  1. The managed write policy enforces root containment, allowed output
+     directories/file names/extensions and JSON/JSONL shape at write time. It
+     does not inspect manifest membership.
+  2. The import stage downloads only asset paths explicitly listed in
+     `outputs/assets_manifest.json`. Undeclared output files are never
+     downloaded or imported.
+- Preserve the legacy analyze-only path. The overlay dispatches by
+  `mode=analyze-pass` or `mode=full-pipeline`; analyze mode remains Steps 0-3,
+  writes only `outputs/structure.json`, and retains the complete
+  `langalpha-managed-textbook-structure/v2` units/readings/source-range
+  example and boundary rules.
+- Revise the Task 1 open-type behavior: `node_type` and `point_type` normalize
+  to safe trimmed lowercase strings and remain open values. Common values
+  trigger warnings for UI normalization but are no longer a closed taxonomy,
+  so unknown types must not be rewritten to `other` or fail validation.
+- Clarify that `knowledge_points[].node_key` is the reference field, while
+  `candidate_key` only needs to be unique.
 
 ---
 

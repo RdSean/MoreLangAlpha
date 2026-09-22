@@ -14,8 +14,19 @@ canonical skill so chapter boundaries come from the skill itself.
 
 ## Local deviations
 
-None at vendoring. `reference/langalpha-managed.md` is added by a later commit
-to describe the service-owned managed job; everything else is upstream content.
+* `reference/langalpha-managed.md` is a LangAlpha service-owned adapter. Its
+  caller-selected `mode=analyze-pass` preserves the existing Steps 0-3
+  `langalpha-managed-textbook-structure/v2` structure output.
+  `mode=full-pipeline` runs canonical Steps 0-9, preserves the upstream
+  book-skill assets, and adds the `langalpha-book-package/v1` content tree,
+  reviewable knowledge candidates, assets manifest and append-only progress
+  contract.
+* Managed source references are deterministic half-open character or 1-based
+  line ranges. Optional `quote` text is descriptive only and is never used to
+  locate source content.
+* No upstream `SKILL.md` procedure was changed at vendoring. The managed
+  adapter adds output schemas, managed step mapping, package artifacts,
+  progress events, and interactive/publishing/filesystem overrides.
 
 ## Updating
 

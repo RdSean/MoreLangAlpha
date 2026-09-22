@@ -2,6 +2,21 @@
 
 ## 2026-09-22
 
+### 新增：book-to-skill 完整 managed 流水线契约
+
+- 新增 `managed_book_pipeline_prompt` 的 `mode=full-pipeline`，要求在 managed `book-to-skill` 的一次执行中完整运行 canonical Steps 0-9，并同时保留 canonical 教材 skill 资产与 `book_package.json`、`content_tree.json`、`knowledge_points.json`、`assets_manifest.json`、`progress.jsonl`。
+- managed overlay 按调用方 prompt 分派模式；既有 `mode=analyze-pass` 明确保留 Steps 0-3、只写 `structure.json` 的 v2 结构分析契约，不被 full-pipeline 条款覆盖。
+- analyze-pass overlay 恢复完整的 `units/readings` v2 schema 示例与边界规则，包含 Reading A/B、技能字段和 1-based 半开行号。
+- 新增 `education_book_pipeline_policy`，以 `book_pipeline` purpose 沿用 managed root、Skills、MCP、web、Vault 和 subagent 边界；写策略仅允许四个 package JSON object、逐行 JSON object 的 progress、canonical book-skill 文件，以及首个路径段固定为 `outputs`、指向允许扩展名文件的内容资产。
+- manifest 契约明确分为两层：managed write policy 只检查 root、路径/文件名/扩展名和 JSON/JSONL 格式，不检查 manifest 成员关系；导入阶段仅下载 `assets_manifest.json` 明确声明的路径，未声明文件永不下载或导入。
+- package、canonical JSON 与 progress write gate 统一使用 strict JSON 解析，拒绝 NaN/Infinity/-Infinity、`1e999`/`-1e999` 等非有限浮点数和重复对象键；asset path 继续拒绝绝对路径、traversal、反斜杠、所有 C0 控制字符，以及非 `md/json/txt/csv/png/jpg/jpeg/webp/svg` 文件。
+- progress write gate 要求每条非空事件包含 `event_key`、`stage`、`status`，stage/status 使用固定枚举，并拒绝 reasoning、prompt、tool、credential、secret、sandbox path 等明确禁止字段；Task 6 下游 parser 继续负责完整归一化、截断和持久化。
+- managed overlay 改为通用内容树契约：节点和知识点类型开放，不强制 Unit → Reading A/B、不要求层级对称，缺少 Reading 或零知识点可以继续；知识点始终只生成待审核候选。
+- `node_type` 与 `point_type` 现在只做 trim/lower、长度和控制字符安全归一，未知描述性类型保留原值并产生 warning，不再改写成 `other`。
+- 来源引用只接受确定性的半开字符范围或 1-based 行范围，同一引用不能混用；`quote` 仅作可选描述，服务端忽略并从范围派生原文，无法确定范围时保留空引用而不是捏造。
+- managed 模式明确禁止用户提问、网络、MCP、Vault、普通 workspace 和根目录外写入；progress 仅允许固定业务阶段与脱敏语义检查点，每条事件要求 `event_key`、`stage`、`status`，且 status 仅允许 `queued | running | completed | failed | skipped`。
+- 验证：Task 2 与 managed overlay 聚焦测试 `17 passed`，managed execution policy `49 passed`，book package `65 passed`，migration 回归 `119 passed`，修改 Python 文件 Ruff 与格式检查通过。
+
 ### 新增：通用教材内容树与 book package 校验契约
 
 - 新增迁移 `076_generic_content_tree`，创建 `education_content_nodes` 与 `education_content_assets`，支持任意父子层级、稳定节点键、来源引用和内容资产元数据；同级 position 使用 `NULLS NOT DISTINCT`，并通过复合外键阻止跨 structure 的 parent 与 asset 引用；structure 删除级联清理节点与资产，被引用 parent 删除保持受限。

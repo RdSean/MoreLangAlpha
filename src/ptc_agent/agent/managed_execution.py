@@ -3,10 +3,135 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 import json
+import math
 import re
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID
+
+
+_BOOK_PIPELINE_JSON_OBJECTS = frozenset(
+    {
+        PurePosixPath("outputs/book_package.json"),
+        PurePosixPath("outputs/content_tree.json"),
+        PurePosixPath("outputs/knowledge_points.json"),
+        PurePosixPath("outputs/assets_manifest.json"),
+    }
+)
+_BOOK_PIPELINE_CANONICAL_FILES = frozenset(
+    {
+        PurePosixPath("outputs/book-skill/SKILL.md"),
+        PurePosixPath("outputs/book-skill/glossary.md"),
+        PurePosixPath("outputs/book-skill/patterns.md"),
+        PurePosixPath("outputs/book-skill/cheatsheet.md"),
+    }
+)
+_BOOK_PIPELINE_ASSET_EXTENSIONS = frozenset(
+    {".md", ".json", ".txt", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".csv"}
+)
+_BOOK_PIPELINE_PROGRESS_STAGES = frozenset(
+    {
+        "chapter_analysis",
+        "content_processing",
+        "knowledge_point_generation",
+        "lesson_preparation",
+    }
+)
+_BOOK_PIPELINE_PROGRESS_STATUSES = frozenset(
+    {"queued", "running", "completed", "failed", "skipped"}
+)
+_BOOK_PIPELINE_FORBIDDEN_PROGRESS_KEYS = frozenset(
+    {
+        "reasoning",
+        "prompt",
+        "tool_args",
+        "tool_result",
+        "credentials",
+        "credential",
+        "secret",
+        "sandbox_path",
+    }
+)
+
+
+class _StrictJsonError(ValueError):
+    """A JSON value is valid syntax but violates the managed subset."""
+
+
+def _reject_json_constant(value: str) -> None:
+    raise _StrictJsonError(f"non-standard JSON constant: {value}")
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    decoded: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in decoded:
+            raise _StrictJsonError(f"duplicate JSON key: {key}")
+        decoded[key] = value
+    return decoded
+
+
+def _parse_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise _StrictJsonError("non-finite JSON number")
+    return parsed
+
+
+def _contains_non_finite_number(value: Any) -> bool:
+    if isinstance(value, float):
+        return not math.isfinite(value)
+    if isinstance(value, Mapping):
+        return any(_contains_non_finite_number(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_non_finite_number(item) for item in value)
+    return False
+
+
+def _strict_json_loads(value: str) -> Any:
+    decoded = json.loads(
+        value,
+        parse_constant=_reject_json_constant,
+        parse_float=_parse_json_float,
+        object_pairs_hook=_reject_duplicate_json_keys,
+    )
+    if _contains_non_finite_number(decoded):
+        raise _StrictJsonError("non-finite JSON number")
+    return decoded
+
+
+def _validate_strict_json_object(
+    content: str,
+    *,
+    invalid_message: str,
+    object_message: str,
+) -> str | None:
+    try:
+        decoded = _strict_json_loads(content)
+    except ValueError:
+        return invalid_message
+    if not isinstance(decoded, dict):
+        return object_message
+    return None
+
+
+def _contains_forbidden_progress_key(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if (
+                isinstance(key, str)
+                and key.strip().casefold() in _BOOK_PIPELINE_FORBIDDEN_PROGRESS_KEYS
+            ):
+                return True
+            if _contains_forbidden_progress_key(item):
+                return True
+    elif isinstance(value, (list, tuple)):
+        return any(_contains_forbidden_progress_key(item) for item in value)
+    return False
+
+
+def _contains_c0_control(value: str) -> bool:
+    return any(ord(character) < 32 for character in value)
 
 
 @dataclass(frozen=True)
@@ -66,6 +191,17 @@ def education_book_asset_policy(job_id: str) -> ManagedExecutionPolicy:
     )
 
 
+def education_book_pipeline_policy(job_id: str) -> ManagedExecutionPolicy:
+    """Return the fixed policy for the unified book processing pipeline."""
+    normalized_job_id = str(UUID(job_id))
+    return ManagedExecutionPolicy(
+        allowed_skill_names=frozenset({"book-to-skill"}),
+        filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
+        purpose="book_pipeline",
+        allow_subagents=True,
+    )
+
+
 def managed_core_config(core_config: Any, policy: ManagedExecutionPolicy) -> Any:
     """Clone and strip a CoreConfig for a service-owned managed run.
 
@@ -94,8 +230,10 @@ def validate_managed_path(path: str, policy: ManagedExecutionPolicy) -> str | No
     if not candidate.is_absolute():
         candidate = root / candidate
     try:
-        candidate.relative_to(root)
+        relative = candidate.relative_to(root)
     except ValueError:
+        return "ERROR: path reaches outside the managed textbook job root"
+    if _contains_c0_control(path) or "\\" in path or ".." in relative.parts:
         return "ERROR: path reaches outside the managed textbook job root"
     return None
 
@@ -134,39 +272,95 @@ def validate_managed_textbook_write(
         relative = candidate_path.relative_to(root)
     except ValueError:
         return "managed teaching candidate path is not allowed"
+    if _contains_c0_control(path) or "\\" in path or ".." in relative.parts:
+        return "managed teaching candidate path is not allowed"
+    if policy.purpose == "book_pipeline":
+        if relative in _BOOK_PIPELINE_JSON_OBJECTS:
+            return _validate_strict_json_object(
+                content,
+                invalid_message="managed book package must be valid JSON before writing",
+                object_message="managed book package must be a JSON object",
+            )
+        if relative == PurePosixPath(".langalpha/progress.jsonl"):
+            for line in content.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    decoded = _strict_json_loads(line)
+                except ValueError:
+                    return "managed progress line must be valid JSON before writing"
+                if not isinstance(decoded, dict):
+                    return "managed progress line must be a JSON object"
+                for field in ("event_key", "stage", "status"):
+                    field_value = decoded.get(field)
+                    if not isinstance(field_value, str) or not field_value.strip():
+                        return (
+                            f"managed progress event must contain a non-empty {field}"
+                        )
+                if decoded["stage"] not in _BOOK_PIPELINE_PROGRESS_STAGES:
+                    return "managed progress event has an invalid stage"
+                if decoded["status"] not in _BOOK_PIPELINE_PROGRESS_STATUSES:
+                    return "managed progress event has an invalid status"
+                if _contains_forbidden_progress_key(decoded):
+                    return "managed progress event contains a forbidden field"
+            return None
+        if relative in _BOOK_PIPELINE_CANONICAL_FILES:
+            return None
+        if (
+            len(relative.parts) >= 4
+            and relative.parts[:3] == ("outputs", "book-skill", "chapters")
+            and relative.suffix == ".md"
+        ):
+            return None
+        if (
+            len(relative.parts) >= 2
+            and relative.parts[0] == "outputs"
+            and relative.suffix in _BOOK_PIPELINE_ASSET_EXTENSIONS
+        ):
+            # Two-layer contract: this write policy enforces root containment,
+            # allowed paths/extensions and package JSON shape. The import stage
+            # separately downloads only paths explicitly declared in
+            # outputs/assets_manifest.json; undeclared outputs are never
+            # imported.
+            if relative.suffix == ".json":
+                return _validate_strict_json_object(
+                    content,
+                    invalid_message=(
+                        "managed JSON content asset must be valid JSON before writing"
+                    ),
+                    object_message="managed JSON content asset must be a JSON object",
+                )
+            return None
+        return "managed teaching candidate path is not allowed"
     if policy.purpose == "structure":
         if relative != PurePosixPath("outputs/structure.json"):
             return "managed teaching candidate path is not allowed"
-        try:
-            decoded = json.loads(content)
-        except json.JSONDecodeError:
-            return "managed teaching candidate must be valid JSON before writing"
-        if not isinstance(decoded, dict):
-            return "managed teaching candidate must be a JSON object"
-        return None
+        return _validate_strict_json_object(
+            content,
+            invalid_message="managed teaching candidate must be valid JSON before writing",
+            object_message="managed teaching candidate must be a JSON object",
+        )
     if policy.purpose == "lesson":
         if relative == PurePosixPath("outputs/lesson.md"):
             if not content.strip():
                 return "managed lesson Markdown must not be empty"
             return None
         if relative == PurePosixPath("outputs/practice.json"):
-            try:
-                decoded = json.loads(content)
-            except json.JSONDecodeError:
-                return "managed lesson practice must be valid JSON before writing"
-            if not isinstance(decoded, dict):
-                return "managed lesson practice must be a JSON object"
-            return None
+            return _validate_strict_json_object(
+                content,
+                invalid_message=(
+                    "managed lesson practice must be valid JSON before writing"
+                ),
+                object_message="managed lesson practice must be a JSON object",
+            )
         return "managed teaching candidate path is not allowed"
     if policy.purpose == "assets":
         if relative == PurePosixPath("outputs/chapters_manifest.json"):
-            try:
-                decoded = json.loads(content)
-            except json.JSONDecodeError:
-                return "managed book asset manifest must be valid JSON"
-            if not isinstance(decoded, dict):
-                return "managed book asset manifest must be a JSON object"
-            return None
+            return _validate_strict_json_object(
+                content,
+                invalid_message="managed book asset manifest must be valid JSON",
+                object_message="managed book asset manifest must be a JSON object",
+            )
         if relative.as_posix() in {
             "outputs/glossary.md",
             "outputs/patterns.md",
@@ -196,12 +390,14 @@ def validate_managed_textbook_write(
         return "managed teaching candidate path is not allowed"
     if chapter_toolkit:
         return None
-    try:
-        decoded = json.loads(content)
-    except json.JSONDecodeError:
-        return "managed teaching candidate must be valid JSON before writing"
-    if not isinstance(decoded, dict):
-        return "managed teaching candidate must be a JSON object"
+    strict_error = _validate_strict_json_object(
+        content,
+        invalid_message="managed teaching candidate must be valid JSON before writing",
+        object_message="managed teaching candidate must be a JSON object",
+    )
+    if strict_error is not None:
+        return strict_error
+    decoded = _strict_json_loads(content)
     if relative != PurePosixPath("outputs/teaching-package.json"):
         return None
     chapters = decoded.get("chapters")

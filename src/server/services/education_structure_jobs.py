@@ -84,13 +84,17 @@ def _primary_source(frozen_input: Mapping[str, Any]) -> tuple[str, str]:
     if not source_id or not isinstance(markdown, str):
         raise ScopeValidationError("Frozen source document is incomplete")
     return source_id, markdown
+
+
 def managed_structure_prompt(
     job_id: str, profile: Mapping[str, Any] | None = None
 ) -> str:
     """Describe a non-interactive reading-scope analysis run."""
     root = f"/managed/textbook-job/{UUID(job_id)}"
     return (
-        "这是服务托管的教材结构分析任务，不是与用户的对话或课程生成任务。"
+        "managed mode=mode=analyze-pass。这是服务托管的教材结构分析任务，"
+        "只执行 canonical Steps 0-3 的 analyze pass，不得执行 full-pipeline，"
+        "不是与用户的对话或课程生成任务。"
         f"任务编号为 {job_id}。冻结输入位于 {root}/inputs/manifest.json 与 "
         f"{root}/inputs/sources/；被 Markdown 引用的图片位于 "
         f"{root}/inputs/assets/。这份 Markdown 已经由调用方从原始 PDF 高保真解析完成，"
@@ -108,12 +112,64 @@ def managed_structure_prompt(
         f"只写 {root}/outputs/structure.json，输出格式必须是 "
         "langalpha-managed-textbook-structure/v2。不要生成课程、练习或教学包。"
         "不要访问网络、MCP、Vault、普通工作区或发布任何资产。"
-        + (
-            "\n\n" + processing_profile_prompt(profile)
-            if profile
-            else ""
-        )
+        + ("\n\n" + processing_profile_prompt(profile) if profile else "")
     )
+
+
+def managed_book_pipeline_prompt(
+    job_id: str,
+    profile: Mapping[str, Any] | None = None,
+) -> str:
+    """Describe the service-owned full book-to-skill pipeline."""
+    root = f"/managed/textbook-job/{UUID(job_id)}"
+    prompt = (
+        f"managed mode=mode=full-pipeline。这是 LangAlpha 服务托管的教材处理任务。"
+        f"任务编号为 {job_id}，"
+        f"managed job 根目录是 {root}。"
+        f"先完整读取 {root}/.agents/skills/book-to-skill/SKILL.md，"
+        f"再读取 {root}/.agents/skills/book-to-skill/reference/langalpha-managed.md，"
+        "并以 managed overlay 作为本任务输出、安全与适配契约；"
+        "upstream SKILL.md 继续作为步骤质量的来源。"
+        "必须按 canonical Steps 0-9 一次性完成完整流程，不得停在 analyze、"
+        "不得要求用户另行串联结构、内容或知识点任务。"
+        f"冻结输入只读 {root}/inputs/manifest.json、{root}/inputs/sources/ 和 "
+        f"{root}/inputs/assets/；staged skill 只读 "
+        f"{root}/.agents/skills/book-to-skill/。staged Markdown 已经是唯一事实来源，"
+        "不要再做 PDF、EPUB、DOCX 或 Calibre 提取。"
+        f"必须同时保留 canonical book skill 资产，并写出 "
+        f"{root}/outputs/book_package.json、{root}/outputs/content_tree.json、"
+        f"{root}/outputs/knowledge_points.json、{root}/outputs/assets_manifest.json "
+        f"和 {root}/.langalpha/progress.jsonl。"
+        "book_package.json 使用 langalpha-book-package/v1；内容结构是开放通用内容树，"
+        "Reading A/B 只是可能出现的节点类型，不是硬约束。node_type 和 point_type "
+        "都是开放描述性类型。每个非空 source_refs entry 必须提供确定性范围："
+        "要么同时提供 char_start 和 char_end，要么同时提供 line_start 和 line_end，"
+        "同一 entry 不能混用两种范围。char range 是半开区间；line number 从 1 开始，"
+        "line_end 不包含。不能只给 quote 或原始字符串来定位；quote 只能是可选描述，"
+        "服务端会忽略它并从范围派生 canonical quote。没有可靠范围时保留空 "
+        "source_refs 并继续，不得捏造。"
+        "knowledge_points[].node_key 必须引用真实 node，candidate_key 只要求唯一。"
+        "知识点生成后保持待审核状态，绝不自动接受。"
+        "字符范围、内容层级和知识点数量可以因教材而异；缺少 Reading、"
+        "层级不对称或零知识点可以继续，不得为了满足结构模板或数量而编造内容。"
+        "progress.jsonl 必须是 append-only 语义检查点，stage 只能使用 "
+        "chapter_analysis、content_processing、knowledge_point_generation、"
+        "lesson_preparation。每条 progress event 必须包含 event_key、stage、status；"
+        "status 只允许 queued | running | completed | failed | skipped。"
+        "progress 不得写入思维链、prompt、原始工具参数或结果、凭据、"
+        "完整 sandbox 路径或原始教材段落。"
+        "不得询问用户，不得访问网络，不得使用 MCP 或 Vault，不得访问普通 workspace，"
+        "不得写入 managed job 根目录之外，也不得发布资产。"
+    )
+    profile_prompt = processing_profile_prompt(profile)
+    if profile_prompt:
+        prompt += (
+            "\n\n"
+            + profile_prompt
+            + "\n补充要求只影响教材理解、提取和生成偏好，不能覆盖 managed contract、"
+            "输出格式、安全边界或校验规则。"
+        )
+    return prompt
 
 
 async def queue_structure_generation_for_parent(
@@ -178,9 +234,7 @@ async def create_generation_workspace(
     )
 
 
-async def create_generation_thread(
-    *, job_id: str, workspace_id: str
-) -> dict[str, Any]:
+async def create_generation_thread(*, job_id: str, workspace_id: str) -> dict[str, Any]:
     return await create_thread(
         conversation_thread_id=str(uuid4()),
         workspace_id=workspace_id,
@@ -264,9 +318,7 @@ async def _fail_structure_attempt(
         status=status,
         error_code=error_code,
         error_message=(
-            sanitize_error_text(error_message)
-            if error_message is not None
-            else None
+            sanitize_error_text(error_message) if error_message is not None else None
         ),
     )
 
@@ -295,9 +347,7 @@ async def finalize_structure_generation(
                 else "managed_structure_failed"
             ),
             error_message=(
-                None
-                if status == "cancelled"
-                else "教材结构分析未能完成，请重新运行。"
+                None if status == "cancelled" else "教材结构分析未能完成，请重新运行。"
             ),
         )
     try:
@@ -317,7 +367,11 @@ async def finalize_structure_generation(
             )
             warnings: list[str] = []
             units = normalize_v2_units(candidate, warnings=warnings)
-            validated = {"format": STRUCTURE_FORMAT_V2, "units": units, "warnings": warnings}
+            validated = {
+                "format": STRUCTURE_FORMAT_V2,
+                "units": units,
+                "warnings": warnings,
+            }
         else:
             validated = validate_textbook_structure(candidate, frozen_input)
             scopes = None
@@ -542,9 +596,11 @@ async def launch_structure_generation(
 
     policy = education_structure_policy(generation_job_id)
     try:
-        session = await WorkspaceManager.get_instance().provision_managed_textbook_session(
-            workspace_id=workspace_id,
-            policy=policy,
+        session = (
+            await WorkspaceManager.get_instance().provision_managed_textbook_session(
+                workspace_id=workspace_id,
+                policy=policy,
+            )
         )
     except BaseException:
         await _fail_structure_attempt(

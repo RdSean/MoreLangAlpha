@@ -1,4 +1,6 @@
 """Execution-boundary contracts for managed textbook PTC runs."""
+
+from pathlib import Path
 from types import SimpleNamespace
 
 from importlib import import_module
@@ -6,6 +8,9 @@ from importlib.util import find_spec
 from unittest.mock import AsyncMock
 
 import pytest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_managed_textbook_policy_allows_only_staged_files_and_one_builtin_skill():
@@ -16,7 +21,10 @@ def test_managed_textbook_policy_allows_only_staged_files_and_one_builtin_skill(
     policy = education_teaching_policy("8a77d086-0b23-4a1e-89d0-f163fa23d5d1")
 
     assert policy.allowed_skill_names == frozenset({"book-to-skill"})
-    assert policy.filesystem_root == "/managed/textbook-job/8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    assert (
+        policy.filesystem_root
+        == "/managed/textbook-job/8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
     assert policy.enable_mcp is False
     assert policy.enable_web is False
     assert policy.enable_vault is False
@@ -61,6 +69,226 @@ def test_structure_policy_allows_only_one_json_candidate_path():
         "[]",
         policy,
     )
+
+
+def test_book_pipeline_policy_matches_managed_execution_boundaries():
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_pipeline_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+
+    assert policy.allowed_skill_names == frozenset({"book-to-skill"})
+    assert (
+        policy.filesystem_root
+        == "/managed/textbook-job/8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+    assert policy.purpose == "book_pipeline"
+    assert policy.enable_mcp is False
+    assert policy.enable_web is False
+    assert policy.enable_vault is False
+    assert policy.enable_preview is False
+    assert policy.allow_subagents is True
+
+
+def test_book_pipeline_policy_allows_package_skill_and_manifest_asset_paths():
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_pipeline_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+    allowed = (
+        ("outputs/book_package.json", "{}"),
+        ("outputs/content_tree.json", "{}"),
+        ("outputs/knowledge_points.json", "{}"),
+        ("outputs/assets_manifest.json", "{}"),
+        (
+            ".langalpha/progress.jsonl",
+            '{"event_key":"chapter:start","stage":"chapter_analysis","status":"running"}\n'
+            "\n"
+            '{"event_key":"chapter:done","stage":"chapter_analysis","status":"completed"}',
+        ),
+        ("outputs/book-skill/SKILL.md", "# Textbook Skill"),
+        ("outputs/book-skill/chapters/unit-1/reading-a.md", "# Reading A"),
+        ("outputs/book-skill/glossary.md", "# Glossary"),
+        ("outputs/book-skill/patterns.md", "# Patterns"),
+        ("outputs/book-skill/cheatsheet.md", "# Cheatsheet"),
+        ("outputs/content/unit-1/knowledge.md", "# Knowledge"),
+        ("outputs/content/unit-1/practice.json", "{}"),
+        ("outputs/content/unit-1/transcript.txt", "Transcript"),
+        ("outputs/content/unit-1/figure.png", "image"),
+        ("outputs/content/unit-1/photo.jpg", "image"),
+        ("outputs/content/unit-1/photo.jpeg", "image"),
+        ("outputs/content/unit-1/diagram.webp", "image"),
+        ("outputs/content/unit-1/diagram.svg", "<svg/>"),
+        ("outputs/content/unit-1/table.csv", "a,b\n1,2\n"),
+    )
+
+    for relative_path, content in allowed:
+        assert (
+            managed_execution.validate_managed_textbook_write(
+                f"{policy.filesystem_root}/{relative_path}",
+                content,
+                policy,
+            )
+            is None
+        )
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "content", "expected"),
+    (
+        ("outputs/book_package.json", "[]", "JSON object"),
+        ("outputs/content_tree.json", "not json", "valid JSON"),
+        (".langalpha/progress.jsonl", '["not","an","object"]', "JSON object"),
+        (
+            ".langalpha/progress.jsonl",
+            '{"event_key":"event-1","stage":"chapter_analysis","status":"running"}\n'
+            "not json",
+            "valid JSON",
+        ),
+    ),
+)
+def test_book_pipeline_policy_rejects_invalid_json_objects(
+    relative_path, content, expected
+):
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_pipeline_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+
+    error = managed_execution.validate_managed_textbook_write(
+        f"{policy.filesystem_root}/{relative_path}",
+        content,
+        policy,
+    )
+
+    assert expected in str(error)
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "content"),
+    (
+        ("outputs/book_package.json", '{"value":NaN}'),
+        ("outputs/book_package.json", '{"value":1e999}'),
+        ("outputs/content_tree.json", '{"value":Infinity}'),
+        ("outputs/content_tree.json", '{"value":-1e999}'),
+        ("outputs/knowledge_points.json", '{"value":-Infinity}'),
+        (
+            "outputs/content/unit-1/practice.json",
+            '{"question":"one","question":"two"}',
+        ),
+        (
+            "outputs/book-skill/chapters/unit-1/payload.json",
+            '{"nested":{"value":1,"value":2}}',
+        ),
+    ),
+)
+def test_book_pipeline_policy_rejects_nonstandard_or_duplicate_json(
+    relative_path, content
+):
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_pipeline_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+
+    error = managed_execution.validate_managed_textbook_write(
+        f"{policy.filesystem_root}/{relative_path}",
+        content,
+        policy,
+    )
+
+    assert "valid JSON" in str(error)
+
+
+@pytest.mark.parametrize(
+    "content",
+    (
+        '{"stage":"chapter_analysis","status":"running"}',
+        '{"event_key":"event-1","stage":"unknown","status":"running"}',
+        '{"event_key":"event-1","stage":"chapter_analysis","status":"unknown"}',
+        (
+            '{"event_key":"event-1","stage":"chapter_analysis",'
+            '"status":"running","reasoning":"hidden"}'
+        ),
+        (
+            '{"event_key":"event-1","stage":"chapter_analysis",'
+            '"status":"running","metadata":{"tool_args":[]}}'
+        ),
+        (
+            '{"event_key":"event-1","stage":"chapter_analysis",'
+            '"status":"running","secret":"token"}'
+        ),
+        '{"event_key":"event-1","event_key":"event-2","stage":"chapter_analysis",'
+        '"status":"running"}',
+        '{"event_key":"event-1","stage":"chapter_analysis","status":"running",'
+        '"current":NaN}',
+        '{"event_key":"event-1","stage":"chapter_analysis","status":"running",'
+        '"current":1e999}',
+    ),
+)
+def test_book_pipeline_policy_rejects_unsafe_progress_events(content):
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_pipeline_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+
+    assert managed_execution.validate_managed_textbook_write(
+        f"{policy.filesystem_root}/.langalpha/progress.jsonl",
+        content,
+        policy,
+    )
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "../outside.json",
+        "inputs/manifest.json",
+        "outputs/archive.bin",
+        "outputs/book-skill/chapters/../../escape.md",
+        ".langalpha/progress.jsonl.bak",
+        "outputs/content/unit-1/bad\x00name.md",
+        "outputs/content/unit-1/bad\rname.md",
+        "outputs/content/unit-1/bad\nname.md",
+        "outputs/content/unit-1/bad\tname.md",
+        "\toutputs/content/unit-1/bad.md",
+        "outputs/content/unit-1/bad.md\t",
+    ),
+)
+def test_book_pipeline_policy_rejects_unmanaged_paths(relative_path):
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_pipeline_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+
+    assert managed_execution.validate_managed_textbook_write(
+        f"{policy.filesystem_root}/{relative_path}",
+        "{}",
+        policy,
+    )
+
+
+def test_book_pipeline_manifest_contract_separates_write_and_import_layers():
+    plan = (
+        REPO_ROOT / "docs/plans/2026-09-22-unified-book-processing-pipeline.md"
+    ).read_text(encoding="utf-8")
+    overlay = (
+        REPO_ROOT
+        / "plugins/langalpha_local/skills/book-to-skill/reference/langalpha-managed.md"
+    ).read_text(encoding="utf-8")
+
+    for contract in (plan, overlay):
+        contract = " ".join(contract.split()).lower()
+        assert "does not inspect manifest membership" in contract
+        assert "downloads only asset paths explicitly listed" in contract
+        assert "undeclared" in contract and "never" in contract
+
+
+def test_progress_write_gate_defers_semantic_parsing_to_task_6():
+    plan = (
+        REPO_ROOT / "docs/plans/2026-09-22-unified-book-processing-pipeline.md"
+    ).read_text(encoding="utf-8")
+
+    assert "Task 6 progress parser is mandatory and authoritative" in plan
 
 
 def test_lesson_policy_allows_markdown_and_optional_practice_only():
@@ -181,20 +409,29 @@ async def test_managed_sandbox_initialization_creates_only_the_job_root(monkeypa
     runtime = Runtime()
     sandbox = object.__new__(PTCSandbox)
     sandbox.config = managed_execution.managed_core_config(
-        type("Core", (), {
-            "filesystem": type("Filesystem", (), {
-                "working_directory": "/home/workspace",
-                "allowed_directories": ["/home/workspace"],
-                "denied_directories": [],
-            })(),
-            "mcp": type("MCP", (), {"servers": []})(),
-            "sandbox": type("Sandbox", (), {"platform_secrets": ()})(),
-            "model_copy": lambda self, *, deep: self,
-        })(),
+        type(
+            "Core",
+            (),
+            {
+                "filesystem": type(
+                    "Filesystem",
+                    (),
+                    {
+                        "working_directory": "/home/workspace",
+                        "allowed_directories": ["/home/workspace"],
+                        "denied_directories": [],
+                    },
+                )(),
+                "mcp": type("MCP", (), {"servers": []})(),
+                "sandbox": type("Sandbox", (), {"platform_secrets": ()})(),
+                "model_copy": lambda self, *, deep: self,
+            },
+        )(),
         policy,
     )
     sandbox.provider = AsyncMock()
     sandbox.provider.create.return_value = runtime
+
     async def runtime_call(func, *args, **kwargs):
         return await func(*args, **kwargs)
 
@@ -209,21 +446,25 @@ async def test_managed_sandbox_initialization_creates_only_the_job_root(monkeypa
         env_vars=None,
         platform_secret_bindings=None,
         mcp_packages=[],
-        retry_policy=pytest.importorskip("ptc_agent.core.sandbox.retry").RetryPolicy.SAFE,
+        retry_policy=pytest.importorskip(
+            "ptc_agent.core.sandbox.retry"
+        ).RetryPolicy.SAFE,
         allow_reconnect=False,
     )
     assert sandbox.sandbox_id == "sandbox-1"
     assert sandbox._work_dir == policy.filesystem_root
-    assert sandbox._runtime_call.await_args.args[1] == f"mkdir -p {policy.filesystem_root}"
+    assert (
+        sandbox._runtime_call.await_args.args[1] == f"mkdir -p {policy.filesystem_root}"
+    )
 
 
 @pytest.mark.asyncio
 async def test_managed_session_does_not_connect_mcp_or_hydrate_workspace(monkeypatch):
     """Managed sessions use the stripped config and the dedicated sandbox setup."""
     session_module = import_module("ptc_agent.core.session")
-    policy = import_module("ptc_agent.agent.managed_execution").education_teaching_policy(
-        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
-    )
+    policy = import_module(
+        "ptc_agent.agent.managed_execution"
+    ).education_teaching_policy("8a77d086-0b23-4a1e-89d0-f163fa23d5d1")
     created: list[object] = []
 
     class Registry:
@@ -257,9 +498,9 @@ async def test_managed_session_does_not_connect_mcp_or_hydrate_workspace(monkeyp
 async def test_managed_graph_discards_caller_identity_and_store(monkeypatch):
     """A service-owned run must not inherit parent memory or signed-url hooks."""
     graph_module = import_module("ptc_agent.agent.graph")
-    policy = import_module("ptc_agent.agent.managed_execution").education_teaching_policy(
-        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
-    )
+    policy = import_module(
+        "ptc_agent.agent.managed_execution"
+    ).education_teaching_policy("8a77d086-0b23-4a1e-89d0-f163fa23d5d1")
     captured: dict[str, object] = {}
 
     class FakePTCAgent:
@@ -291,7 +532,9 @@ async def test_managed_graph_discards_caller_identity_and_store(monkeypatch):
 
     await graph_module.build_ptc_graph_with_session(
         session=session,
-        config=type("Config", (), {"subagents": type("Subagents", (), {"enabled": []})()})(),
+        config=type(
+            "Config", (), {"subagents": type("Subagents", (), {"enabled": []})()}
+        )(),
         user_id="parent-1",
         store=object(),
         on_signed_url=object(),
@@ -305,12 +548,14 @@ async def test_managed_graph_discards_caller_identity_and_store(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_managed_graph_keeps_the_root_guard_for_allowed_builtin_subagents(monkeypatch):
+async def test_managed_graph_keeps_the_root_guard_for_allowed_builtin_subagents(
+    monkeypatch,
+):
     """Service-owned work still needs the root fence for its fixed workers."""
     graph_module = import_module("ptc_agent.agent.graph")
-    policy = import_module("ptc_agent.agent.managed_execution").education_teaching_policy(
-        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
-    )
+    policy = import_module(
+        "ptc_agent.agent.managed_execution"
+    ).education_teaching_policy("8a77d086-0b23-4a1e-89d0-f163fa23d5d1")
     captured: dict[str, object] = {}
 
     class FakePTCAgent:
@@ -337,7 +582,9 @@ async def test_managed_graph_keeps_the_root_guard_for_allowed_builtin_subagents(
 
     await graph_module.build_ptc_graph_with_session(
         session=session,
-        config=type("Config", (), {"subagents": type("Subagents", (), {"enabled": []})()})(),
+        config=type(
+            "Config", (), {"subagents": type("Subagents", (), {"enabled": []})()}
+        )(),
         namespace_owner=guard,
         managed_policy=policy,
     )
@@ -348,9 +595,9 @@ async def test_managed_graph_keeps_the_root_guard_for_allowed_builtin_subagents(
 
 def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypatch):
     agent_module = import_module("ptc_agent.agent.agent")
-    policy = import_module("ptc_agent.agent.managed_execution").education_teaching_policy(
-        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
-    )
+    policy = import_module(
+        "ptc_agent.agent.managed_execution"
+    ).education_teaching_policy("8a77d086-0b23-4a1e-89d0-f163fa23d5d1")
 
     captured: dict[str, object] = {}
 
@@ -399,10 +646,14 @@ def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypat
                 "local_skill_dirs_with_sandbox": staticmethod(lambda: []),
             },
         )()
-        filesystem = type("Filesystem", (), {
-            "working_directory": policy.filesystem_root,
-            "denied_directories": [],
-        })()
+        filesystem = type(
+            "Filesystem",
+            (),
+            {
+                "working_directory": policy.filesystem_root,
+                "denied_directories": [],
+            },
+        )()
         mcp = type("MCP", (), {"servers": [], "tool_exposure_mode": "summary"})()
         compaction = type(
             "Compaction",
@@ -450,15 +701,18 @@ def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypat
     # A managed job is scoped to one chapter's materials, so it reaches no
     # ambient surface at all — including the household homework tool, which
     # would otherwise let it read outside that scope.
-    assert not {
-        "ExecuteCode",
-        "BashOutput",
-        "PreviewURL",
-        "ShowWidget",
-        "WebSearch",
-        "AskUserQuestion",
-        "get_homework_schedule",
-    } & tool_names
+    assert (
+        not {
+            "ExecuteCode",
+            "BashOutput",
+            "PreviewURL",
+            "ShowWidget",
+            "WebSearch",
+            "AskUserQuestion",
+            "get_homework_schedule",
+        }
+        & tool_names
+    )
     assert compiled_subagents[0]["enabled_names"] == ["textbook-chapter-worker"]
     assert compiled_subagents[0]["definition"] is not None
     background = next(
@@ -475,12 +729,18 @@ def test_managed_bash_rejects_shell_escapes_from_the_job_root():
         "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
     )
 
-    assert managed_execution.validate_managed_bash_command(
-        "cat inputs/manifest.json", policy
-    ) is None
-    assert managed_execution.validate_managed_bash_command(
-        "sha256sum inputs/manifest.json", policy
-    ) is None
+    assert (
+        managed_execution.validate_managed_bash_command(
+            "cat inputs/manifest.json", policy
+        )
+        is None
+    )
+    assert (
+        managed_execution.validate_managed_bash_command(
+            "sha256sum inputs/manifest.json", policy
+        )
+        is None
+    )
     assert "outside the managed textbook job root" in str(
         managed_execution.validate_managed_bash_command("cat /etc/passwd", policy)
     )
@@ -488,7 +748,9 @@ def test_managed_bash_rejects_shell_escapes_from_the_job_root():
         managed_execution.validate_managed_bash_command("cd .. && ls", policy)
     )
     assert "not allowed" in str(
-        managed_execution.validate_managed_bash_command("curl https://example.com", policy)
+        managed_execution.validate_managed_bash_command(
+            "curl https://example.com", policy
+        )
     )
 
 
@@ -575,4 +837,6 @@ async def test_managed_bash_tool_enforces_the_policy_before_execution():
     assert "outside the managed textbook job root" in rejected
     assert accepted == "ok"
     backend.aexecute_bash.assert_awaited_once()
-    assert backend.aexecute_bash.await_args.kwargs["working_dir"] == policy.filesystem_root
+    assert (
+        backend.aexecute_bash.await_args.kwargs["working_dir"] == policy.filesystem_root
+    )
