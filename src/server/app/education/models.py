@@ -395,6 +395,28 @@ class CreateTextbookStructureRequest(BaseModel):
     profile: ProcessingProfileRequest | None = None
 
 
+class CreateBookPipelineRequest(BaseModel):
+    pause_after_chapter_analysis: bool = False
+
+
+class BookPipelineJobResponse(BaseModel):
+    generation_job_id: UUID
+    version_id: UUID
+    scope: Literal["book_pipeline"]
+    structure_id: UUID | None = None
+    knowledge_point_id: UUID | None = None
+    status: str
+    attempt_count: int
+    pause_after_chapter_analysis: bool
+    error_code: str | None = None
+    error_message: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    root_run_id: UUID | None = None
+    started_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+
+
 class StructureKnowledgePointResponse(StructureKnowledgePointWrite):
     knowledge_point_id: UUID
     status: str
@@ -454,7 +476,7 @@ class TextbookStructureResponse(BaseModel):
 class StructureGenerationJobResponse(BaseModel):
     generation_job_id: UUID
     version_id: UUID
-    scope: Literal["structure", "assets", "lesson"]
+    scope: Literal["structure", "assets", "lesson", "book_pipeline"]
     structure_id: UUID | None = None
     status: str
     attempt_count: int

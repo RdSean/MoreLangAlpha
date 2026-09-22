@@ -7,6 +7,8 @@ from fastapi import APIRouter, HTTPException, status
 from src.server.app.education.models import (
     AssignTextbookPublicationRequest,
     ApproveKnowledgePointLessonRequest,
+    BookPipelineJobResponse,
+    CreateBookPipelineRequest,
     CreateKnowledgePointLessonRevisionRequest,
     CreateLearningItemRequest,
     CreateTextbookRequest,
@@ -58,6 +60,11 @@ from src.server.services.education_lesson_review import (
 from src.server.services.education_book_asset_jobs import (
     launch_book_asset_generation,
     queue_book_assets_for_parent,
+)
+from src.server.services.education_book_pipeline_jobs import (
+    get_book_pipeline_job_for_parent,
+    queue_book_pipeline_for_parent,
+    resume_book_pipeline_for_parent,
 )
 from src.server.services.education_learning_assets import (
     add_learning_item,
@@ -140,6 +147,63 @@ async def get_family_textbook(textbook_id: UUID, user_id: CurrentUserId):
 async def list_completed_parse_jobs(user_id: CurrentUserId):
     try:
         return await list_completed_textbook_parse_jobs(parent_user_id=user_id)
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/textbook-versions/{content_version_id}/book-pipeline-jobs",
+    response_model=BookPipelineJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def queue_family_book_pipeline(
+    content_version_id: UUID,
+    user_id: CurrentUserId,
+    body: CreateBookPipelineRequest | None = None,
+):
+    try:
+        return await queue_book_pipeline_for_parent(
+            parent_user_id=user_id,
+            content_version_id=str(content_version_id),
+            pause_after_chapter_analysis=(
+                body.pause_after_chapter_analysis if body is not None else False
+            ),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/book-pipeline-jobs/{generation_job_id}",
+    response_model=BookPipelineJobResponse,
+)
+async def get_family_book_pipeline_job(
+    generation_job_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_book_pipeline_job_for_parent(
+            parent_user_id=user_id,
+            generation_job_id=str(generation_job_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/book-pipeline-jobs/{generation_job_id}/resume",
+    response_model=BookPipelineJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def resume_family_book_pipeline_job(
+    generation_job_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await resume_book_pipeline_for_parent(
+            parent_user_id=user_id,
+            generation_job_id=str(generation_job_id),
+        )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
 

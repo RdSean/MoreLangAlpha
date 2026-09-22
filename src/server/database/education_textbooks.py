@@ -539,6 +539,220 @@ async def get_active_structure_generation_for_parent(
     return dict(row) if row else None
 
 
+async def queue_book_pipeline_job(
+    *,
+    parent_user_id: str,
+    content_version_id: str,
+    processing_profile_sha256: str,
+    pause_after_chapter_analysis: bool = False,
+) -> dict[str, Any] | None:
+    """Create or reuse one active unified book pipeline for a content version."""
+    generation_job_id = str(uuid4())
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"education-book-pipeline:{content_version_id}",),
+                )
+                await cur.execute(
+                    """
+                    SELECT versions.version_id
+                    FROM education_textbook_versions AS versions
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE versions.version_id = %s
+                      AND versions.status = 'review'
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                    FOR UPDATE OF versions
+                    """,
+                    (content_version_id, parent_user_id),
+                )
+                if not await cur.fetchone():
+                    return None
+                await cur.execute(
+                    """
+                    SELECT jobs.generation_job_id, jobs.version_id, jobs.scope,
+                           jobs.structure_id, jobs.knowledge_point_id,
+                           jobs.status, jobs.attempt_count,
+                           jobs.pause_after_chapter_analysis,
+                           jobs.error_code, jobs.error_message,
+                           jobs.created_at, jobs.updated_at,
+                           attempts.root_run_id, attempts.started_at,
+                           attempts.heartbeat_at
+                    FROM education_generation_jobs AS jobs
+                    LEFT JOIN education_generation_attempts AS attempts
+                      ON attempts.attempt_id = jobs.latest_attempt_id
+                    WHERE jobs.version_id = %s
+                      AND jobs.scope = 'book_pipeline'
+                      AND jobs.status IN (
+                          'queued', 'preparing', 'running', 'validating',
+                          'awaiting_review'
+                      )
+                    ORDER BY jobs.created_at DESC
+                    LIMIT 1
+                    """,
+                    (content_version_id,),
+                )
+                active_job = await cur.fetchone()
+                if active_job:
+                    return dict(active_job)
+                await cur.execute(
+                    """
+                    INSERT INTO education_generation_jobs (
+                        generation_job_id, version_id, scope, structure_id,
+                        knowledge_point_id, status,
+                        pause_after_chapter_analysis,
+                        processing_profile_sha256
+                    ) VALUES (
+                        %s, %s, 'book_pipeline', NULL, NULL, 'queued', %s, %s
+                    )
+                    RETURNING generation_job_id, version_id, scope,
+                              structure_id, knowledge_point_id, status,
+                              attempt_count, pause_after_chapter_analysis,
+                              error_code, error_message, created_at, updated_at
+                    """,
+                    (
+                        generation_job_id,
+                        content_version_id,
+                        pause_after_chapter_analysis,
+                        processing_profile_sha256,
+                    ),
+                )
+                job = await cur.fetchone()
+    return dict(job)
+
+
+async def pause_book_pipeline_for_chapter_review(
+    *,
+    parent_user_id: str,
+    generation_job_id: str,
+    attempt_id: str,
+) -> dict[str, Any] | None:
+    """Finish one parent-owned checkpoint attempt and enter review state."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT attempts.attempt_id
+                    FROM education_generation_attempts AS attempts
+                    JOIN education_generation_jobs AS jobs
+                      ON jobs.generation_job_id = attempts.generation_job_id
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = jobs.version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE attempts.generation_job_id = %s
+                      AND attempts.attempt_id = %s
+                      AND jobs.latest_attempt_id = %s
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                      AND jobs.scope = 'book_pipeline'
+                      AND jobs.status = 'running'
+                      AND jobs.pause_after_chapter_analysis IS TRUE
+                    FOR UPDATE OF attempts
+                    """,
+                    (generation_job_id, attempt_id, attempt_id, parent_user_id),
+                )
+                if not await cur.fetchone():
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_generation_attempts
+                    SET status = 'completed', completed_at = NOW()
+                    WHERE attempt_id = %s AND generation_job_id = %s
+                      AND status = 'running'
+                    RETURNING attempt_id
+                    """,
+                    (attempt_id, generation_job_id),
+                )
+                if not await cur.fetchone():
+                    raise RuntimeError(
+                        "Book pipeline checkpoint transition was lost"
+                    )
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs AS jobs
+                    SET status = 'awaiting_review', error_code = NULL,
+                        error_message = NULL, updated_at = NOW()
+                    FROM education_textbook_versions AS versions,
+                         education_textbooks AS textbooks,
+                         education_memberships AS memberships
+                    WHERE jobs.generation_job_id = %s
+                      AND jobs.latest_attempt_id = %s
+                      AND jobs.version_id = versions.version_id
+                      AND versions.textbook_id = textbooks.textbook_id
+                      AND textbooks.household_id = memberships.household_id
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                      AND jobs.scope = 'book_pipeline'
+                      AND jobs.status = 'running'
+                      AND jobs.pause_after_chapter_analysis IS TRUE
+                    RETURNING jobs.generation_job_id, jobs.version_id,
+                              jobs.scope, jobs.structure_id,
+                              jobs.knowledge_point_id, jobs.status,
+                              jobs.attempt_count,
+                              jobs.pause_after_chapter_analysis,
+                              jobs.error_code, jobs.error_message,
+                              jobs.created_at, jobs.updated_at
+                    """,
+                    (generation_job_id, attempt_id, parent_user_id),
+                )
+                job = await cur.fetchone()
+                if not job:
+                    raise RuntimeError(
+                        "Book pipeline checkpoint transition was lost"
+                    )
+    return dict(job)
+
+
+async def resume_book_pipeline_job(
+    *,
+    parent_user_id: str,
+    generation_job_id: str,
+) -> dict[str, Any] | None:
+    """Consume one parent-owned checkpoint and queue its continuation."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                UPDATE education_generation_jobs AS jobs
+                SET status = 'queued',
+                    pause_after_chapter_analysis = FALSE,
+                    error_code = NULL, error_message = NULL,
+                    updated_at = NOW()
+                FROM education_textbook_versions AS versions,
+                     education_textbooks AS textbooks,
+                     education_memberships AS memberships
+                WHERE jobs.generation_job_id = %s
+                  AND jobs.version_id = versions.version_id
+                  AND versions.textbook_id = textbooks.textbook_id
+                  AND textbooks.household_id = memberships.household_id
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                  AND jobs.scope = 'book_pipeline'
+                  AND jobs.status = 'awaiting_review'
+                  AND jobs.pause_after_chapter_analysis IS TRUE
+                RETURNING jobs.generation_job_id, jobs.version_id,
+                          jobs.scope, jobs.structure_id,
+                          jobs.knowledge_point_id, jobs.status,
+                          jobs.attempt_count,
+                          jobs.pause_after_chapter_analysis,
+                          jobs.error_code, jobs.error_message,
+                          jobs.created_at, jobs.updated_at
+                """,
+                (generation_job_id, parent_user_id),
+            )
+            job = await cur.fetchone()
+    return dict(job) if job else None
+
+
 async def get_active_lesson_generation_for_parent(
     *, parent_user_id: str, knowledge_point_id: str
 ) -> dict[str, Any] | None:
@@ -914,7 +1128,7 @@ async def get_generation_job_for_parent(
                 SELECT jobs.generation_job_id, jobs.version_id, jobs.scope,
                        jobs.structure_id, jobs.knowledge_point_id, jobs.status,
                        jobs.attempt_count, jobs.latest_attempt_id,
-                       jobs.auto_grading,
+                       jobs.auto_grading, jobs.pause_after_chapter_analysis,
                        jobs.processing_profile_sha256, jobs.error_code,
                        jobs.error_message, jobs.created_at, jobs.updated_at,
                        attempts.root_run_id, attempts.started_at,
@@ -1372,7 +1586,7 @@ async def create_generation_job(
     processing_profile_sha256: str,
     auto_grading: bool = False,
 ) -> dict[str, Any]:
-    """Queue one structure or lesson generation job."""
+    """Queue one textbook generation job."""
     structure_target = str(structure_id) if structure_id is not None else None
     knowledge_point_target = (
         str(knowledge_point_id) if knowledge_point_id is not None else None
@@ -1384,6 +1598,10 @@ async def create_generation_job(
     elif scope == "lesson":
         valid_target = (
             structure_target is None and knowledge_point_target is not None
+        )
+    elif scope == "book_pipeline":
+        raise ValueError(
+            "book_pipeline jobs must use queue_book_pipeline_job()"
         )
     else:
         valid_target = False

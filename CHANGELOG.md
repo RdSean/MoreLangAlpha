@@ -2,6 +2,23 @@
 
 ## 2026-09-22
 
+### 新增：统一教材处理任务台账与检查点 API
+
+- 新增迁移 `077_book_pipeline_jobs`，扩展现有 `education_generation_jobs`：增加 `book_pipeline` scope、`awaiting_review` 状态和 `pause_after_chapter_analysis` 持久字段；`book_pipeline` 必须绑定 content version，且不允许提前绑定 structure 或知识点，现有 structure/assets/lesson 目标约束保持不变。
+- 新增家长专属统一任务 API：创建/复用版本下的处理任务、读取任务投影、从章节检查点恢复；前端可轮询同一任务，后续增加 SSE 不需要改变这些持久契约。
+- 创建任务在事务级 advisory lock 和内层 active job 查询中完成去重，同一 content version 在同一时间最多存在一个 queued/preparing/running/validating/awaiting_review 的 `book_pipeline` 行，重复点击返回既有任务而不是创建并行 sandbox run。
+- `pause_after_chapter_analysis=true` 的契约由同一 job/attempt 台账实现：章节分析完成时收口当前 attempt 并进入 `awaiting_review`；resume 消费一次性 pause 标记，将同一 job 重新置为 `queued`，后续运行接入继续复用既有 attempt 链。
+- checkpoint pause 现在必须同时匹配 parent、job version 所属教材家庭和 parent membership；错误家长、错误 scope、错误 attempt 或非 running 状态都不能完成 attempt 或修改 job。
+- checkpoint resume 同样在数据库层校验 parent、version、textbook 与 household membership；错误家庭不能消费 pause 或改变 job ledger。
+- checkpoint pause 与既有 settle 路径统一为 attempt-first 锁顺序：先锁定 attempt，再更新 attempt，最后锁定并更新 job；新增真实 PostgreSQL 两事务验证 attempt 锁竞争时 job 锁仍可用，避免与 settle 形成死锁。
+- 077 新增状态约束，只有 `book_pipeline`、`pause_after_chapter_analysis=true` 的 job 才能进入 `awaiting_review`；downgrade 先恢复旧 status 约束，分别用 only-book_pipeline 和 only-awaiting_review 数据证明两类新状态都会 fail-closed。
+- `book_pipeline` 的 processing profile hash 不再包含 checkpoint mode，pause/resume 不改变同一 job 的不可变 profile 身份。
+- 旧通用 `create_generation_job()` 明确拒绝 `book_pipeline` 并指示调用统一 `queue_book_pipeline_job()`，避免绕过版本锁和 active job 去重产生并行任务。
+- 077 downgrade 采用 fail-closed：存在 `book_pipeline` 或 `awaiting_review` 数据时恢复旧约束会失败并保留数据，不静默删除或转换；无相关数据时才允许撤销本 migration 的 scope/status/column。
+- Task 3 仅建立持久任务与状态转换契约，不伪造 package 导入；实际 managed runtime 启动、暂停调用和产物导入按后续 Task 5/7 接入。
+- 新增真实 PostgreSQL integration：两家庭 pause/resume ACL 与 attempt/job 状态迁移、attempt-first 锁顺序、实际 077 DDL 的合法/非法 scope、status、target、awaiting_review 组合约束、pause 字段默认值与 NOT NULL、两连接 advisory-lock 去重，以及有/无新数据时的 downgrade 行为。
+- 验证：Task 3 focused 与 077 integration 通过，Education app/service、相邻 structure/asset/retry 和 migration 回归通过，Ruff 检查通过；本地 PostgreSQL 已实际升级并确认 head 为 `077_book_pipeline_jobs`。
+
 ### 新增：book-to-skill 完整 managed 流水线契约
 
 - 新增 `managed_book_pipeline_prompt` 的 `mode=full-pipeline`，要求在 managed `book-to-skill` 的一次执行中完整运行 canonical Steps 0-9，并同时保留 canonical 教材 skill 资产与 `book_package.json`、`content_tree.json`、`knowledge_points.json`、`assets_manifest.json`、`progress.jsonl`。

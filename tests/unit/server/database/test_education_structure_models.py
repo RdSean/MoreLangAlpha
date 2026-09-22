@@ -504,6 +504,31 @@ async def test_create_generation_job_requires_exactly_one_target(
 
 
 @pytest.mark.asyncio
+async def test_create_generation_job_rejects_book_pipeline_bypass(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+
+    with pytest.raises(
+        ValueError,
+        match=r"book_pipeline jobs must use queue_book_pipeline_job\(\)",
+    ):
+        await education_textbooks.create_generation_job(
+            version_id="version-1",
+            scope="book_pipeline",
+            structure_id=None,
+            knowledge_point_id=None,
+            processing_profile_sha256="a" * 64,
+        )
+
+    mock_cursor.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_create_lesson_generation_job_persists_one_target(
     mock_connection, mock_cursor, monkeypatch
 ):
@@ -536,6 +561,221 @@ async def test_create_lesson_generation_job_persists_one_target(
 
 
 @pytest.mark.asyncio
+async def test_queue_book_pipeline_is_parent_scoped_and_deduplicated(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"version_id": "version-1"},
+        {
+            "generation_job_id": "generation-active",
+            "version_id": "version-1",
+            "scope": "book_pipeline",
+            "structure_id": None,
+            "knowledge_point_id": None,
+            "status": "running",
+            "attempt_count": 1,
+            "pause_after_chapter_analysis": False,
+        },
+    ]
+
+    result = await education_textbooks.queue_book_pipeline_job(
+        parent_user_id="parent-1",
+        content_version_id="version-1",
+        processing_profile_sha256="a" * 64,
+    )
+
+    assert result is not None
+    assert result["generation_job_id"] == "generation-active"
+    executed = "\n".join(call.args[0] for call in mock_cursor.execute.call_args_list)
+    assert "pg_advisory_xact_lock" in executed
+    assert "memberships.role = 'parent'" in executed
+    assert "INSERT INTO education_generation_jobs" not in executed
+
+
+@pytest.mark.asyncio
+async def test_queue_book_pipeline_creates_untargeted_job(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"version_id": "version-1"},
+        None,
+        {
+            "generation_job_id": "generation-pipeline-1",
+            "version_id": "version-1",
+            "scope": "book_pipeline",
+            "structure_id": None,
+            "knowledge_point_id": None,
+            "status": "queued",
+            "attempt_count": 0,
+            "pause_after_chapter_analysis": True,
+        },
+    ]
+
+    result = await education_textbooks.queue_book_pipeline_job(
+        parent_user_id="parent-1",
+        content_version_id="version-1",
+        processing_profile_sha256="a" * 64,
+        pause_after_chapter_analysis=True,
+    )
+
+    assert result is not None
+    assert result["status"] == "queued"
+    insert_sql, parameters = mock_cursor.execute.call_args.args
+    assert "VALUES (" in insert_sql
+    assert parameters[2] is True
+    assert parameters[3] == "a" * 64
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_pause_closes_attempt_then_waits_for_review(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"attempt_id": "attempt-1"},
+        {"attempt_id": "attempt-1"},
+        {
+            "generation_job_id": "generation-pipeline-1",
+            "version_id": "version-1",
+            "scope": "book_pipeline",
+            "structure_id": None,
+            "knowledge_point_id": None,
+            "status": "awaiting_review",
+            "attempt_count": 1,
+            "pause_after_chapter_analysis": True,
+        },
+    ]
+
+    result = await education_textbooks.pause_book_pipeline_for_chapter_review(
+        parent_user_id="parent-1",
+        generation_job_id="generation-pipeline-1",
+        attempt_id="attempt-1",
+    )
+
+    assert result is not None
+    assert result["status"] == "awaiting_review"
+    lock_sql = mock_cursor.execute.call_args_list[0].args[0]
+    attempt_sql = mock_cursor.execute.call_args_list[1].args[0]
+    job_sql = mock_cursor.execute.call_args_list[2].args[0]
+    assert "FOR UPDATE OF attempts" in lock_sql
+    assert "JOIN education_generation_jobs AS jobs" in lock_sql
+    assert "SET status = 'completed'" in attempt_sql
+    assert "status = 'awaiting_review'" in job_sql
+    assert "pause_after_chapter_analysis IS TRUE" in job_sql
+    assert "education_memberships AS memberships" in job_sql
+    assert "memberships.user_id = %s" in job_sql
+    assert "memberships.role = 'parent'" in job_sql
+    assert "jobs.version_id = versions.version_id" in job_sql
+    assert mock_cursor.execute.call_args_list[0].args[1] == (
+        "generation-pipeline-1",
+        "attempt-1",
+        "attempt-1",
+        "parent-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_pause_rejects_foreign_or_invalid_job(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = None
+
+    result = await education_textbooks.pause_book_pipeline_for_chapter_review(
+        parent_user_id="parent-1",
+        generation_job_id="generation-pipeline-1",
+        attempt_id="attempt-1",
+    )
+
+    assert result is None
+    job_sql = mock_cursor.execute.call_args.args[0]
+    assert "FOR UPDATE OF attempts" in job_sql
+    assert "memberships.user_id = %s" in job_sql
+    assert "memberships.role = 'parent'" in job_sql
+    assert "jobs.scope = 'book_pipeline'" in job_sql
+    assert "jobs.status = 'running'" in job_sql
+    assert "jobs.latest_attempt_id = %s" in job_sql
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_pause_fails_if_attempt_transition_is_lost(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"attempt_id": "attempt-1"},
+        None,
+    ]
+
+    with pytest.raises(RuntimeError, match="checkpoint transition was lost"):
+        await education_textbooks.pause_book_pipeline_for_chapter_review(
+            parent_user_id="parent-1",
+            generation_job_id="generation-pipeline-1",
+            attempt_id="attempt-1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_resume_consumes_pause_flag(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {
+        "generation_job_id": "generation-pipeline-1",
+        "version_id": "version-1",
+        "scope": "book_pipeline",
+        "structure_id": None,
+        "knowledge_point_id": None,
+        "status": "queued",
+        "attempt_count": 1,
+        "pause_after_chapter_analysis": False,
+    }
+
+    result = await education_textbooks.resume_book_pipeline_job(
+        parent_user_id="parent-1",
+        generation_job_id="generation-pipeline-1"
+    )
+
+    assert result is not None
+    resume_sql = mock_cursor.execute.call_args.args[0]
+    assert "pause_after_chapter_analysis = FALSE" in resume_sql
+    assert "status = 'awaiting_review'" in resume_sql
+    assert "education_memberships AS memberships" in resume_sql
+    assert "memberships.user_id = %s" in resume_sql
+    assert "memberships.role = 'parent'" in resume_sql
+    assert mock_cursor.execute.call_args.args[1] == (
+        "generation-pipeline-1",
+        "parent-1",
+    )
+
+
+@pytest.mark.asyncio
 async def test_generation_job_parent_projection_includes_frozen_dispatch_context(
     mock_connection, mock_cursor, monkeypatch
 ):
@@ -550,6 +790,7 @@ async def test_generation_job_parent_projection_includes_frozen_dispatch_context
         "scope": "structure",
         "structure_id": "structure-1",
         "status": "queued",
+        "pause_after_chapter_analysis": True,
         "content_version_sequence": 1,
         "structure_sequence": 1,
         "slug": "textbook",
@@ -560,9 +801,12 @@ async def test_generation_job_parent_projection_includes_frozen_dispatch_context
         generation_job_id="generation-1",
     )
 
+    assert job is not None
+    assert job["pause_after_chapter_analysis"] is True
     assert job["structure_sequence"] == 1
     sql = mock_cursor.execute.call_args.args[0]
     assert "education_generation_jobs" in sql
+    assert "jobs.pause_after_chapter_analysis" in sql
     assert "memberships.role = 'parent'" in sql
 
 

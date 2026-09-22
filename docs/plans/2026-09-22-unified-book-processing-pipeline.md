@@ -474,6 +474,21 @@ git commit -m "feat(book-to-skill): emit full managed package contract"
 
 ### Task 3: Add the Unified Managed Pipeline Job
 
+**Execution adjustment (2026-09-22):** the existing generation runtime treats
+one job as a chain of attempts, so checkpoint mode is represented as completing
+the current attempt and moving the job to `awaiting_review`. Resume consumes
+the one-shot pause flag, changes the same job back to `queued`, and lets
+`claim_generation_job` create the continuation attempt. Task 3 owns this
+durable state contract and the three APIs; Task 5 connects the actual managed
+runtime launch/finalization. Queue creation uses a transaction-scoped advisory
+lock plus an active-job query so concurrent starts return the same row. Migration
+077 downgrade is fail-closed: if `book_pipeline` or `awaiting_review` rows
+exist, restoring the legacy constraints aborts and preserves the data instead
+of deleting or rewriting it.
+The pipeline validator also enforces `awaiting_review => book_pipeline &&
+pause_after_chapter_analysis` at the database layer, and checkpoint pause locks
+the attempt before the job to match the existing settle transaction order.
+
 **Files:**
 - Create: `migrations/versions/077_book_pipeline_jobs.py`
 - Create: `src/server/services/education_book_pipeline_jobs.py`
@@ -482,6 +497,9 @@ git commit -m "feat(book-to-skill): emit full managed package contract"
 - Modify: `src/server/app/education/models.py`
 - Test: `tests/unit/server/services/test_education_book_pipeline_jobs.py`
 - Test: `tests/unit/server/app/education/test_textbook_structures.py`
+- Test: `tests/unit/migrations/test_book_pipeline_jobs.py`
+- Test: `tests/unit/server/database/test_education_structure_models.py`
+- Test: `tests/integration/test_book_pipeline_jobs_db.py`
 
 **Step 1: Write the failing service test**
 
@@ -507,6 +525,9 @@ Migration `077` extends `education_generation_jobs.scope`:
 ```text
 book_pipeline
 ```
+
+It also adds a fail-closed `awaiting_review` state constraint requiring
+`scope='book_pipeline'` and `pause_after_chapter_analysis=true`.
 
 `book_pipeline` requires a `version_id`, has no structure target and creates its
 own structure/package during execution.
@@ -541,7 +562,11 @@ POST /api/v1/education/book-pipeline-jobs/{job_id}/resume
 ```bash
 uv run pytest \
   tests/unit/server/services/test_education_book_pipeline_jobs.py \
-  tests/unit/server/app/education/test_textbook_structures.py -q
+  tests/unit/server/app/education/test_textbook_structures.py \
+  tests/unit/migrations/test_book_pipeline_jobs.py \
+  tests/unit/server/database/test_education_structure_models.py -q
+uv run pytest -m integration \
+  tests/integration/test_book_pipeline_jobs_db.py -q
 ```
 
 Expected: PASS.
@@ -555,7 +580,10 @@ git add migrations/versions/077_book_pipeline_jobs.py \
   src/server/app/education/textbooks.py \
   src/server/app/education/models.py \
   tests/unit/server/services/test_education_book_pipeline_jobs.py \
-  tests/unit/server/app/education/test_textbook_structures.py
+  tests/unit/server/app/education/test_textbook_structures.py \
+  tests/unit/migrations/test_book_pipeline_jobs.py \
+  tests/unit/server/database/test_education_structure_models.py \
+  tests/integration/test_book_pipeline_jobs_db.py
 git commit -m "feat(textbooks): add unified book processing job"
 ```
 
@@ -708,6 +736,11 @@ git commit -m "feat(textbooks): collect processing brief and prevent duplicate r
 ---
 
 ### Task 5: Import the Generic Book Package
+
+**Runtime wiring (2026-09-22):** Task 5 owns the managed runtime launch and
+finalization wiring for `book_pipeline`, including calling the Task 3 checkpoint
+pause transition and launching the continuation attempt after resume. Task 3
+intentionally exposes only the durable job and API state contract.
 
 **Files:**
 - Modify: `src/server/services/education_book_pipeline_jobs.py`

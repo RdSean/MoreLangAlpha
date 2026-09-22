@@ -394,6 +394,69 @@ async def test_parent_reads_structure_generation_progress(client):
 
 
 @pytest.mark.asyncio
+async def test_parent_queues_gets_and_resumes_book_pipeline(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    generation_job_id = uuid4()
+    version_id = uuid4()
+    base_job = {
+        "generation_job_id": generation_job_id,
+        "version_id": version_id,
+        "scope": "book_pipeline",
+        "structure_id": None,
+        "knowledge_point_id": None,
+        "status": "queued",
+        "attempt_count": 0,
+        "pause_after_chapter_analysis": False,
+        "error_code": None,
+        "error_message": None,
+        "created_at": None,
+        "updated_at": None,
+        "root_run_id": None,
+        "started_at": None,
+        "heartbeat_at": None,
+    }
+    waiting = {
+        **base_job,
+        "status": "awaiting_review",
+        "pause_after_chapter_analysis": True,
+    }
+    with (
+        patch(
+            "src.server.app.education.textbooks.queue_book_pipeline_for_parent",
+            new=AsyncMock(return_value=base_job),
+        ) as queue,
+        patch(
+            "src.server.app.education.textbooks.get_book_pipeline_job_for_parent",
+            new=AsyncMock(return_value=waiting),
+        ) as get_job,
+        patch(
+            "src.server.app.education.textbooks.resume_book_pipeline_for_parent",
+            new=AsyncMock(return_value=base_job),
+        ) as resume,
+    ):
+        queued = await client.post(
+            f"/api/v1/education/textbook-versions/{version_id}/book-pipeline-jobs",
+            json={"pause_after_chapter_analysis": False},
+        )
+        loaded = await client.get(
+            f"/api/v1/education/book-pipeline-jobs/{generation_job_id}"
+        )
+        resumed = await client.post(
+            f"/api/v1/education/book-pipeline-jobs/{generation_job_id}/resume"
+        )
+
+    assert queued.status_code == 202
+    assert queued.json()["scope"] == "book_pipeline"
+    assert loaded.status_code == 200
+    assert loaded.json()["status"] == "awaiting_review"
+    assert resumed.status_code == 202
+    assert queue.await_args.kwargs["pause_after_chapter_analysis"] is False
+    get_job.assert_awaited_once()
+    resume.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_parent_reads_knowledge_point_source_preview(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
