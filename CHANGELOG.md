@@ -2,6 +2,18 @@
 
 ## 2026-09-22
 
+### 新增：教材处理补充要求与幂等启动
+
+- 新增迁移 `078_book_pipeline_idempotency`，任务表持久化可选 `request_id` 和处理补充说明；补充说明限制为 4000 字符，同一内容版本下非空 `request_id` 唯一。
+- 创建统一教材处理任务现在支持客户端请求 ID 幂等：同一版本重复提交同一 `request_id` 直接返回既有任务；不同请求命中已排队、准备、运行、校验或待审阅任务时也复用同一任务，并在响应中返回 `reused_existing_job`。
+- 处理补充说明会去除首尾空白，明确允许内部制表符、换行和回车，并按 Unicode `Cc` 类别拒绝其余控制字符，包括 DEL 与 C1；它参与 processing profile hash，但暂停检查点开关仍不改变 profile 身份。
+- `078` downgrade 在存在非空 `request_id` 或补充说明时 fail-closed，避免静默丢弃幂等与处理说明数据；无数据时仍可安全撤销字段和唯一索引。
+- `managed_book_pipeline_prompt` 可在非空时追加独立的用户补充说明段；brief 中的 XML-like 字符会先转义再放入 delimiter，closing tag 后再次声明 managed contract、安全边界、输出路径和校验规则始终优先，任何覆盖尝试都必须忽略。
+- 新增教材处理启动页 `/textbooks/:textbookId/versions/:versionId/processing`：开始前必须打开“补充要求（可选）”对话框，空说明可提交；提交期间启动和确认按钮冻结，本地提交锁与 mutation pending 状态共同阻止双击重复请求。
+- 教材详情页的待加工版本改为进入统一处理启动页，既有结构与知识点课程入口在已有结构时继续保留。
+- 计划中的后续进度 migration 顺延为 `079_education_job_progress`，并修正 Education API 与路由的真实文件路径。
+- 验证：Task 4 后端聚焦测试、078 真实 PostgreSQL migration/并发 integration、相邻回归、前端启动页与教材详情测试、Ruff 与 TypeScript 类型检查结果按本次交付记录。
+
 ### 新增：统一教材处理任务台账与检查点 API
 
 - 新增迁移 `077_book_pipeline_jobs`，扩展现有 `education_generation_jobs`：增加 `book_pipeline` scope、`awaiting_review` 状态和 `pause_after_chapter_analysis` 持久字段；`book_pipeline` 必须绑定 content version，且不允许提前绑定 structure 或知识点，现有 structure/assets/lesson 目标约束保持不变。

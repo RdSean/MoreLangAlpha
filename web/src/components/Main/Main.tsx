@@ -23,6 +23,7 @@ const Education = React.lazy(routeChunks.education);
 const CreateHomework = React.lazy(async () => ({ default: (await routeChunks.createHomework()).CreateHomeworkPage }));
 const TextbookLibrary = React.lazy(routeChunks.textbookLibrary);
 const TextbookDetail = React.lazy(routeChunks.textbookDetail);
+const BookProcessing = React.lazy(routeChunks.bookProcessing);
 const TextbookStructure = React.lazy(routeChunks.textbookStructure);
 const KnowledgePointLessonReview = React.lazy(routeChunks.knowledgePointLessonReview);
 const StudentTextbookLearning = React.lazy(routeChunks.studentTextbookLearning);
@@ -54,6 +55,7 @@ function Main() {
         <Route path="/education/tasks/new" element={<CreateHomework />} />
         <Route path="/textbooks" element={<TextbookLibrary />} />
         <Route path="/textbooks/:textbookId" element={<TextbookDetail />} />
+        <Route path="/textbooks/:textbookId/versions/:versionId/processing" element={<BookProcessing />} />
         <Route path="/textbooks/:textbookId/versions/:versionId/structure" element={<TextbookStructure />} />
         <Route path="/textbooks/:textbookId/versions/:versionId/knowledge/:knowledgePointId" element={<KnowledgePointLessonReview />} />
         <Route path="/education/learn/:assignmentId" element={<StudentTextbookLearning />} />

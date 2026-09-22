@@ -508,6 +508,41 @@ export interface TextbookProcessingJob {
   attempt_count?: number;
 }
 
+export type BookPipelineJobStatus =
+  | 'queued'
+  | 'preparing'
+  | 'running'
+  | 'validating'
+  | 'awaiting_review'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface CreateBookPipelineJobInput {
+  processing_brief: string;
+  request_id: string;
+  pause_after_chapter_analysis: boolean;
+}
+
+export interface BookPipelineJob {
+  generation_job_id: string;
+  version_id: string;
+  scope: 'book_pipeline';
+  structure_id?: string | null;
+  knowledge_point_id?: string | null;
+  status: BookPipelineJobStatus;
+  attempt_count: number;
+  pause_after_chapter_analysis: boolean;
+  reused_existing_job: boolean;
+  error_code?: string | null;
+  error_message?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  root_run_id?: string | null;
+  started_at?: string | null;
+  heartbeat_at?: string | null;
+}
+
 export interface TextbookAssignment {
   assignment_id: string;
   publication_id: string;

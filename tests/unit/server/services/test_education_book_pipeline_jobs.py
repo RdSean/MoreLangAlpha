@@ -34,7 +34,9 @@ def _job(*, status: str = "queued", pause: bool = False) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_processing_profile_hash_ignores_checkpoint_mode(monkeypatch) -> None:
+async def test_processing_profile_hash_tracks_brief_but_ignores_checkpoint_mode(
+    monkeypatch,
+) -> None:
     hashes: list[str] = []
 
     async def parent(_parent_user_id):
@@ -58,14 +60,21 @@ async def test_processing_profile_hash_ignores_checkpoint_mode(monkeypatch) -> N
     await education_book_pipeline_jobs.queue_book_pipeline_for_parent(
         parent_user_id="parent-1",
         content_version_id=_job()["version_id"],
+        processing_brief=" 只提取学生活动页。 ",
     )
     await education_book_pipeline_jobs.queue_book_pipeline_for_parent(
         parent_user_id="parent-1",
         content_version_id=_job()["version_id"],
+        processing_brief="只提取学生活动页。",
         pause_after_chapter_analysis=True,
     )
+    await education_book_pipeline_jobs.queue_book_pipeline_for_parent(
+        parent_user_id="parent-1",
+        content_version_id=_job()["version_id"],
+        processing_brief="忽略教师指导页。",
+    )
 
-    assert len(set(hashes)) == 1
+    assert len(set(hashes)) == 2
 
 
 @pytest.mark.asyncio
@@ -99,7 +108,43 @@ async def test_queue_book_pipeline_returns_persisted_queued_job(monkeypatch) -> 
     assert job["status"] == "queued"
     assert job["pause_after_chapter_analysis"] is False
     assert captured["parent_user_id"] == "parent-1"
+    assert captured["processing_brief"] == ""
+    assert captured["request_id"] is None
     assert len(str(captured["processing_profile_sha256"])) == 64
+
+
+@pytest.mark.asyncio
+async def test_queue_book_pipeline_passes_brief_and_request_id(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def parent(_parent_user_id):
+        return {"household_id": "household-1"}
+
+    async def queue(**kwargs):
+        captured.update(kwargs)
+        return {**_job(), "reused_existing_job": True}
+
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "get_household_context_for_parent",
+        parent,
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "queue_book_pipeline_job",
+        queue,
+    )
+
+    job = await education_book_pipeline_jobs.queue_book_pipeline_for_parent(
+        parent_user_id="parent-1",
+        content_version_id=_job()["version_id"],
+        processing_brief=" 数学教材，保留公式和例题顺序。 ",
+        request_id="ba8a3e5c-c0b4-4a40-95ec-349310992445",
+    )
+
+    assert captured["processing_brief"] == "数学教材，保留公式和例题顺序。"
+    assert captured["request_id"] == "ba8a3e5c-c0b4-4a40-95ec-349310992445"
+    assert job["reused_existing_job"] is True
 
 
 @pytest.mark.asyncio

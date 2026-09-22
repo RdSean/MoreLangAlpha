@@ -13,6 +13,7 @@ export const routeChunks = {
   textbooks: () => import('../../pages/Education/TextbooksPage'),
   textbookLibrary: () => import('../../pages/Education/TextbooksPage'),
   textbookDetail: () => import('../../pages/Education/TextbookDetailPage'),
+  bookProcessing: () => import('../../pages/Education/BookProcessingPage'),
   textbookStructure: () => import('../../pages/Education/TextbookStructurePage'),
   knowledgePointLessonReview: () => import('../../pages/Education/KnowledgePointLessonReviewPage'),
   studentTextbookLearning: () => import('../../pages/Education/StudentTextbookLearningPage'),

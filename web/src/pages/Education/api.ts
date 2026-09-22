@@ -1,5 +1,5 @@
 import { api } from '@/api/client';
-import type { CompletedParseJob, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, KnowledgePointSourcePreview, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, LessonGenerationStatus, ParentLearningTranscript, StructureGenerationJob, StructureGenerationProgress, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit } from './types';
+import type { BookPipelineJob, CompletedParseJob, CreateBookPipelineJobInput, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, KnowledgePointSourcePreview, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, LessonGenerationStatus, ParentLearningTranscript, StructureGenerationJob, StructureGenerationProgress, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit } from './types';
 
 export async function listEducationTasks(): Promise<EducationTask[]> {
   const { data } = await api.get<EducationTask[]>('/api/v1/education/tasks');
@@ -96,6 +96,17 @@ export async function getTextbook(textbookId: string): Promise<TextbookDetail> {
 
 export async function getLatestTextbookStructure(versionId: string): Promise<TextbookStructure | null> {
   const { data } = await api.get<TextbookStructure | null>(`/api/v1/education/textbook-versions/${versionId}/structure`);
+  return data;
+}
+
+export async function createBookPipelineJob(
+  versionId: string,
+  input: CreateBookPipelineJobInput,
+): Promise<BookPipelineJob> {
+  const { data } = await api.post<BookPipelineJob>(
+    `/api/v1/education/textbook-versions/${versionId}/book-pipeline-jobs`,
+    input,
+  );
   return data;
 }
 

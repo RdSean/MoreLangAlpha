@@ -21,12 +21,13 @@ from src.server.services.education_textbooks import (
 )
 
 
-def _processing_profile_sha256() -> str:
+def _processing_profile_sha256(processing_brief: str) -> str:
     return hashlib.sha256(
         json.dumps(
             {
                 "mode": "book-pipeline-v1",
                 "skill": "book-to-skill",
+                "processing_brief": processing_brief.strip(),
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -54,13 +55,15 @@ def _job_projection(job: Mapping[str, Any]) -> dict[str, Any]:
             "started_at",
             "heartbeat_at",
         )
-    }
+    } | {"reused_existing_job": bool(job.get("reused_existing_job"))}
 
 
 async def queue_book_pipeline_for_parent(
     *,
     parent_user_id: str,
     content_version_id: str,
+    processing_brief: str = "",
+    request_id: str | None = None,
     pause_after_chapter_analysis: bool = False,
 ) -> dict[str, Any]:
     """Create or reuse one parent-owned unified processing job."""
@@ -68,10 +71,13 @@ async def queue_book_pipeline_for_parent(
         raise TextbookPermissionError(
             "Only a parent can create textbook processing jobs"
         )
+    normalized_brief = processing_brief.strip()
     job = await queue_book_pipeline_job(
         parent_user_id=parent_user_id,
         content_version_id=content_version_id,
-        processing_profile_sha256=_processing_profile_sha256(),
+        processing_profile_sha256=_processing_profile_sha256(normalized_brief),
+        processing_brief=normalized_brief,
+        request_id=request_id,
         pause_after_chapter_analysis=pause_after_chapter_analysis,
     )
     if not job:

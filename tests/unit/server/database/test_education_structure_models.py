@@ -177,7 +177,9 @@ async def test_get_structure_returns_units_and_knowledge_points_for_parent(
     assert result is not None
     assert result["units"][0]["knowledge_points"][0]["knowledge_point_id"] == "kp-1"
     assert result["units"][0]["knowledge_points"][0]["lesson_status"] == "approved"
-    assert result["units"][0]["knowledge_points"][0]["lesson_revision_id"] == "revision-1"
+    assert (
+        result["units"][0]["knowledge_points"][0]["lesson_revision_id"] == "revision-1"
+    )
     assert result["units"][0]["scopes"] == [
         {
             "unit_id": "unit-1",
@@ -297,11 +299,11 @@ async def test_replace_structure_contents_persists_reading_scopes(
 
     statements = [call.args[0] for call in mock_cursor.execute.call_args_list]
     assert any(
-        "DELETE FROM education_textbook_scopes" in statement
-        for statement in statements
+        "DELETE FROM education_textbook_scopes" in statement for statement in statements
     )
     scope_inserts = [
-        call for call in mock_cursor.execute.call_args_list
+        call
+        for call in mock_cursor.execute.call_args_list
         if "INSERT INTO education_textbook_scopes" in call.args[0]
     ]
     assert len(scope_inserts) == 1
@@ -598,6 +600,51 @@ async def test_queue_book_pipeline_is_parent_scoped_and_deduplicated(
 
 
 @pytest.mark.asyncio
+async def test_queue_book_pipeline_reuses_matching_request_id(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"version_id": "version-1"},
+        {
+            "generation_job_id": "generation-existing",
+            "version_id": "version-1",
+            "scope": "book_pipeline",
+            "structure_id": None,
+            "knowledge_point_id": None,
+            "status": "queued",
+            "attempt_count": 0,
+            "pause_after_chapter_analysis": False,
+            "reused_existing_job": True,
+        },
+    ]
+
+    result = await education_textbooks.queue_book_pipeline_job(
+        parent_user_id="parent-1",
+        content_version_id="version-1",
+        processing_profile_sha256="a" * 64,
+        processing_brief="只提取学生活动页。",
+        request_id="ba8a3e5c-c0b4-4a40-95ec-349310992445",
+    )
+
+    assert result is not None
+    assert result["generation_job_id"] == "generation-existing"
+    assert result["reused_existing_job"] is True
+    executed = "\n".join(call.args[0] for call in mock_cursor.execute.call_args_list)
+    assert "jobs.request_id = %s" in executed
+    assert "jobs.scope = 'book_pipeline'" in executed
+    assert "INSERT INTO education_generation_jobs" not in executed
+    assert mock_cursor.execute.call_args_list[2].args[1] == (
+        "version-1",
+        "ba8a3e5c-c0b4-4a40-95ec-349310992445",
+    )
+
+
+@pytest.mark.asyncio
 async def test_queue_book_pipeline_creates_untargeted_job(
     mock_connection, mock_cursor, monkeypatch
 ):
@@ -608,6 +655,7 @@ async def test_queue_book_pipeline_creates_untargeted_job(
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
     mock_cursor.fetchone.side_effect = [
         {"version_id": "version-1"},
+        None,
         None,
         {
             "generation_job_id": "generation-pipeline-1",
@@ -625,6 +673,8 @@ async def test_queue_book_pipeline_creates_untargeted_job(
         parent_user_id="parent-1",
         content_version_id="version-1",
         processing_profile_sha256="a" * 64,
+        processing_brief="保留公式顺序。",
+        request_id="ba8a3e5c-c0b4-4a40-95ec-349310992445",
         pause_after_chapter_analysis=True,
     )
 
@@ -632,8 +682,10 @@ async def test_queue_book_pipeline_creates_untargeted_job(
     assert result["status"] == "queued"
     insert_sql, parameters = mock_cursor.execute.call_args.args
     assert "VALUES (" in insert_sql
-    assert parameters[2] is True
-    assert parameters[3] == "a" * 64
+    assert parameters[2] == "保留公式顺序。"
+    assert parameters[3] == "ba8a3e5c-c0b4-4a40-95ec-349310992445"
+    assert parameters[4] is True
+    assert parameters[5] == "a" * 64
 
 
 @pytest.mark.asyncio
@@ -758,8 +810,7 @@ async def test_checkpoint_resume_consumes_pause_flag(
     }
 
     result = await education_textbooks.resume_book_pipeline_job(
-        parent_user_id="parent-1",
-        generation_job_id="generation-pipeline-1"
+        parent_user_id="parent-1", generation_job_id="generation-pipeline-1"
     )
 
     assert result is not None

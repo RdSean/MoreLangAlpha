@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from './api';
-import type { EducationTaskCalendarRequest, StructureGenerationJob, TextbookStructureUnit } from './types';
+import type {
+  CreateBookPipelineJobInput,
+  EducationTaskCalendarRequest,
+  StructureGenerationJob,
+  TextbookStructureUnit,
+} from './types';
 
 export function useEducationTasks() {
   return useQuery({
@@ -281,6 +286,24 @@ export function useTextbookMutations() {
     run: useMutation({ mutationFn: educationApi.runTextbookProcessing, onSuccess: invalidate }),
     retry: useMutation({ mutationFn: educationApi.retryTextbookProcessing, onSuccess: invalidate }),
     assign: useMutation({ mutationFn: ({ publicationId, studentUserId }: { publicationId: string; studentUserId: string }) => educationApi.assignTextbookPublication(publicationId, studentUserId), onSuccess: invalidate }),
+  };
+}
+
+export function useBookPipelineMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
+  return {
+    create: useMutation({
+      mutationFn: ({
+        versionId,
+        input,
+      }: {
+        versionId: string;
+        input: CreateBookPipelineJobInput;
+      }) => educationApi.createBookPipelineJob(versionId, input),
+      onSuccess: invalidate,
+    }),
   };
 }
 

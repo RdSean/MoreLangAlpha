@@ -9,6 +9,7 @@ import {
   Play,
   RotateCcw,
   Send,
+  WandSparkles,
 } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -526,7 +527,16 @@ function VersionWorkflow({ textbookId, version }: { textbookId: string; version:
                   重试内容准备
                 </Button>
               )}
-            {(version.status === 'review' || version.status === 'published') && (
+            {version.status === 'review' && (
+              <Link
+                to={`/textbooks/${textbookId}/versions/${version.version_id}/processing`}
+                className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-[var(--color-bg-hover)]"
+              >
+                <WandSparkles className="mr-2 size-4" aria-hidden="true" />
+                开始处理
+              </Link>
+            )}
+            {structure.data && (
               <Link
                 to={`/textbooks/${textbookId}/versions/${version.version_id}/structure`}
                 className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-[var(--color-bg-hover)]"

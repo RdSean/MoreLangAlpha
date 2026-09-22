@@ -1,0 +1,112 @@
+.book-processing-page {
+  min-height: 100%;
+  overflow-y: auto;
+  background: var(--color-bg-canvas);
+}
+
+.book-processing-shell {
+  width: min(100%, 960px);
+  margin: 0 auto;
+  padding: 32px 24px 48px;
+}
+
+.book-processing-header {
+  border-bottom: 1px solid var(--color-border-muted);
+  padding-bottom: 24px;
+}
+
+.book-processing-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+
+.book-processing-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.book-processing-kicker {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.book-processing-heading h1 {
+  margin-top: 8px;
+  color: var(--color-text-primary);
+  font-family: var(--font-title);
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.book-processing-heading p:last-child {
+  margin-top: 6px;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+
+.book-processing-status,
+.book-processing-empty {
+  display: flex;
+  gap: 12px;
+  margin-top: 28px;
+  border: 1px solid var(--color-border-muted);
+  padding: 20px;
+}
+
+.book-processing-status {
+  color: var(--color-success);
+}
+
+.book-processing-status h2,
+.book-processing-empty h2 {
+  color: var(--color-text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.book-processing-status p,
+.book-processing-empty p {
+  margin-top: 6px;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+
+.book-processing-job-id {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.book-processing-empty {
+  display: grid;
+  min-height: 220px;
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+}
+
+.book-processing-mark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid var(--color-border-muted);
+  color: var(--color-accent-primary);
+}
+
+@media (max-width: 640px) {
+  .book-processing-shell {
+    padding: 24px 16px 40px;
+  }
+
+  .book-processing-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

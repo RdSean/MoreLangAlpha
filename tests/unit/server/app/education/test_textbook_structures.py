@@ -7,8 +7,10 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 
 from src.server.app.education.textbooks import router
+from src.server.app.education.models import CreateBookPipelineRequest
 from src.server.services.education_textbooks import TextbookPermissionError
 from src.server.utils.api import get_current_user_id
 
@@ -101,11 +103,17 @@ async def test_parent_queues_reads_edits_and_accepts_structure(client):
     update_body = {
         "units": [
             {
-                **{key: value for key, value in structure["units"][0].items() if key not in {"unit_id", "status", "knowledge_points"}},
+                **{
+                    key: value
+                    for key, value in structure["units"][0].items()
+                    if key not in {"unit_id", "status", "knowledge_points"}
+                },
                 "knowledge_points": [
                     {
                         key: value
-                        for key, value in structure["units"][0]["knowledge_points"][0].items()
+                        for key, value in structure["units"][0]["knowledge_points"][
+                            0
+                        ].items()
                         if key not in {"knowledge_point_id", "status"}
                     }
                 ],
@@ -293,9 +301,7 @@ async def test_parent_generates_reviews_and_publishes_lesson(client):
     assert queue.await_args.kwargs["knowledge_point_id"] == str(knowledge_point_id)
     assert revise.await_args.kwargs["content_markdown"] == "# 修订版\n"
     assert approve.await_args.kwargs["revision_id"] == str(revision_id)
-    assert publish.await_args.kwargs["structure_id"] == str(
-        publication["structure_id"]
-    )
+    assert publish.await_args.kwargs["structure_id"] == str(publication["structure_id"])
 
 
 @pytest.mark.asyncio
@@ -415,6 +421,7 @@ async def test_parent_queues_gets_and_resumes_book_pipeline(client):
         "root_run_id": None,
         "started_at": None,
         "heartbeat_at": None,
+        "reused_existing_job": False,
     }
     waiting = {
         **base_job,
@@ -437,7 +444,11 @@ async def test_parent_queues_gets_and_resumes_book_pipeline(client):
     ):
         queued = await client.post(
             f"/api/v1/education/textbook-versions/{version_id}/book-pipeline-jobs",
-            json={"pause_after_chapter_analysis": False},
+            json={
+                "processing_brief": " 法语教材，保留公式顺序。 ",
+                "request_id": "ba8a3e5c-c0b4-4a40-95ec-349310992445",
+                "pause_after_chapter_analysis": False,
+            },
         )
         loaded = await client.get(
             f"/api/v1/education/book-pipeline-jobs/{generation_job_id}"
@@ -448,12 +459,48 @@ async def test_parent_queues_gets_and_resumes_book_pipeline(client):
 
     assert queued.status_code == 202
     assert queued.json()["scope"] == "book_pipeline"
+    assert queued.json()["reused_existing_job"] is False
     assert loaded.status_code == 200
     assert loaded.json()["status"] == "awaiting_review"
     assert resumed.status_code == 202
+    assert queue.await_args.kwargs["processing_brief"] == "法语教材，保留公式顺序。"
+    assert (
+        queue.await_args.kwargs["request_id"] == "ba8a3e5c-c0b4-4a40-95ec-349310992445"
+    )
     assert queue.await_args.kwargs["pause_after_chapter_analysis"] is False
     get_job.assert_awaited_once()
     resume.assert_awaited_once()
+
+
+def test_book_pipeline_request_normalizes_optional_brief() -> None:
+    request = CreateBookPipelineRequest(
+        processing_brief="  这是一本法语教材；\r\n\t忽略教师指导页。  "
+    )
+
+    assert request.processing_brief == "这是一本法语教材；\r\n\t忽略教师指导页。"
+    assert CreateBookPipelineRequest().processing_brief == ""
+    assert CreateBookPipelineRequest().request_id is None
+
+
+@pytest.mark.parametrize(
+    "brief",
+    [
+        "bad\x00brief",
+        "bad\x0bbreviation",
+        "bad\x7fbrief",
+        "\x85bad",
+        "bad\x9bcontrol",
+        "bad\x9f",
+    ],
+)
+def test_book_pipeline_request_rejects_control_characters(brief: str) -> None:
+    with pytest.raises(ValidationError):
+        CreateBookPipelineRequest(processing_brief=brief)
+
+
+def test_book_pipeline_request_rejects_more_than_4000_characters() -> None:
+    with pytest.raises(ValidationError):
+        CreateBookPipelineRequest(processing_brief="a" * 4_001)
 
 
 @pytest.mark.asyncio
@@ -563,5 +610,8 @@ async def test_student_reads_only_published_structure_and_lesson(client):
 
     assert structure_response.status_code == 200
     assert lesson_response.status_code == 200
-    assert structure_response.json()["units"][0]["knowledge_points"][0]["has_lesson"] is True
+    assert (
+        structure_response.json()["units"][0]["knowledge_points"][0]["has_lesson"]
+        is True
+    )
     assert lesson_response.json()["content_markdown"] == "# 世界运动\n"

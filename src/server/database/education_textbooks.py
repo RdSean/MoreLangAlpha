@@ -544,6 +544,8 @@ async def queue_book_pipeline_job(
     parent_user_id: str,
     content_version_id: str,
     processing_profile_sha256: str,
+    processing_brief: str = "",
+    request_id: str | None = None,
     pause_after_chapter_analysis: bool = False,
 ) -> dict[str, Any] | None:
     """Create or reuse one active unified book pipeline for a content version."""
@@ -573,6 +575,33 @@ async def queue_book_pipeline_job(
                 )
                 if not await cur.fetchone():
                     return None
+                if request_id is not None:
+                    await cur.execute(
+                        """
+                        SELECT jobs.generation_job_id, jobs.version_id,
+                               jobs.scope, jobs.structure_id,
+                               jobs.knowledge_point_id, jobs.status,
+                               jobs.attempt_count,
+                               jobs.pause_after_chapter_analysis,
+                               jobs.error_code, jobs.error_message,
+                               jobs.created_at, jobs.updated_at,
+                               attempts.root_run_id, attempts.started_at,
+                               attempts.heartbeat_at,
+                               TRUE AS reused_existing_job
+                        FROM education_generation_jobs AS jobs
+                        LEFT JOIN education_generation_attempts AS attempts
+                          ON attempts.attempt_id = jobs.latest_attempt_id
+                        WHERE jobs.version_id = %s
+                          AND jobs.request_id = %s
+                          AND jobs.scope = 'book_pipeline'
+                        ORDER BY jobs.created_at DESC
+                        LIMIT 1
+                        """,
+                        (content_version_id, request_id),
+                    )
+                    request_job = await cur.fetchone()
+                    if request_job:
+                        return dict(request_job)
                 await cur.execute(
                     """
                     SELECT jobs.generation_job_id, jobs.version_id, jobs.scope,
@@ -582,7 +611,8 @@ async def queue_book_pipeline_job(
                            jobs.error_code, jobs.error_message,
                            jobs.created_at, jobs.updated_at,
                            attempts.root_run_id, attempts.started_at,
-                           attempts.heartbeat_at
+                           attempts.heartbeat_at,
+                           TRUE AS reused_existing_job
                     FROM education_generation_jobs AS jobs
                     LEFT JOIN education_generation_attempts AS attempts
                       ON attempts.attempt_id = jobs.latest_attempt_id
@@ -603,21 +633,26 @@ async def queue_book_pipeline_job(
                 await cur.execute(
                     """
                     INSERT INTO education_generation_jobs (
-                        generation_job_id, version_id, scope, structure_id,
+                        generation_job_id, version_id, processing_brief,
+                        request_id, scope, structure_id,
                         knowledge_point_id, status,
                         pause_after_chapter_analysis,
                         processing_profile_sha256
                     ) VALUES (
-                        %s, %s, 'book_pipeline', NULL, NULL, 'queued', %s, %s
+                        %s, %s, %s, %s, 'book_pipeline', NULL, NULL,
+                        'queued', %s, %s
                     )
                     RETURNING generation_job_id, version_id, scope,
                               structure_id, knowledge_point_id, status,
                               attempt_count, pause_after_chapter_analysis,
-                              error_code, error_message, created_at, updated_at
+                              error_code, error_message, created_at, updated_at,
+                              FALSE AS reused_existing_job
                     """,
                     (
                         generation_job_id,
                         content_version_id,
+                        processing_brief,
+                        request_id,
                         pause_after_chapter_analysis,
                         processing_profile_sha256,
                     ),

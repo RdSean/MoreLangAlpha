@@ -149,7 +149,7 @@ describe('TextbookDetailPage', () => {
     );
   });
 
-  it('shows the four workflow steps and links content-ready versions to structure analysis', () => {
+  it('shows the four workflow steps and links review versions to unified processing', () => {
     state.textbook = {
       ...state.textbook,
       versions: [version()],
@@ -161,9 +161,9 @@ describe('TextbookDetailPage', () => {
     expect(screen.getByText('结构分析')).toBeInTheDocument();
     expect(screen.getByText('知识点课程')).toBeInTheDocument();
     expect(screen.getByText('发布')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '开始结构分析' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '开始处理' })).toHaveAttribute(
       'href',
-      '/textbooks/textbook-1/versions/version-1/structure',
+      '/textbooks/textbook-1/versions/version-1/processing',
     );
   });
 

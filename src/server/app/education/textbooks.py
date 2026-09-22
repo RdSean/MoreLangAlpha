@@ -165,6 +165,8 @@ async def queue_family_book_pipeline(
         return await queue_book_pipeline_for_parent(
             parent_user_id=user_id,
             content_version_id=str(content_version_id),
+            processing_brief=(body.processing_brief if body is not None else ""),
+            request_id=str(body.request_id) if body and body.request_id else None,
             pause_after_chapter_analysis=(
                 body.pause_after_chapter_analysis if body is not None else False
             ),
@@ -222,7 +224,9 @@ async def queue_family_textbook_structure(
         return await queue_structure_for_parent(
             parent_user_id=user_id,
             content_version_id=str(content_version_id),
-            profile_input=body.profile.model_dump(mode="python") if body and body.profile else None,
+            profile_input=body.profile.model_dump(mode="python")
+            if body and body.profile
+            else None,
             profile_id=str(body.profile_id) if body and body.profile_id else None,
         )
     except TextbookError as exc:

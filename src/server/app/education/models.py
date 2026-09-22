@@ -1,10 +1,14 @@
 """Pydantic contracts for first-party family homework APIs."""
 
+import unicodedata
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
+
+
+_ALLOWED_BRIEF_CONTROL_CHARS = frozenset("\t\n\r")
 
 
 class EducationStudentProfileResponse(BaseModel):
@@ -74,10 +78,14 @@ class CreateEducationTaskRequest(BaseModel):
     @model_validator(mode="after")
     def validate_recurrence(self) -> "CreateEducationTaskRequest":
         if self.frequency == "weekly":
-            if not self.weekdays or len(set(self.weekdays)) != len(self.weekdays) or any(
-                day not in range(1, 8) for day in self.weekdays
+            if (
+                not self.weekdays
+                or len(set(self.weekdays)) != len(self.weekdays)
+                or any(day not in range(1, 8) for day in self.weekdays)
             ):
-                raise ValueError("weekly tasks require a nonempty unique ISO weekday list")
+                raise ValueError(
+                    "weekly tasks require a nonempty unique ISO weekday list"
+                )
         elif self.weekdays:
             raise ValueError("weekdays are only valid for weekly tasks")
         return self
@@ -323,7 +331,9 @@ class StructureSourceRefResponse(BaseModel):
     def validate_range(self) -> "StructureSourceRefResponse":
         if self.start is None or self.end is None:
             if self.start is not None or self.end is not None:
-                raise ValueError("source reference offsets must be both set or both empty")
+                raise ValueError(
+                    "source reference offsets must be both set or both empty"
+                )
             return self
         if self.end <= self.start:
             raise ValueError("source reference end must be greater than start")
@@ -383,9 +393,9 @@ class ProcessingProfileRequest(BaseModel):
     grade_band: Literal["primary", "middle", "high", "adult"] = "middle"
     language: Literal["zh-CN", "en", "bilingual"] = "zh-CN"
     depth: Literal["overview", "standard", "deep"] = "standard"
-    question_types: list[
-        Literal["choice", "fill", "short_answer", "mixed"]
-    ] = Field(default_factory=lambda: ["choice", "mixed"], max_length=4)
+    question_types: list[Literal["choice", "fill", "short_answer", "mixed"]] = Field(
+        default_factory=lambda: ["choice", "mixed"], max_length=4
+    )
     prompt_fragment: str = Field(default="", max_length=2_000)
     allowed_skills: list[str] = Field(default_factory=list, max_length=8)
 
@@ -396,7 +406,22 @@ class CreateTextbookStructureRequest(BaseModel):
 
 
 class CreateBookPipelineRequest(BaseModel):
+    processing_brief: str = Field(default="", max_length=4_000)
+    request_id: UUID | None = None
     pause_after_chapter_analysis: bool = False
+
+    @field_validator("processing_brief", mode="before")
+    @classmethod
+    def normalize_processing_brief(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        if any(
+            unicodedata.category(character) == "Cc"
+            and character not in _ALLOWED_BRIEF_CONTROL_CHARS
+            for character in value
+        ):
+            raise ValueError("processing_brief contains unsupported control characters")
+        return value.strip()
 
 
 class BookPipelineJobResponse(BaseModel):
@@ -408,6 +433,7 @@ class BookPipelineJobResponse(BaseModel):
     status: str
     attempt_count: int
     pause_after_chapter_analysis: bool
+    reused_existing_job: bool = False
     error_code: str | None = None
     error_message: str | None = None
     created_at: datetime | None = None

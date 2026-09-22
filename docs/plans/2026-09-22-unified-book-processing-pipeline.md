@@ -592,16 +592,33 @@ git commit -m "feat(textbooks): add unified book processing job"
 ### Task 4: Add the Processing Brief and Idempotent Start
 
 **Files:**
+- Create: `migrations/versions/078_book_pipeline_idempotency.py`
 - Modify: `src/server/app/education/models.py`
 - Modify: `src/server/app/education/textbooks.py`
 - Modify: `src/server/services/education_book_pipeline_jobs.py`
 - Modify: `src/server/database/education_textbooks.py`
-- Modify: `web/src/pages/Education/BookProcessingPage.tsx`
-- Modify: `web/src/pages/Education/BookProcessingPage.css`
-- Modify: `web/src/pages/Education/utils/api.ts`
+- Modify: `src/server/services/education_structure_jobs.py`
+- Create: `web/src/pages/Education/BookProcessingPage.tsx`
+- Create: `web/src/pages/Education/BookProcessingPage.css`
+- Modify: `web/src/pages/Education/api.ts`
+- Modify: `web/src/pages/Education/types.ts`
+- Modify: `web/src/pages/Education/queries.ts`
+- Modify: `web/src/components/Main/Main.tsx`
+- Modify: `web/src/components/Main/routeChunks.ts`
+- Modify: `web/src/pages/Education/TextbookDetailPage.tsx`
 - Test: `tests/unit/server/app/education/test_textbook_structures.py`
 - Test: `tests/unit/server/services/test_education_book_pipeline_jobs.py`
+- Test: `tests/unit/server/services/test_education_structure_jobs.py`
+- Test: `tests/unit/server/database/test_education_structure_models.py`
+- Test: `tests/unit/migrations/test_book_pipeline_idempotency.py`
+- Test: `tests/integration/test_book_pipeline_jobs_db.py`
 - Test: `web/src/pages/Education/__tests__/BookProcessingPage.test.tsx`
+
+**Repository correction (2026-09-22):** the Education API client lives at
+`web/src/pages/Education/api.ts`, not `web/src/pages/Education/utils/api.ts`.
+The app route registry is `web/src/components/Main/Main.tsx` plus
+`routeChunks.ts`. Task 4 creates the processing page so later tasks modify it
+instead of creating it again.
 
 **Step 1: Write failing frontend tests**
 
@@ -673,6 +690,9 @@ output contract、安全边界、来源范围要求或输出文件路径。
 ```
 
 If the brief is empty, do not add the section.
+Escape XML-like characters in a non-empty brief before inserting it into the
+`<processing_brief>` delimiter, and append the authoritative contract/security/
+output-path/validation precedence rule after the closing tag.
 
 **Step 6: Add backend idempotency**
 
@@ -724,11 +744,22 @@ git add src/server/app/education/models.py \
   src/server/app/education/textbooks.py \
   src/server/services/education_book_pipeline_jobs.py \
   src/server/database/education_textbooks.py \
+  src/server/services/education_structure_jobs.py \
+  migrations/versions/078_book_pipeline_idempotency.py \
   web/src/pages/Education/BookProcessingPage.tsx \
   web/src/pages/Education/BookProcessingPage.css \
-  web/src/pages/Education/utils/api.ts \
+  web/src/pages/Education/api.ts \
+  web/src/pages/Education/types.ts \
+  web/src/pages/Education/queries.ts \
+  web/src/components/Main/Main.tsx \
+  web/src/components/Main/routeChunks.ts \
+  web/src/pages/Education/TextbookDetailPage.tsx \
   tests/unit/server/app/education/test_textbook_structures.py \
   tests/unit/server/services/test_education_book_pipeline_jobs.py \
+  tests/unit/server/services/test_education_structure_jobs.py \
+  tests/unit/server/database/test_education_structure_models.py \
+  tests/unit/migrations/test_book_pipeline_idempotency.py \
+  tests/integration/test_book_pipeline_jobs_db.py \
   web/src/pages/Education/__tests__/BookProcessingPage.test.tsx
 git commit -m "feat(textbooks): collect processing brief and prevent duplicate runs"
 ```
@@ -825,7 +856,7 @@ git commit -m "feat(textbooks): import generic book packages"
 ### Task 6: Add the Semantic Progress Protocol
 
 **Files:**
-- Create: `migrations/versions/078_education_job_progress.py`
+- Create: `migrations/versions/079_education_job_progress.py`
 - Create: `src/server/services/education_generation_progress.py`
 - Modify: `src/server/services/education_teaching_storage.py`
 - Test: `tests/unit/migrations/test_education_job_progress.py`
@@ -834,7 +865,7 @@ git commit -m "feat(textbooks): import generic book packages"
 
 **Step 1: Write the failing migration test**
 
-Assert `078` creates `education_generation_progress_events`:
+Assert `079` creates `education_generation_progress_events`:
 
 ```text
 event_id BIGSERIAL PRIMARY KEY
@@ -918,7 +949,7 @@ Expected: PASS.
 **Step 6: Commit**
 
 ```bash
-git add migrations/versions/078_education_job_progress.py \
+git add migrations/versions/079_education_job_progress.py \
   src/server/services/education_generation_progress.py \
   src/server/services/education_teaching_storage.py \
   tests/unit/migrations/test_education_job_progress.py \
@@ -1034,8 +1065,8 @@ git commit -m "feat(textbooks): collect managed progress while runs are live"
 - Modify: `src/server/app/education/models.py`
 - Modify: `src/server/services/education_structure_progress.py`
 - Modify: `web/src/pages/Education/queries.ts`
-- Create: `web/src/pages/Education/BookProcessingPage.tsx`
-- Create: `web/src/pages/Education/BookProcessingPage.css`
+- Modify: `web/src/pages/Education/BookProcessingPage.tsx`
+- Modify: `web/src/pages/Education/BookProcessingPage.css`
 - Modify: `web/src/pages/Education/types.ts`
 - Test: `tests/unit/server/app/education/test_textbook_structures.py`
 - Test: `web/src/pages/Education/__tests__/BookProcessingPage.test.tsx`
