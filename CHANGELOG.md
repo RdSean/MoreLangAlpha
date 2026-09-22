@@ -2,6 +2,22 @@
 
 ## 2026-09-22
 
+### 新增：通用教材包导入与统一流水线启动
+
+- 新增迁移 `079_book_pipeline_package_import`：允许 legacy 知识点保留空 `unit_id`，为生成候选增加 `content_node_id`、`candidate_key`、开放 `point_type`、`origin` 与 `candidate_status`，并约束 generated candidate 必须绑定内容节点和候选键；唯一索引限制同一内容节点下的候选键重复。`book_pipeline` 完成后可回填 `structure_id`，长 `source_revision` 扩展为 255；存在通用包数据或已完成流水线绑定时 downgrade fail-closed。
+- managed package 导入固定读取 `book_package.json`、`content_tree.json`、`knowledge_points.json` 和 `assets_manifest.json`，统一使用 strict UTF-8 JSON 解析并检查两份 projection 与权威 `book_package.json` 一致；只下载 manifest 明确声明的资产，校验路径、大小和 SHA-256，未声明输出不会枚举或导入。
+- 已验证包在单个 PostgreSQL 事务中创建 `langalpha-book-content-tree/v1` 结构 revision，先根后子写入通用内容树，写入已归档资产和 `origin=generated`、`candidate_status=pending` 的知识点候选，最后原子完成 pipeline attempt/job 并绑定 structure；任一写入失败会回滚全部数据库行。
+- 原始四个 JSON、manifest 明确资产和文件哈希归档到 `education/<household>/<textbook>/vN/book-packages/<job_id>/` 私有前缀，结构记录的 `bundle_prefix` 与 manifest hash 提供不可变包投影。
+- 创建任务 API 在 durable queue 去重完成后通过既有 `WorkspaceManager`、`RunCoordinator`、`LocalRunExecutor`、`RunSSEProducer` 和 managed PTC graph 启动 full-pipeline；复用 running/awaiting 任务不会二次启动，并发启动仍由 attempt claim 单写者约束收口。运行成功进入 package import，失败、取消、无效包和归档错误分别完成失败结算。
+- launch 前新增数据库原子 `queued -> preparing` claim fence；并发 queue-and-launch 只有一个请求创建 workspace/thread/attempt 并进入 executor，其余请求返回同一 job 且不创建孤儿资源。workspace、thread 或 attempt claim 任一失败时使用 `fail_claimed_book_pipeline_launch()` 原子收口 `preparing -> failed`；attempt 建立后的输入读取、manifest hydration、staging、graph 组装和 dispatch 使用同一失败边界，任何异常/取消都会结算当前 attempt/job，不会遗留 active preparing。
+- package import 显式使用本次 launch 的 `attempt_id`，不再回退到 `latest_attempt_id`；retry/continuation 会完成当前 running attempt，旧 completed attempt 只保留历史状态。
+- `pause_after_chapter_analysis` 的章节完成后 pause hook 已提供，但语义进度 collector 尚不存在；公开 queue/API 会在任何 parent 查询或数据库写入前用 `TextbookTransitionError`（HTTP 409）拒绝 checkpoint 请求，避免遗留无法推进的 queued job。Task 7 必须在持久 `chapter_analysis/completed` 事件可用后移除该 guard，并接入 continuation prompt；当前保证默认非 checkpoint full pipeline 可启动、导入并完成，不伪造章节暂停成功。
+- `validate_book_package` 支持按 `source_id`/`content_chapter_id` 提供多份 frozen Markdown；每个字符或行范围、canonical quote 和知识点归属都针对实际来源校验。多来源缺少或未知 `source_id` 会 hard fail，只有一个来源时允许默认并产生 warning。legacy `markdown=` 只接受空 source ID 或固定兼容 ID，避免单 Markdown 接口接受伪造来源。managed prompt/overlay 同步明确该规则。
+- `079` 为 generated candidate 增加 `content_structure_id` 与 `(content_structure_id, content_node_id)` 复合 FK，结构归属与节点所有权必须一致；跨 structure 绑定在 PostgreSQL 层拒绝。sequence 分配前锁定 content version 行，legacy structure 与 package import 并发时不会取得相同 sequence。
+- `education_book_pipeline` managed kind 使用与 `education_teaching` 相同的 abandoned/reconnect timeout 窗口；新增等于 PostgreSQL INTEGER 上限通过、超过上限拒绝的 asset size 边界测试。
+- 079 downgrade 同时覆盖有通用包数据时 fail-closed 和无相关数据时完整成功并可回滚事务的路径。
+- 验证：Task 5 服务/API/DB/迁移聚焦测试 `172 passed`，server services 回归 `1508 passed`，database `375 passed`，Education/managed skill `111 passed`，migration `128 passed`，079 真 PostgreSQL package/queue-launch/checkpoint integration 合并运行 `21 passed`；覆盖多来源、单赢家 launch fence、workspace/thread/attempt 与读取/hydration 失败收口、当前 attempt、sequence 并发、跨 structure FK、downgrade 成功/失败、真实 dispatch runtime 与 bundle 归档，修改文件 Ruff 通过。
+
 ### 新增：教材处理补充要求与幂等启动
 
 - 新增迁移 `078_book_pipeline_idempotency`，任务表持久化可选 `request_id` 和处理补充说明；补充说明限制为 4000 字符，同一内容版本下非空 `request_id` 唯一。
@@ -11,7 +27,7 @@
 - `managed_book_pipeline_prompt` 可在非空时追加独立的用户补充说明段；brief 中的 XML-like 字符会先转义再放入 delimiter，closing tag 后再次声明 managed contract、安全边界、输出路径和校验规则始终优先，任何覆盖尝试都必须忽略。
 - 新增教材处理启动页 `/textbooks/:textbookId/versions/:versionId/processing`：开始前必须打开“补充要求（可选）”对话框，空说明可提交；提交期间启动和确认按钮冻结，本地提交锁与 mutation pending 状态共同阻止双击重复请求。
 - 教材详情页的待加工版本改为进入统一处理启动页，既有结构与知识点课程入口在已有结构时继续保留。
-- 计划中的后续进度 migration 顺延为 `079_education_job_progress`，并修正 Education API 与路由的真实文件路径。
+- 计划中的后续进度 migration 先后顺延为 `079_education_job_progress`、再因 Task 5 引入 package import 迁移而顺延为 `080_education_job_progress`，并修正 Education API 与路由的真实文件路径。
 - 验证：Task 4 后端聚焦测试、078 真实 PostgreSQL migration/并发 integration、相邻回归、前端启动页与教材详情测试、Ruff 与 TypeScript 类型检查结果按本次交付记录。
 
 ### 新增：统一教材处理任务台账与检查点 API

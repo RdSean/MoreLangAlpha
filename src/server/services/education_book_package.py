@@ -22,6 +22,7 @@ MAX_TITLE_LENGTH = 255
 MAX_LABEL_LENGTH = 255
 MAX_KEY_LENGTH = 255
 POSTGRES_INTEGER_MAX = 2_147_483_647
+_LEGACY_SOURCE_ID = "source-1"
 
 _COMMON_NODE_TYPES = frozenset(
     {
@@ -62,6 +63,59 @@ _ASSET_EXTENSIONS = frozenset(
 
 class BookPackageValidationError(ValueError):
     """A managed book package violates the integrity or safety contract."""
+
+
+class _SourceDocuments:
+    """Resolve deterministic source references to frozen Markdown documents."""
+
+    def __init__(
+        self,
+        documents: dict[str | None, str],
+        *,
+        legacy_single: bool,
+        default_source_id: str | None = None,
+    ) -> None:
+        self.documents = documents
+        self.legacy_single = legacy_single
+        self.default_source_id = default_source_id
+
+    def resolve(
+        self,
+        raw_source_id: object,
+        *,
+        label: str,
+        warnings: list[str] | None = None,
+    ) -> tuple[str | None, str | None, str]:
+        if self.legacy_single:
+            source_id = (
+                None
+                if raw_source_id is None
+                else _key(raw_source_id, label=f"{label} source_id")
+            )
+            if source_id not in {None, _LEGACY_SOURCE_ID}:
+                raise BookPackageValidationError(
+                    f"{label} source_id is not the fixed compatibility source"
+                )
+            return source_id, None, self.documents[None]
+
+        if raw_source_id is None:
+            source_id = self.default_source_id
+            if source_id is None and len(self.documents) == 1:
+                only_source_id = next(iter(self.documents))
+                source_id = str(only_source_id) if only_source_id is not None else None
+            if source_id is None:
+                raise BookPackageValidationError(
+                    f"{label} source_id must identify a frozen source"
+                )
+            if warnings is not None:
+                _warn(warnings, "source_id_defaulted")
+        else:
+            source_id = _key(raw_source_id, label=f"{label} source_id")
+        if source_id not in self.documents:
+            raise BookPackageValidationError(
+                f"{label} source_id does not match a frozen source"
+            )
+        return source_id, source_id, self.documents[source_id]
 
 
 class _LineIndex:
@@ -119,8 +173,11 @@ def _build_line_index(
     return _LineIndex(markdown, requested_lines)
 
 
-def _collect_line_requests(package: Mapping[str, Any]) -> set[int]:
-    requested: set[int] = set()
+def _collect_line_requests(
+    package: Mapping[str, Any],
+    sources: _SourceDocuments,
+) -> dict[str | None, set[int]]:
+    requested: dict[str | None, set[int]] = {}
     for collection_name in ("content_nodes", "knowledge_points"):
         collection = package.get(collection_name)
         if not isinstance(collection, list):
@@ -138,10 +195,18 @@ def _collect_line_requests(package: Mapping[str, Any]) -> set[int]:
                     continue
                 if "line_start" not in reference or "line_end" not in reference:
                     continue
+                try:
+                    _source_id, document_key, _markdown = sources.resolve(
+                        reference.get("source_id"),
+                        label="source reference",
+                    )
+                except BookPackageValidationError:
+                    continue
+                source_lines = requested.setdefault(document_key, set())
                 for field in ("line_start", "line_end"):
                     line_number = reference.get(field)
                     if _is_int(line_number) and line_number > 0:
-                        requested.add(line_number)
+                        source_lines.add(line_number)
     return requested
 
 
@@ -329,17 +394,21 @@ def _offset_ref(
 def _normalize_source_ref(
     raw_reference: object,
     *,
-    markdown: str,
+    sources: _SourceDocuments,
     label: str,
     warnings: list[str],
-    line_index: _LineIndex | None,
+    line_indexes: Mapping[str | None, _LineIndex],
 ) -> dict[str, Any]:
     if not isinstance(raw_reference, Mapping):
         raise BookPackageValidationError(
             f"{label} source reference must be an object containing a range"
         )
     reference = _require_mapping(raw_reference, label=label)
-    source_id = reference.get("source_id")
+    source_id, document_key, markdown = sources.resolve(
+        reference.get("source_id"),
+        label=label,
+        warnings=warnings,
+    )
 
     has_any_char = "char_start" in reference or "char_end" in reference
     has_any_line = "line_start" in reference or "line_end" in reference
@@ -360,7 +429,7 @@ def _normalize_source_ref(
     if has_line_range and not has_any_char:
         line_start = reference.get("line_start")
         line_end = reference.get("line_end")
-        active_line_index = line_index or _build_line_index(
+        active_line_index = line_indexes.get(document_key) or _build_line_index(
             markdown,
             {
                 line_number
@@ -389,10 +458,10 @@ def _normalize_source_ref(
 def _normalize_source_refs(
     value: object,
     *,
-    markdown: str,
+    sources: _SourceDocuments,
     label: str,
     warnings: list[str],
-    line_index: _LineIndex | None,
+    line_indexes: Mapping[str | None, _LineIndex],
 ) -> list[dict[str, Any]]:
     if value is None:
         _warn(warnings, "source_refs_missing")
@@ -405,27 +474,32 @@ def _normalize_source_refs(
     return [
         _normalize_source_ref(
             reference,
-            markdown=markdown,
+            sources=sources,
             label=f"{label} source_refs[{index}]",
             warnings=warnings,
-            line_index=line_index,
+            line_indexes=line_indexes,
         )
         for index, reference in enumerate(references)
     ]
 
 
-def _source_span(source_refs: list[dict[str, Any]]) -> tuple[int, int] | None:
-    starts = [
-        reference["start"]
-        for reference in source_refs
-        if _is_int(reference.get("start"))
-    ]
-    ends = [
-        reference["end"] for reference in source_refs if _is_int(reference.get("end"))
-    ]
-    if not starts or not ends:
-        return None
-    return min(starts), max(ends)
+def _source_spans(
+    source_refs: list[dict[str, Any]],
+) -> dict[str | None, tuple[int, int]]:
+    spans: dict[str | None, tuple[int, int]] = {}
+    for reference in source_refs:
+        start = reference.get("start")
+        end = reference.get("end")
+        if not _is_int(start) or not _is_int(end):
+            continue
+        source_id = reference.get("source_id")
+        key = str(source_id) if source_id is not None else None
+        previous = spans.get(key)
+        spans[key] = (
+            min(start, previous[0]) if previous else start,
+            max(end, previous[1]) if previous else end,
+        )
+    return spans
 
 
 def _validate_hierarchy(
@@ -464,11 +538,10 @@ def _validate_hierarchy(
     if not any(node["node_type"] == "reading" for node in nodes):
         _warn(warnings, "no_reading_nodes")
 
-    sibling_spans: dict[str | None, list[tuple[int, int]]] = {}
+    sibling_spans: dict[tuple[str | None, str | None], list[tuple[int, int]]] = {}
     for node in nodes:
-        span = _source_span(node["source_refs"])
-        if span is not None:
-            sibling_spans.setdefault(node["parent_key"], []).append(span)
+        for source_id, span in _source_spans(node["source_refs"]).items():
+            sibling_spans.setdefault((node["parent_key"], source_id), []).append(span)
     for spans in sibling_spans.values():
         spans.sort()
         for previous, current in zip(spans, spans[1:]):
@@ -480,9 +553,9 @@ def _validate_hierarchy(
 def _normalize_nodes(
     value: object,
     *,
-    markdown: str,
+    sources: _SourceDocuments,
     warnings: list[str],
-    line_index: _LineIndex | None,
+    line_indexes: Mapping[str | None, _LineIndex],
 ) -> list[dict[str, Any]]:
     raw_nodes = _require_list(value, label="content_nodes")
     if len(raw_nodes) > MAX_CONTENT_NODES:
@@ -573,10 +646,10 @@ def _normalize_nodes(
                 "summary": summary,
                 "source_refs": _normalize_source_refs(
                     node.get("source_refs"),
-                    markdown=markdown,
+                    sources=sources,
                     label=f"node {node_key}",
                     warnings=warnings,
-                    line_index=line_index,
+                    line_indexes=line_indexes,
                 ),
                 "metadata": dict(metadata),
             }
@@ -614,9 +687,9 @@ def _normalize_knowledge_points(
     value: object,
     *,
     nodes: list[dict[str, Any]],
-    markdown: str,
+    sources: _SourceDocuments,
     warnings: list[str],
-    line_index: _LineIndex | None,
+    line_indexes: Mapping[str | None, _LineIndex],
 ) -> list[dict[str, Any]]:
     raw_points = _require_list(value, label="knowledge_points")
     if len(raw_points) > MAX_KNOWLEDGE_POINTS:
@@ -644,13 +717,22 @@ def _normalize_knowledge_points(
             )
         source_refs = _normalize_source_refs(
             point.get("source_refs"),
-            markdown=markdown,
+            sources=sources,
             label=f"knowledge point {candidate_key}",
             warnings=warnings,
-            line_index=line_index,
+            line_indexes=line_indexes,
         )
+        node_ranges_by_source: dict[str | None, list[tuple[int, int]]] = {}
+        for reference in node["source_refs"]:
+            source_id = reference.get("source_id")
+            key = None if sources.legacy_single else source_id
+            node_ranges_by_source.setdefault(key, []).append(
+                (reference["start"], reference["end"])
+            )
         node_ranges = [
-            (reference["start"], reference["end"]) for reference in node["source_refs"]
+            source_range
+            for ranges in node_ranges_by_source.values()
+            for source_range in ranges
         ]
         if source_refs and not node_ranges:
             raise BookPackageValidationError(
@@ -659,7 +741,12 @@ def _normalize_knowledge_points(
         if any(
             not any(
                 reference["start"] >= node_start and reference["end"] <= node_end
-                for node_start, node_end in node_ranges
+                for node_start, node_end in node_ranges_by_source.get(
+                    None
+                    if sources.legacy_single
+                    else reference.get("source_id"),
+                    [],
+                )
             )
             for reference in source_refs
         ):
@@ -795,20 +882,63 @@ def _warn_point_density(
 def validate_book_package(
     candidate: object,
     *,
-    markdown: str,
+    markdown: str | None = None,
+    markdown_by_source: Mapping[str, str] | None = None,
+    default_source_id: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Normalize a managed package while enforcing only integrity limits.
 
     Non-standard textbook shapes remain valid. Structural oddities are
     returned as warnings so review can decide how to handle them.
     """
-    if not isinstance(markdown, str):
-        raise BookPackageValidationError("frozen Markdown must be a string")
-    _ensure_utf8_bytes(
-        markdown,
-        label="frozen Markdown",
-        limit=MAX_FROZEN_MARKDOWN_BYTES,
-    )
+    if markdown is not None and markdown_by_source is not None:
+        raise BookPackageValidationError(
+            "provide either frozen Markdown or markdown_by_source, not both"
+        )
+    if markdown_by_source is not None:
+        if not isinstance(markdown_by_source, Mapping) or not markdown_by_source:
+            raise BookPackageValidationError(
+                "markdown_by_source must contain at least one frozen source"
+            )
+        documents: dict[str | None, str] = {}
+        for raw_source_id, source_markdown in markdown_by_source.items():
+            source_id = _key(raw_source_id, label="frozen source_id")
+            if not isinstance(source_markdown, str):
+                raise BookPackageValidationError(
+                    "frozen Markdown must be a string"
+                )
+            _ensure_utf8_bytes(
+                source_markdown,
+                label=f"frozen Markdown for {source_id}",
+                limit=MAX_FROZEN_MARKDOWN_BYTES,
+            )
+            documents[source_id] = source_markdown
+        normalized_default = (
+            _key(default_source_id, label="default_source_id")
+            if default_source_id is not None
+            else None
+        )
+        if normalized_default is not None and normalized_default not in documents:
+            raise BookPackageValidationError(
+                "default_source_id does not match a frozen source"
+            )
+        sources = _SourceDocuments(
+            documents,
+            legacy_single=False,
+            default_source_id=normalized_default,
+        )
+    else:
+        if not isinstance(markdown, str):
+            raise BookPackageValidationError("frozen Markdown must be a string")
+        _ensure_utf8_bytes(
+            markdown,
+            label="frozen Markdown",
+            limit=MAX_FROZEN_MARKDOWN_BYTES,
+        )
+        sources = _SourceDocuments(
+            {None: markdown},
+            legacy_single=True,
+        )
     _ensure_utf8_size(
         candidate,
         label="book package",
@@ -825,20 +955,27 @@ def validate_book_package(
     )
 
     warnings: list[str] = []
-    line_requests = _collect_line_requests(package)
-    line_index = _build_line_index(markdown, line_requests) if line_requests else None
+    line_requests = _collect_line_requests(package, sources)
+    line_indexes = {
+        document_key: _build_line_index(
+            sources.documents[document_key] or "",
+            requested_lines,
+        )
+        for document_key, requested_lines in line_requests.items()
+        if requested_lines
+    }
     nodes = _normalize_nodes(
         package.get("content_nodes"),
-        markdown=markdown,
+        sources=sources,
         warnings=warnings,
-        line_index=line_index,
+        line_indexes=line_indexes,
     )
     points = _normalize_knowledge_points(
         package.get("knowledge_points"),
         nodes=nodes,
-        markdown=markdown,
+        sources=sources,
         warnings=warnings,
-        line_index=line_index,
+        line_indexes=line_indexes,
     )
     assets = _normalize_assets(
         package.get("assets"),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import re
 from collections.abc import Mapping
 from typing import Any, Protocol
@@ -15,6 +16,11 @@ from src.server.services.education_book_assets import (
     expected_book_asset_files,
     validate_book_asset_content,
     validate_book_asset_manifest,
+)
+from src.server.services.education_book_package import (
+    BOOK_PACKAGE_FORMAT,
+    BookPackageValidationError,
+    validate_book_package,
 )
 from src.server.services.education_reading_assets import (
     READING_ASSET_FORMAT,
@@ -50,6 +56,9 @@ _SOURCE_ASSET_FIELDS = (
     "sha256",
 )
 _MAX_CANDIDATE_BYTES = 4 * 1024 * 1024
+_MAX_BOOK_PACKAGE_JSON_BYTES = 16 * 1024 * 1024
+_MAX_BOOK_PACKAGE_ASSET_BYTES = 32 * 1024 * 1024
+_MAX_BOOK_PACKAGE_TOTAL_ASSET_BYTES = 128 * 1024 * 1024
 _MAX_ARCHIVE_STAGE_BYTES = 64 * 1024 * 1024
 _ARCHIVE_PUT_RETRY_DELAYS = (5, 10, 20, 40, 60)
 
@@ -70,6 +79,97 @@ class ManagedTeachingSandbox(Protocol):
 
 _MANAGED_SKILL_NAMES = ("book-to-skill",)
 _STATIC_SKILL_SUFFIXES = frozenset({".css", ".html", ".json", ".md", ".py", ".toml"})
+_BOOK_PACKAGE_FILES = (
+    "outputs/book_package.json",
+    "outputs/content_tree.json",
+    "outputs/knowledge_points.json",
+    "outputs/assets_manifest.json",
+)
+_ASSETS_MANIFEST_FORMAT = "langalpha-assets-manifest/v1"
+
+
+def _strict_json_object(content: bytes, *, label: str) -> dict[str, Any]:
+    if not isinstance(content, bytes) or not content.strip():
+        raise TeachingPackageStorageError(f"{label} is unavailable")
+    if len(content) > _MAX_BOOK_PACKAGE_JSON_BYTES:
+        raise TeachingPackageStorageError(f"{label} is too large")
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise TeachingPackageStorageError(f"{label} must be UTF-8") from exc
+
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"non-standard JSON constant: {value}")
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        decoded: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in decoded:
+                raise ValueError(f"duplicate JSON key: {key}")
+            decoded[key] = value
+        return decoded
+
+    def parse_float(value: str) -> float:
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise ValueError("non-finite JSON number")
+        return parsed
+
+    try:
+        decoded = json.loads(
+            text,
+            parse_constant=reject_constant,
+            parse_float=parse_float,
+            object_pairs_hook=reject_duplicate_keys,
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise TeachingPackageStorageError(f"{label} is invalid") from exc
+    if not isinstance(decoded, dict):
+        raise TeachingPackageStorageError(f"{label} must be a JSON object")
+    return decoded
+
+
+def _package_projection(
+    value: Mapping[str, Any],
+    *,
+    package: Mapping[str, Any],
+    key: str,
+) -> list[Any]:
+    projected = value.get(key)
+    if not isinstance(projected, list):
+        raise TeachingPackageStorageError(f"Managed book package {key} is invalid")
+    if value.get("format") not in {None, BOOK_PACKAGE_FORMAT}:
+        raise TeachingPackageStorageError(f"Managed book package {key} is invalid")
+    return projected
+
+
+def _validate_projection(
+    *,
+    raw_package: Mapping[str, Any],
+    normalized_package: Mapping[str, Any],
+    markdown: str | None,
+    markdown_by_source: Mapping[str, str] | None,
+    default_source_id: str | None,
+    key: str,
+    value: list[Any],
+) -> None:
+    probe = dict(raw_package)
+    probe[key] = value
+    try:
+        normalized, _warnings = validate_book_package(
+            probe,
+            markdown=markdown,
+            markdown_by_source=markdown_by_source,
+            default_source_id=default_source_id,
+        )
+    except BookPackageValidationError as exc:
+        raise TeachingPackageStorageError(
+            f"Managed book package {key} is invalid"
+        ) from exc
+    if normalized[key] != normalized_package[key]:
+        raise TeachingPackageStorageError(
+            f"Managed book package {key} contradicts book_package.json"
+        )
 
 
 async def _upload_staged_files(
@@ -595,6 +695,139 @@ async def download_structure_output(
     return output
 
 
+async def download_book_package_outputs(
+    job_id: str,
+    sandbox: ManagedTeachingSandbox,
+    *,
+    markdown: str | None = None,
+    markdown_by_source: Mapping[str, str] | None = None,
+    default_source_id: str | None = None,
+) -> dict[str, Any]:
+    """Download the fixed package bundle and only manifest-declared assets."""
+    root = managed_job_root(job_id)
+    raw_files: dict[str, bytes] = {}
+    for relative_path in _BOOK_PACKAGE_FILES:
+        content = await sandbox.adownload_file_bytes(f"{root}/{relative_path}")
+        if not isinstance(content, bytes) or not content.strip():
+            raise TeachingPackageStorageError(
+                f"Managed book package output is unavailable: {relative_path}"
+            )
+        raw_files[relative_path] = content
+
+    parsed = {
+        relative_path: _strict_json_object(
+            raw_files[relative_path],
+            label=f"Managed book package output {relative_path}",
+        )
+        for relative_path in _BOOK_PACKAGE_FILES
+    }
+    package_raw = parsed["outputs/book_package.json"]
+    try:
+        package, warnings = validate_book_package(
+            package_raw,
+            markdown=markdown,
+            markdown_by_source=markdown_by_source,
+            default_source_id=default_source_id,
+        )
+    except BookPackageValidationError as exc:
+        raise TeachingPackageStorageError("Managed book package is invalid") from exc
+
+    content_tree = parsed["outputs/content_tree.json"]
+    knowledge_points = parsed["outputs/knowledge_points.json"]
+    _validate_projection(
+        raw_package=package_raw,
+        normalized_package=package,
+        markdown=markdown,
+        markdown_by_source=markdown_by_source,
+        default_source_id=default_source_id,
+        key="content_nodes",
+        value=_package_projection(
+            content_tree,
+            package=package,
+            key="content_nodes",
+        ),
+    )
+    _validate_projection(
+        raw_package=package_raw,
+        normalized_package=package,
+        markdown=markdown,
+        markdown_by_source=markdown_by_source,
+        default_source_id=default_source_id,
+        key="knowledge_points",
+        value=_package_projection(
+            knowledge_points,
+            package=package,
+            key="knowledge_points",
+        ),
+    )
+
+    manifest = parsed["outputs/assets_manifest.json"]
+    if manifest.get("format") != _ASSETS_MANIFEST_FORMAT:
+        raise TeachingPackageStorageError("Managed asset manifest format is invalid")
+    manifest_assets = manifest.get("assets")
+    if not isinstance(manifest_assets, list):
+        raise TeachingPackageStorageError("Managed asset manifest is invalid")
+    manifest_probe = dict(package_raw)
+    manifest_probe["assets"] = manifest_assets
+    try:
+        normalized_manifest, _manifest_warnings = validate_book_package(
+            manifest_probe,
+            markdown=markdown,
+            markdown_by_source=markdown_by_source,
+            default_source_id=default_source_id,
+        )
+    except BookPackageValidationError as exc:
+        raise TeachingPackageStorageError("Managed asset manifest is invalid") from exc
+    if normalized_manifest["assets"] != package["assets"]:
+        raise TeachingPackageStorageError(
+            "Managed asset manifest contradicts book_package.json"
+        )
+
+    asset_files: dict[str, bytes] = {}
+    total_size = 0
+    for asset in package["assets"]:
+        relative_path = str(asset["path"])
+        expected_size = asset.get("size_bytes")
+        expected_sha256 = asset.get("content_sha256")
+        if (
+            not isinstance(expected_size, int)
+            or isinstance(expected_size, bool)
+            or expected_size < 0
+            or not isinstance(expected_sha256, str)
+            or not _SHA256_RE.fullmatch(expected_sha256)
+        ):
+            raise TeachingPackageStorageError(
+                "Managed book package asset metadata is incomplete"
+            )
+        content = await sandbox.adownload_file_bytes(f"{root}/{relative_path}")
+        if not isinstance(content, bytes):
+            raise TeachingPackageStorageError(
+                f"Managed book package asset is unavailable: {relative_path}"
+            )
+        if len(content) > _MAX_BOOK_PACKAGE_ASSET_BYTES:
+            raise TeachingPackageStorageError(
+                f"Managed book package asset is too large: {relative_path}"
+            )
+        total_size += len(content)
+        if total_size > _MAX_BOOK_PACKAGE_TOTAL_ASSET_BYTES:
+            raise TeachingPackageStorageError(
+                "Managed book package assets exceed the size limit"
+            )
+        actual_sha256 = hashlib.sha256(content).hexdigest()
+        if len(content) != expected_size or actual_sha256 != expected_sha256:
+            raise TeachingPackageStorageError(
+                f"Managed book package asset digest or size does not match: "
+                f"{relative_path}"
+            )
+        asset_files[relative_path] = content
+    return {
+        "package": package,
+        "raw_files": raw_files,
+        "asset_files": asset_files,
+        "warnings": warnings,
+    }
+
+
 async def download_book_asset_outputs(
     job_id: str,
     sandbox: ManagedTeachingSandbox,
@@ -905,6 +1138,107 @@ def structure_bundle_prefix(job: Mapping[str, Any]) -> str:
         content_sequence,
         structure_sequence,
     )
+
+
+def book_package_bundle_prefix(job: Mapping[str, Any]) -> str:
+    """Return the immutable private prefix for one raw managed package."""
+    try:
+        content_sequence = int(job["content_version_sequence"])
+        generation_job_id = UUID(str(job["generation_job_id"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TeachingPackageStorageError(
+            "Managed book package version is invalid"
+        ) from exc
+    if content_sequence <= 0:
+        raise TeachingPackageStorageError("Managed book package version is invalid")
+    return "education/{}/{}/v{}/book-packages/{}".format(
+        _safe_component(job.get("household_id"), "household"),
+        _safe_component(job.get("slug"), "textbook"),
+        content_sequence,
+        generation_job_id,
+    )
+
+
+async def write_book_package_bundle(
+    job: Mapping[str, Any],
+    downloaded: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Archive the raw package JSON and manifest-declared content assets."""
+    raw_files = downloaded.get("raw_files")
+    asset_files = downloaded.get("asset_files")
+    package = downloaded.get("package")
+    if (
+        not isinstance(raw_files, Mapping)
+        or not isinstance(asset_files, Mapping)
+        or not isinstance(package, Mapping)
+    ):
+        raise TeachingPackageStorageError("Managed book package bundle is invalid")
+    prefix = book_package_bundle_prefix(job)
+    for relative_path, content in raw_files.items():
+        if relative_path not in _BOOK_PACKAGE_FILES or not isinstance(content, bytes):
+            raise TeachingPackageStorageError("Managed book package bundle is invalid")
+        filename = str(relative_path).removeprefix("outputs/")
+        await _put(
+            f"{prefix}/{filename}",
+            content,
+            "application/json",
+        )
+
+    asset_content_keys: dict[str, str] = {}
+    asset_manifest: list[dict[str, Any]] = []
+    for asset in package.get("assets", []):
+        if not isinstance(asset, Mapping):
+            raise TeachingPackageStorageError("Managed book package asset is invalid")
+        relative_path = str(asset.get("path") or "")
+        content = asset_files.get(relative_path)
+        if (
+            relative_path not in asset_files
+            or not isinstance(content, bytes)
+            or not relative_path.startswith("outputs/")
+        ):
+            raise TeachingPackageStorageError("Managed book package asset is invalid")
+        asset_key = f"{prefix}/assets/{relative_path.removeprefix('outputs/')}"
+        await _put(asset_key, content, _asset_content_type(relative_path))
+        asset_content_keys[relative_path] = asset_key
+        asset_manifest.append(
+            {
+                "path": relative_path,
+                "content_key": asset_key,
+                "content_sha256": hashlib.sha256(content).hexdigest(),
+                "size_bytes": len(content),
+            }
+        )
+
+    files_manifest = {
+        relative_path: {
+            "content_key": f"{prefix}/{str(relative_path).removeprefix('outputs/')}",
+            "content_sha256": hashlib.sha256(content).hexdigest(),
+            "size_bytes": len(content),
+        }
+        for relative_path, content in raw_files.items()
+    }
+    manifest = {
+        "format": "langalpha-book-package-bundle/v1",
+        "generation_job_id": str(UUID(str(job["generation_job_id"]))),
+        "source_revision": str(package.get("source_revision") or ""),
+        "files": files_manifest,
+        "assets": asset_manifest,
+    }
+    await _put(
+        f"{prefix}/manifest.json",
+        json.dumps(
+            manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        "application/json",
+    )
+    return {
+        "prefix": prefix,
+        "manifest": manifest,
+        "asset_content_keys": asset_content_keys,
+    }
 
 
 async def write_structure_bundle(

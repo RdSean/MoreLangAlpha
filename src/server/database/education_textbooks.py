@@ -1,6 +1,7 @@
 """Raw PostgreSQL persistence for versioned family textbook learning."""
 
 import hashlib
+import json
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -788,6 +789,360 @@ async def resume_book_pipeline_job(
     return dict(job) if job else None
 
 
+async def claim_book_pipeline_launch(
+    *,
+    parent_user_id: str,
+    generation_job_id: str,
+) -> dict[str, Any] | None:
+    """Claim the queued→preparing launch fence for exactly one runtime owner."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs AS jobs
+                    SET status = 'preparing', updated_at = NOW()
+                    FROM education_textbook_versions AS versions,
+                         education_textbooks AS textbooks,
+                         education_memberships AS memberships
+                    WHERE jobs.generation_job_id = %s
+                      AND jobs.version_id = versions.version_id
+                      AND versions.textbook_id = textbooks.textbook_id
+                      AND textbooks.household_id = memberships.household_id
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                      AND jobs.scope = 'book_pipeline'
+                      AND jobs.status = 'queued'
+                    RETURNING jobs.generation_job_id, jobs.version_id,
+                              jobs.scope, jobs.structure_id,
+                              jobs.knowledge_point_id, jobs.status,
+                              jobs.attempt_count, jobs.latest_attempt_id,
+                              jobs.pause_after_chapter_analysis,
+                              jobs.error_code, jobs.error_message,
+                              jobs.created_at, jobs.updated_at
+                    """,
+                    (generation_job_id, parent_user_id),
+                )
+                claimed = await cur.fetchone()
+    return dict(claimed) if claimed else None
+
+
+async def fail_claimed_book_pipeline_launch(
+    *,
+    generation_job_id: str,
+    expected_latest_attempt_id: str | None,
+    error_code: str,
+    error_message: str,
+) -> dict[str, Any] | None:
+    """Close a preparing launch claim when no attempt was created."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs AS jobs
+                    SET status = 'failed', error_code = %s,
+                        error_message = %s, updated_at = NOW()
+                    WHERE jobs.generation_job_id = %s
+                      AND jobs.scope = 'book_pipeline'
+                      AND jobs.status = 'preparing'
+                      AND jobs.latest_attempt_id IS NOT DISTINCT FROM %s
+                    RETURNING generation_job_id, version_id, scope,
+                              structure_id, knowledge_point_id, status,
+                              attempt_count, pause_after_chapter_analysis,
+                              error_code, error_message, created_at, updated_at
+                    """,
+                    (
+                        error_code,
+                        error_message,
+                        generation_job_id,
+                        expected_latest_attempt_id,
+                    ),
+                )
+                failed = await cur.fetchone()
+    return dict(failed) if failed else None
+
+
+def _ordered_content_nodes(
+    nodes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return a stable roots-before-children order for a validated tree."""
+    by_key = {str(node["node_key"]): node for node in nodes}
+    children: dict[str | None, list[dict[str, Any]]] = {}
+    for node in nodes:
+        parent = node.get("parent_key")
+        children.setdefault(str(parent) if parent is not None else None, []).append(
+            node
+        )
+    for siblings in children.values():
+        siblings.sort(
+            key=lambda node: (
+                int(node.get("position") or 0),
+                str(node.get("node_key") or ""),
+            )
+        )
+
+    ordered: list[dict[str, Any]] = []
+    stack = list(reversed(children.get(None, [])))
+    while stack:
+        node = stack.pop()
+        ordered.append(node)
+        key = str(node["node_key"])
+        stack.extend(reversed(children.get(key, [])))
+    if len(ordered) != len(by_key):
+        raise TextbookQueueValidationError("content tree parent topology is invalid")
+    return ordered
+
+
+def _candidate_slug(candidate_key: str) -> str:
+    slug = re.sub(r"[^0-9a-z]+", "-", candidate_key.casefold()).strip("-")
+    slug = slug[:230] or "knowledge-point"
+    return f"{slug}-{uuid4().hex[:8]}"
+
+
+async def complete_book_pipeline_import(
+    *,
+    parent_user_id: str,
+    generation_job_id: str,
+    attempt_id: str,
+    package: Mapping[str, Any],
+    bundle_prefix: str,
+    bundle_manifest: Mapping[str, Any],
+    asset_content_keys: Mapping[str, str],
+    warnings: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """Atomically persist one validated generic book package for review."""
+    nodes = package.get("content_nodes")
+    points = package.get("knowledge_points")
+    assets = package.get("assets")
+    if not isinstance(nodes, list) or not isinstance(points, list):
+        raise TextbookQueueValidationError("book package content is invalid")
+    if not isinstance(assets, list):
+        raise TextbookQueueValidationError("book package assets are invalid")
+    if (
+        not isinstance(bundle_prefix, str)
+        or not bundle_prefix.startswith("education/")
+        or ".." in bundle_prefix
+    ):
+        raise TextbookQueueValidationError("book package bundle prefix is invalid")
+    manifest_sha256 = hashlib.sha256(
+        json.dumps(
+            bundle_manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    structure_id = str(uuid4())
+    node_ids = {str(node["node_key"]): str(uuid4()) for node in nodes}
+    ordered_nodes = _ordered_content_nodes(nodes)
+
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT jobs.generation_job_id, jobs.version_id,
+                           jobs.processing_profile_sha256, jobs.structure_id,
+                           jobs.status, attempts.attempt_id
+                    FROM education_generation_attempts AS attempts
+                    JOIN education_generation_jobs AS jobs
+                      ON jobs.generation_job_id = attempts.generation_job_id
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = jobs.version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE attempts.attempt_id = %s
+                      AND attempts.generation_job_id = %s
+                      AND attempts.status = 'running'
+                      AND jobs.latest_attempt_id = attempts.attempt_id
+                      AND jobs.scope = 'book_pipeline'
+                      AND jobs.status = 'running'
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                    FOR UPDATE OF attempts
+                    """,
+                    (attempt_id, generation_job_id, parent_user_id),
+                )
+                job = await cur.fetchone()
+                if not job:
+                    return None
+                version_id = str(job["version_id"])
+                await cur.execute(
+                    """
+                    SELECT version_id
+                    FROM education_textbook_versions
+                    WHERE version_id = %s
+                    FOR UPDATE
+                    """,
+                    (version_id,),
+                )
+                if not await cur.fetchone():
+                    raise RuntimeError("Book package version disappeared")
+                await cur.execute(
+                    """
+                    SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
+                    FROM education_textbook_structures
+                    WHERE version_id = %s
+                    """,
+                    (version_id,),
+                )
+                sequence = int((await cur.fetchone())["sequence"])
+                await cur.execute(
+                    """
+                    INSERT INTO education_textbook_structures (
+                        structure_id, version_id, sequence, status,
+                        schema_version, processing_profile_id,
+                        processing_profile_sha256, input_manifest_sha256,
+                        source_revision, bundle_prefix, validation_warnings,
+                        created_by_user_id
+                    ) VALUES (
+                        %s, %s, %s, 'review', 'langalpha-book-content-tree/v1',
+                        NULL, %s, %s, %s, %s, %s, %s
+                    )
+                    RETURNING structure_id, version_id, sequence, status
+                    """,
+                    (
+                        structure_id,
+                        version_id,
+                        sequence,
+                        str(job["processing_profile_sha256"]),
+                        manifest_sha256,
+                        str(package.get("source_revision") or ""),
+                        bundle_prefix,
+                        Json(warnings or []),
+                        parent_user_id,
+                    ),
+                )
+                structure = await cur.fetchone()
+                if not structure:
+                    raise RuntimeError("Book package structure was not created")
+
+                for index, node in enumerate(ordered_nodes, start=1):
+                    node_key = str(node["node_key"])
+                    parent_key = node.get("parent_key")
+                    await cur.execute(
+                        """
+                        INSERT INTO education_content_nodes (
+                            node_id, structure_id, parent_node_id, node_key,
+                            node_type, label, position, slug, title, summary,
+                            source_refs, metadata
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        )
+                        """,
+                        (
+                            node_ids[node_key],
+                            structure_id,
+                            node_ids.get(str(parent_key)) if parent_key else None,
+                            node_key,
+                            str(node["node_type"]),
+                            node.get("label"),
+                            int(node["position"]),
+                            str(node.get("slug") or f"node-{index}"),
+                            str(node["title"]),
+                            str(node.get("summary") or ""),
+                            Json(node.get("source_refs") or []),
+                            Json(node.get("metadata") or {}),
+                        ),
+                    )
+
+                for asset in assets:
+                    relative_path = str(asset.get("path") or "")
+                    content_key = asset_content_keys.get(relative_path)
+                    if not content_key:
+                        raise TextbookQueueValidationError(
+                            "book package asset is not archived"
+                        )
+                    await cur.execute(
+                        """
+                        INSERT INTO education_content_assets (
+                            asset_id, structure_id, node_id, asset_type,
+                            content_key, content_sha256, size_bytes, metadata
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            str(uuid4()),
+                            structure_id,
+                            node_ids[str(asset["node_key"])],
+                            str(asset["kind"]),
+                            content_key,
+                            str(asset["content_sha256"]),
+                            int(asset["size_bytes"]),
+                            Json(asset.get("metadata") or {}),
+                        ),
+                    )
+
+                for position, point in enumerate(points, start=1):
+                    candidate_key = str(point["candidate_key"])
+                    await cur.execute(
+                        """
+                        INSERT INTO education_structure_knowledge_points (
+                            knowledge_point_id, unit_id, content_structure_id,
+                            content_node_id, candidate_key, point_type, origin,
+                            candidate_status, position, slug, title, summary,
+                            source_refs, confidence, status
+                        ) VALUES (
+                            %s, NULL, %s, %s, %s, %s, 'generated',
+                            'pending', %s, %s, %s, %s, %s, %s, 'review'
+                        )
+                        """,
+                        (
+                            str(uuid4()),
+                            structure_id,
+                            node_ids[str(point["node_key"])],
+                            candidate_key,
+                            str(point["point_type"]),
+                            position,
+                            _candidate_slug(candidate_key),
+                            str(point["title"]),
+                            str(point.get("summary") or ""),
+                            Json(point.get("source_refs") or []),
+                            float(point["confidence"]),
+                        ),
+                    )
+
+                await cur.execute(
+                    """
+                    UPDATE education_generation_attempts
+                    SET status = 'completed', completed_at = NOW()
+                    WHERE attempt_id = %s AND generation_job_id = %s
+                      AND status = 'running'
+                    RETURNING attempt_id
+                    """,
+                    (attempt_id, generation_job_id),
+                )
+                if not await cur.fetchone():
+                    raise RuntimeError("Book pipeline attempt completion was lost")
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs
+                    SET status = 'completed', structure_id = %s,
+                        error_code = NULL, error_message = NULL,
+                        updated_at = NOW()
+                    WHERE generation_job_id = %s
+                      AND latest_attempt_id = %s
+                      AND status = 'running'
+                    RETURNING generation_job_id, status
+                    """,
+                    (structure_id, generation_job_id, attempt_id),
+                )
+                completed = await cur.fetchone()
+                if not completed:
+                    raise RuntimeError("Book pipeline job completion was lost")
+    return {
+        **dict(structure),
+        "generation_job_id": completed["generation_job_id"],
+        "job_status": completed["status"],
+        "bundle_prefix": bundle_prefix,
+        "node_count": len(nodes),
+        "knowledge_point_count": len(points),
+        "asset_count": len(assets),
+    }
+
+
 async def get_active_lesson_generation_for_parent(
     *, parent_user_id: str, knowledge_point_id: str
 ) -> dict[str, Any] | None:
@@ -1164,6 +1519,7 @@ async def get_generation_job_for_parent(
                        jobs.structure_id, jobs.knowledge_point_id, jobs.status,
                        jobs.attempt_count, jobs.latest_attempt_id,
                        jobs.auto_grading, jobs.pause_after_chapter_analysis,
+                       jobs.processing_brief, jobs.request_id,
                        jobs.processing_profile_sha256, jobs.error_code,
                        jobs.error_message, jobs.created_at, jobs.updated_at,
                        attempts.root_run_id, attempts.started_at,
@@ -1675,18 +2031,22 @@ async def claim_generation_job(
     generation_job_id: str,
     managed_workspace_id: str,
     managed_thread_id: str,
+    expected_job_status: str = "queued",
 ) -> dict[str, Any] | None:
     """Reserve one queued generation attempt under the job's single-writer row."""
+    if expected_job_status not in {"queued", "preparing"}:
+        raise ValueError("Invalid expected generation job status")
     attempt_id = str(uuid4())
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
                 await cur.execute(
-                    """
+                    f"""
                     SELECT generation_job_id, version_id, scope, structure_id,
                            knowledge_point_id, latest_attempt_id AS previous_attempt_id
                     FROM education_generation_jobs
-                    WHERE generation_job_id = %s AND status = 'queued'
+                    WHERE generation_job_id = %s
+                      AND status = '{expected_job_status}'
                     FOR UPDATE
                     """,
                     (generation_job_id,),
@@ -1713,13 +2073,14 @@ async def claim_generation_job(
                 )
                 attempt = dict(await cur.fetchone())
                 await cur.execute(
-                    """
+                    f"""
                     UPDATE education_generation_jobs
                     SET status = 'preparing',
                         attempt_count = attempt_count + 1,
                         latest_attempt_id = %s,
                         updated_at = NOW()
-                    WHERE generation_job_id = %s AND status = 'queued'
+                    WHERE generation_job_id = %s
+                      AND status = '{expected_job_status}'
                     """,
                     (attempt_id, generation_job_id),
                 )

@@ -430,7 +430,7 @@ async def test_parent_queues_gets_and_resumes_book_pipeline(client):
     }
     with (
         patch(
-            "src.server.app.education.textbooks.queue_book_pipeline_for_parent",
+            "src.server.app.education.textbooks.queue_and_launch_book_pipeline_for_parent",
             new=AsyncMock(return_value=base_job),
         ) as queue,
         patch(
@@ -470,6 +470,32 @@ async def test_parent_queues_gets_and_resumes_book_pipeline(client):
     assert queue.await_args.kwargs["pause_after_chapter_analysis"] is False
     get_job.assert_awaited_once()
     resume.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pause_checkpoint_request_is_rejected_without_creating_job(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    version_id = uuid4()
+    with (
+        patch(
+            "src.server.services.education_book_pipeline_jobs.queue_book_pipeline_job",
+            new=AsyncMock(side_effect=AssertionError("must not insert")),
+        ) as insert,
+        patch(
+            "src.server.services.education_book_pipeline_jobs.launch_book_pipeline_generation",
+            new=AsyncMock(side_effect=AssertionError("must not launch")),
+        ) as launch,
+    ):
+        response = await client.post(
+            f"/api/v1/education/textbook-versions/{version_id}/book-pipeline-jobs",
+            json={"pause_after_chapter_analysis": True},
+        )
+
+    assert response.status_code == 409
+    assert "not available" in response.json()["detail"]
+    insert.assert_not_awaited()
+    launch.assert_not_awaited()
 
 
 def test_book_pipeline_request_normalizes_optional_brief() -> None:

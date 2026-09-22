@@ -63,7 +63,7 @@ from src.server.services.education_book_asset_jobs import (
 )
 from src.server.services.education_book_pipeline_jobs import (
     get_book_pipeline_job_for_parent,
-    queue_book_pipeline_for_parent,
+    queue_and_launch_book_pipeline_for_parent,
     resume_book_pipeline_for_parent,
 )
 from src.server.services.education_learning_assets import (
@@ -162,7 +162,7 @@ async def queue_family_book_pipeline(
     body: CreateBookPipelineRequest | None = None,
 ):
     try:
-        return await queue_book_pipeline_for_parent(
+        return await queue_and_launch_book_pipeline_for_parent(
             parent_user_id=user_id,
             content_version_id=str(content_version_id),
             processing_brief=(body.processing_brief if body is not None else ""),

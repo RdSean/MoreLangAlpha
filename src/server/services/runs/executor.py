@@ -157,7 +157,10 @@ class LocalRunExecutor:
     def _abandoned_timeout_for_metadata(self, metadata: dict[str, Any]) -> int:
         """Keep a managed textbook root alive through its longer reconnect window."""
         managed = metadata.get("managed_execution")
-        if isinstance(managed, dict) and managed.get("kind") == "education_teaching":
+        if isinstance(managed, dict) and managed.get("kind") in {
+            "education_teaching",
+            "education_book_pipeline",
+        }:
             return get_education_teaching_abandoned_timeout()
         return self.abandoned_timeout
 

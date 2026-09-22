@@ -251,6 +251,14 @@ or:
   exclusive.
 * Line numbers are 1-based and half-open: `line_start` is inclusive and
   `line_end` is exclusive.
+* Every non-empty reference must resolve to a frozen source. Use the manifest's
+  `source_id` (or its `content_chapter_id` alias) when multiple sources exist;
+  omitted source IDs are never guessed in multi-source books.
+* With exactly one frozen source, `source_id` may be omitted and the service
+  defaults it to that source with a warning.
+* Ranges are relative to the selected source's Markdown. The service validates
+  the range against that source and derives the canonical quote from the same
+  source slice. Multiple sources are never concatenated for offset lookup.
 * Do not mix char and line fields in one entry. Do not use raw string refs or
   quote-only refs.
 * `quote` is optional descriptive context and is not used for locating. The

@@ -136,6 +136,9 @@ def test_managed_book_pipeline_prompt_declares_full_managed_contract() -> None:
     assert "outputs/knowledge_points.json" in prompt
     assert "outputs/assets_manifest.json" in prompt
     assert ".langalpha/progress.jsonl" in prompt
+    assert "source_id" in prompt
+    assert "每个来源" in prompt
+    assert "冻结 source" in prompt
     assert "不得询问用户" in prompt
     assert "不得访问网络" in prompt
     assert "不得使用 MCP" in prompt

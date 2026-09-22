@@ -26,6 +26,16 @@ The world's game is global.
 Olympic champions train deliberately.
 """
 
+MARKDOWN_SECOND = """\
+# Unit 2
+
+Geometry connects shapes, proofs, and measurements.
+
+# Reading C
+
+Triangles have three angles whose measures sum to 180 degrees.
+"""
+
 
 def _candidate() -> dict:
     reading_start = MARKDOWN.index("# Reading A")
@@ -152,6 +162,17 @@ def test_char_range_is_authoritative_and_quote_is_ignored() -> None:
     assert normalized["quote"] == "The world's game is global."
     assert normalized["start"] == ref["char_start"]
     assert normalized["end"] == ref["char_end"]
+
+
+def test_legacy_markdown_accepts_only_fixed_compatibility_source_id() -> None:
+    candidate = _candidate()
+    candidate["content_nodes"][1]["source_refs"][0]["source_id"] = "source-1"
+    validate_book_package(candidate, markdown=MARKDOWN)
+
+    candidate = _candidate()
+    candidate["content_nodes"][1]["source_refs"][0]["source_id"] = "invented-source"
+    with pytest.raises(BookPackageValidationError, match="compatibility source"):
+        validate_book_package(candidate, markdown=MARKDOWN)
 
 
 def test_char_only_package_does_not_build_line_index(
@@ -370,6 +391,21 @@ def test_invalid_asset_sizes_are_hard_failures(size_bytes: object) -> None:
         validate_book_package(candidate, markdown=MARKDOWN)
 
 
+def test_asset_size_postgres_integer_boundary_is_explicit() -> None:
+    candidate = _candidate()
+    candidate["assets"][0]["size_bytes"] = education_book_package.POSTGRES_INTEGER_MAX
+    package, _warnings = validate_book_package(candidate, markdown=MARKDOWN)
+    assert package["assets"][0]["size_bytes"] == (
+        education_book_package.POSTGRES_INTEGER_MAX
+    )
+
+    candidate["assets"][0]["size_bytes"] = (
+        education_book_package.POSTGRES_INTEGER_MAX + 1
+    )
+    with pytest.raises(BookPackageValidationError, match="size_bytes"):
+        validate_book_package(candidate, markdown=MARKDOWN)
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -466,3 +502,164 @@ def test_oversized_package_is_rejected() -> None:
 
     with pytest.raises(BookPackageValidationError, match="size limit"):
         validate_book_package(candidate, markdown=MARKDOWN)
+
+
+def test_multi_source_ranges_and_quotes_follow_their_source() -> None:
+    second_reading = MARKDOWN_SECOND.index("# Reading C")
+    candidate = {
+        "format": "langalpha-book-package/v1",
+        "source_revision": "multi-source-revision",
+        "content_nodes": [
+            {
+                "node_key": "unit-1",
+                "parent_key": None,
+                "node_type": "unit",
+                "position": 1,
+                "title": "Unit 1",
+                "summary": "",
+                "source_refs": [
+                    {
+                        "source_id": "source-1",
+                        "char_start": 0,
+                        "char_end": len(MARKDOWN),
+                    }
+                ],
+            },
+            {
+                "node_key": "reading-c",
+                "parent_key": "unit-1",
+                "node_type": "reading",
+                "position": 1,
+                "title": "Reading C",
+                "summary": "",
+                "source_refs": [
+                    {
+                        "source_id": "source-2",
+                        "line_start": MARKDOWN_SECOND[
+                            :second_reading
+                        ].count("\n")
+                        + 1,
+                        "line_end": MARKDOWN_SECOND.count("\n") + 1,
+                    }
+                ],
+            },
+        ],
+        "knowledge_points": [
+            {
+                "candidate_key": "reading-c-kp-1",
+                "node_key": "reading-c",
+                "point_type": "concept",
+                "title": "Triangle angle sum",
+                "summary": "",
+                "source_refs": [
+                    {
+                        "source_id": "source-2",
+                        "char_start": MARKDOWN_SECOND.index("Triangles"),
+                        "char_end": len(MARKDOWN_SECOND),
+                    }
+                ],
+            }
+        ],
+        "assets": [],
+    }
+
+    package, _warnings = validate_book_package(
+        candidate,
+        markdown_by_source={
+            "source-1": MARKDOWN,
+            "source-2": MARKDOWN_SECOND,
+        },
+    )
+
+    assert package["content_nodes"][0]["source_refs"][0]["quote"].startswith(
+        "# Unit 1"
+    )
+    assert package["content_nodes"][1]["source_refs"][0]["quote"].startswith(
+        "# Reading C"
+    )
+    assert package["knowledge_points"][0]["source_refs"][0]["quote"].startswith(
+        "Triangles have"
+    )
+
+
+def test_single_multi_source_defaults_missing_source_id_with_warning() -> None:
+    candidate = _candidate()
+    candidate["content_nodes"][0]["source_refs"][0].pop("source_id", None)
+    candidate["content_nodes"][1]["source_refs"][0].pop("source_id", None)
+    candidate["knowledge_points"][0]["source_refs"][0].pop("source_id", None)
+
+    package, warnings = validate_book_package(
+        candidate,
+        markdown_by_source={"source-1": MARKDOWN},
+    )
+
+    assert package["content_nodes"][0]["source_refs"][0]["source_id"] == "source-1"
+    assert "source_id_defaulted" in warnings
+
+
+@pytest.mark.parametrize("mode", ["missing", "unknown"])
+def test_multi_source_requires_resolvable_source_id(mode: str) -> None:
+    candidate = _candidate()
+    reference = candidate["content_nodes"][1]["source_refs"][0]
+    if mode == "missing":
+        reference.pop("source_id", None)
+    else:
+        reference["source_id"] = "source-missing"
+
+    with pytest.raises(BookPackageValidationError, match="source_id"):
+        validate_book_package(
+            candidate,
+            markdown_by_source={
+                "source-1": MARKDOWN,
+                "source-2": MARKDOWN_SECOND,
+            },
+        )
+
+
+def test_multi_source_knowledge_point_cannot_cross_node_source() -> None:
+    candidate = _candidate()
+    candidate["content_nodes"][0]["source_refs"][0]["source_id"] = "source-1"
+    candidate["content_nodes"][1]["source_refs"] = [
+        {
+            "source_id": "source-2",
+            "char_start": 0,
+            "char_end": len(MARKDOWN_SECOND),
+        }
+    ]
+    candidate["knowledge_points"][0]["source_refs"] = [
+        {
+            "source_id": "source-1",
+            "char_start": 0,
+            "char_end": 10,
+        }
+    ]
+
+    with pytest.raises(BookPackageValidationError, match="node source ref"):
+        validate_book_package(
+            candidate,
+            markdown_by_source={
+                "source-1": MARKDOWN,
+                "source-2": MARKDOWN_SECOND,
+            },
+        )
+
+
+def test_multi_source_ranges_use_the_selected_source_bounds() -> None:
+    candidate = _candidate()
+    candidate["content_nodes"][0]["source_refs"][0]["source_id"] = "source-1"
+    candidate["content_nodes"][1]["source_refs"] = [
+        {
+            "source_id": "source-2",
+            "char_start": len(MARKDOWN_SECOND) - 2,
+            "char_end": len(MARKDOWN_SECOND) + 1,
+        }
+    ]
+
+    with pytest.raises(BookPackageValidationError, match="outside"):
+        validate_book_package(
+            candidate,
+            markdown_by_source={
+                "source-1": MARKDOWN,
+                "source-2": MARKDOWN_SECOND,
+            },
+        )

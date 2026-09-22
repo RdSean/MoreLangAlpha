@@ -858,6 +858,7 @@ async def test_generation_job_parent_projection_includes_frozen_dispatch_context
     sql = mock_cursor.execute.call_args.args[0]
     assert "education_generation_jobs" in sql
     assert "jobs.pause_after_chapter_analysis" in sql
+    assert "jobs.processing_brief" in sql
     assert "memberships.role = 'parent'" in sql
 
 
@@ -1023,3 +1024,236 @@ async def test_freeze_publication_lessons_rejects_cross_structure_revision(
     validation_sql = mock_cursor.execute.call_args_list[1].args[0]
     assert "revisions.revision_id = %s" in validation_sql
     assert "structures.version_id = %s" in validation_sql
+
+
+@pytest.mark.asyncio
+async def test_complete_book_pipeline_import_persists_topology_and_candidates(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {
+            "generation_job_id": "generation-1",
+            "version_id": "version-1",
+            "processing_profile_sha256": "a" * 64,
+            "input_manifest_sha256": "b" * 64,
+            "source_revision": "revision-1",
+        },
+        {"version_id": "version-1"},
+        {"sequence": 2},
+        {
+            "structure_id": "structure-2",
+            "version_id": "version-1",
+            "sequence": 2,
+            "status": "review",
+        },
+        {"attempt_id": "attempt-1"},
+        {"generation_job_id": "generation-1", "status": "completed"},
+    ]
+
+    result = await education_textbooks.complete_book_pipeline_import(
+        parent_user_id="parent-1",
+        generation_job_id="generation-1",
+        attempt_id="attempt-1",
+        package={
+            "format": "langalpha-book-package/v1",
+            "source_revision": "revision-1",
+            "content_nodes": [
+                {
+                    "node_key": "node-1",
+                    "parent_key": None,
+                    "node_type": "unit",
+                    "position": 1,
+                    "slug": "node-1",
+                    "title": "Node 1",
+                    "summary": "",
+                    "source_refs": [],
+                    "metadata": {},
+                },
+                {
+                    "node_key": "node-2",
+                    "parent_key": "node-1",
+                    "node_type": "reading",
+                    "position": 1,
+                    "slug": "node-2",
+                    "title": "Node 2",
+                    "summary": "",
+                    "source_refs": [],
+                    "metadata": {},
+                },
+            ],
+            "knowledge_points": [
+                {
+                    "candidate_key": "candidate-1",
+                    "node_key": "node-2",
+                    "point_type": "concept",
+                    "title": "Candidate",
+                    "summary": "",
+                    "source_refs": [],
+                    "confidence": 0.8,
+                    "metadata": {},
+                }
+            ],
+            "assets": [
+                {
+                    "node_key": "node-2",
+                    "kind": "knowledge",
+                    "path": "outputs/node-2.md",
+                    "content_sha256": "c" * 64,
+                    "size_bytes": 10,
+                    "metadata": {},
+                }
+            ],
+        },
+        bundle_prefix="education/household/textbook/v1/book-packages/job-1",
+        bundle_manifest={"format": "langalpha-book-package-bundle/v1"},
+        asset_content_keys={"outputs/node-2.md": "education/.../node-2.md"},
+        warnings=["no_reading_nodes"],
+    )
+
+    assert result is not None
+    assert result["structure_id"] == "structure-2"
+    assert result["node_count"] == 2
+    assert result["knowledge_point_count"] == 1
+    executed = mock_cursor.execute.call_args_list
+    authorization_sql = executed[0].args[0]
+    assert "memberships.role = 'parent'" in authorization_sql
+    version_lock_sql = executed[1].args[0]
+    assert "FROM education_textbook_versions" in version_lock_sql
+    assert "FOR UPDATE" in version_lock_sql
+    node_inserts = [
+        call
+        for call in executed
+        if "INSERT INTO education_content_nodes" in call.args[0]
+    ]
+    assert len(node_inserts) == 2
+    assert node_inserts[0].args[1][2] is None
+    assert node_inserts[1].args[1][2] is not None
+    candidate_insert = next(
+        call
+        for call in executed
+        if "INSERT INTO education_structure_knowledge_points" in call.args[0]
+    )
+    UUID(candidate_insert.args[1][1])
+    UUID(candidate_insert.args[1][2])
+    assert candidate_insert.args[1][3:5] == ("candidate-1", "concept")
+    assert "'generated'" in candidate_insert.args[0]
+    assert "'pending'" in candidate_insert.args[0]
+    asset_insert = next(
+        call
+        for call in executed
+        if "INSERT INTO education_content_assets" in call.args[0]
+    )
+    assert asset_insert.args[1][2] is not None
+    job_update = next(
+        call
+        for call in reversed(executed)
+        if "UPDATE education_generation_jobs" in call.args[0]
+    )
+    assert "structure_id = %s" in job_update.args[0]
+    UUID(job_update.args[1][0])
+
+
+@pytest.mark.asyncio
+async def test_claim_book_pipeline_launch_serializes_queued_to_preparing(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {
+        "generation_job_id": "generation-1",
+        "version_id": "version-1",
+        "scope": "book_pipeline",
+        "status": "preparing",
+    }
+
+    claimed = await education_textbooks.claim_book_pipeline_launch(
+        parent_user_id="parent-1",
+        generation_job_id="generation-1",
+    )
+
+    assert claimed is not None
+    assert claimed["status"] == "preparing"
+    sql = mock_cursor.execute.call_args.args[0]
+    assert "UPDATE education_generation_jobs" in sql
+    assert "jobs.status = 'queued'" in sql
+    assert "status = 'preparing'" in sql
+    assert "memberships.role = 'parent'" in sql
+
+
+@pytest.mark.asyncio
+async def test_fail_claimed_book_pipeline_launch_closes_preparing_job(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {
+        "generation_job_id": "generation-1",
+        "status": "failed",
+        "error_code": "managed_book_pipeline_start_failed",
+    }
+
+    failed = await education_textbooks.fail_claimed_book_pipeline_launch(
+        generation_job_id="generation-1",
+        expected_latest_attempt_id=None,
+        error_code="managed_book_pipeline_start_failed",
+        error_message="start failed",
+    )
+
+    assert failed is not None
+    sql = mock_cursor.execute.call_args.args[0]
+    assert "UPDATE education_generation_jobs" in sql
+    assert "jobs.status = 'preparing'" in sql
+    assert "status = 'failed'" in sql
+    assert "latest_attempt_id IS NOT DISTINCT FROM %s" in sql
+
+
+@pytest.mark.asyncio
+async def test_claim_generation_job_can_consume_pipeline_launch_preparing(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {
+            "generation_job_id": "generation-1",
+            "version_id": "version-1",
+            "scope": "book_pipeline",
+            "structure_id": None,
+            "knowledge_point_id": None,
+            "previous_attempt_id": None,
+        },
+        {
+            "attempt_id": "attempt-2",
+            "generation_job_id": "generation-1",
+            "previous_attempt_id": None,
+            "managed_workspace_id": "workspace-1",
+            "managed_thread_id": "thread-1",
+            "root_run_id": None,
+        },
+    ]
+
+    attempt = await education_textbooks.claim_generation_job(
+        generation_job_id="generation-1",
+        managed_workspace_id="workspace-1",
+        managed_thread_id="thread-1",
+        expected_job_status="preparing",
+    )
+
+    assert attempt is not None
+    assert attempt["attempt_id"] == "attempt-2"
+    select_sql = mock_cursor.execute.call_args_list[0].args[0]
+    assert "status = 'preparing'" in select_sql

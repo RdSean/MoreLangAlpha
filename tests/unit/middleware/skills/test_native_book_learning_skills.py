@@ -71,6 +71,9 @@ def test_book_to_skill_managed_overlay_declares_full_pipeline_contract():
     assert ".langalpha/progress.jsonl" in overlay
     assert "char_start" in overlay and "char_end" in overlay
     assert "line_start" in overlay and "line_end" in overlay
+    assert "source_id" in overlay
+    assert "multiple sources" in overlay
+    assert "content_chapter_id" in overlay
     assert "quote" in overlay and "not used for locating" in overlay
     assert "Reading" in overlay and "not required" in overlay
     assert "network" in overlay and "MCP" in overlay

@@ -341,8 +341,7 @@ Expected: PASS.
 **Step 6: Commit**
 
 ```bash
-git add migrations/versions/076_generic_content_tree.py \
-  src/server/database/education_textbooks.py \
+git add src/server/database/education_textbooks.py \
   src/server/services/education_book_package.py \
   tests/unit/migrations/test_generic_content_tree.py \
   tests/unit/server/services/test_education_book_package.py
@@ -768,17 +767,36 @@ git commit -m "feat(textbooks): collect processing brief and prevent duplicate r
 
 ### Task 5: Import the Generic Book Package
 
-**Runtime wiring (2026-09-22):** Task 5 owns the managed runtime launch and
-finalization wiring for `book_pipeline`, including calling the Task 3 checkpoint
-pause transition and launching the continuation attempt after resume. Task 3
-intentionally exposes only the durable job and API state contract.
+**Runtime wiring (2026-09-22):** Task 5 owns the default non-checkpoint managed
+runtime launch and finalization wiring for `book_pipeline`, plus a callable
+checkpoint pause hook. The semantic progress collector is not available until
+Task 6/7, so checkpoint execution and its continuation prompt are intentionally
+deferred to Task 7 rather than guessed from raw tool events. Task 3 intentionally
+exposes only the durable job and API state contract.
+
+**Migration adjustment (2026-09-22):** the generic candidate fields must exist
+before package import, so Task 5 adds
+`079_book_pipeline_package_import.py` (down_revision `078`). Task 6's progress
+migration is therefore `080_education_job_progress.py`. Candidate storage is no
+longer added in Task 9.
 
 **Files:**
+- Create: `migrations/versions/079_book_pipeline_package_import.py`
 - Modify: `src/server/services/education_book_pipeline_jobs.py`
 - Modify: `src/server/services/education_teaching_storage.py`
 - Modify: `src/server/database/education_textbooks.py`
+- Modify: `src/server/app/education/textbooks.py`
+- Modify: `src/server/services/runs/executor.py`
+- Modify: `plugins/langalpha_local/skills/book-to-skill/reference/langalpha-managed.md`
 - Test: `tests/unit/server/services/test_education_book_pipeline_jobs.py`
+- Test: `tests/unit/server/services/test_education_book_package.py`
+- Test: `tests/unit/server/services/test_education_structure_jobs.py`
+- Test: `tests/unit/server/services/runs/test_education_teaching_timeout.py`
 - Test: `tests/unit/server/database/test_education_structure_models.py`
+- Test: `tests/unit/migrations/test_book_pipeline_package_import.py`
+- Test: `tests/unit/server/app/education/test_textbook_structures.py`
+- Test: `tests/unit/middleware/skills/test_native_book_learning_skills.py`
+- Test: `tests/integration/test_book_pipeline_package_import_db.py`
 
 **Step 1: Write the failing import test**
 
@@ -811,17 +829,59 @@ outputs/assets_manifest.json
 ```
 
 Then download only asset paths listed by the manifest. Ignore undeclared files.
+The package service validates `book_package.json`, checks both JSON projections
+against it, downloads only manifest-declared assets, and verifies each asset's
+size and SHA-256 before archiving the immutable raw bundle.
+Source validation accepts `markdown_by_source` keyed by both `source_id` and
+`content_chapter_id`. Each range is checked against its selected source and the
+canonical quote and knowledge-point containment use that same source. Missing
+`source_id` is warning/defaulted only when exactly one frozen source exists;
+unknown or missing IDs in multi-source packages are hard failures.
 
 **Step 4: Persist transactionally**
 
 Within one database transaction:
 
-1. create a structure revision;
+1. create a structure revision and bind it to the completed generation job;
 2. insert all content nodes;
-3. insert all candidate knowledge points;
-4. insert the asset manifest;
-5. store the immutable package bundle;
+3. insert all pending generated candidate knowledge points;
+4. insert all content assets and their private object keys;
+5. record the immutable raw bundle prefix and manifest hash;
 6. mark the pipeline review-ready.
+
+Migration `079` makes legacy `unit_id` nullable, adds the generic candidate
+binding/status columns plus `content_structure_id`, and uses a composite FK to
+the content node's `(structure_id, node_id)` ownership. It allows a completed
+`book_pipeline` job to reference its new structure and fails closed on downgrade
+when generic package data exists.
+
+The queue API uses `queue_and_launch_book_pipeline_for_parent()` after the
+durable queue transaction commits. Reused running jobs are not launched again;
+concurrent requests still converge on one job and the attempt claim remains the
+single-writer fence.
+Before workspace/thread creation, the runtime atomically claims
+`queued -> preparing` with `claim_book_pipeline_launch()`. Only the winner
+creates resources and reserves an attempt; losers return the same durable job
+without creating resources or returning a conflict.
+Workspace creation, thread creation, and attempt reservation share one failure
+boundary: before an attempt exists, a DB fence atomically closes the launch
+claim from `preparing` to `failed`; after an attempt exists, that explicit
+attempt and job are settled failed.
+
+After an attempt is reserved, input lookup, manifest hydration, skill/input
+staging, graph assembly and dispatch all share one failure boundary. Any
+exception or cancellation settles that explicit attempt and job before
+propagating, so a failed launch cannot remain active in `preparing`. Package
+import receives the current attempt ID explicitly and never falls back to a
+stale `latest_attempt_id`.
+
+Structure sequence allocation locks the content-version row before
+`MAX(sequence) + 1`, serializing package import with legacy structure creation.
+
+Until Task 7 supplies semantic progress and continuation, the public queue path
+rejects `pause_after_chapter_analysis=true` before parent lookup or any DB
+insert with `TextbookTransitionError` (HTTP 409). It must never leave a queued
+job that no runtime can advance.
 
 Generated candidates receive:
 
@@ -835,7 +895,11 @@ candidate_status=pending
 ```bash
 uv run pytest \
   tests/unit/server/services/test_education_book_pipeline_jobs.py \
-  tests/unit/server/database/test_education_structure_models.py -q
+  tests/unit/server/database/test_education_structure_models.py \
+  tests/unit/migrations/test_book_pipeline_package_import.py \
+  tests/unit/server/app/education/test_textbook_structures.py -q
+uv run pytest -m integration \
+  tests/integration/test_book_pipeline_package_import_db.py -q
 ```
 
 Expected: PASS.
@@ -843,11 +907,24 @@ Expected: PASS.
 **Step 6: Commit**
 
 ```bash
-git add src/server/services/education_book_pipeline_jobs.py \
+git add migrations/versions/079_book_pipeline_package_import.py \
+  src/server/services/education_book_pipeline_jobs.py \
   src/server/services/education_teaching_storage.py \
   src/server/database/education_textbooks.py \
+  src/server/services/education_book_package.py \
+  src/server/services/education_structure_jobs.py \
+  src/server/services/runs/executor.py \
+  src/server/app/education/textbooks.py \
+  plugins/langalpha_local/skills/book-to-skill/reference/langalpha-managed.md \
   tests/unit/server/services/test_education_book_pipeline_jobs.py \
-  tests/unit/server/database/test_education_structure_models.py
+  tests/unit/server/services/test_education_book_package.py \
+  tests/unit/server/services/test_education_structure_jobs.py \
+  tests/unit/server/services/runs/test_education_teaching_timeout.py \
+  tests/unit/server/database/test_education_structure_models.py \
+  tests/unit/migrations/test_book_pipeline_package_import.py \
+  tests/unit/server/app/education/test_textbook_structures.py \
+  tests/unit/middleware/skills/test_native_book_learning_skills.py \
+  tests/integration/test_book_pipeline_package_import_db.py
 git commit -m "feat(textbooks): import generic book packages"
 ```
 
@@ -856,7 +933,7 @@ git commit -m "feat(textbooks): import generic book packages"
 ### Task 6: Add the Semantic Progress Protocol
 
 **Files:**
-- Create: `migrations/versions/079_education_job_progress.py`
+- Create: `migrations/versions/080_education_job_progress.py`
 - Create: `src/server/services/education_generation_progress.py`
 - Modify: `src/server/services/education_teaching_storage.py`
 - Test: `tests/unit/migrations/test_education_job_progress.py`
@@ -865,7 +942,7 @@ git commit -m "feat(textbooks): import generic book packages"
 
 **Step 1: Write the failing migration test**
 
-Assert `079` creates `education_generation_progress_events`:
+Assert `080` creates `education_generation_progress_events`:
 
 ```text
 event_id BIGSERIAL PRIMARY KEY
@@ -949,7 +1026,7 @@ Expected: PASS.
 **Step 6: Commit**
 
 ```bash
-git add migrations/versions/079_education_job_progress.py \
+git add migrations/versions/080_education_job_progress.py \
   src/server/services/education_generation_progress.py \
   src/server/services/education_teaching_storage.py \
   tests/unit/migrations/test_education_job_progress.py \
@@ -1022,6 +1099,15 @@ education_lesson_jobs.py
 ```
 
 The collector must run independently of model/tool activity.
+
+For `pause_after_chapter_analysis=true`, Task 7 must call
+`pause_book_pipeline_after_chapter_analysis()` only after a durable
+`chapter_analysis/completed` event is observed, then interrupt the full run
+without importing the partial package as a completed pipeline. Resume must
+create a continuation attempt and use a continuation prompt that starts after
+the persisted chapter checkpoint; it must not replay the full Steps 0-9 prompt.
+Task 7 must also replace the temporary public-entry rejection with the fully
+tested checkpoint launch path once durable events can trigger it.
 
 **Step 5: Add fallback projection**
 
@@ -1177,7 +1263,6 @@ git commit -m "feat(textbooks): show four-stage live processing timeline"
 ### Task 9: Add Knowledge-Point Candidate Review
 
 **Files:**
-- Modify: `migrations/versions/076_generic_content_tree.py`
 - Modify: `src/server/database/education_textbooks.py`
 - Modify: `src/server/app/education/models.py`
 - Modify: `src/server/app/education/textbooks.py`
@@ -1204,19 +1289,13 @@ uv run pytest \
 
 Expected: FAIL.
 
-**Step 3: Add candidate fields**
+**Step 3: Consume the Task 5 candidate contract**
 
-Extend knowledge points with:
-
-```text
-content_node_id UUID NULL
-candidate_key VARCHAR(255) NULL
-point_type VARCHAR(64) NOT NULL DEFAULT 'concept'
-origin VARCHAR(24) NOT NULL DEFAULT 'manual'
-candidate_status VARCHAR(24) NOT NULL DEFAULT 'pending'
-```
-
-Generated candidates remain pending until explicit review.
+Migration `079` already adds `content_structure_id`, `content_node_id`,
+`candidate_key`, `point_type`, `origin` and `candidate_status`, with the
+composite structure/node ownership FK. Task 9 only implements review
+projections, state transitions and UI. Generated candidates remain pending
+until explicit review; no schema changes are repeated here.
 
 **Step 4: Add review APIs**
 
@@ -1258,8 +1337,7 @@ Expected: PASS.
 **Step 7: Commit**
 
 ```bash
-git add migrations/versions/076_generic_content_tree.py \
-  src/server/database/education_textbooks.py \
+git add src/server/database/education_textbooks.py \
   src/server/app/education/models.py \
   src/server/app/education/textbooks.py \
   web/src/pages/Education/KnowledgePointReviewPage.tsx \
