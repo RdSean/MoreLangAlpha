@@ -215,6 +215,113 @@ async def test_get_structure_returns_units_and_knowledge_points_for_parent(
 
 
 @pytest.mark.asyncio
+async def test_generic_structure_summary_counts_generated_candidates(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {
+            "structure_id": "structure-1",
+            "version_id": "version-1",
+            "sequence": 1,
+            "status": "review",
+            "schema_version": "langalpha-book-content-tree/v1",
+        },
+        {"total": 3, "accepted": 1, "generated": 0, "approved": 0},
+        None,
+    ]
+    mock_cursor.fetchall.side_effect = [[], [], []]
+
+    result = await education_textbooks.get_textbook_structure_for_parent(
+        parent_user_id="parent-1",
+        structure_id="structure-1",
+    )
+
+    assert result is not None
+    assert result["lesson_summary"]["total"] == 3
+    summary_sql = next(
+        call.args[0]
+        for call in mock_cursor.execute.call_args_list
+        if "AS total" in call.args[0]
+    )
+    assert "content_structure_id = %s" in summary_sql
+    assert "candidate.origin = 'generated'" in summary_sql
+    assert "candidate.content_node_id IS NOT NULL" in summary_sql
+    assert "JOIN education_structure_units AS units" not in summary_sql
+
+
+@pytest.mark.asyncio
+async def test_split_locks_content_node_before_candidate_row(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchall.side_effect = [
+        [{"node_id": "node-1"}],
+        [
+            {
+                "knowledge_point_id": "kp-1",
+                "content_structure_id": "structure-1",
+                "content_node_id": "node-1",
+                "candidate_key": "source-key",
+                "candidate_status": "pending",
+                "source_refs": [],
+                "confidence": 0.9,
+            }
+        ],
+    ]
+    mock_cursor.fetchone.side_effect = [
+        {"position": 2},
+        {
+            "knowledge_point_id": "kp-new",
+            "content_structure_id": "structure-1",
+            "content_node_id": "node-1",
+            "candidate_key": "source-key-split-01-hash",
+            "candidate_status": "pending",
+            "position": 2,
+        },
+        {
+            "knowledge_point_id": "kp-new-2",
+            "content_structure_id": "structure-1",
+            "content_node_id": "node-1",
+            "candidate_key": "source-key-split-02-hash",
+            "candidate_status": "pending",
+            "position": 3,
+        },
+    ]
+
+    result = await education_textbooks.split_knowledge_point_candidate_for_parent(
+        parent_user_id="parent-1",
+        candidate_id="kp-1",
+        items=[
+            {"title": "第一部分", "summary": "", "point_type": "concept"},
+            {"title": "第二部分", "summary": "", "point_type": "concept"},
+        ],
+    )
+
+    assert result is not None
+    sql = [call.args[0] for call in mock_cursor.execute.call_args_list]
+    node_lock_index = next(
+        index
+        for index, statement in enumerate(sql)
+        if "FOR UPDATE OF nodes" in statement
+    )
+    candidate_lock_index = next(
+        index
+        for index, statement in enumerate(sql)
+        if "FOR UPDATE OF candidate" in statement
+    )
+    assert node_lock_index < candidate_lock_index
+
+
+@pytest.mark.asyncio
 async def test_replace_structure_contents_generates_service_owned_ids(
     mock_connection, mock_cursor, monkeypatch
 ):

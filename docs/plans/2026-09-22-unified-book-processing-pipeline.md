@@ -1463,11 +1463,22 @@ git commit -m "feat(textbooks): show four-stage live processing timeline"
 
 **Files:**
 - Modify: `src/server/database/education_textbooks.py`
+- Create: `src/server/services/education_candidate_review.py`
 - Modify: `src/server/app/education/models.py`
 - Modify: `src/server/app/education/textbooks.py`
 - Create: `web/src/pages/Education/KnowledgePointReviewPage.tsx`
+- Modify: `web/src/pages/Education/api.ts`
+- Modify: `web/src/pages/Education/types.ts`
+- Modify: `web/src/pages/Education/queries.ts`
+- Modify: `web/src/lib/queryKeys.ts`
+- Modify: `web/src/components/Main/routeChunks.ts`
+- Modify: `web/src/components/Main/Main.tsx`
+- Modify: `web/src/pages/Education/TextbookDetailPage.tsx`
 - Test: `tests/unit/server/app/education/test_textbook_structures.py`
+- Test: `tests/unit/server/database/test_education_structure_models.py`
+- Test: `tests/integration/test_education_candidate_review_db.py`
 - Test: `web/src/pages/Education/__tests__/KnowledgePointReviewPage.test.tsx`
+- Test: `web/src/pages/Education/__tests__/TextbookDetailPage.test.tsx`
 
 **Step 1: Write the failing review test**
 
@@ -1496,6 +1507,24 @@ composite structure/node ownership FK. Task 9 only implements review
 projections, state transitions and UI. Generated candidates remain pending
 until explicit review; no schema changes are repeated here.
 
+The database projection returns a recursively ordered generic content tree,
+with all generated candidates grouped under their owning node. Candidate
+queries join structure -> version -> textbook -> membership and filter
+`origin='generated'`, so legacy/manual rows are preserved but are not exposed
+through these endpoints and cross-household or cross-structure IDs are not
+visible.
+
+The production generic structure schema is `langalpha-book-content-tree/v1`
+(`langalpha-managed-book-package/v1` is accepted as the forward-compatible
+package spelling). TextbookDetail uses that schema to show the candidate
+review entry and suppress the legacy structure-editing entry. Legacy schemas
+retain their existing structure review/course entry and do not show candidate
+review. Generic lesson/candidate counts come from generated
+`education_structure_knowledge_points` rows bound to
+`content_structure_id`/`content_node_id`; pending and accepted candidates form
+`total`, while accepted/lesson-backed rows form the progress counts. This
+query must not join through the legacy Unit table.
+
 **Step 4: Add review APIs**
 
 ```text
@@ -1506,6 +1535,35 @@ POST  /api/v1/education/candidates/reject
 POST  /api/v1/education/candidates/merge
 POST  /api/v1/education/candidates/split
 ```
+
+All mutations run in one PostgreSQL transaction and lock the exact generated
+candidate rows in deterministic order. Accept/reject are idempotent for their
+own terminal status and return 409 for any other existing terminal status.
+PATCH may change only title, summary and open `point_type`; it cannot change
+node or structure ownership. Merge requires at least two pending candidates in
+one content node, marks non-target sources `merged`, and either updates the
+explicit target or creates one pending candidate. Split marks one pending
+source `split`, then creates two or more pending candidates under the same
+node with new unique `candidate_key` values. Any invalid item rolls the whole
+transaction back. Generated split keys use a deterministic per-item SHA-256
+suffix and truncate the source prefix to fit the database `VARCHAR(255)`
+limit, so a legal 255-character source key remains splittable. Creating a new
+merged candidate (`target_id` absent) always remains pending; requesting
+`accept=true` without a target is rejected instead of creating an accepted
+candidate implicitly.
+
+Before merge/split lock candidate rows, they lock every owning
+`education_content_nodes` row in node-id order. Position allocation therefore
+occurs after a per-node serialization point; concurrent merge/split requests
+on one node cannot select the same `MAX(position)+1`, and ordering is never
+inferred from UUID/created-at fallbacks. A real-PostgreSQL test holds the node
+row on a separate connection and verifies both mutations block until release,
+then complete with unique contiguous positions.
+
+All six candidate endpoints remain parent-only and reject student callers with
+403. Candidate PATCH/merge/split text fields reject unsupported Unicode `Cc`
+control characters at the request boundary; summaries allow the contract line
+breaks (`\n`/`\r`) while NUL and other controls return 422 before persistence.
 
 **Step 5: Build the review UI**
 
@@ -1521,6 +1579,28 @@ Unit 1
 
 Actions: accept, reject, merge, split, rename, change type.
 
+The page builds the tree from `parent_node_id`, supports selection across the
+full structure for accept/reject, restricts merge to selected candidates from
+one node, and exposes edit/split dialogs on each row. Selection is limited to
+pending candidates: non-pending checkboxes are disabled, bulk actions use only
+the selected set intersected with current pending rows, and a refresh that
+makes a selected row non-pending removes it from the eligible set. Successful
+mutations invalidate the Education query prefix. Generated candidates are
+never accepted on load or as a side effect of another action. Selection allows
+at most 100 pending candidates; reaching 100 disables additional unselected
+checkboxes and shows a bounded Chinese helper message, while accept/reject/
+merge remain enabled for exactly the 100 selected rows. The split dialog
+starts with two items, supports adding and deleting items, and enforces the
+same 2-100 boundary as the API.
+
+The current complete-review contract supports the backend-validated package
+limits (up to 5,000 content nodes and 50,000 candidates) without silently
+truncating either dimension. The UI currently returns the complete generic
+tree without pagination or virtualization; packages beyond roughly 2,000
+visible nodes/candidates should be treated as a scalability follow-up and
+given a cursor/windowed contract with an explicit `truncated` flag rather than
+silently dropping data or breaking complete review.
+
 **Step 6: Run tests and build**
 
 ```bash
@@ -1533,15 +1613,35 @@ pnpm build
 
 Expected: PASS.
 
+Execution update: 35 API/structure tests, 32 database projection tests, five
+real-PostgreSQL transaction/concurrency tests and ten candidate-review Vitest
+interactions pass; the complete Education frontend suite is 73 tests. The route
+is lazy-loaded from
+`/textbooks/:textbookId/versions/:versionId/candidates` and is linked from a
+generic book-content-tree structure in TextbookDetail.
+
 **Step 7: Commit**
 
 ```bash
 git add src/server/database/education_textbooks.py \
+  src/server/services/education_candidate_review.py \
   src/server/app/education/models.py \
   src/server/app/education/textbooks.py \
   web/src/pages/Education/KnowledgePointReviewPage.tsx \
+  web/src/pages/Education/api.ts \
+  web/src/pages/Education/types.ts \
+  web/src/pages/Education/queries.ts \
+  web/src/lib/queryKeys.ts \
+  web/src/components/Main/routeChunks.ts \
+  web/src/components/Main/Main.tsx \
+  web/src/pages/Education/TextbookDetailPage.tsx \
   tests/unit/server/app/education/test_textbook_structures.py \
-  web/src/pages/Education/__tests__/KnowledgePointReviewPage.test.tsx
+  tests/unit/server/database/test_education_structure_models.py \
+  tests/integration/test_education_candidate_review_db.py \
+  CHANGELOG.md \
+  docs/plans/2026-09-22-unified-book-processing-pipeline.md \
+  web/src/pages/Education/__tests__/KnowledgePointReviewPage.test.tsx \
+  web/src/pages/Education/__tests__/TextbookDetailPage.test.tsx
 git commit -m "feat(textbooks): review generated knowledge point candidates"
 ```
 

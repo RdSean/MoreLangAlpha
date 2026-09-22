@@ -12,7 +12,11 @@ from pydantic import ValidationError
 from src.server.app.education.textbooks import router
 from src.server.app.education.models import CreateBookPipelineRequest
 from src.server.services import education_structure_progress as progress_service
-from src.server.services.education_textbooks import TextbookPermissionError
+from src.server.services.education_textbooks import (
+    TextbookNotFoundError,
+    TextbookPermissionError,
+    TextbookTransitionError,
+)
 from src.server.utils.api import get_current_user_id
 
 
@@ -206,6 +210,385 @@ async def test_structure_update_rejects_missing_units(client):
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_parent_reviews_updates_and_accepts_generated_candidates(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    structure_id = uuid4()
+    candidate_id = uuid4()
+    review = {
+        "structure_id": structure_id,
+        "version_id": uuid4(),
+        "nodes": [
+            {
+                "node_id": uuid4(),
+                "structure_id": structure_id,
+                "parent_node_id": None,
+                "node_key": "unit-1",
+                "node_type": "unit",
+                "label": None,
+                "position": 1,
+                "slug": "unit-1",
+                "title": "Unit 1",
+                "summary": "",
+                "source_refs": [],
+                "candidates": [
+                    {
+                        "knowledge_point_id": candidate_id,
+                        "content_structure_id": structure_id,
+                        "content_node_id": uuid4(),
+                        "candidate_key": "unit-1-kp-1",
+                        "point_type": "concept",
+                        "origin": "generated",
+                        "candidate_status": "pending",
+                        "position": 1,
+                        "slug": "world-game",
+                        "title": "世界运动",
+                        "summary": "",
+                        "source_refs": [],
+                        "confidence": 0.9,
+                        "status": "review",
+                        "created_at": None,
+                    }
+                ],
+            }
+        ],
+    }
+    accepted = {
+        **review["nodes"][0]["candidates"][0],
+        "candidate_status": "accepted",
+        "status": "accepted",
+    }
+    updated = {**accepted, "title": "足球运动", "point_type": "reading_skill"}
+    with (
+        patch(
+            "src.server.app.education.textbooks.list_knowledge_point_candidates_for_parent",
+            new=AsyncMock(return_value=review),
+        ) as list_candidates,
+        patch(
+            "src.server.app.education.textbooks.update_knowledge_point_candidate_for_parent",
+            new=AsyncMock(return_value=updated),
+        ) as update_candidate,
+        patch(
+            "src.server.app.education.textbooks.accept_knowledge_point_candidates_for_parent",
+            new=AsyncMock(return_value=[accepted]),
+        ) as accept_candidates,
+    ):
+        listed = await client.get(
+            f"/api/v1/education/structures/{structure_id}/candidates"
+        )
+        changed = await client.patch(
+            f"/api/v1/education/candidates/{candidate_id}",
+            json={"title": "足球运动", "point_type": "reading_skill"},
+        )
+        accepted_response = await client.post(
+            "/api/v1/education/candidates/accept",
+            json={"candidate_ids": [str(candidate_id)]},
+        )
+
+    assert listed.status_code == 200
+    assert listed.json()["nodes"][0]["candidates"][0]["candidate_status"] == "pending"
+    assert changed.status_code == 200
+    assert changed.json()["title"] == "足球运动"
+    assert accepted_response.status_code == 200
+    assert accepted_response.json()[0]["candidate_status"] == "accepted"
+    list_candidates.assert_awaited_once_with(
+        parent_user_id="parent-1", structure_id=str(structure_id)
+    )
+    update_candidate.assert_awaited_once_with(
+        parent_user_id="parent-1",
+        candidate_id=str(candidate_id),
+        title="足球运动",
+        summary=None,
+        point_type="reading_skill",
+    )
+    accept_candidates.assert_awaited_once_with(
+        parent_user_id="parent-1", candidate_ids=[str(candidate_id)]
+    )
+
+
+@pytest.mark.asyncio
+async def test_parent_rejects_merges_and_splits_candidates(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    first_id = uuid4()
+    second_id = uuid4()
+    with (
+        patch(
+            "src.server.app.education.textbooks.reject_knowledge_point_candidates_for_parent",
+            new=AsyncMock(return_value=[]),
+        ) as reject_candidates,
+        patch(
+            "src.server.app.education.textbooks.merge_knowledge_point_candidates_for_parent",
+            new=AsyncMock(return_value=[]),
+        ) as merge_candidates,
+        patch(
+            "src.server.app.education.textbooks.split_knowledge_point_candidate_for_parent",
+            new=AsyncMock(return_value=[]),
+        ) as split_candidate,
+    ):
+        rejected = await client.post(
+            "/api/v1/education/candidates/reject",
+            json={"candidate_ids": [str(first_id)]},
+        )
+        merged = await client.post(
+            "/api/v1/education/candidates/merge",
+            json={
+                "source_ids": [str(first_id), str(second_id)],
+                "target_id": str(first_id),
+                "title": "合并后的知识点",
+                "point_type": "concept",
+                "accept": True,
+            },
+        )
+        split = await client.post(
+            "/api/v1/education/candidates/split",
+            json={
+                "candidate_id": str(first_id),
+                "items": [
+                    {"title": "第一部分", "point_type": "concept"},
+                    {"title": "第二部分", "point_type": "concept"},
+                ],
+            },
+        )
+
+    assert rejected.status_code == 200
+    assert merged.status_code == 200
+    assert split.status_code == 200
+    reject_candidates.assert_awaited_once_with(
+        parent_user_id="parent-1", candidate_ids=[str(first_id)]
+    )
+    merge_candidates.assert_awaited_once_with(
+        parent_user_id="parent-1",
+        source_ids=[str(first_id), str(second_id)],
+        target_id=str(first_id),
+        title="合并后的知识点",
+        summary=None,
+        point_type="concept",
+        accept=True,
+    )
+    split_candidate.assert_awaited_once_with(
+        parent_user_id="parent-1",
+        candidate_id=str(first_id),
+        items=[
+            {
+                "title": "第一部分",
+                "summary": "",
+                "point_type": "concept",
+            },
+            {
+                "title": "第二部分",
+                "summary": "",
+                "point_type": "concept",
+            },
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_merge_without_target_cannot_be_accepted_immediately(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    first_id = uuid4()
+    second_id = uuid4()
+    with patch(
+        "src.server.app.education.textbooks.merge_knowledge_point_candidates_for_parent",
+        new=AsyncMock(),
+    ) as merge_candidates:
+        response = await client.post(
+            "/api/v1/education/candidates/merge",
+            json={
+                "source_ids": [str(first_id), str(second_id)],
+                "title": "新建合并候选",
+                "point_type": "concept",
+                "accept": True,
+            },
+        )
+
+    assert response.status_code == 422
+    merge_candidates.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_candidate_transition_errors_map_to_http_conflicts(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    candidate_id = uuid4()
+    with patch(
+        "src.server.app.education.textbooks.accept_knowledge_point_candidates_for_parent",
+        new=AsyncMock(
+            side_effect=TextbookTransitionError(
+                "Generated knowledge-point candidate transition is not allowed"
+            )
+        ),
+    ):
+        conflict = await client.post(
+            "/api/v1/education/candidates/accept",
+            json={"candidate_ids": [str(candidate_id)]},
+        )
+    with patch(
+        "src.server.app.education.textbooks.accept_knowledge_point_candidates_for_parent",
+        new=AsyncMock(
+            side_effect=TextbookNotFoundError(
+                "Generated knowledge-point candidate not found"
+            )
+        ),
+    ):
+        missing = await client.post(
+            "/api/v1/education/candidates/accept",
+            json={"candidate_ids": [str(candidate_id)]},
+        )
+
+    assert conflict.status_code == 409
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_candidate_text_controls_are_rejected_before_persistence(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    first_id = uuid4()
+    second_id = uuid4()
+    with (
+        patch(
+            "src.server.app.education.textbooks.update_knowledge_point_candidate_for_parent",
+            new=AsyncMock(),
+        ) as update_candidate,
+        patch(
+            "src.server.app.education.textbooks.merge_knowledge_point_candidates_for_parent",
+            new=AsyncMock(),
+        ) as merge_candidates,
+        patch(
+            "src.server.app.education.textbooks.split_knowledge_point_candidate_for_parent",
+            new=AsyncMock(),
+        ) as split_candidate,
+    ):
+        updated = await client.patch(
+            f"/api/v1/education/candidates/{first_id}",
+            json={"title": "bad\u0000title"},
+        )
+        merged = await client.post(
+            "/api/v1/education/candidates/merge",
+            json={
+                "source_ids": [str(first_id), str(second_id)],
+                "target_id": str(first_id),
+                "summary": "bad\u0000summary",
+            },
+        )
+        split = await client.post(
+            "/api/v1/education/candidates/split",
+            json={
+                "candidate_id": str(first_id),
+                "items": [
+                    {"title": "bad\u0001title", "point_type": "concept"},
+                    {"title": "second", "point_type": "concept"},
+                ],
+            },
+        )
+
+    assert updated.status_code == 422
+    assert merged.status_code == 422
+    assert split.status_code == 422
+    update_candidate.assert_not_awaited()
+    merge_candidates.assert_not_awaited()
+    split_candidate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_candidate_summary_accepts_contract_line_breaks(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    first_id = uuid4()
+    second_id = uuid4()
+    with patch(
+        "src.server.app.education.textbooks.merge_knowledge_point_candidates_for_parent",
+        new=AsyncMock(return_value=[]),
+    ) as merge_candidates:
+        response = await client.post(
+            "/api/v1/education/candidates/merge",
+            json={
+                "source_ids": [str(first_id), str(second_id)],
+                "target_id": str(first_id),
+                "summary": "第一行\n第二行\r\n第三行",
+            },
+        )
+
+    assert response.status_code == 200
+    assert merge_candidates.await_args.kwargs["summary"] == "第一行\n第二行\r\n第三行"
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_access_candidate_review_endpoints(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "student-1"
+    structure_id = uuid4()
+    candidate_id = uuid4()
+    other_id = uuid4()
+    permission = TextbookPermissionError(
+        "Only a parent can review knowledge-point candidates"
+    )
+    with (
+        patch(
+            "src.server.app.education.textbooks.list_knowledge_point_candidates_for_parent",
+            new=AsyncMock(side_effect=permission),
+        ),
+        patch(
+            "src.server.app.education.textbooks.update_knowledge_point_candidate_for_parent",
+            new=AsyncMock(side_effect=permission),
+        ),
+        patch(
+            "src.server.app.education.textbooks.accept_knowledge_point_candidates_for_parent",
+            new=AsyncMock(side_effect=permission),
+        ),
+        patch(
+            "src.server.app.education.textbooks.reject_knowledge_point_candidates_for_parent",
+            new=AsyncMock(side_effect=permission),
+        ),
+        patch(
+            "src.server.app.education.textbooks.merge_knowledge_point_candidates_for_parent",
+            new=AsyncMock(side_effect=permission),
+        ),
+        patch(
+            "src.server.app.education.textbooks.split_knowledge_point_candidate_for_parent",
+            new=AsyncMock(side_effect=permission),
+        ),
+    ):
+        responses = [
+            await client.get(f"/api/v1/education/structures/{structure_id}/candidates"),
+            await client.patch(
+                f"/api/v1/education/candidates/{candidate_id}",
+                json={"title": "新标题"},
+            ),
+            await client.post(
+                "/api/v1/education/candidates/accept",
+                json={"candidate_ids": [str(candidate_id)]},
+            ),
+            await client.post(
+                "/api/v1/education/candidates/reject",
+                json={"candidate_ids": [str(candidate_id)]},
+            ),
+            await client.post(
+                "/api/v1/education/candidates/merge",
+                json={
+                    "source_ids": [str(candidate_id), str(other_id)],
+                    "target_id": str(candidate_id),
+                },
+            ),
+            await client.post(
+                "/api/v1/education/candidates/split",
+                json={
+                    "candidate_id": str(candidate_id),
+                    "items": [
+                        {"title": "一", "point_type": "concept"},
+                        {"title": "二", "point_type": "concept"},
+                    ],
+                },
+            ),
+        ]
+
+    assert [response.status_code for response in responses] == [403] * 6
 
 
 @pytest.mark.asyncio

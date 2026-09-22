@@ -6,6 +6,7 @@ import {
   ExternalLink,
   FileCog,
   GitBranch,
+  ListChecks,
   Play,
   RotateCcw,
   Send,
@@ -47,6 +48,11 @@ const statusLabels: Record<TextbookVersionStatus, string> = {
   published: '已发布',
   failed: '内容准备失败',
 };
+
+const GENERIC_STRUCTURE_SCHEMAS = new Set([
+  'langalpha-book-content-tree/v1',
+  'langalpha-managed-book-package/v1',
+]);
 
 function formatSize(size: number) {
   return size >= 1024 * 1024
@@ -402,6 +408,10 @@ function VersionWorkflow({ textbookId, version }: { textbookId: string; version:
   const structureMutations = useStructureMutations();
   const { toast } = useToast();
   const summary = structure.data?.lesson_summary;
+  const genericStructure = Boolean(
+    structure.data
+    && GENERIC_STRUCTURE_SCHEMAS.has(structure.data.schema_version),
+  );
   const steps = useMemo(
     () =>
       workflowSteps(
@@ -536,7 +546,7 @@ function VersionWorkflow({ textbookId, version }: { textbookId: string; version:
                 开始处理
               </Link>
             )}
-            {structure.data && (
+            {structure.data && !genericStructure && (
               <Link
                 to={`/textbooks/${textbookId}/versions/${version.version_id}/structure`}
                 className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-[var(--color-bg-hover)]"
@@ -547,6 +557,15 @@ function VersionWorkflow({ textbookId, version }: { textbookId: string; version:
                   : structure.data
                     ? '审阅结构与知识点'
                     : '开始结构分析'}
+              </Link>
+            )}
+            {genericStructure && (
+              <Link
+                to={`/textbooks/${textbookId}/versions/${version.version_id}/candidates`}
+                className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-[var(--color-bg-hover)]"
+              >
+                <ListChecks className="mr-2 size-4" aria-hidden="true" />
+                确认知识点候选
               </Link>
             )}
             {steps.find((step) => step.id === 'publish')?.status === 'in_progress' && (

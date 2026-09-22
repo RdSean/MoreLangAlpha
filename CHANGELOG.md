@@ -2,6 +2,19 @@
 
 ## 2026-09-22
 
+### 新增：生成知识点候选的人工确认与流转
+
+- 新增 parent-only 候选审阅 API：按任意深度的通用内容树返回生成的 pending 候选，并支持 PATCH 描述字段、批量接受/拒绝、同节点合并和拆分。知识点查询严格经 structure -> version -> textbook -> membership 校验，只投影 `origin='generated'` 的行，旧的手工知识点继续保留且不会混入候选接口。
+- 接受会把 `candidate_status` 与 legacy `status` 原子设为 `accepted`，拒绝设为 `rejected/blocked`；重复接受或拒绝按幂等成功处理，已接受后拒绝等非法终态迁移返回 409。合并会把非 target 来源设为 `merged/blocked`，按显式选项保留 target 为 pending/accepted，或新建同节点 pending 候选；拆分把原候选设为 `split/blocked`，并在同一事务中生成两个以上带唯一 candidate key 的 pending 候选。所有操作锁定确定顺序的候选行，任一失败整体回滚。
+- 生产 generic structure schema 确认为 `langalpha-book-content-tree/v1`，同时兼容 forward-compatible `langalpha-managed-book-package/v1`。TextbookDetail 对 generic schema 只显示“确认知识点候选”，不再显示旧的“审阅结构与知识点”；legacy schema 仍保留旧入口。generic 的 `lesson_summary` 改为从未删除的 generated candidate 行按 `content_structure_id`/`content_node_id` 统计，pending+accepted 为 total，accepted/lesson-backed 为进度，不再经 Unit inner join 得到错误的 0/0。
+- merge/split 在锁候选行前，按 node_id 顺序先用 `FOR UPDATE` 锁定所属 `education_content_nodes` 行。position 在节点锁之后分配，真实 PostgreSQL 双连接测试证明并发 merge/split 会等待节点锁，完成后 position 唯一且连续；不依赖 UUID 或 created_at 排序兜底。
+- candidate PATCH/merge/split 的标题、类型和摘要统一在请求边界拒绝未允许 Unicode `Cc`；摘要允许契约中的换行/回车，NUL 等控制字符返回 422 且不会进入 DB。新增学生访问六个候选审阅端点的 403 覆盖。
+- 拆分生成键使用“截断后的可读来源前缀 + 每项稳定 SHA-256 短后缀”，长度始终不超过数据库 `VARCHAR(255)`；255 字符合法来源键也已由真实 PostgreSQL 测试覆盖。无 target 的新合并候选必须保持 pending，`accept=true` 在请求模型层返回 422，service/DB 同样 fail closed；带 target 的显式接受语义保持不变。DB 失败注入测试确认拆分中途插入失败后，来源状态和已插入项都会回滚。
+- 新增 `/textbooks/:textbookId/versions/:versionId/candidates` 懒加载审阅页，通用树按 `parent_node_id` 渲染节点和候选；页面提供选择、接受、拒绝、合并、拆分、标题/摘要/类型编辑，并显示加载、错误、空状态和状态统计。生成候选只会在用户明确操作后改变状态，不会因页面加载或其他动作自动接受。
+- 审阅选择只允许 pending：非 pending 复选框禁用，批量操作始终使用当前 pending 交集，已选项在刷新后变为 accepted/rejected/merged/split 时会自动剔除。最多允许明确选择 100 个 pending 项；达到 100 后只禁用额外复选框并显示安全提示，已选 100 项的 bulk 操作仍可用且请求不会超过 100 个 ID。拆分对话框至少 2 项、最多 100 项，后端模型边界一致，支持增删拆分项且无法删除到 2 项以下。
+- 当前候选 projection 保持完整审核语义：后端允许的校验上限为 5,000 个 content node 和 50,000 个 candidate，不静默截断；UI 未实现分页/虚拟化，计划将超过约 2,000 个可见行的场景列为 scalability follow-up，未来必须用 cursor/window + 显式 `truncated` 扩展。
+- 验证：API 与结构路由单测 `35 passed`，数据库结构投影单测 `32 passed`，真实 PostgreSQL 候选迁移/更新/幂等/ACL/merge/split/255-key/rollback/concurrency 测试 `5 passed`，Education Vitest `73 passed`；`pnpm typecheck`、`pnpm build`、修改文件 Ruff 与 `git diff --check` 通过。迁移 head 保持 `081_book_pipeline_checkpoint`，本 Task 不新增迁移。
+
 ### 新增：统一教材处理四阶段实时进度接口与时间线
 
 - 新增 parent-only 的 `GET /api/v1/education/jobs/{job_id}/progress` 与 `/progress/stream`。读取以 PostgreSQL 进度事件为准，固定返回“教材章节解析、内容智能处理、知识点生成、课程制作”四个阶段；未知 job 或其他 scope 返回 404。

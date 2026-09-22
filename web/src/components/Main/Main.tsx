@@ -25,6 +25,7 @@ const TextbookLibrary = React.lazy(routeChunks.textbookLibrary);
 const TextbookDetail = React.lazy(routeChunks.textbookDetail);
 const BookProcessing = React.lazy(routeChunks.bookProcessing);
 const TextbookStructure = React.lazy(routeChunks.textbookStructure);
+const KnowledgePointReview = React.lazy(routeChunks.knowledgePointReview);
 const KnowledgePointLessonReview = React.lazy(routeChunks.knowledgePointLessonReview);
 const StudentTextbookLearning = React.lazy(routeChunks.studentTextbookLearning);
 const PersonalizedSummary = React.lazy(routeChunks.personalizedSummary);
@@ -57,6 +58,7 @@ function Main() {
         <Route path="/textbooks/:textbookId" element={<TextbookDetail />} />
         <Route path="/textbooks/:textbookId/versions/:versionId/processing" element={<BookProcessing />} />
         <Route path="/textbooks/:textbookId/versions/:versionId/structure" element={<TextbookStructure />} />
+        <Route path="/textbooks/:textbookId/versions/:versionId/candidates" element={<KnowledgePointReview />} />
         <Route path="/textbooks/:textbookId/versions/:versionId/knowledge/:knowledgePointId" element={<KnowledgePointLessonReview />} />
         <Route path="/education/learn/:assignmentId" element={<StudentTextbookLearning />} />
         <Route path="/education/learn/:assignmentId/units/:unitId" element={<StudentTextbookLearning />} />

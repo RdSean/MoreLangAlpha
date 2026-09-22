@@ -163,6 +163,7 @@ export const queryKeys = {
     textbook: (id: string) => [...queryKeys.education.textbooks(), id],
     textbookStructure: (versionId: string) => [...queryKeys.education.textbooks(), versionId, 'structure'],
     structure: (id: string) => [...queryKeys.education.all, 'textbook-structures', id],
+    candidateReview: (structureId: string) => [...queryKeys.education.structure(structureId), 'candidates'],
     bookPipelineJob: (id: string) => [...queryKeys.education.all, 'book-pipeline-jobs', id],
     bookPipelineJobProgress: (id: string) => [...queryKeys.education.bookPipelineJob(id), 'progress'],
     structureJob: (id: string) => [...queryKeys.education.all, 'structure-generation-jobs', id],

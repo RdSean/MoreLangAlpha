@@ -235,6 +235,76 @@ export interface TextbookStructure {
   latest_generation_job?: StructureGenerationJobSummary | null;
 }
 
+export type KnowledgePointCandidateStatus =
+  | 'pending'
+  | 'accepted'
+  | 'rejected'
+  | 'merged'
+  | 'split';
+
+export interface KnowledgePointCandidate {
+  knowledge_point_id: string;
+  content_structure_id: string;
+  content_node_id: string;
+  candidate_key: string;
+  point_type: string;
+  origin: 'generated';
+  candidate_status: KnowledgePointCandidateStatus;
+  position: number;
+  slug: string;
+  title: string;
+  summary: string;
+  source_refs: StructureSourceRef[];
+  confidence: number;
+  status: string;
+  created_at?: string | null;
+}
+
+export interface KnowledgePointCandidateNode {
+  node_id: string;
+  structure_id: string;
+  parent_node_id?: string | null;
+  node_key: string;
+  node_type: string;
+  label?: string | null;
+  position: number;
+  slug: string;
+  title: string;
+  summary: string;
+  source_refs: StructureSourceRef[];
+  candidates: KnowledgePointCandidate[];
+}
+
+export interface KnowledgePointCandidateReview {
+  structure_id: string;
+  version_id: string;
+  nodes: KnowledgePointCandidateNode[];
+}
+
+export interface UpdateKnowledgePointCandidateInput {
+  title?: string;
+  summary?: string;
+  point_type?: string;
+}
+
+export interface MergeKnowledgePointCandidatesInput {
+  source_ids: string[];
+  target_id?: string | null;
+  title?: string;
+  summary?: string;
+  point_type?: string;
+  accept: boolean;
+}
+
+export interface SplitKnowledgePointCandidateInput {
+  candidate_id: string;
+  items: Array<{
+    title: string;
+    summary: string;
+    point_type: string;
+  }>;
+}
+
 export interface StructureGenerationJobSummary {
   generation_job_id: string;
   status: string;

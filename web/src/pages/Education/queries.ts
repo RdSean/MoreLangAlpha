@@ -4,8 +4,11 @@ import * as educationApi from './api';
 import type {
   CreateBookPipelineJobInput,
   EducationTaskCalendarRequest,
+  MergeKnowledgePointCandidatesInput,
+  SplitKnowledgePointCandidateInput,
   StructureGenerationJob,
   TextbookStructureUnit,
+  UpdateKnowledgePointCandidateInput,
 } from './types';
 
 export function useEducationTasks() {
@@ -207,6 +210,57 @@ export function useLatestTextbookStructure(versionId: string | undefined, enable
     enabled: Boolean(versionId) && enabled,
     staleTime: 5_000,
   });
+}
+
+export function useKnowledgePointCandidateReview(
+  structureId: string | undefined,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: queryKeys.education.candidateReview(structureId ?? ''),
+    queryFn: () =>
+      educationApi.getKnowledgePointCandidateReview(structureId ?? ''),
+    enabled: Boolean(structureId) && enabled,
+    staleTime: 5_000,
+  });
+}
+
+export function useKnowledgePointCandidateMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
+  return {
+    accept: useMutation({
+      mutationFn: ({ candidateIds }: { candidateIds: string[] }) =>
+        educationApi.acceptKnowledgePointCandidates(candidateIds),
+      onSuccess: invalidate,
+    }),
+    reject: useMutation({
+      mutationFn: ({ candidateIds }: { candidateIds: string[] }) =>
+        educationApi.rejectKnowledgePointCandidates(candidateIds),
+      onSuccess: invalidate,
+    }),
+    update: useMutation({
+      mutationFn: ({
+        candidateId,
+        ...input
+      }: {
+        candidateId: string;
+      } & UpdateKnowledgePointCandidateInput) =>
+        educationApi.updateKnowledgePointCandidate(candidateId, input),
+      onSuccess: invalidate,
+    }),
+    merge: useMutation({
+      mutationFn: (input: MergeKnowledgePointCandidatesInput) =>
+        educationApi.mergeKnowledgePointCandidates(input),
+      onSuccess: invalidate,
+    }),
+    split: useMutation({
+      mutationFn: (input: SplitKnowledgePointCandidateInput) =>
+        educationApi.splitKnowledgePointCandidate(input),
+      onSuccess: invalidate,
+    }),
+  };
 }
 
 export function useStructureGenerationJob(jobId: string | undefined, enabled: boolean) {

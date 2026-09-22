@@ -28,10 +28,24 @@ _CHECKPOINT_BUNDLE_PREFIX = re.compile(
     r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
 )
 MAX_GENERATION_PROGRESS_EVENTS = 2_000
+GENERIC_STRUCTURE_SCHEMAS = frozenset(
+    {
+        "langalpha-book-content-tree/v1",
+        "langalpha-managed-book-package/v1",
+    }
+)
 
 
 class TextbookQueueValidationError(ValueError):
     """A textbook queue request failed before any database write."""
+
+
+class KnowledgePointCandidateNotFoundError(LookupError):
+    """A generated knowledge-point candidate is absent or not owned."""
+
+
+class KnowledgePointCandidateTransitionError(ValueError):
+    """A generated knowledge-point candidate cannot take the requested state."""
 
 
 class ProgressEventPersistenceOutcome(str, Enum):
@@ -125,9 +139,7 @@ def _validated_asset_manifest(value: object) -> list[dict[str, str]]:
         ):
             raise TextbookQueueValidationError("asset_manifest entry is invalid")
         if relative_path in relative_paths:
-            raise TextbookQueueValidationError(
-                "asset_manifest paths must be unique"
-            )
+            raise TextbookQueueValidationError("asset_manifest paths must be unique")
         if not _SHA256.fullmatch(fields["sha256"]):
             raise TextbookQueueValidationError("asset_manifest sha256 is invalid")
         relative_paths.add(relative_path)
@@ -782,9 +794,7 @@ async def pause_book_pipeline_for_chapter_review(
                     (attempt_id, generation_job_id),
                 )
                 if not await cur.fetchone():
-                    raise RuntimeError(
-                        "Book pipeline checkpoint transition was lost"
-                    )
+                    raise RuntimeError("Book pipeline checkpoint transition was lost")
                 await cur.execute(
                     """
                     UPDATE education_generation_jobs AS jobs
@@ -823,9 +833,7 @@ async def pause_book_pipeline_for_chapter_review(
                 )
                 job = await cur.fetchone()
                 if not job:
-                    raise RuntimeError(
-                        "Book pipeline checkpoint transition was lost"
-                    )
+                    raise RuntimeError("Book pipeline checkpoint transition was lost")
     return dict(job)
 
 
@@ -982,6 +990,14 @@ def _candidate_slug(candidate_key: str) -> str:
     slug = re.sub(r"[^0-9a-z]+", "-", candidate_key.casefold()).strip("-")
     slug = slug[:230] or "knowledge-point"
     return f"{slug}-{uuid4().hex[:8]}"
+
+
+def _split_candidate_key(source_key: str, index: int) -> str:
+    """Return a readable, deterministic key that fits VARCHAR(255)."""
+    digest = hashlib.sha256(f"{source_key}\0{index}".encode("utf-8")).hexdigest()[:12]
+    suffix = f"-split-{index + 1:02d}-{digest}"
+    prefix = source_key[: max(1, 255 - len(suffix))]
+    return f"{prefix}{suffix}"
 
 
 async def complete_book_pipeline_import(
@@ -1469,36 +1485,67 @@ async def get_textbook_structure_for_parent(
             knowledge_points = [dict(row) for row in await cur.fetchall()]
             by_unit: dict[str, list[dict[str, Any]]] = {}
             for knowledge_point in knowledge_points:
-                by_unit.setdefault(
-                    str(knowledge_point["unit_id"]), []
-                ).append(knowledge_point)
+                by_unit.setdefault(str(knowledge_point["unit_id"]), []).append(
+                    knowledge_point
+                )
             for unit in units:
                 unit["scopes"] = scopes_by_unit.get(str(unit["unit_id"]), [])
                 unit["knowledge_points"] = by_unit.get(str(unit["unit_id"]), [])
             result["units"] = units
-            await cur.execute(
-                """
-                SELECT COUNT(*) AS total,
-                       COUNT(*) FILTER (
-                           WHERE knowledge_points.status = 'accepted'
-                       ) AS accepted,
-                       COUNT(lessons.lesson_id) FILTER (
-                           WHERE lessons.latest_revision_id IS NOT NULL
-                       ) AS generated,
-                       COUNT(*) FILTER (
-                           WHERE lessons.status = 'approved'
-                             AND lessons.latest_revision_id IS NOT NULL
-                       ) AS approved
-                FROM education_structure_units AS units
-                JOIN education_structure_knowledge_points AS knowledge_points
-                  ON knowledge_points.unit_id = units.unit_id
-                LEFT JOIN education_kp_lessons AS lessons
-                  ON lessons.knowledge_point_id =
-                     knowledge_points.knowledge_point_id
-                WHERE units.structure_id = %s
-                """,
-                (structure_id,),
-            )
+            if str(structure.get("schema_version") or "") in GENERIC_STRUCTURE_SCHEMAS:
+                await cur.execute(
+                    """
+                    SELECT COUNT(*) FILTER (
+                               WHERE candidate.candidate_status IN (
+                                   'pending', 'accepted'
+                               )
+                           ) AS total,
+                           COUNT(*) FILTER (
+                               WHERE candidate.candidate_status = 'accepted'
+                           ) AS accepted,
+                           COUNT(lessons.lesson_id) FILTER (
+                               WHERE candidate.candidate_status = 'accepted'
+                                 AND lessons.latest_revision_id IS NOT NULL
+                           ) AS generated,
+                           COUNT(*) FILTER (
+                               WHERE candidate.candidate_status = 'accepted'
+                                 AND lessons.status = 'approved'
+                                 AND lessons.latest_revision_id IS NOT NULL
+                           ) AS approved
+                    FROM education_structure_knowledge_points AS candidate
+                    LEFT JOIN education_kp_lessons AS lessons
+                      ON lessons.knowledge_point_id =
+                         candidate.knowledge_point_id
+                    WHERE candidate.content_structure_id = %s
+                      AND candidate.origin = 'generated'
+                      AND candidate.content_node_id IS NOT NULL
+                    """,
+                    (structure_id,),
+                )
+            else:
+                await cur.execute(
+                    """
+                    SELECT COUNT(*) AS total,
+                           COUNT(*) FILTER (
+                               WHERE knowledge_points.status = 'accepted'
+                           ) AS accepted,
+                           COUNT(lessons.lesson_id) FILTER (
+                               WHERE lessons.latest_revision_id IS NOT NULL
+                           ) AS generated,
+                           COUNT(*) FILTER (
+                               WHERE lessons.status = 'approved'
+                                 AND lessons.latest_revision_id IS NOT NULL
+                           ) AS approved
+                    FROM education_structure_units AS units
+                    JOIN education_structure_knowledge_points AS knowledge_points
+                      ON knowledge_points.unit_id = units.unit_id
+                    LEFT JOIN education_kp_lessons AS lessons
+                      ON lessons.knowledge_point_id =
+                         knowledge_points.knowledge_point_id
+                    WHERE units.structure_id = %s
+                    """,
+                    (structure_id,),
+                )
             result["lesson_summary"] = dict(await cur.fetchone())
             await cur.execute(
                 """
@@ -1525,17 +1572,594 @@ async def get_textbook_structure_for_parent(
                 latest_generation_job["status"] if latest_generation_job else None
             )
             result["latest_generation_job_created_at"] = (
-                latest_generation_job["created_at"]
-                if latest_generation_job
-                else None
+                latest_generation_job["created_at"] if latest_generation_job else None
             )
             result["latest_generation_job_updated_at"] = (
-                latest_generation_job["updated_at"]
-                if latest_generation_job
-                else None
+                latest_generation_job["updated_at"] if latest_generation_job else None
             )
-            result["latest_generation_job"] = dict(latest_generation_job) if latest_generation_job else None
+            result["latest_generation_job"] = (
+                dict(latest_generation_job) if latest_generation_job else None
+            )
     return result
+
+
+async def list_knowledge_point_candidates_for_parent(
+    *,
+    parent_user_id: str,
+    structure_id: str,
+) -> dict[str, Any] | None:
+    """Return one owned generic content tree with generated candidates."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT structures.structure_id, structures.version_id
+                FROM education_textbook_structures AS structures
+                JOIN education_textbook_versions AS versions
+                  ON versions.version_id = structures.version_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = versions.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                WHERE structures.structure_id = %s
+                  AND memberships.user_id = %s
+                  AND memberships.role = 'parent'
+                """,
+                (structure_id, parent_user_id),
+            )
+            structure = await cur.fetchone()
+            if not structure:
+                return None
+
+            await cur.execute(
+                """
+                WITH RECURSIVE ordered_nodes AS (
+                    SELECT nodes.node_id, nodes.structure_id,
+                           nodes.parent_node_id, nodes.node_key,
+                           nodes.node_type, nodes.label, nodes.position,
+                           nodes.slug, nodes.title, nodes.summary,
+                           nodes.source_refs,
+                           ARRAY[nodes.position]::INTEGER[] AS sort_path
+                    FROM education_content_nodes AS nodes
+                    WHERE nodes.structure_id = %s
+                      AND nodes.parent_node_id IS NULL
+                    UNION ALL
+                    SELECT child.node_id, child.structure_id,
+                           child.parent_node_id, child.node_key,
+                           child.node_type, child.label, child.position,
+                           child.slug, child.title, child.summary,
+                           child.source_refs,
+                           parent.sort_path || child.position
+                    FROM education_content_nodes AS child
+                    JOIN ordered_nodes AS parent
+                      ON parent.node_id = child.parent_node_id
+                    WHERE child.structure_id = %s
+                )
+                SELECT node_id, structure_id, parent_node_id, node_key,
+                       node_type, label, position, slug, title, summary,
+                       source_refs
+                FROM ordered_nodes
+                ORDER BY sort_path, node_key
+                """,
+                (structure_id, structure_id),
+            )
+            nodes = [dict(row) for row in await cur.fetchall()]
+
+            await cur.execute(
+                """
+                SELECT candidate.knowledge_point_id,
+                       candidate.content_structure_id,
+                       candidate.content_node_id,
+                       candidate.candidate_key,
+                       candidate.point_type,
+                       candidate.origin,
+                       candidate.candidate_status,
+                       candidate.position,
+                       candidate.slug,
+                       candidate.title,
+                       candidate.summary,
+                       candidate.source_refs,
+                       candidate.confidence,
+                       candidate.status,
+                       candidate.created_at
+                FROM education_structure_knowledge_points AS candidate
+                WHERE candidate.content_structure_id = %s
+                  AND candidate.origin = 'generated'
+                  AND candidate.content_node_id IS NOT NULL
+                ORDER BY candidate.position, candidate.created_at,
+                         candidate.knowledge_point_id
+                """,
+                (structure_id,),
+            )
+            candidates_by_node: dict[str, list[dict[str, Any]]] = {}
+            for row in await cur.fetchall():
+                candidate = dict(row)
+                candidates_by_node.setdefault(
+                    str(candidate["content_node_id"]), []
+                ).append(candidate)
+            for node in nodes:
+                node["candidates"] = candidates_by_node.get(str(node["node_id"]), [])
+
+    return {
+        "structure_id": structure["structure_id"],
+        "version_id": structure["version_id"],
+        "nodes": nodes,
+    }
+
+
+async def _lock_owned_generated_candidates(
+    cur: Any,
+    *,
+    parent_user_id: str,
+    candidate_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Lock generated candidates that belong to one parent's household."""
+    await cur.execute(
+        """
+        SELECT candidate.knowledge_point_id,
+               candidate.content_structure_id,
+               candidate.content_node_id,
+               candidate.candidate_key,
+               candidate.point_type,
+               candidate.origin,
+               candidate.candidate_status,
+               candidate.position,
+               candidate.slug,
+               candidate.title,
+               candidate.summary,
+               candidate.source_refs,
+               candidate.confidence,
+               candidate.status,
+               candidate.created_at
+        FROM education_structure_knowledge_points AS candidate
+        JOIN education_textbook_structures AS structures
+          ON structures.structure_id = candidate.content_structure_id
+        JOIN education_textbook_versions AS versions
+          ON versions.version_id = structures.version_id
+        JOIN education_textbooks AS textbooks
+          ON textbooks.textbook_id = versions.textbook_id
+        JOIN education_memberships AS memberships
+          ON memberships.household_id = textbooks.household_id
+        WHERE candidate.knowledge_point_id = ANY(%s::uuid[])
+          AND candidate.origin = 'generated'
+          AND candidate.content_structure_id IS NOT NULL
+          AND candidate.content_node_id IS NOT NULL
+          AND memberships.user_id = %s
+          AND memberships.role = 'parent'
+        ORDER BY candidate.knowledge_point_id
+        FOR UPDATE OF candidate
+        """,
+        (candidate_ids, parent_user_id),
+    )
+    rows = [dict(row) for row in await cur.fetchall()]
+    if len(rows) != len(candidate_ids):
+        raise KnowledgePointCandidateNotFoundError(
+            "Generated knowledge-point candidate not found"
+        )
+    return rows
+
+
+async def _lock_owned_candidate_content_nodes(
+    cur: Any,
+    *,
+    parent_user_id: str,
+    candidate_ids: list[str],
+) -> list[str]:
+    """Lock content-node rows before any candidate mutation."""
+    await cur.execute(
+        """
+        SELECT nodes.node_id
+        FROM education_content_nodes AS nodes
+        JOIN education_textbook_structures AS structures
+          ON structures.structure_id = nodes.structure_id
+        JOIN education_textbook_versions AS versions
+          ON versions.version_id = structures.version_id
+        JOIN education_textbooks AS textbooks
+          ON textbooks.textbook_id = versions.textbook_id
+        JOIN education_memberships AS memberships
+          ON memberships.household_id = textbooks.household_id
+        WHERE nodes.node_id IN (
+            SELECT candidate.content_node_id
+            FROM education_structure_knowledge_points AS candidate
+            WHERE candidate.knowledge_point_id = ANY(%s::uuid[])
+              AND candidate.origin = 'generated'
+              AND candidate.content_node_id IS NOT NULL
+        )
+          AND memberships.user_id = %s
+          AND memberships.role = 'parent'
+        ORDER BY nodes.node_id
+        FOR UPDATE OF nodes
+        """,
+        (candidate_ids, parent_user_id),
+    )
+    return [str(row["node_id"]) for row in await cur.fetchall()]
+
+
+def _candidate_by_id(
+    rows: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    return {str(row["knowledge_point_id"]): row for row in rows}
+
+
+async def update_knowledge_point_candidate_for_parent(
+    *,
+    parent_user_id: str,
+    candidate_id: str,
+    title: str | None,
+    summary: str | None,
+    point_type: str | None,
+) -> dict[str, Any] | None:
+    """Update only descriptive fields on one generated candidate."""
+    if title is None and summary is None and point_type is None:
+        raise TextbookQueueValidationError(
+            "At least one candidate field must be updated"
+        )
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT candidate.knowledge_point_id
+                    FROM education_structure_knowledge_points AS candidate
+                    JOIN education_textbook_structures AS structures
+                      ON structures.structure_id = candidate.content_structure_id
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = structures.version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE candidate.knowledge_point_id = %s
+                      AND candidate.origin = 'generated'
+                      AND candidate.content_structure_id IS NOT NULL
+                      AND candidate.content_node_id IS NOT NULL
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                    FOR UPDATE OF candidate
+                    """,
+                    (candidate_id, parent_user_id),
+                )
+                if not await cur.fetchone():
+                    return None
+                await cur.execute(
+                    """
+                    UPDATE education_structure_knowledge_points
+                    SET title = COALESCE(%s, title),
+                        summary = COALESCE(%s, summary),
+                        point_type = COALESCE(%s, point_type)
+                    WHERE knowledge_point_id = %s
+                    RETURNING knowledge_point_id, content_structure_id,
+                              content_node_id, candidate_key, point_type,
+                              origin, candidate_status, position, slug,
+                              title, summary, source_refs, confidence,
+                              status, created_at
+                    """,
+                    (title, summary, point_type, candidate_id),
+                )
+                row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def _transition_generated_candidates(
+    *,
+    parent_user_id: str,
+    candidate_ids: list[str],
+    target_status: str,
+    target_legacy_status: str,
+) -> list[dict[str, Any]]:
+    """Idempotently apply accept or reject to an ordered candidate set."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                rows = await _lock_owned_generated_candidates(
+                    cur,
+                    parent_user_id=parent_user_id,
+                    candidate_ids=candidate_ids,
+                )
+                by_id = _candidate_by_id(rows)
+                for candidate_id in candidate_ids:
+                    row = by_id[candidate_id]
+                    current = str(row["candidate_status"])
+                    if current == target_status:
+                        continue
+                    if current != "pending":
+                        raise KnowledgePointCandidateTransitionError(
+                            "Generated knowledge-point candidate transition "
+                            f"from {current} to {target_status} is not allowed"
+                        )
+                    await cur.execute(
+                        """
+                        UPDATE education_structure_knowledge_points
+                        SET candidate_status = %s, status = %s
+                        WHERE knowledge_point_id = %s
+                        """,
+                        (target_status, target_legacy_status, candidate_id),
+                    )
+                    row["candidate_status"] = target_status
+                    row["status"] = target_legacy_status
+    return [by_id[candidate_id] for candidate_id in candidate_ids]
+
+
+async def accept_knowledge_point_candidates_for_parent(
+    *,
+    parent_user_id: str,
+    candidate_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Accept pending generated candidates; repeated accepts are idempotent."""
+    return await _transition_generated_candidates(
+        parent_user_id=parent_user_id,
+        candidate_ids=candidate_ids,
+        target_status="accepted",
+        target_legacy_status="accepted",
+    )
+
+
+async def reject_knowledge_point_candidates_for_parent(
+    *,
+    parent_user_id: str,
+    candidate_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Reject pending generated candidates; repeated rejects are idempotent."""
+    return await _transition_generated_candidates(
+        parent_user_id=parent_user_id,
+        candidate_ids=candidate_ids,
+        target_status="rejected",
+        target_legacy_status="blocked",
+    )
+
+
+def _combined_candidate_source_refs(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    combined: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        refs = row.get("source_refs")
+        if not isinstance(refs, list):
+            continue
+        for ref in refs:
+            if not isinstance(ref, dict):
+                continue
+            key = json.dumps(
+                ref,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            combined.append(ref)
+    return combined
+
+
+async def merge_knowledge_point_candidates_for_parent(
+    *,
+    parent_user_id: str,
+    source_ids: list[str],
+    target_id: str | None,
+    title: str | None,
+    summary: str | None,
+    point_type: str | None,
+    accept: bool,
+) -> list[dict[str, Any]]:
+    """Merge pending candidates under one content node in one transaction."""
+    if target_id is None and accept:
+        raise KnowledgePointCandidateTransitionError(
+            "A new merged candidate must remain pending"
+        )
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await _lock_owned_candidate_content_nodes(
+                    cur,
+                    parent_user_id=parent_user_id,
+                    candidate_ids=source_ids,
+                )
+                rows = await _lock_owned_generated_candidates(
+                    cur,
+                    parent_user_id=parent_user_id,
+                    candidate_ids=source_ids,
+                )
+                if any(str(row["candidate_status"]) != "pending" for row in rows):
+                    raise KnowledgePointCandidateTransitionError(
+                        "Only pending generated candidates can be merged"
+                    )
+                structure_ids = {str(row["content_structure_id"]) for row in rows}
+                node_ids = {str(row["content_node_id"]) for row in rows}
+                if len(structure_ids) != 1 or len(node_ids) != 1:
+                    raise KnowledgePointCandidateTransitionError(
+                        "Candidates can only be merged within one content node"
+                    )
+                by_id = _candidate_by_id(rows)
+                if target_id is not None and target_id not in by_id:
+                    raise KnowledgePointCandidateTransitionError(
+                        "Merge target must be one of the source candidates"
+                    )
+                source_refs = _combined_candidate_source_refs(rows)
+                final_status = "accepted" if accept else "pending"
+                legacy_status = "accepted" if accept else "review"
+
+                if target_id is None:
+                    await cur.execute(
+                        """
+                        SELECT COALESCE(MAX(position), 0) + 1 AS position
+                        FROM education_structure_knowledge_points
+                        WHERE content_node_id = %s
+                        """,
+                        (next(iter(node_ids)),),
+                    )
+                    position = int((await cur.fetchone())["position"])
+                    candidate_key = f"merge-{uuid4().hex}"
+                    await cur.execute(
+                        """
+                        INSERT INTO education_structure_knowledge_points (
+                            knowledge_point_id, unit_id, content_structure_id,
+                            content_node_id, candidate_key, point_type, origin,
+                            candidate_status, position, slug, title, summary,
+                            source_refs, confidence, status
+                        ) VALUES (
+                            %s, NULL, %s, %s, %s, %s, 'generated', %s, %s,
+                            %s, %s, %s, %s, %s, %s
+                        )
+                        RETURNING knowledge_point_id, content_structure_id,
+                                  content_node_id, candidate_key, point_type,
+                                  origin, candidate_status, position, slug,
+                                  title, summary, source_refs, confidence,
+                                  status, created_at
+                        """,
+                        (
+                            str(uuid4()),
+                            next(iter(structure_ids)),
+                            next(iter(node_ids)),
+                            candidate_key,
+                            point_type,
+                            final_status,
+                            position,
+                            _candidate_slug(candidate_key),
+                            title,
+                            summary or "",
+                            Json(source_refs),
+                            max(float(row["confidence"]) for row in rows),
+                            legacy_status,
+                        ),
+                    )
+                    target = dict(await cur.fetchone())
+                    target_id = str(target["knowledge_point_id"])
+                else:
+                    target = by_id[target_id]
+                    await cur.execute(
+                        """
+                        UPDATE education_structure_knowledge_points
+                        SET title = COALESCE(%s, title),
+                            summary = COALESCE(%s, summary),
+                            point_type = COALESCE(%s, point_type),
+                            source_refs = %s,
+                            candidate_status = %s,
+                            status = %s
+                        WHERE knowledge_point_id = %s
+                        RETURNING knowledge_point_id, content_structure_id,
+                                  content_node_id, candidate_key, point_type,
+                                  origin, candidate_status, position, slug,
+                                  title, summary, source_refs, confidence,
+                                  status, created_at
+                        """,
+                        (
+                            title,
+                            summary,
+                            point_type,
+                            Json(source_refs),
+                            final_status,
+                            legacy_status,
+                            target_id,
+                        ),
+                    )
+                    target = dict(await cur.fetchone())
+
+                merged_ids = [
+                    candidate_id
+                    for candidate_id in source_ids
+                    if candidate_id != target_id
+                ]
+                if merged_ids:
+                    await cur.execute(
+                        """
+                        UPDATE education_structure_knowledge_points
+                        SET candidate_status = 'merged', status = 'blocked'
+                        WHERE knowledge_point_id = ANY(%s::uuid[])
+                        """,
+                        (merged_ids,),
+                    )
+                for candidate_id in merged_ids:
+                    by_id[candidate_id]["candidate_status"] = "merged"
+                    by_id[candidate_id]["status"] = "blocked"
+    return [target, *[by_id[candidate_id] for candidate_id in merged_ids]]
+
+
+async def split_knowledge_point_candidate_for_parent(
+    *,
+    parent_user_id: str,
+    candidate_id: str,
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Replace one pending candidate with two or more pending candidates."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await _lock_owned_candidate_content_nodes(
+                    cur,
+                    parent_user_id=parent_user_id,
+                    candidate_ids=[candidate_id],
+                )
+                rows = await _lock_owned_generated_candidates(
+                    cur,
+                    parent_user_id=parent_user_id,
+                    candidate_ids=[candidate_id],
+                )
+                source = rows[0]
+                if source["candidate_status"] != "pending":
+                    raise KnowledgePointCandidateTransitionError(
+                        "Only a pending generated candidate can be split"
+                    )
+                await cur.execute(
+                    """
+                    SELECT COALESCE(MAX(position), 0) + 1 AS position
+                    FROM education_structure_knowledge_points
+                    WHERE content_node_id = %s
+                    """,
+                    (source["content_node_id"],),
+                )
+                next_position = int((await cur.fetchone())["position"])
+                await cur.execute(
+                    """
+                    UPDATE education_structure_knowledge_points
+                    SET candidate_status = 'split', status = 'blocked'
+                    WHERE knowledge_point_id = %s
+                    """,
+                    (candidate_id,),
+                )
+                source["candidate_status"] = "split"
+                source["status"] = "blocked"
+
+                created: list[dict[str, Any]] = []
+                for index, item in enumerate(items):
+                    candidate_key = _split_candidate_key(
+                        str(source["candidate_key"]),
+                        index,
+                    )
+                    await cur.execute(
+                        """
+                        INSERT INTO education_structure_knowledge_points (
+                            knowledge_point_id, unit_id, content_structure_id,
+                            content_node_id, candidate_key, point_type, origin,
+                            candidate_status, position, slug, title, summary,
+                            source_refs, confidence, status
+                        ) VALUES (
+                            %s, NULL, %s, %s, %s, %s, 'generated', 'pending',
+                            %s, %s, %s, %s, %s, %s, 'review'
+                        )
+                        RETURNING knowledge_point_id, content_structure_id,
+                                  content_node_id, candidate_key, point_type,
+                                  origin, candidate_status, position, slug,
+                                  title, summary, source_refs, confidence,
+                                  status, created_at
+                        """,
+                        (
+                            str(uuid4()),
+                            source["content_structure_id"],
+                            source["content_node_id"],
+                            candidate_key,
+                            item["point_type"],
+                            next_position + index,
+                            _candidate_slug(candidate_key),
+                            item["title"],
+                            item.get("summary") or "",
+                            Json(source.get("source_refs") or []),
+                            source["confidence"],
+                        ),
+                    )
+                    created.append(dict(await cur.fetchone()))
+    return [source, *created]
 
 
 async def get_latest_textbook_structure_for_parent(
@@ -2089,8 +2713,7 @@ async def replace_structure_contents(
                 )
                 existing_rows = await cur.fetchall()
                 existing_unit_ids = {
-                    str(row["unit_slug"]): str(row["unit_id"])
-                    for row in existing_rows
+                    str(row["unit_slug"]): str(row["unit_id"]) for row in existing_rows
                 }
                 existing_knowledge_point_ids = {
                     (str(row["unit_id"]), str(row["knowledge_point_slug"])): str(
@@ -2122,9 +2745,9 @@ async def replace_structure_contents(
                         scope = dict(row)
                         if "slot" not in scope or "unit_id" not in scope:
                             continue
-                        preserved_scopes.setdefault(
-                            str(scope["unit_id"]), []
-                        ).append(scope)
+                        preserved_scopes.setdefault(str(scope["unit_id"]), []).append(
+                            scope
+                        )
                 await cur.execute(
                     """
                     DELETE FROM education_structure_knowledge_points
@@ -2153,9 +2776,7 @@ async def replace_structure_contents(
                     )
                 stored_units: list[dict[str, Any]] = []
                 for unit_index, unit in enumerate(units):
-                    unit_id = existing_unit_ids.get(
-                        str(unit["slug"]), str(uuid4())
-                    )
+                    unit_id = existing_unit_ids.get(str(unit["slug"]), str(uuid4()))
                     await cur.execute(
                         """
                         INSERT INTO education_structure_units (
@@ -2277,17 +2898,11 @@ async def create_generation_job(
         str(knowledge_point_id) if knowledge_point_id is not None else None
     )
     if scope in {"structure", "assets"}:
-        valid_target = (
-            structure_target is not None and knowledge_point_target is None
-        )
+        valid_target = structure_target is not None and knowledge_point_target is None
     elif scope == "lesson":
-        valid_target = (
-            structure_target is None and knowledge_point_target is not None
-        )
+        valid_target = structure_target is None and knowledge_point_target is not None
     elif scope == "book_pipeline":
-        raise ValueError(
-            "book_pipeline jobs must use queue_book_pipeline_job()"
-        )
+        raise ValueError("book_pipeline jobs must use queue_book_pipeline_job()")
     else:
         valid_target = False
     if not valid_target:
@@ -2756,7 +3371,11 @@ async def create_kp_lesson_revision(
         raise ValueError("Lesson content sha256 is invalid")
     if not _SHA256.fullmatch(processing_profile_sha256):
         raise ValueError("Lesson processing profile sha256 is invalid")
-    if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes <= 0:
+    if (
+        not isinstance(size_bytes, int)
+        or isinstance(size_bytes, bool)
+        or size_bytes <= 0
+    ):
         raise ValueError("Lesson content size is invalid")
 
     revision_id = str(uuid4())
@@ -3036,12 +3655,8 @@ async def freeze_publication_lessons(
                 if not publication:
                     return False
                 for lesson in lessons:
-                    knowledge_point_id = str(
-                        lesson.get("knowledge_point_id") or ""
-                    )
-                    lesson_revision_id = str(
-                        lesson.get("lesson_revision_id") or ""
-                    )
+                    knowledge_point_id = str(lesson.get("knowledge_point_id") or "")
+                    lesson_revision_id = str(lesson.get("lesson_revision_id") or "")
                     if not knowledge_point_id or not lesson_revision_id:
                         return False
                     await cur.execute(
@@ -3212,8 +3827,7 @@ async def get_teaching_input_for_parent(
                 result["sources"] = [
                     {
                         "source_id": str(
-                            row.get("producer_job_id")
-                            or row["content_chapter_id"]
+                            row.get("producer_job_id") or row["content_chapter_id"]
                         ),
                         "content_chapter_id": str(row["content_chapter_id"]),
                         "document_id": (
@@ -3342,9 +3956,7 @@ async def queue_textbook_processing_from_artifacts(
     artifact.
     """
     if not sources:
-        raise TextbookQueueValidationError(
-            "At least one parse job source is required"
-        )
+        raise TextbookQueueValidationError("At least one parse job source is required")
 
     try:
         household_component = _validated_path_component(
@@ -3352,22 +3964,16 @@ async def queue_textbook_processing_from_artifacts(
         )
     except ValueError as exc:
         raise TextbookQueueValidationError(str(exc)) from exc
-    producer_job_ids = [
-        str(source.get("producer_job_id") or "") for source in sources
-    ]
+    producer_job_ids = [str(source.get("producer_job_id") or "") for source in sources]
     if any(not job_id for job_id in producer_job_ids):
-        raise TextbookQueueValidationError(
-            "Every source requires a producer_job_id"
-        )
+        raise TextbookQueueValidationError("Every source requires a producer_job_id")
     if len(set(producer_job_ids)) != len(producer_job_ids):
         raise TextbookQueueValidationError(
             "Duplicate producer_job_id sources are not allowed"
         )
     for source in sources:
         if not str(source.get("document_id") or ""):
-            raise TextbookQueueValidationError(
-                "Every source requires a document_id"
-            )
+            raise TextbookQueueValidationError("Every source requires a document_id")
         if not str(source.get("primary_artifact_id") or ""):
             raise TextbookQueueValidationError(
                 "Every source requires a primary_artifact_id"

@@ -177,6 +177,38 @@ describe('TextbookDetailPage', () => {
 
     expect(screen.getByText('知识点 4/4 已接受，课程 2/4 已通过。')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '查看知识点课程' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: '确认知识点候选' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('uses the candidate review entry and generic summary for a content tree', () => {
+    state.textbook = {
+      ...state.textbook,
+      versions: [version()],
+    };
+    state.structure = structure({
+      schema_version: 'langalpha-book-content-tree/v1',
+      status: 'review',
+      lesson_summary: {
+        total: 3,
+        accepted: 1,
+        generated: 0,
+        approved: 0,
+      },
+    });
+    renderPage();
+
+    expect(screen.getByText('知识点 1/3 已接受，课程 0/3 已通过。')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: '确认知识点候选' }),
+    ).toHaveAttribute(
+      'href',
+      '/textbooks/textbook-1/versions/version-1/candidates',
+    );
+    expect(
+      screen.queryByRole('link', { name: '审阅结构与知识点' }),
+    ).not.toBeInTheDocument();
   });
 
   it('publishes only after every accepted knowledge point has an approved lesson', async () => {

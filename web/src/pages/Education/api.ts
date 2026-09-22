@@ -1,5 +1,5 @@
 import { api } from '@/api/client';
-import type { BookPipelineJob, BookPipelineProgress, CompletedParseJob, CreateBookPipelineJobInput, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointLesson, KnowledgePointSourcePreview, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, LessonGenerationStatus, ParentLearningTranscript, StructureGenerationJob, StructureGenerationProgress, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit } from './types';
+import type { BookPipelineJob, BookPipelineProgress, CompletedParseJob, CreateBookPipelineJobInput, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointCandidate, KnowledgePointCandidateReview, KnowledgePointLesson, KnowledgePointSourcePreview, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, LessonGenerationStatus, MergeKnowledgePointCandidatesInput, ParentLearningTranscript, SplitKnowledgePointCandidateInput, StructureGenerationJob, StructureGenerationProgress, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit, UpdateKnowledgePointCandidateInput } from './types';
 
 export async function listEducationTasks(): Promise<EducationTask[]> {
   const { data } = await api.get<EducationTask[]>('/api/v1/education/tasks');
@@ -96,6 +96,66 @@ export async function getTextbook(textbookId: string): Promise<TextbookDetail> {
 
 export async function getLatestTextbookStructure(versionId: string): Promise<TextbookStructure | null> {
   const { data } = await api.get<TextbookStructure | null>(`/api/v1/education/textbook-versions/${versionId}/structure`);
+  return data;
+}
+
+export async function getKnowledgePointCandidateReview(
+  structureId: string,
+): Promise<KnowledgePointCandidateReview> {
+  const { data } = await api.get<KnowledgePointCandidateReview>(
+    `/api/v1/education/structures/${structureId}/candidates`,
+  );
+  return data;
+}
+
+export async function updateKnowledgePointCandidate(
+  candidateId: string,
+  input: UpdateKnowledgePointCandidateInput,
+): Promise<KnowledgePointCandidate> {
+  const { data } = await api.patch<KnowledgePointCandidate>(
+    `/api/v1/education/candidates/${candidateId}`,
+    input,
+  );
+  return data;
+}
+
+export async function acceptKnowledgePointCandidates(
+  candidateIds: string[],
+): Promise<KnowledgePointCandidate[]> {
+  const { data } = await api.post<KnowledgePointCandidate[]>(
+    '/api/v1/education/candidates/accept',
+    { candidate_ids: candidateIds },
+  );
+  return data;
+}
+
+export async function rejectKnowledgePointCandidates(
+  candidateIds: string[],
+): Promise<KnowledgePointCandidate[]> {
+  const { data } = await api.post<KnowledgePointCandidate[]>(
+    '/api/v1/education/candidates/reject',
+    { candidate_ids: candidateIds },
+  );
+  return data;
+}
+
+export async function mergeKnowledgePointCandidates(
+  input: MergeKnowledgePointCandidatesInput,
+): Promise<KnowledgePointCandidate[]> {
+  const { data } = await api.post<KnowledgePointCandidate[]>(
+    '/api/v1/education/candidates/merge',
+    input,
+  );
+  return data;
+}
+
+export async function splitKnowledgePointCandidate(
+  input: SplitKnowledgePointCandidateInput,
+): Promise<KnowledgePointCandidate[]> {
+  const { data } = await api.post<KnowledgePointCandidate[]>(
+    '/api/v1/education/candidates/split',
+    input,
+  );
   return data;
 }
 

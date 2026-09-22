@@ -18,6 +18,9 @@ from src.server.app.education.models import (
     CreateTextbookRequest,
     CreateTextbookStructureRequest,
     GenerateKnowledgePointLessonRequest,
+    KnowledgePointCandidateIdsRequest,
+    KnowledgePointCandidateResponse,
+    KnowledgePointCandidateReviewResponse,
     KnowledgePointLessonResponse,
     KnowledgePointProgressResponse,
     KnowledgePointSourcePreviewResponse,
@@ -25,6 +28,8 @@ from src.server.app.education.models import (
     LearningItemResponse,
     PublishTextbookStructureRequest,
     StartTextbookProcessingRequest,
+    MergeKnowledgePointCandidatesRequest,
+    SplitKnowledgePointCandidateRequest,
     StructureGenerationJobResponse,
     StudentKnowledgePointLessonResponse,
     StudentTextbookStructureResponse,
@@ -36,8 +41,17 @@ from src.server.app.education.models import (
     TextbookStructurePublicationResponse,
     TextbookStructureResponse,
     UpdateLearningItemRequest,
+    UpdateKnowledgePointCandidateRequest,
     UpdateKnowledgePointProgressRequest,
     UpdateTextbookStructureRequest,
+)
+from src.server.services.education_candidate_review import (
+    accept_knowledge_point_candidates_for_parent,
+    list_knowledge_point_candidates_for_parent,
+    merge_knowledge_point_candidates_for_parent,
+    reject_knowledge_point_candidates_for_parent,
+    split_knowledge_point_candidate_for_parent,
+    update_knowledge_point_candidate_for_parent,
 )
 from src.server.services.education_structure_review import (
     accept_structure_for_parent,
@@ -327,6 +341,118 @@ async def get_latest_family_textbook_structure(
         return await get_latest_structure_for_parent(
             parent_user_id=user_id,
             content_version_id=str(content_version_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/structures/{structure_id}/candidates",
+    response_model=KnowledgePointCandidateReviewResponse,
+)
+async def list_family_knowledge_point_candidates(
+    structure_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await list_knowledge_point_candidates_for_parent(
+            parent_user_id=user_id,
+            structure_id=str(structure_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.patch(
+    "/candidates/{candidate_id}",
+    response_model=KnowledgePointCandidateResponse,
+)
+async def update_family_knowledge_point_candidate(
+    candidate_id: UUID,
+    body: UpdateKnowledgePointCandidateRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        return await update_knowledge_point_candidate_for_parent(
+            parent_user_id=user_id,
+            candidate_id=str(candidate_id),
+            title=body.title,
+            summary=body.summary,
+            point_type=body.point_type,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/candidates/accept",
+    response_model=list[KnowledgePointCandidateResponse],
+)
+async def accept_family_knowledge_point_candidates(
+    body: KnowledgePointCandidateIdsRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        return await accept_knowledge_point_candidates_for_parent(
+            parent_user_id=user_id,
+            candidate_ids=[str(candidate_id) for candidate_id in body.candidate_ids],
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/candidates/reject",
+    response_model=list[KnowledgePointCandidateResponse],
+)
+async def reject_family_knowledge_point_candidates(
+    body: KnowledgePointCandidateIdsRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        return await reject_knowledge_point_candidates_for_parent(
+            parent_user_id=user_id,
+            candidate_ids=[str(candidate_id) for candidate_id in body.candidate_ids],
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/candidates/merge",
+    response_model=list[KnowledgePointCandidateResponse],
+)
+async def merge_family_knowledge_point_candidates(
+    body: MergeKnowledgePointCandidatesRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        return await merge_knowledge_point_candidates_for_parent(
+            parent_user_id=user_id,
+            source_ids=[str(candidate_id) for candidate_id in body.source_ids],
+            target_id=str(body.target_id) if body.target_id is not None else None,
+            title=body.title,
+            summary=body.summary,
+            point_type=body.point_type,
+            accept=body.accept,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/candidates/split",
+    response_model=list[KnowledgePointCandidateResponse],
+)
+async def split_family_knowledge_point_candidate(
+    body: SplitKnowledgePointCandidateRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        return await split_knowledge_point_candidate_for_parent(
+            parent_user_id=user_id,
+            candidate_id=str(body.candidate_id),
+            items=[item.model_dump(mode="python") for item in body.items],
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc

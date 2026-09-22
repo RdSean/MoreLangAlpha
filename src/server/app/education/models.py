@@ -9,6 +9,21 @@ from pydantic import BaseModel, Field, StrictInt, field_validator, model_validat
 
 
 _ALLOWED_BRIEF_CONTROL_CHARS = frozenset("\t\n\r")
+_ALLOWED_SUMMARY_CONTROL_CHARS = frozenset("\n\r")
+
+
+def _reject_control_characters(
+    value: str,
+    *,
+    allowed: frozenset[str] = frozenset(),
+    field_name: str,
+) -> str:
+    if any(
+        unicodedata.category(character) == "Cc" and character not in allowed
+        for character in value
+    ):
+        raise ValueError(f"{field_name} contains unsupported control characters")
+    return value
 
 
 class EducationStudentProfileResponse(BaseModel):
@@ -422,6 +437,175 @@ class CreateBookPipelineRequest(BaseModel):
         ):
             raise ValueError("processing_brief contains unsupported control characters")
         return value.strip()
+
+
+KnowledgePointCandidateStatus = Literal[
+    "pending", "accepted", "rejected", "merged", "split"
+]
+
+
+class KnowledgePointCandidateResponse(BaseModel):
+    knowledge_point_id: UUID
+    content_structure_id: UUID
+    content_node_id: UUID
+    candidate_key: str
+    point_type: str
+    origin: Literal["generated"]
+    candidate_status: KnowledgePointCandidateStatus
+    position: int
+    slug: str
+    title: str
+    summary: str
+    source_refs: list[StructureSourceRefResponse] = Field(default_factory=list)
+    confidence: float
+    status: str
+    created_at: datetime | None = None
+
+
+class KnowledgePointCandidateNodeResponse(BaseModel):
+    node_id: UUID
+    structure_id: UUID
+    parent_node_id: UUID | None = None
+    node_key: str
+    node_type: str
+    label: str | None = None
+    position: int
+    slug: str
+    title: str
+    summary: str
+    source_refs: list[StructureSourceRefResponse] = Field(default_factory=list)
+    candidates: list[KnowledgePointCandidateResponse] = Field(default_factory=list)
+
+
+class KnowledgePointCandidateReviewResponse(BaseModel):
+    structure_id: UUID
+    version_id: UUID
+    nodes: list[KnowledgePointCandidateNodeResponse]
+
+
+class UpdateKnowledgePointCandidateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    summary: str | None = Field(default=None, max_length=30_000)
+    point_type: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @field_validator("title", "point_type")
+    @classmethod
+    def normalize_required_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = _reject_control_characters(
+            value,
+            field_name="candidate text",
+        ).strip()
+        if not normalized:
+            raise ValueError("value is required")
+        return normalized
+
+    @field_validator("summary")
+    @classmethod
+    def validate_summary(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _reject_control_characters(
+            value,
+            allowed=_ALLOWED_SUMMARY_CONTROL_CHARS,
+            field_name="candidate summary",
+        )
+
+    @model_validator(mode="after")
+    def require_update(self) -> "UpdateKnowledgePointCandidateRequest":
+        if self.title is None and self.summary is None and self.point_type is None:
+            raise ValueError("at least one candidate field is required")
+        return self
+
+
+class KnowledgePointCandidateIdsRequest(BaseModel):
+    candidate_ids: list[UUID] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def require_unique_candidates(self) -> "KnowledgePointCandidateIdsRequest":
+        if len(set(self.candidate_ids)) != len(self.candidate_ids):
+            raise ValueError("candidate_ids must be unique")
+        return self
+
+
+class MergeKnowledgePointCandidatesRequest(BaseModel):
+    source_ids: list[UUID] = Field(min_length=2, max_length=100)
+    target_id: UUID | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    summary: str | None = Field(default=None, max_length=30_000)
+    point_type: str | None = Field(default=None, min_length=1, max_length=64)
+    accept: bool = False
+
+    @field_validator("title", "point_type")
+    @classmethod
+    def normalize_required_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = _reject_control_characters(
+            value,
+            field_name="candidate text",
+        ).strip()
+        if not normalized:
+            raise ValueError("value is required")
+        return normalized
+
+    @field_validator("summary")
+    @classmethod
+    def validate_summary(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _reject_control_characters(
+            value,
+            allowed=_ALLOWED_SUMMARY_CONTROL_CHARS,
+            field_name="candidate summary",
+        )
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "MergeKnowledgePointCandidatesRequest":
+        if len(set(self.source_ids)) != len(self.source_ids):
+            raise ValueError("source_ids must be unique")
+        if self.target_id is not None and self.target_id not in self.source_ids:
+            raise ValueError("target_id must be one of source_ids")
+        if self.target_id is None and (self.title is None or self.point_type is None):
+            raise ValueError("a new merged candidate requires title and point_type")
+        if self.target_id is None and self.accept:
+            raise ValueError("a new merged candidate must remain pending")
+        return self
+
+
+class SplitKnowledgePointCandidateItem(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    summary: str = Field(default="", max_length=30_000)
+    point_type: str = Field(min_length=1, max_length=64)
+
+    @field_validator("title", "point_type")
+    @classmethod
+    def normalize_required_text(cls, value: str) -> str:
+        normalized = _reject_control_characters(
+            value,
+            field_name="candidate text",
+        ).strip()
+        if not normalized:
+            raise ValueError("value is required")
+        return normalized
+
+    @field_validator("summary")
+    @classmethod
+    def validate_summary(cls, value: str) -> str:
+        return _reject_control_characters(
+            value,
+            allowed=_ALLOWED_SUMMARY_CONTROL_CHARS,
+            field_name="candidate summary",
+        )
+
+
+class SplitKnowledgePointCandidateRequest(BaseModel):
+    candidate_id: UUID
+    items: list[SplitKnowledgePointCandidateItem] = Field(
+        min_length=2,
+        max_length=100,
+    )
 
 
 class BookPipelineJobResponse(BaseModel):
