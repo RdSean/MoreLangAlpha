@@ -1055,3 +1055,188 @@ async def test_private_teaching_archive_retries_across_the_transient_storage_win
 
     assert attempts == 6
     assert delays == [5, 10, 20, 40, 60]
+
+
+@pytest.mark.asyncio
+async def test_book_pipeline_checkpoint_bundle_archives_fixed_chapter_outputs(
+    monkeypatch,
+) -> None:
+    job = {
+        **_job(),
+        "generation_job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+        "version_id": "version-1",
+        "latest_attempt_id": "6f3f2de2-5c58-4bc2-84bc-95e97acd37f6",
+    }
+    attempt_id = "6f3f2de2-5c58-4bc2-84bc-95e97acd37f6"
+    sandbox = AsyncMock()
+    sandbox.adownload_file_bytes.side_effect = [
+        b'{"format":"langalpha-book-package/v1","content_nodes":[]}',
+        b'{"format":"langalpha-book-package/v1","content_nodes":[]}',
+        None,
+        None,
+    ]
+    put = AsyncMock()
+    monkeypatch.setattr(education_teaching_storage, "_put", put)
+
+    bundle = await education_teaching_storage.write_book_pipeline_checkpoint_bundle(
+        job,
+        attempt_id,
+        sandbox,
+    )
+
+    assert bundle["manifest"]["format"] == ("langalpha-book-pipeline-checkpoint/v1")
+    assert bundle["manifest"]["generation_job_id"] == job["generation_job_id"]
+    assert bundle["manifest"]["version_id"] == job["version_id"]
+    assert bundle["manifest"]["attempt_id"] == attempt_id
+    assert set(bundle["manifest"]["files"]) == {
+        "outputs/book_package.json",
+        "outputs/content_tree.json",
+    }
+    assert [call.args[0] for call in put.await_args_list][:2] == [
+        f"{bundle['prefix']}/book_package.json",
+        f"{bundle['prefix']}/content_tree.json",
+    ]
+    assert put.await_args_list[-1].args[0] == f"{bundle['prefix']}/manifest.json"
+
+
+@pytest.mark.asyncio
+async def test_book_pipeline_checkpoint_stage_restores_only_fixed_outputs(
+    monkeypatch,
+) -> None:
+    job = {
+        **_job(),
+        "generation_job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+        "version_id": "version-1",
+        "latest_attempt_id": "6f3f2de2-5c58-4bc2-84bc-95e97acd37f6",
+        "checkpoint_bundle_prefix": (
+            "education/household-1/english-2/v1/book-pipeline-checkpoints/"
+            "5e3a0b43-8378-4b6c-926f-0f053577501d/"
+            "6f3f2de2-5c58-4bc2-84bc-95e97acd37f6"
+        ),
+    }
+    files = {
+        "outputs/book_package.json": b"{}",
+        "outputs/content_tree.json": b"{}",
+    }
+    prefix = job["checkpoint_bundle_prefix"]
+    objects = {
+        f"{prefix}/{relative.removeprefix('outputs/')}": content
+        for relative, content in files.items()
+    }
+    objects[f"{prefix}/manifest.json"] = json.dumps(
+        {
+            "format": "langalpha-book-pipeline-checkpoint/v1",
+            "generation_job_id": job["generation_job_id"],
+            "version_id": job["version_id"],
+            "attempt_id": job["latest_attempt_id"],
+            "files": {
+                relative: {
+                    "content_key": f"{prefix}/{relative.removeprefix('outputs/')}",
+                    "content_sha256": sha256(content).hexdigest(),
+                    "size_bytes": len(content),
+                }
+                for relative, content in files.items()
+            },
+        }
+    ).encode()
+    sandbox = AsyncMock()
+    sandbox.aupload_file_bytes.return_value = True
+
+    async def to_thread(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(education_teaching_storage.asyncio, "to_thread", to_thread)
+    monkeypatch.setattr(education_teaching_storage, "get_bytes", objects.get)
+
+    uploaded = await education_teaching_storage.stage_book_pipeline_checkpoint_bundle(
+        job,
+        sandbox,
+    )
+
+    assert uploaded == [
+        "outputs/book_package.json",
+        "outputs/content_tree.json",
+    ]
+    assert [call.args[0] for call in sandbox.aupload_file_bytes.await_args_list] == [
+        (
+            "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+            "outputs/book_package.json"
+        ),
+        (
+            "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+            "outputs/content_tree.json"
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mutation",
+    ["wrong_job", "wrong_hash", "second_hash", "wrong_key"],
+)
+async def test_checkpoint_stage_rejects_corrupt_or_cross_job_manifest(
+    monkeypatch,
+    mutation: str,
+) -> None:
+    attempt_id = "6f3f2de2-5c58-4bc2-84bc-95e97acd37f6"
+    prefix = (
+        "education/household-1/english-2/v1/book-pipeline-checkpoints/"
+        "5e3a0b43-8378-4b6c-926f-0f053577501d/"
+        f"{attempt_id}"
+    )
+    job = {
+        **_job(),
+        "generation_job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+        "version_id": "version-1",
+        "latest_attempt_id": attempt_id,
+        "checkpoint_bundle_prefix": prefix,
+    }
+    files = {
+        "outputs/book_package.json": b"{}",
+        "outputs/content_tree.json": b"{}",
+    }
+    manifest = {
+        "format": "langalpha-book-pipeline-checkpoint/v1",
+        "generation_job_id": job["generation_job_id"],
+        "version_id": job["version_id"],
+        "attempt_id": attempt_id,
+        "files": {
+            relative: {
+                "content_key": f"{prefix}/{relative.removeprefix('outputs/')}",
+                "content_sha256": sha256(content).hexdigest(),
+                "size_bytes": len(content),
+            }
+            for relative, content in files.items()
+        },
+    }
+    if mutation == "wrong_job":
+        manifest["generation_job_id"] = "11111111-1111-1111-1111-111111111111"
+    elif mutation == "wrong_hash":
+        manifest["files"]["outputs/book_package.json"]["content_sha256"] = "0" * 64
+    elif mutation == "second_hash":
+        manifest["files"]["outputs/content_tree.json"]["content_sha256"] = "0" * 64
+    else:
+        manifest["files"]["outputs/book_package.json"]["content_key"] = (
+            "education/other/book_package.json"
+        )
+    objects = {
+        f"{prefix}/{relative.removeprefix('outputs/')}": content
+        for relative, content in files.items()
+    }
+    objects[f"{prefix}/manifest.json"] = json.dumps(manifest).encode()
+    sandbox = AsyncMock()
+    sandbox.aupload_file_bytes.return_value = True
+
+    async def to_thread(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(education_teaching_storage.asyncio, "to_thread", to_thread)
+    monkeypatch.setattr(education_teaching_storage, "get_bytes", objects.get)
+
+    with pytest.raises(education_teaching_storage.TeachingPackageStorageError):
+        await education_teaching_storage.stage_book_pipeline_checkpoint_bundle(
+            job,
+            sandbox,
+        )
+
+    sandbox.aupload_file_bytes.assert_not_awaited()

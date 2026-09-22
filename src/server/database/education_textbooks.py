@@ -4,6 +4,8 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -15,10 +17,73 @@ from src.server.database.pool import get_db_connection
 
 _SAFE_PATH_COMPONENT = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,254}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_CHECKPOINT_BUNDLE_PREFIX = re.compile(
+    r"^education/"
+    r"[0-9A-Za-z][0-9A-Za-z._-]{0,79}/"
+    r"[0-9A-Za-z][0-9A-Za-z._-]{0,79}/"
+    r"v[1-9][0-9]*/book-pipeline-checkpoints/"
+    r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
+    r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}/"
+    r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
+    r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
+)
 
 
 class TextbookQueueValidationError(ValueError):
     """A textbook queue request failed before any database write."""
+
+
+class ProgressEventPersistenceOutcome(str, Enum):
+    """Outcome of one idempotent semantic progress write."""
+
+    INSERTED = "inserted"
+    ALREADY_EXISTS = "already_exists"
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True, slots=True)
+class ProgressEventPersistenceResult:
+    """Typed progress write result returned to the live collector."""
+
+    outcome: ProgressEventPersistenceOutcome
+    event: Mapping[str, Any] | None = None
+
+
+def _validated_checkpoint_bundle_prefix(value: object) -> str:
+    """Return one canonical private checkpoint prefix or reject it."""
+    prefix = str(value or "").strip()
+    if not prefix or not _CHECKPOINT_BUNDLE_PREFIX.fullmatch(prefix):
+        raise ValueError("checkpoint bundle prefix is invalid")
+    return prefix
+
+
+def _progress_event_matches(
+    row: Mapping[str, Any],
+    event: Mapping[str, Any],
+) -> bool:
+    """Return whether one durable row is the same normalized event payload."""
+    row_metadata = row.get("metadata")
+    event_metadata = event.get("metadata")
+    if row_metadata is None:
+        row_metadata = {}
+    if event_metadata is None:
+        event_metadata = {}
+    if row_metadata != event_metadata:
+        return False
+    return all(
+        row.get(field) == event.get(field)
+        for field in (
+            "event_key",
+            "stage",
+            "substage",
+            "status",
+            "label",
+            "detail",
+            "node_key",
+            "current_value",
+            "total_value",
+        )
+    )
 
 
 def _validated_path_component(value: str, label: str) -> str:
@@ -584,6 +649,7 @@ async def queue_book_pipeline_job(
                                jobs.knowledge_point_id, jobs.status,
                                jobs.attempt_count,
                                jobs.pause_after_chapter_analysis,
+                               jobs.checkpoint_bundle_prefix,
                                jobs.error_code, jobs.error_message,
                                jobs.created_at, jobs.updated_at,
                                attempts.root_run_id, attempts.started_at,
@@ -609,6 +675,7 @@ async def queue_book_pipeline_job(
                            jobs.structure_id, jobs.knowledge_point_id,
                            jobs.status, jobs.attempt_count,
                            jobs.pause_after_chapter_analysis,
+                           jobs.checkpoint_bundle_prefix,
                            jobs.error_code, jobs.error_message,
                            jobs.created_at, jobs.updated_at,
                            attempts.root_run_id, attempts.started_at,
@@ -646,6 +713,7 @@ async def queue_book_pipeline_job(
                     RETURNING generation_job_id, version_id, scope,
                               structure_id, knowledge_point_id, status,
                               attempt_count, pause_after_chapter_analysis,
+                              checkpoint_bundle_prefix,
                               error_code, error_message, created_at, updated_at,
                               FALSE AS reused_existing_job
                     """,
@@ -667,8 +735,12 @@ async def pause_book_pipeline_for_chapter_review(
     parent_user_id: str,
     generation_job_id: str,
     attempt_id: str,
+    checkpoint_bundle_prefix: str,
 ) -> dict[str, Any] | None:
     """Finish one parent-owned checkpoint attempt and enter review state."""
+    checkpoint_bundle_prefix = _validated_checkpoint_bundle_prefix(
+        checkpoint_bundle_prefix
+    )
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
@@ -716,7 +788,9 @@ async def pause_book_pipeline_for_chapter_review(
                     """
                     UPDATE education_generation_jobs AS jobs
                     SET status = 'awaiting_review', error_code = NULL,
-                        error_message = NULL, updated_at = NOW()
+                        error_message = NULL,
+                        checkpoint_bundle_prefix = %s,
+                        updated_at = NOW()
                     FROM education_textbook_versions AS versions,
                          education_textbooks AS textbooks,
                          education_memberships AS memberships
@@ -735,10 +809,16 @@ async def pause_book_pipeline_for_chapter_review(
                               jobs.knowledge_point_id, jobs.status,
                               jobs.attempt_count,
                               jobs.pause_after_chapter_analysis,
+                              jobs.checkpoint_bundle_prefix,
                               jobs.error_code, jobs.error_message,
                               jobs.created_at, jobs.updated_at
                     """,
-                    (generation_job_id, attempt_id, parent_user_id),
+                    (
+                        checkpoint_bundle_prefix,
+                        generation_job_id,
+                        attempt_id,
+                        parent_user_id,
+                    ),
                 )
                 job = await cur.fetchone()
                 if not job:
@@ -775,11 +855,14 @@ async def resume_book_pipeline_job(
                   AND jobs.scope = 'book_pipeline'
                   AND jobs.status = 'awaiting_review'
                   AND jobs.pause_after_chapter_analysis IS TRUE
+                  AND jobs.checkpoint_bundle_prefix IS NOT NULL
+                  AND btrim(jobs.checkpoint_bundle_prefix) <> ''
                 RETURNING jobs.generation_job_id, jobs.version_id,
                           jobs.scope, jobs.structure_id,
                           jobs.knowledge_point_id, jobs.status,
                           jobs.attempt_count,
                           jobs.pause_after_chapter_analysis,
+                          jobs.checkpoint_bundle_prefix,
                           jobs.error_code, jobs.error_message,
                           jobs.created_at, jobs.updated_at
                 """,
@@ -1120,6 +1203,7 @@ async def complete_book_pipeline_import(
                     """
                     UPDATE education_generation_jobs
                     SET status = 'completed', structure_id = %s,
+                        checkpoint_bundle_prefix = NULL,
                         error_code = NULL, error_message = NULL,
                         updated_at = NOW()
                     WHERE generation_job_id = %s
@@ -1519,6 +1603,7 @@ async def get_generation_job_for_parent(
                        jobs.structure_id, jobs.knowledge_point_id, jobs.status,
                        jobs.attempt_count, jobs.latest_attempt_id,
                        jobs.auto_grading, jobs.pause_after_chapter_analysis,
+                       jobs.checkpoint_bundle_prefix,
                        jobs.processing_brief, jobs.request_id,
                        jobs.processing_profile_sha256, jobs.error_code,
                        jobs.error_message, jobs.created_at, jobs.updated_at,
@@ -1578,6 +1663,134 @@ async def get_generation_job_for_parent(
             )
             row = await cur.fetchone()
     return dict(row) if row else None
+
+
+async def persist_generation_progress_event(
+    *,
+    generation_job_id: str,
+    attempt_id: str,
+    run_id: str | None,
+    sequence: int,
+    event: Mapping[str, Any],
+) -> ProgressEventPersistenceResult:
+    """Persist one collector event idempotently under its attempt ownership."""
+    metadata = event.get("metadata")
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, Mapping):
+        raise ValueError("generation progress metadata must be an object")
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT generation_job_id, attempt_id, root_run_id, status
+                    FROM education_generation_attempts
+                    WHERE generation_job_id = %s
+                      AND attempt_id = %s
+                      AND status IN ('preparing', 'running')
+                      AND (%s::uuid IS NULL OR root_run_id = %s::uuid)
+                    FOR UPDATE
+                    """,
+                    (generation_job_id, attempt_id, run_id, run_id),
+                )
+                if not await cur.fetchone():
+                    return ProgressEventPersistenceResult(
+                        outcome=ProgressEventPersistenceOutcome.REJECTED
+                    )
+
+                await cur.execute(
+                    """
+                    SELECT event_id, generation_job_id, attempt_id, run_id,
+                           sequence, event_key, stage, substage, status, label,
+                           detail, node_key, current_value, total_value,
+                           metadata, created_at
+                    FROM education_generation_progress_events
+                    WHERE generation_job_id = %s
+                      AND attempt_id = %s
+                      AND sequence = %s
+                    FOR UPDATE
+                    """,
+                    (generation_job_id, attempt_id, sequence),
+                )
+                existing = await cur.fetchone()
+                if existing is not None:
+                    existing_row = dict(existing)
+                    if not _progress_event_matches(existing_row, event):
+                        return ProgressEventPersistenceResult(
+                            outcome=ProgressEventPersistenceOutcome.REJECTED
+                        )
+                    return ProgressEventPersistenceResult(
+                        outcome=ProgressEventPersistenceOutcome.ALREADY_EXISTS,
+                        event=existing_row,
+                    )
+
+                await cur.execute(
+                    """
+                    INSERT INTO education_generation_progress_events (
+                        generation_job_id, attempt_id, run_id, sequence,
+                        event_key, stage, substage, status, label, detail,
+                        node_key, current_value, total_value, metadata
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s
+                    )
+                    RETURNING event_id, generation_job_id, attempt_id, run_id,
+                              sequence, event_key, stage, substage, status,
+                              label, detail, node_key, current_value,
+                              total_value, metadata, created_at
+                    """,
+                    (
+                        generation_job_id,
+                        attempt_id,
+                        run_id,
+                        sequence,
+                        str(event["event_key"]),
+                        str(event["stage"]),
+                        event.get("substage"),
+                        str(event["status"]),
+                        str(event["label"]),
+                        event.get("detail"),
+                        event.get("node_key"),
+                        event.get("current_value"),
+                        event.get("total_value"),
+                        Json(dict(metadata)),
+                    ),
+                )
+                inserted = await cur.fetchone()
+                if inserted is None:
+                    return ProgressEventPersistenceResult(
+                        outcome=ProgressEventPersistenceOutcome.REJECTED
+                    )
+                return ProgressEventPersistenceResult(
+                    outcome=ProgressEventPersistenceOutcome.INSERTED,
+                    event=dict(inserted),
+                )
+
+
+async def list_generation_progress_events(
+    *,
+    generation_job_id: str,
+    attempt_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Read durable progress rows in deterministic attempt/sequence order."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT event_id, generation_job_id, attempt_id, run_id,
+                       sequence, event_key, stage, substage, status, label,
+                       detail, node_key, current_value, total_value,
+                       metadata, created_at
+                FROM education_generation_progress_events
+                WHERE generation_job_id = %s
+                  AND (%s::uuid IS NULL OR attempt_id = %s::uuid)
+                ORDER BY attempt_id, sequence
+                """,
+                (generation_job_id, attempt_id, attempt_id),
+            )
+            rows = await cur.fetchall()
+    return [dict(row) for row in rows]
 
 
 async def get_run_id_for_generation_job(

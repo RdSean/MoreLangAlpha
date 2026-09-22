@@ -473,29 +473,41 @@ async def test_parent_queues_gets_and_resumes_book_pipeline(client):
 
 
 @pytest.mark.asyncio
-async def test_pause_checkpoint_request_is_rejected_without_creating_job(client):
+async def test_pause_checkpoint_request_is_accepted_and_launched(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
     version_id = uuid4()
-    with (
-        patch(
-            "src.server.services.education_book_pipeline_jobs.queue_book_pipeline_job",
-            new=AsyncMock(side_effect=AssertionError("must not insert")),
-        ) as insert,
-        patch(
-            "src.server.services.education_book_pipeline_jobs.launch_book_pipeline_generation",
-            new=AsyncMock(side_effect=AssertionError("must not launch")),
-        ) as launch,
-    ):
+    queued = {
+        "generation_job_id": str(uuid4()),
+        "version_id": str(version_id),
+        "scope": "book_pipeline",
+        "structure_id": None,
+        "knowledge_point_id": None,
+        "status": "queued",
+        "attempt_count": 0,
+        "pause_after_chapter_analysis": True,
+        "checkpoint_bundle_prefix": None,
+        "error_code": None,
+        "error_message": None,
+        "created_at": None,
+        "updated_at": None,
+        "root_run_id": None,
+        "started_at": None,
+        "heartbeat_at": None,
+        "reused_existing_job": False,
+    }
+    with patch(
+        "src.server.app.education.textbooks.queue_and_launch_book_pipeline_for_parent",
+        new=AsyncMock(return_value=queued),
+    ) as queue_and_launch:
         response = await client.post(
             f"/api/v1/education/textbook-versions/{version_id}/book-pipeline-jobs",
             json={"pause_after_chapter_analysis": True},
         )
 
-    assert response.status_code == 409
-    assert "not available" in response.json()["detail"]
-    insert.assert_not_awaited()
-    launch.assert_not_awaited()
+    assert response.status_code == 202
+    assert response.json()["pause_after_chapter_analysis"] is True
+    assert queue_and_launch.await_args.kwargs["pause_after_chapter_analysis"] is True
 
 
 def test_book_pipeline_request_normalizes_optional_brief() -> None:

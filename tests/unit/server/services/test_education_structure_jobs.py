@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from src.server.services import education_generation_progress
 from src.server.services import education_structure_jobs
 
 
@@ -159,6 +160,53 @@ def test_managed_book_pipeline_prompt_declares_progress_contract() -> None:
     assert "原始工具参数" in prompt
     assert "凭据" in prompt
     assert "原始教材段落" in prompt
+
+
+def test_managed_book_pipeline_prompt_orders_durable_chapter_completion_before_step4() -> (
+    None
+):
+    prompt = education_structure_jobs.managed_book_pipeline_prompt(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1",
+        {},
+    )
+
+    assert "Step 3 完成" in prompt
+    example = (
+        '{"event_key":"chapter_analysis:completed:job-version",'
+        '"stage":"chapter_analysis","status":"completed"}'
+    )
+    assert example in prompt
+    parsed = education_generation_progress.parse_progress_json_line(example)
+    assert parsed["event_key"] == "chapter_analysis:completed:job-version"
+    assert parsed["stage"] == "chapter_analysis"
+    assert parsed["status"] == "completed"
+    assert "之后才开始" in prompt
+    assert "Step 4" in prompt
+
+
+def test_managed_book_pipeline_continuation_prompt_starts_after_analysis() -> None:
+    prompt = education_structure_jobs.managed_book_pipeline_continuation_prompt(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1",
+        {},
+        processing_brief="保留所有学生活动。",
+    )
+
+    assert "mode=full-pipeline-continuation" in prompt
+    assert "不要重新执行 Steps 0-3" in prompt
+    assert "Steps 4-9" in prompt
+    assert "outputs/book_package.json" in prompt
+    assert "outputs/content_tree.json" in prompt
+    assert "保留所有学生活动。" in prompt
+    assert "必须按 canonical Steps 0-9 一次性完成" not in prompt
+    assert "已持久化的 chapter_analysis/completed" in prompt
+    assert "不得在重启后补写" in prompt
+    example = (
+        '{"event_key":"chapter_analysis:completed:job-version",'
+        '"stage":"chapter_analysis","status":"completed"}'
+    )
+    assert example in prompt
+    parsed = education_generation_progress.parse_progress_json_line(example)
+    assert parsed["event_key"] == "chapter_analysis:completed:job-version"
 
 
 def test_managed_book_pipeline_prompt_separates_node_reference_and_candidate_key() -> (
@@ -451,3 +499,103 @@ async def test_finalize_structure_generation_fails_only_the_structure_job(
     assert result["status"] == "failed"
     assert failed["error_code"] == "managed_structure_invalid"
     assert "结构" in failed["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_structure_starts_live_progress_collector(
+    monkeypatch,
+) -> None:
+    job_id = FROZEN_INPUT["job_id"]
+    job = {
+        "generation_job_id": job_id,
+        "processing_profile_id": None,
+    }
+    session = type("Session", (), {"sandbox": object()})()
+    captured: dict[str, object] = {}
+    collectors: list[dict[str, object]] = []
+    graph = object()
+
+    class FakeRunCoordinator:
+        async def start_run(self, **kwargs):
+            captured["run"] = kwargs
+            return type(
+                "RunHandle",
+                (),
+                {"run_id": kwargs["run_id"], "guard": object()},
+            )()
+
+    class FakeExecutor:
+        async def start_run(self, **kwargs):
+            captured["executor"] = kwargs
+
+    class FakeRunSSEProducer:
+        def __init__(self, **kwargs):
+            captured["handler"] = kwargs
+
+        async def stream_workflow(self, **_kwargs):
+            if False:
+                yield "unused"
+
+    class FakeProgressCollector:
+        def __init__(self, **kwargs):
+            collectors.append(kwargs)
+
+    async def build_graph(**_kwargs):
+        return graph, {"messages": []}, {"configurable": {"thread_id": "thread-1"}}
+
+    async def mark_running(**kwargs):
+        return {"status": "running", **kwargs}
+
+    monkeypatch.setattr(
+        education_structure_jobs,
+        "build_managed_education_graph",
+        build_graph,
+    )
+    monkeypatch.setattr(
+        education_structure_jobs,
+        "mark_generation_attempt_running",
+        mark_running,
+    )
+    monkeypatch.setattr(
+        education_structure_jobs.RunCoordinator,
+        "get_instance",
+        classmethod(lambda cls: FakeRunCoordinator()),
+    )
+    monkeypatch.setattr(
+        education_structure_jobs.LocalRunExecutor,
+        "get_instance",
+        classmethod(lambda cls: FakeExecutor()),
+    )
+    monkeypatch.setattr(
+        education_structure_jobs,
+        "RunSSEProducer",
+        FakeRunSSEProducer,
+    )
+    monkeypatch.setattr(
+        education_structure_jobs,
+        "ManagedProgressCollector",
+        FakeProgressCollector,
+    )
+
+    result = await education_structure_jobs._dispatch_structure_root_run(
+        parent_user_id="parent-1",
+        job=job,
+        frozen_input=FROZEN_INPUT,
+        attempt_id="attempt-1",
+        session=session,
+        workspace_id="workspace-1",
+        thread_id="thread-1",
+        agent_config=object(),
+    )
+
+    assert result == {"root_run_id": captured["run"]["run_id"]}
+    assert collectors == [
+        {
+            "sandbox": session.sandbox,
+            "generation_job_id": job_id,
+            "attempt_id": "attempt-1",
+            "run_id": captured["run"]["run_id"],
+        }
+    ]
+    workflow = captured["executor"]["workflow_generator"]
+    await workflow.aclose()

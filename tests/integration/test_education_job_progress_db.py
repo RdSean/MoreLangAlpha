@@ -11,6 +11,10 @@ import pytest
 
 from migrations import textbook_ddl
 from src.server.database.conversation.threads_write import create_thread
+from src.server.database import education_textbooks
+from src.server.database.education_textbooks import (
+    ProgressEventPersistenceOutcome,
+)
 from src.server.database.workspace import create_workspace
 
 
@@ -21,6 +25,12 @@ MIGRATION_PATH = (
     / "migrations"
     / "versions"
     / "080_education_job_progress.py"
+)
+MIGRATION_081_PATH = (
+    Path(__file__).parents[2]
+    / "migrations"
+    / "versions"
+    / "081_book_pipeline_checkpoint.py"
 )
 
 
@@ -57,6 +67,18 @@ def _migration_statements(
     function_name: str,
 ) -> list[str]:
     migration = runpy.run_path(str(MIGRATION_PATH))
+    operations = _RecordingOperations()
+    monkeypatch.setattr(textbook_ddl, "op", operations)
+    migration[function_name]()
+    return operations.bind.statements
+
+
+def _migration_081_statements(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    function_name: str,
+) -> list[str]:
+    migration = runpy.run_path(str(MIGRATION_081_PATH))
     operations = _RecordingOperations()
     monkeypatch.setattr(textbook_ddl, "op", operations)
     migration[function_name]()
@@ -402,9 +424,10 @@ async def test_progress_cascades_from_attempt_and_job(
 async def test_080_downgrade_removes_owned_schema_without_touching_job_tables(
     cleanup_tables,
     db_conn: psycopg.AsyncConnection,
-    test_db_uri: str,
+    request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    test_db_uri = request.getfixturevalue("test_db_uri")
     generation_job_id, attempt_id = await _seed_job(db_conn)
     async with db_conn.cursor() as cur:
         await cur.execute(
@@ -492,6 +515,319 @@ async def test_080_downgrade_removes_owned_schema_without_touching_job_tables(
             SELECT COUNT(*) AS count
             FROM pg_constraint
             WHERE conname = 'uq_education_generation_attempts_job_attempt'
+            """
+        )
+        assert (await cur.fetchone())["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_progress_writer_is_idempotent_and_rejects_wrong_run_ownership(
+    cleanup_tables,
+    db_conn: psycopg.AsyncConnection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generation_job_id, attempt_id = await _seed_job(db_conn)
+    other_generation_job_id, other_attempt_id = await _seed_job(db_conn)
+
+    class _ConnectionContext:
+        async def __aenter__(self):
+            return db_conn
+
+        async def __aexit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_db_connection",
+        lambda: _ConnectionContext(),
+    )
+
+    root_run_id = None
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT attempts.root_run_id
+            FROM education_generation_attempts AS attempts
+            WHERE attempts.attempt_id = %s
+            """,
+            (attempt_id,),
+        )
+        root_run_id = (await cur.fetchone())["root_run_id"]
+
+    running_event = {
+        "event_key": "chapter:start",
+        "stage": "chapter_analysis",
+        "status": "running",
+        "label": "Analyze",
+    }
+    first = await education_textbooks.persist_generation_progress_event(
+        generation_job_id=generation_job_id,
+        attempt_id=attempt_id,
+        run_id=root_run_id,
+        sequence=1,
+        event=running_event,
+    )
+    duplicate = await education_textbooks.persist_generation_progress_event(
+        generation_job_id=generation_job_id,
+        attempt_id=attempt_id,
+        run_id=root_run_id,
+        sequence=1,
+        event=running_event,
+    )
+    same_key_completed = await education_textbooks.persist_generation_progress_event(
+        generation_job_id=generation_job_id,
+        attempt_id=attempt_id,
+        run_id=root_run_id,
+        sequence=2,
+        event={**running_event, "status": "completed", "label": "Analyzed"},
+    )
+    wrong_run = await education_textbooks.persist_generation_progress_event(
+        generation_job_id=generation_job_id,
+        attempt_id=attempt_id,
+        run_id=f"00000000-0000-0000-0000-{uuid4().hex[:12]}",
+        sequence=3,
+        event={**running_event, "event_key": "wrong:run"},
+    )
+    cross_attempt = await education_textbooks.persist_generation_progress_event(
+        generation_job_id=other_generation_job_id,
+        attempt_id=attempt_id,
+        run_id=root_run_id,
+        sequence=4,
+        event={**running_event, "event_key": "cross:attempt"},
+    )
+    sequence_mismatch = await education_textbooks.persist_generation_progress_event(
+        generation_job_id=generation_job_id,
+        attempt_id=attempt_id,
+        run_id=root_run_id,
+        sequence=1,
+        event={**running_event, "status": "completed", "label": "Different"},
+    )
+
+    assert first.outcome is ProgressEventPersistenceOutcome.INSERTED
+    assert duplicate.outcome is ProgressEventPersistenceOutcome.ALREADY_EXISTS
+    assert duplicate.event["event_key"] == "chapter:start"
+    assert same_key_completed.outcome is ProgressEventPersistenceOutcome.INSERTED
+    assert wrong_run.outcome is ProgressEventPersistenceOutcome.REJECTED
+    assert cross_attempt.outcome is ProgressEventPersistenceOutcome.REJECTED
+    assert sequence_mismatch.outcome is ProgressEventPersistenceOutcome.REJECTED
+
+    rows = await education_textbooks.list_generation_progress_events(
+        generation_job_id=generation_job_id,
+        attempt_id=attempt_id,
+    )
+    assert [(row["sequence"], row["event_key"], row["status"]) for row in rows] == [
+        (1, "chapter:start", "running"),
+        (2, "chapter:start", "completed"),
+    ]
+    assert other_attempt_id != attempt_id
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_bundle_prefix_is_private_and_database_validated(
+    cleanup_tables,
+    db_conn: psycopg.AsyncConnection,
+) -> None:
+    generation_job_id, _attempt_id = await _seed_job(db_conn)
+
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT is_nullable, data_type
+            FROM information_schema.columns
+            WHERE table_name = 'education_generation_jobs'
+              AND column_name = 'checkpoint_bundle_prefix'
+            """
+        )
+        assert await cur.fetchone() == {
+            "is_nullable": "YES",
+            "data_type": "text",
+        }
+        await cur.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM pg_constraint
+            WHERE conname =
+                'ck_education_generation_jobs_checkpoint_prefix'
+            """
+        )
+        assert (await cur.fetchone())["count"] == 1
+
+    valid_prefix = (
+        "education/household/textbook/v1/book-pipeline-checkpoints/"
+        "4d0112f8-0e00-4f1f-990a-4bc1b1cc20f3/"
+        "6f3f2de2-5c58-4bc2-84bc-95e97acd37f6"
+    )
+    async with db_conn.transaction():
+        async with db_conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE education_generation_jobs
+                SET checkpoint_bundle_prefix = %s
+                WHERE generation_job_id = %s
+                """,
+                (valid_prefix, generation_job_id),
+            )
+        async with db_conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT checkpoint_bundle_prefix
+                FROM education_generation_jobs
+                WHERE generation_job_id = %s
+                """,
+                (generation_job_id,),
+            )
+            assert (await cur.fetchone())["checkpoint_bundle_prefix"] == valid_prefix
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        async with db_conn.transaction():
+            async with db_conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs
+                    SET checkpoint_bundle_prefix = %s
+                    WHERE generation_job_id = %s
+                    """,
+                    ("/tmp/private", generation_job_id),
+                )
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        async with db_conn.transaction():
+            async with db_conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs
+                    SET status = 'awaiting_review',
+                        pause_after_chapter_analysis = TRUE,
+                        checkpoint_bundle_prefix = NULL
+                    WHERE generation_job_id = %s
+                    """,
+                    (generation_job_id,),
+                )
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        async with db_conn.transaction():
+            async with db_conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs
+                    SET checkpoint_bundle_prefix = ''
+                    WHERE generation_job_id = %s
+                    """,
+                    (generation_job_id,),
+                )
+
+
+@pytest.mark.asyncio
+async def test_081_downgrade_fails_closed_when_checkpoint_data_exists(
+    cleanup_tables,
+    db_conn: psycopg.AsyncConnection,
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_db_uri = request.getfixturevalue("test_db_uri")
+    generation_job_id, _attempt_id = await _seed_job(db_conn)
+    checkpoint_prefix = (
+        "education/household/textbook/v1/book-pipeline-checkpoints/"
+        "4d0112f8-0e00-4f1f-990a-4bc1b1cc20f3/"
+        "6f3f2de2-5c58-4bc2-84bc-95e97acd37f6"
+    )
+    async with db_conn.transaction():
+        async with db_conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE education_generation_jobs
+                SET checkpoint_bundle_prefix = %s
+                WHERE generation_job_id = %s
+                """,
+                (checkpoint_prefix, generation_job_id),
+            )
+
+    statements = _migration_081_statements(
+        monkeypatch,
+        function_name="downgrade",
+    )
+    connection = await psycopg.AsyncConnection.connect(
+        test_db_uri,
+        autocommit=False,
+        row_factory=psycopg.rows.dict_row,
+    )
+    try:
+        with pytest.raises(psycopg.errors.RaiseException, match="checkpoint data"):
+            async with connection.transaction():
+                for statement in statements:
+                    await connection.execute(statement)
+    finally:
+        await connection.close()
+
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT checkpoint_bundle_prefix
+            FROM education_generation_jobs
+            WHERE generation_job_id = %s
+            """,
+            (generation_job_id,),
+        )
+        assert (await cur.fetchone())["checkpoint_bundle_prefix"] == checkpoint_prefix
+        await cur.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'education_generation_jobs'
+              AND column_name = 'checkpoint_bundle_prefix'
+            """
+        )
+        assert (await cur.fetchone())["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_081_downgrade_succeeds_without_checkpoint_data(
+    cleanup_tables,
+    db_conn: psycopg.AsyncConnection,
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_db_uri = request.getfixturevalue("test_db_uri")
+    await _seed_job(db_conn)
+    statements = _migration_081_statements(
+        monkeypatch,
+        function_name="downgrade",
+    )
+    connection = await psycopg.AsyncConnection.connect(
+        test_db_uri,
+        autocommit=False,
+        row_factory=psycopg.rows.dict_row,
+    )
+    try:
+        async with connection.transaction():
+            for statement in statements:
+                await connection.execute(statement)
+            async with connection.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'education_generation_jobs'
+                      AND column_name = 'checkpoint_bundle_prefix'
+                    """
+                )
+                assert (await cur.fetchone())["count"] == 0
+            raise _RollbackMigration
+    except _RollbackMigration:
+        pass
+    finally:
+        await connection.close()
+
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'education_generation_jobs'
+              AND column_name = 'checkpoint_bundle_prefix'
             """
         )
         assert (await cur.fetchone())["count"] == 1

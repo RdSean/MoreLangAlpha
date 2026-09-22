@@ -17,6 +17,10 @@ following any later section:
 * `mode=full-pipeline` runs canonical Steps 0-9 and writes the canonical
   book-skill assets plus the LangAlpha package, content tree, knowledge-point
   candidates, assets manifest and progress stream described below.
+* `mode=full-pipeline-continuation` resumes after a durable
+  `chapter_analysis/completed` checkpoint. Reuse the restored
+  `book_package.json` and `content_tree.json`, do not repeat Steps 0-3, and
+  complete Steps 4-9 with the full-pipeline outputs described below.
 
 Do not infer a mode. If the caller prompt does not name one of these exact
 identifiers, stop. Never apply full-pipeline requirements to an analyze pass.
@@ -31,6 +35,9 @@ The invocation names a managed job root of the form
 * In `mode=full-pipeline`, run all canonical Steps 0-9 in one execution. Do not
   stop after analyze-only, do not use generate-from-prior-analysis, and do not
   ask the user to run structure, content and knowledge phases as separate jobs.
+* In `mode=full-pipeline-continuation`, treat Steps 0-3 as already complete.
+  Reuse the restored chapter-analysis projections and continue with Steps 4-9.
+  Do not rebuild the chapter tree from the full Markdown.
 * In `mode=analyze-pass`, stop after Step 3 as required by the existing
   structure-analysis job.
 * Read only `<root>/inputs/manifest.json`, `<root>/inputs/sources/`,
@@ -129,6 +136,10 @@ of the same run; they must not contradict the combined package. Create content
 asset files only under `<root>/outputs/`, and declare every generated or copied
 asset in `assets_manifest.json`.
 
+The same output contract applies to `mode=full-pipeline-continuation`. In that
+mode, the restored `book_package.json` and `content_tree.json` are authoritative
+checkpoint inputs for Steps 4-9; do not replace them with a fresh analysis.
+
 ## Step mapping
 
 The exact method for each step comes from upstream `SKILL.md`. The mapping below
@@ -144,6 +155,15 @@ defines where the managed artifacts are produced:
 | 7 | Generate canonical chapter files and per-node content assets. Attach source refs to every node when a trustworthy range is available. |
 | 8 | Generate canonical glossary, patterns and cheatsheet assets, plus reviewable knowledge-point candidates and the assets manifest. |
 | 9 | Generate the master `SKILL.md`, reconcile all projections, validate the complete package, and finish the progress stream. |
+
+When Step 3 has finished the generic content tree and written
+`book_package.json` plus `content_tree.json`, append the durable event
+`{"event_key":"chapter_analysis:completed:job-version","stage":"chapter_analysis","status":"completed"}`
+to `progress.jsonl`
+**before Steps 4-9**. Do not begin content processing or emit a
+`content_processing/running` event until that chapter-completion event has been
+appended. In continuation mode, this event is already part of the restored
+checkpoint; do not redo Step 3 or backfill the event after Step 4 has started.
 
 ## Generic content tree
 

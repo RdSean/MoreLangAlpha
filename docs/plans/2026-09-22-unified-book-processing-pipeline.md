@@ -570,6 +570,51 @@ uv run pytest -m integration \
 
 Expected: PASS.
 
+**Runtime wiring (2026-09-22):** Task 7 adds
+`081_book_pipeline_checkpoint.py` with `checkpoint_bundle_prefix` on
+`education_generation_jobs`. The collector persists complete JSONL lines by
+deterministic attempt sequence with an idempotent database insert. The shared
+managed workflow wrapper owns collector start/stop, so collection does not
+depend on model/tool SSE activity.
+
+The database write is a typed `inserted | already_exists | rejected` result.
+An existing `(attempt_id, sequence)` row may trigger checkpoint handling only
+when its normalized payload matches; mismatched payloads, wrong run ids and
+cross-job attempts are rejected. The 081 constraint requires a safe non-empty
+checkpoint prefix before a job can enter `awaiting_review`, and its downgrade
+fails closed while checkpoint data exists.
+
+The collector advances its durable byte offset only after `inserted` or a
+payload-matching `already_exists` acknowledgement; transient database failures
+leave the line pending and retry with bounded backoff. On
+`chapter_analysis/completed`, the collector only sets the stop signal. The
+shared workflow wrapper closes the graph/consumer and collector first, then
+runs the checkpoint archive and `awaiting_review` transition against the
+stopped snapshot.
+
+For checkpoint mode, the service first archives the restored
+`book_package.json` and `content_tree.json` into an immutable private bundle,
+then atomically moves the job to `awaiting_review`. The workflow wrapper stops
+on the collector's checkpoint signal; the terminal callback does not import the
+partial package. Resume requeues the same job, starts a new attempt, restages
+the durable checkpoint bundle, and uses `mode=full-pipeline-continuation`
+starting at Steps 4-9 rather than replaying Steps 0-9.
+
+The checkpoint manifest is written last and binds job id, content version id,
+source attempt id, fixed projection keys, size and SHA-256. Restore verifies
+prefix ownership, lineage, manifest shape and every object hash/size before
+staging any file into the continuation sandbox.
+
+Additional Task 7 files:
+
+```text
+migrations/versions/081_book_pipeline_checkpoint.py
+src/server/services/education_teaching_storage.py
+tests/integration/test_education_job_progress_db.py
+tests/unit/migrations/test_book_pipeline_checkpoint.py
+tests/unit/server/services/test_education_teaching_storage.py
+```
+
 **Step 7: Commit**
 
 ```bash
@@ -1102,11 +1147,28 @@ git commit -m "feat(textbooks): add semantic progress protocol"
 ### Task 7: Capture Progress While the Managed Run Is Live
 
 **Files:**
+- Create: `migrations/versions/081_book_pipeline_checkpoint.py`
 - Create: `src/server/services/education_progress_collector.py`
+- Modify: `src/server/database/education_textbooks.py`
 - Modify: `src/server/services/education_structure_jobs.py`
 - Modify: `src/server/services/education_book_pipeline_jobs.py`
 - Modify: `src/server/services/education_lesson_jobs.py`
+- Modify: `src/server/services/education_teaching_storage.py`
+- Modify:
+  `plugins/langalpha_local/skills/book-to-skill/reference/langalpha-managed.md`
+- Test: `tests/integration/test_book_pipeline_jobs_db.py`
+- Test: `tests/integration/test_education_job_progress_db.py`
 - Test: `tests/unit/server/services/test_education_progress_collector.py`
+- Test: `tests/unit/server/services/test_education_book_pipeline_jobs.py`
+- Test: `tests/unit/server/services/test_education_structure_jobs.py`
+- Test: `tests/unit/server/services/test_education_lesson_jobs.py`
+- Test: `tests/unit/server/services/test_education_teaching_storage.py`
+- Test: `tests/unit/migrations/test_book_pipeline_checkpoint.py`
+- Test: `tests/unit/server/database/test_education_structure_models.py`
+- Test: `tests/unit/server/app/education/test_textbook_structures.py`
+- Test: `tests/unit/middleware/skills/test_native_book_learning_skills.py`
+- Modify: `CHANGELOG.md`
+- Modify: `docs/plans/2026-09-22-unified-book-processing-pipeline.md`
 
 **Step 1: Write the failing live collector test**
 
@@ -1171,6 +1233,12 @@ create a continuation attempt and use a continuation prompt that starts after
 the persisted chapter checkpoint; it must not replay the full Steps 0-9 prompt.
 Task 7 must also replace the temporary public-entry rejection with the fully
 tested checkpoint launch path once durable events can trigger it.
+The full-pipeline and continuation prompts/overlay must also require that the
+`chapter_analysis/completed` event is durable before any Step 4 content
+processing begins; continuation mode only consumes the restored checkpoint and
+never backfills the event after restart. The required event is complete JSON
+with a non-empty stable key, for example:
+`{"event_key":"chapter_analysis:completed:job-version","stage":"chapter_analysis","status":"completed"}`.
 
 **Step 5: Add fallback projection**
 
@@ -1198,10 +1266,26 @@ Expected: PASS.
 
 ```bash
 git add src/server/services/education_progress_collector.py \
+  migrations/versions/081_book_pipeline_checkpoint.py \
+  src/server/database/education_textbooks.py \
   src/server/services/education_structure_jobs.py \
   src/server/services/education_book_pipeline_jobs.py \
   src/server/services/education_lesson_jobs.py \
-  tests/unit/server/services/test_education_progress_collector.py
+  src/server/services/education_teaching_storage.py \
+  plugins/langalpha_local/skills/book-to-skill/reference/langalpha-managed.md \
+  tests/unit/server/services/test_education_progress_collector.py \
+  tests/unit/server/services/test_education_book_pipeline_jobs.py \
+  tests/unit/server/services/test_education_structure_jobs.py \
+  tests/unit/server/services/test_education_lesson_jobs.py \
+  tests/unit/server/services/test_education_teaching_storage.py \
+  tests/unit/migrations/test_book_pipeline_checkpoint.py \
+  tests/unit/server/database/test_education_structure_models.py \
+  tests/unit/server/app/education/test_textbook_structures.py \
+  tests/unit/middleware/skills/test_native_book_learning_skills.py \
+  tests/integration/test_book_pipeline_jobs_db.py \
+  tests/integration/test_education_job_progress_db.py \
+  CHANGELOG.md \
+  docs/plans/2026-09-22-unified-book-processing-pipeline.md
 git commit -m "feat(textbooks): collect managed progress while runs are live"
 ```
 

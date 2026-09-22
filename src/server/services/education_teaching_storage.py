@@ -43,6 +43,16 @@ from src.utils.storage import get_bytes, upload_bytes
 _SAFE_COMPONENT_RE = re.compile(r"[^0-9A-Za-z._-]+")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SOURCE_SNAPSHOT_FORMAT = "langalpha-textbook-source-snapshot/v1"
+_CHECKPOINT_BUNDLE_PREFIX_RE = re.compile(
+    r"^education/"
+    r"[0-9A-Za-z][0-9A-Za-z._-]{0,79}/"
+    r"[0-9A-Za-z][0-9A-Za-z._-]{0,79}/"
+    r"v[1-9][0-9]*/book-pipeline-checkpoints/"
+    r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
+    r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}/"
+    r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
+    r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
+)
 _MARKDOWN_IMAGE_RE = re.compile(
     r"""!\[[^\]]*\]\(\s*(?P<target><[^>\n]+>|[^\s)]+)"""
     r"""(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)""",
@@ -1241,6 +1251,206 @@ async def write_book_package_bundle(
         "manifest": manifest,
         "asset_content_keys": asset_content_keys,
     }
+
+
+def book_pipeline_checkpoint_prefix(
+    job: Mapping[str, Any],
+    attempt_id: str,
+) -> str:
+    """Return the immutable private prefix for a chapter-analysis checkpoint."""
+    try:
+        content_sequence = int(job["content_version_sequence"])
+        generation_job_id = UUID(str(job["generation_job_id"]))
+        normalized_attempt_id = UUID(str(attempt_id))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TeachingPackageStorageError(
+            "Book pipeline checkpoint identity is invalid"
+        ) from exc
+    if content_sequence <= 0:
+        raise TeachingPackageStorageError("Book pipeline checkpoint version is invalid")
+    prefix = "education/{}/{}/v{}/book-pipeline-checkpoints/{}/{}".format(
+        _safe_component(job.get("household_id"), "household"),
+        _safe_component(job.get("slug"), "textbook"),
+        content_sequence,
+        generation_job_id,
+        normalized_attempt_id,
+    )
+    return validate_book_pipeline_checkpoint_prefix(prefix)
+
+
+def validate_book_pipeline_checkpoint_prefix(value: object) -> str:
+    """Return one canonical checkpoint prefix or reject it."""
+    prefix = str(value or "").strip()
+    if not _CHECKPOINT_BUNDLE_PREFIX_RE.fullmatch(prefix):
+        raise TeachingPackageStorageError(
+            "Book pipeline checkpoint prefix is invalid"
+        )
+    return prefix
+
+
+async def write_book_pipeline_checkpoint_bundle(
+    job: Mapping[str, Any],
+    attempt_id: str,
+    sandbox: ManagedTeachingSandbox,
+) -> dict[str, Any]:
+    """Archive the durable package projections available after chapter analysis."""
+    root = managed_job_root(str(job["generation_job_id"]))
+    files: dict[str, bytes] = {}
+    for relative_path in _BOOK_PACKAGE_FILES:
+        content = await sandbox.adownload_file_bytes(f"{root}/{relative_path}")
+        if content is None:
+            continue
+        if (
+            not isinstance(content, bytes)
+            or len(content) > _MAX_BOOK_PACKAGE_JSON_BYTES
+        ):
+            raise TeachingPackageStorageError(
+                f"Book pipeline checkpoint file is invalid: {relative_path}"
+            )
+        if not content.strip():
+            continue
+        files[relative_path] = content
+
+    required = {
+        "outputs/book_package.json",
+        "outputs/content_tree.json",
+    }
+    if not required.issubset(files):
+        raise TeachingPackageStorageError(
+            "Book pipeline checkpoint lacks chapter-analysis outputs"
+        )
+
+    prefix = book_pipeline_checkpoint_prefix(job, attempt_id)
+    file_manifest: dict[str, dict[str, Any]] = {}
+    for relative_path, content in files.items():
+        filename = relative_path.removeprefix("outputs/")
+        content_key = f"{prefix}/{filename}"
+        await _put(content_key, content, "application/json")
+        file_manifest[relative_path] = {
+            "content_key": content_key,
+            "content_sha256": hashlib.sha256(content).hexdigest(),
+            "size_bytes": len(content),
+        }
+    manifest = {
+        "format": "langalpha-book-pipeline-checkpoint/v1",
+        "generation_job_id": str(UUID(str(job["generation_job_id"]))),
+        "version_id": str(job["version_id"]),
+        "attempt_id": str(UUID(str(attempt_id))),
+        "files": file_manifest,
+    }
+    await _put(
+        f"{prefix}/manifest.json",
+        json.dumps(
+            manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        "application/json",
+    )
+    return {"prefix": prefix, "manifest": manifest}
+
+
+async def stage_book_pipeline_checkpoint_bundle(
+    job: Mapping[str, Any],
+    sandbox: ManagedTeachingSandbox,
+) -> list[str]:
+    """Restore only the fixed projections named by a continuation checkpoint."""
+    prefix = validate_book_pipeline_checkpoint_prefix(
+        job.get("checkpoint_bundle_prefix")
+    )
+    root = managed_job_root(str(job["generation_job_id"]))
+    manifest = _strict_json_object(
+        await asyncio.to_thread(get_bytes, f"{prefix}/manifest.json")
+        or b"",
+        label="Book pipeline checkpoint manifest",
+    )
+    if manifest.get("format") != "langalpha-book-pipeline-checkpoint/v1":
+        raise TeachingPackageStorageError(
+            "Book pipeline checkpoint manifest is invalid"
+        )
+    manifest_attempt_id = str(manifest.get("attempt_id") or "")
+    if (
+        str(manifest.get("generation_job_id") or "")
+        != str(job["generation_job_id"])
+        or str(manifest.get("version_id") or "") != str(job.get("version_id") or "")
+        or manifest_attempt_id != str(job.get("latest_attempt_id") or "")
+    ):
+        raise TeachingPackageStorageError(
+            "Book pipeline checkpoint manifest ownership is invalid"
+        )
+    if book_pipeline_checkpoint_prefix(job, manifest_attempt_id) != prefix:
+        raise TeachingPackageStorageError(
+            "Book pipeline checkpoint manifest prefix is invalid"
+        )
+    manifest_files = manifest.get("files")
+    if not isinstance(manifest_files, Mapping):
+        raise TeachingPackageStorageError(
+            "Book pipeline checkpoint manifest files are invalid"
+        )
+    if not {"outputs/book_package.json", "outputs/content_tree.json"}.issubset(
+        manifest_files
+    ):
+        raise TeachingPackageStorageError(
+            "Book pipeline checkpoint manifest is incomplete"
+        )
+    if not set(manifest_files).issubset(_BOOK_PACKAGE_FILES):
+        raise TeachingPackageStorageError(
+            "Book pipeline checkpoint manifest has undeclared keys"
+        )
+
+    validated_files: list[tuple[str, bytes]] = []
+    for relative_path in _BOOK_PACKAGE_FILES:
+        file_metadata = manifest_files.get(relative_path)
+        if file_metadata is None:
+            continue
+        if not isinstance(file_metadata, Mapping):
+            raise TeachingPackageStorageError(
+                "Book pipeline checkpoint file metadata is invalid"
+            )
+        expected_key = f"{prefix}/{relative_path.removeprefix('outputs/')}"
+        expected_sha256 = str(file_metadata.get("content_sha256") or "")
+        expected_size = file_metadata.get("size_bytes")
+        if (
+            str(file_metadata.get("content_key") or "") != expected_key
+            or not _SHA256_RE.fullmatch(expected_sha256)
+            or not isinstance(expected_size, int)
+            or isinstance(expected_size, bool)
+            or expected_size < 0
+        ):
+            raise TeachingPackageStorageError(
+                "Book pipeline checkpoint file metadata is invalid"
+            )
+        content = await asyncio.to_thread(
+            get_bytes,
+            expected_key,
+        )
+        if content is None:
+            raise TeachingPackageStorageError(
+                "Book pipeline checkpoint restore is incomplete"
+            )
+        if (
+            not isinstance(content, bytes)
+            or len(content) != expected_size
+            or hashlib.sha256(content).hexdigest() != expected_sha256
+            or len(content) > _MAX_BOOK_PACKAGE_JSON_BYTES
+        ):
+            raise TeachingPackageStorageError(
+                "Book pipeline checkpoint restore is invalid"
+            )
+        validated_files.append((relative_path, content))
+
+    uploaded: list[str] = []
+    for relative_path, content in validated_files:
+        if not await sandbox.aupload_file_bytes(
+            f"{root}/{relative_path}",
+            content,
+        ):
+            raise TeachingPackageStorageError(
+                "Book pipeline checkpoint could not be staged"
+            )
+        uploaded.append(relative_path)
+    return uploaded
 
 
 async def write_structure_bundle(

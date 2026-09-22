@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from collections.abc import Mapping
@@ -35,8 +36,12 @@ from src.server.services.education_managed_runs import (
     build_managed_education_graph,
     resolve_managed_education_agent_config,
 )
+from src.server.services.education_progress_collector import (
+    ManagedProgressCollector,
+)
 from src.server.services.education_structure_jobs import (
     managed_book_pipeline_prompt,
+    managed_book_pipeline_continuation_prompt,
     managed_generation_workflow_events,
 )
 from src.server.services.education_teaching_storage import (
@@ -44,8 +49,11 @@ from src.server.services.education_teaching_storage import (
     download_book_package_outputs,
     hydrate_source_asset_manifests,
     stage_managed_teaching_skills,
+    stage_book_pipeline_checkpoint_bundle,
     stage_teaching_inputs,
+    validate_book_pipeline_checkpoint_prefix,
     write_book_package_bundle,
+    write_book_pipeline_checkpoint_bundle,
 )
 from src.server.services.runs.coordinator import RunCoordinator
 from src.server.services.runs.executor import LocalRunExecutor
@@ -91,6 +99,7 @@ def _job_projection(job: Mapping[str, Any]) -> dict[str, Any]:
             "status",
             "attempt_count",
             "pause_after_chapter_analysis",
+            "checkpoint_bundle_prefix",
             "error_code",
             "error_message",
             "created_at",
@@ -119,9 +128,7 @@ def _frozen_source_documents(
             raise TeachingPackageStorageError("Managed frozen source is invalid")
         markdown = source.get("markdown")
         if not isinstance(markdown, str) or not markdown:
-            raise TeachingPackageStorageError(
-                "Managed frozen Markdown is unavailable"
-            )
+            raise TeachingPackageStorageError("Managed frozen Markdown is unavailable")
         source_id = str(
             source.get("source_id") or source.get("content_chapter_id") or ""
         ).strip()
@@ -226,9 +233,15 @@ async def finalize_book_pipeline_generation(
     sandbox: Any,
     terminal_status: str,
     terminal_error: str | None,
+    checkpoint_stop_event: asyncio.Event | None = None,
 ) -> dict[str, Any] | None:
     """Import one completed package or settle its failed attempt."""
     del root_run_id
+    if checkpoint_stop_event is not None and checkpoint_stop_event.is_set():
+        return {
+            "status": "awaiting_review",
+            "job_status": "awaiting_review",
+        }
     if terminal_status != "completed":
         status = "cancelled" if terminal_status == "cancelled" else "failed"
         return await _fail_book_pipeline_attempt(
@@ -278,6 +291,7 @@ async def pause_book_pipeline_after_chapter_analysis(
     *,
     job: Mapping[str, Any],
     attempt_id: str,
+    checkpoint_bundle_prefix: str,
 ) -> dict[str, Any]:
     """Pause a checkpointed run after the collector reports chapter analysis.
 
@@ -292,6 +306,7 @@ async def pause_book_pipeline_after_chapter_analysis(
         parent_user_id=parent_user_id,
         generation_job_id=str(job["generation_job_id"]),
         attempt_id=attempt_id,
+        checkpoint_bundle_prefix=checkpoint_bundle_prefix,
     )
 
 
@@ -344,9 +359,17 @@ async def _dispatch_book_pipeline_root_run(
     del frozen_input
     generation_job_id = str(job["generation_job_id"])
     run_id = str(uuid4())
-    prompt = managed_book_pipeline_prompt(
-        generation_job_id,
-        processing_brief=str(job.get("processing_brief") or ""),
+    continuation = bool(job.get("checkpoint_bundle_prefix"))
+    prompt = (
+        managed_book_pipeline_continuation_prompt(
+            generation_job_id,
+            processing_brief=str(job.get("processing_brief") or ""),
+        )
+        if continuation
+        else managed_book_pipeline_prompt(
+            generation_job_id,
+            processing_brief=str(job.get("processing_brief") or ""),
+        )
     )
     run_handle = await RunCoordinator.get_instance().start_run(
         thread_id=thread_id,
@@ -399,6 +422,31 @@ async def _dispatch_book_pipeline_root_run(
             run_id=run_id,
             workflow_timeout=get_education_teaching_workflow_timeout(),
         )
+        checkpoint_stop_event = asyncio.Event()
+
+        async def persist_checkpoint() -> None:
+            bundle = await write_book_pipeline_checkpoint_bundle(
+                job,
+                attempt_id,
+                session.sandbox,
+            )
+            await pause_book_pipeline_after_chapter_analysis(
+                job=job,
+                attempt_id=attempt_id,
+                checkpoint_bundle_prefix=str(bundle["prefix"]),
+            )
+
+        collector = ManagedProgressCollector(
+            sandbox=session.sandbox,
+            generation_job_id=generation_job_id,
+            attempt_id=attempt_id,
+            run_id=run_id,
+            checkpoint_stop_event=(
+                checkpoint_stop_event
+                if bool(job.get("pause_after_chapter_analysis"))
+                else None
+            ),
+        )
 
         async def on_terminal(task_info: Any, status: str) -> None:
             await finalize_book_pipeline_generation(
@@ -409,6 +457,7 @@ async def _dispatch_book_pipeline_root_run(
                 sandbox=session.sandbox,
                 terminal_status=status,
                 terminal_error=getattr(task_info, "error", None),
+                checkpoint_stop_event=checkpoint_stop_event,
             )
 
         workflow = managed_generation_workflow_events(
@@ -420,6 +469,13 @@ async def _dispatch_book_pipeline_root_run(
             generation_job_id=generation_job_id,
             attempt_id=attempt_id,
             root_run_id=run_id,
+            progress_collector=collector,
+            checkpoint_stop_event=checkpoint_stop_event,
+            on_checkpoint_stop=(
+                persist_checkpoint
+                if bool(job.get("pause_after_chapter_analysis"))
+                else None
+            ),
         )
         await LocalRunExecutor.get_instance().start_run(
             thread_id=thread_id,
@@ -457,6 +513,18 @@ async def _dispatch_book_pipeline_root_run(
     return {"root_run_id": run_id}
 
 
+async def _stage_continuation_checkpoint_bundle(
+    job: Mapping[str, Any],
+    sandbox: Any,
+) -> None:
+    try:
+        await stage_book_pipeline_checkpoint_bundle(job, sandbox)
+    except TeachingPackageStorageError as exc:
+        raise TextbookTransitionError(
+            "Textbook processing continuation checkpoint is corrupt"
+        ) from exc
+
+
 async def launch_book_pipeline_generation(
     *, parent_user_id: str, generation_job_id: str
 ) -> dict[str, Any]:
@@ -469,10 +537,20 @@ async def launch_book_pipeline_generation(
         raise TextbookNotFoundError("Textbook processing job not found")
     if job.get("scope") != "book_pipeline":
         raise TextbookTransitionError("Textbook processing job cannot start")
-    if job.get("pause_after_chapter_analysis"):
-        raise TextbookTransitionError(
-            "Chapter-review checkpoint requires the semantic progress collector"
-        )
+    continuation_required = bool(
+        int(job.get("attempt_count") or 0) > 0
+        or job.get("checkpoint_bundle_prefix") is not None
+    )
+    checkpoint_bundle_prefix: str | None = None
+    if continuation_required:
+        try:
+            checkpoint_bundle_prefix = validate_book_pipeline_checkpoint_prefix(
+                job.get("checkpoint_bundle_prefix")
+            )
+        except TeachingPackageStorageError as exc:
+            raise TextbookTransitionError(
+                "Textbook processing continuation checkpoint bundle is invalid"
+            ) from exc
     if job.get("status") == "preparing":
         return {"launch_claimed": False}
     if job.get("status") != "queued":
@@ -533,6 +611,12 @@ async def launch_book_pipeline_generation(
             skill_names=("book-to-skill",),
         )
         await stage_teaching_inputs(frozen_input, session.sandbox)
+        if checkpoint_bundle_prefix is not None:
+            job = {
+                **dict(job),
+                "checkpoint_bundle_prefix": checkpoint_bundle_prefix,
+            }
+            await _stage_continuation_checkpoint_bundle(job, session.sandbox)
         return await _dispatch_book_pipeline_root_run(
             job=job,
             frozen_input=frozen_input,
@@ -624,11 +708,6 @@ async def queue_book_pipeline_for_parent(
     pause_after_chapter_analysis: bool = False,
 ) -> dict[str, Any]:
     """Create or reuse one parent-owned unified processing job."""
-    if pause_after_chapter_analysis:
-        raise TextbookTransitionError(
-            "Chapter-review checkpoint is not available until semantic "
-            "progress collection is enabled"
-        )
     if not await get_household_context_for_parent(parent_user_id):
         raise TextbookPermissionError(
             "Only a parent can create textbook processing jobs"
@@ -669,8 +748,17 @@ async def pause_book_pipeline_for_parent(
     parent_user_id: str,
     generation_job_id: str,
     attempt_id: str,
+    checkpoint_bundle_prefix: str,
 ) -> dict[str, Any]:
     """Finish the current attempt at the chapter-analysis review checkpoint."""
+    try:
+        checkpoint_bundle_prefix = validate_book_pipeline_checkpoint_prefix(
+            checkpoint_bundle_prefix
+        )
+    except TeachingPackageStorageError as exc:
+        raise TextbookTransitionError(
+            "Textbook processing checkpoint bundle is invalid"
+        ) from exc
     if not await get_household_context_for_parent(parent_user_id):
         raise TextbookPermissionError(
             "Only a parent can update textbook processing jobs"
@@ -679,6 +767,7 @@ async def pause_book_pipeline_for_parent(
         parent_user_id=parent_user_id,
         generation_job_id=generation_job_id,
         attempt_id=attempt_id,
+        checkpoint_bundle_prefix=checkpoint_bundle_prefix,
     )
     if not job:
         raise TextbookTransitionError("Textbook processing job cannot pause for review")
@@ -705,10 +794,30 @@ async def resume_book_pipeline_for_parent(
         raise TextbookTransitionError(
             "Only a chapter-analysis checkpoint can be resumed"
         )
+    try:
+        checkpoint_bundle_prefix = validate_book_pipeline_checkpoint_prefix(
+            job.get("checkpoint_bundle_prefix")
+        )
+    except TeachingPackageStorageError as exc:
+        raise TextbookTransitionError(
+            "Textbook processing continuation checkpoint bundle is invalid"
+        ) from exc
     resumed = await resume_book_pipeline_job(
         parent_user_id=parent_user_id,
         generation_job_id=generation_job_id,
     )
     if not resumed:
         raise TextbookTransitionError("Textbook processing job cannot be resumed")
-    return _job_projection(resumed)
+    if str(resumed.get("checkpoint_bundle_prefix") or "") != checkpoint_bundle_prefix:
+        raise TextbookTransitionError(
+            "Textbook processing continuation checkpoint changed during resume"
+        )
+    await launch_book_pipeline_generation(
+        parent_user_id=parent_user_id,
+        generation_job_id=generation_job_id,
+    )
+    projected = await get_book_pipeline_job_for_parent(
+        parent_user_id=parent_user_id,
+        generation_job_id=generation_job_id,
+    )
+    return projected

@@ -19,6 +19,12 @@ from src.server.database import education_textbooks
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
+CHECKPOINT_PREFIX = (
+    "education/household/textbook/v1/book-pipeline-checkpoints/"
+    "4d0112f8-0e00-4f1f-990a-4bc1b1cc20f3/"
+    "6f3f2de2-5c58-4bc2-84bc-95e97acd37f6"
+)
+
 MIGRATION_PATH = (
     Path(__file__).parents[2] / "migrations" / "versions" / "077_book_pipeline_jobs.py"
 )
@@ -940,6 +946,7 @@ async def test_pause_and_resume_enforce_household_acl(
                         attempt_count INTEGER NOT NULL DEFAULT 0,
                         latest_attempt_id UUID,
                         pause_after_chapter_analysis BOOLEAN NOT NULL DEFAULT FALSE,
+                        checkpoint_bundle_prefix TEXT,
                         processing_profile_sha256 VARCHAR(64) NOT NULL,
                         error_code VARCHAR(64),
                         error_message TEXT,
@@ -1018,6 +1025,7 @@ async def test_pause_and_resume_enforce_household_acl(
                     parent_user_id=parent_b,
                     generation_job_id=str(generation_job_id),
                     attempt_id=str(attempt_id),
+                    checkpoint_bundle_prefix=CHECKPOINT_PREFIX,
                 )
                 is None
             )
@@ -1045,6 +1053,7 @@ async def test_pause_and_resume_enforce_household_acl(
                 parent_user_id=parent_a,
                 generation_job_id=str(generation_job_id),
                 attempt_id=str(attempt_id),
+                checkpoint_bundle_prefix=CHECKPOINT_PREFIX,
             )
             assert paused is not None
             assert paused["status"] == "awaiting_review"
@@ -1176,6 +1185,7 @@ async def test_pause_uses_attempt_first_lock_order(
                     attempt_count INTEGER NOT NULL DEFAULT 0,
                     latest_attempt_id UUID,
                     pause_after_chapter_analysis BOOLEAN NOT NULL DEFAULT FALSE,
+                    checkpoint_bundle_prefix TEXT,
                     processing_profile_sha256 VARCHAR(64) NOT NULL,
                     error_code VARCHAR(64),
                     error_message TEXT,
@@ -1276,6 +1286,7 @@ async def test_pause_uses_attempt_first_lock_order(
                 parent_user_id=parent_user_id,
                 generation_job_id=str(generation_job_id),
                 attempt_id=str(attempt_id),
+                checkpoint_bundle_prefix=CHECKPOINT_PREFIX,
             )
         )
         await _wait_for_backend_lock(blocker, backend_pid=pause_pid)

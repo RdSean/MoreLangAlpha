@@ -44,6 +44,9 @@ from src.server.services.education_managed_runs import (
     build_managed_education_graph,
     resolve_managed_education_agent_config,
 )
+from src.server.services.education_progress_collector import (
+    ManagedProgressCollector,
+)
 from src.server.services.education_teaching_storage import (
     download_kp_lesson_outputs,
     hydrate_source_asset_manifests,
@@ -448,6 +451,12 @@ async def _dispatch_kp_lesson_root_run(
             run_id=run_id,
             workflow_timeout=get_education_teaching_workflow_timeout(),
         )
+        progress_collector = ManagedProgressCollector(
+            sandbox=session.sandbox,
+            generation_job_id=generation_job_id,
+            attempt_id=attempt_id,
+            run_id=run_id,
+        )
 
         async def on_terminal(task_info: Any, status: str) -> None:
             await finalize_kp_lesson_generation(
@@ -469,6 +478,7 @@ async def _dispatch_kp_lesson_root_run(
             generation_job_id=generation_job_id,
             attempt_id=attempt_id,
             root_run_id=run_id,
+            progress_collector=progress_collector,
         )
         await LocalRunExecutor.get_instance().start_run(
             thread_id=thread_id,

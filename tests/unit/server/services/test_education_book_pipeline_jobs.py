@@ -1,5 +1,6 @@
 """Managed unified book-pipeline job contracts."""
 
+import asyncio
 import hashlib
 import json
 from unittest.mock import AsyncMock
@@ -13,6 +14,12 @@ from src.server.services.education_textbooks import (
     TextbookTransitionError,
 )
 
+CHECKPOINT_PREFIX = (
+    "education/household/textbook/v1/book-pipeline-checkpoints/"
+    "4d0112f8-0e00-4f1f-990a-4bc1b1cc20f3/"
+    "6f3f2de2-5c58-4bc2-84bc-95e97acd37f6"
+)
+
 
 def _job(*, status: str = "queued", pause: bool = False) -> dict:
     return {
@@ -24,6 +31,7 @@ def _job(*, status: str = "queued", pause: bool = False) -> dict:
         "status": status,
         "attempt_count": 0,
         "pause_after_chapter_analysis": pause,
+        "checkpoint_bundle_prefix": None,
         "error_code": None,
         "error_message": None,
         "created_at": None,
@@ -935,7 +943,12 @@ async def test_launch_book_pipeline_uses_shared_runtime_spine(monkeypatch) -> No
     graphed: dict[str, object] = {}
     executed: dict[str, object] = {}
     marked: dict[str, object] = {}
+    collectors: list[dict[str, object]] = []
     graph = object()
+
+    class FakeProgressCollector:
+        def __init__(self, **kwargs):
+            collectors.append(kwargs)
 
     async def get_job(**_kwargs):
         return job
@@ -1052,6 +1065,12 @@ async def test_launch_book_pipeline_uses_shared_runtime_spine(monkeypatch) -> No
         "stage_teaching_inputs",
         AsyncMock(),
     )
+    stage_checkpoint = AsyncMock()
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "stage_book_pipeline_checkpoint_bundle",
+        stage_checkpoint,
+    )
     monkeypatch.setattr(
         education_book_pipeline_jobs,
         "build_managed_education_graph",
@@ -1079,6 +1098,11 @@ async def test_launch_book_pipeline_uses_shared_runtime_spine(monkeypatch) -> No
     )
     monkeypatch.setattr(
         education_book_pipeline_jobs,
+        "ManagedProgressCollector",
+        FakeProgressCollector,
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
         "finalize_book_pipeline_generation",
         finalize,
     )
@@ -1100,12 +1124,26 @@ async def test_launch_book_pipeline_uses_shared_runtime_spine(monkeypatch) -> No
         "attempt_id": "attempt-1",
         "root_run_id": started["run_id"],
     }
+    assert collectors[0]["generation_job_id"] == job["generation_job_id"]
+    assert collectors[0]["attempt_id"] == "attempt-1"
+    assert collectors[0]["run_id"] == started["run_id"]
     assert executed["terminal_callback"].__name__ == "on_terminal"
     task_info = type("TaskInfo", (), {"error": None})()
     await executed["terminal_callback"](task_info, "completed")
     finalize.assert_awaited_once()
     assert finalize.await_args.kwargs["attempt_id"] == "attempt-1"
     assert finalize.await_args.kwargs["root_run_id"] == started["run_id"]
+    stage_checkpoint.assert_not_awaited()
+
+    job["checkpoint_bundle_prefix"] = CHECKPOINT_PREFIX
+    await education_book_pipeline_jobs.launch_book_pipeline_generation(
+        parent_user_id="parent-1",
+        generation_job_id=job["generation_job_id"],
+    )
+
+    stage_checkpoint.assert_awaited_once()
+    assert "mode=full-pipeline-continuation" in str(graphed["prompt"])
+    assert "不要重新执行 Steps 0-3" in str(graphed["prompt"])
 
 
 @pytest.mark.asyncio
@@ -1441,26 +1479,37 @@ async def test_queue_book_pipeline_passes_brief_and_request_id(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_pause_checkpoint_request_is_rejected_before_any_database_work(
+async def test_pause_checkpoint_request_is_persisted_for_live_collector(
     monkeypatch,
 ) -> None:
+    captured: dict[str, object] = {}
+
+    async def parent(_parent_user_id):
+        return {"household_id": "household-1"}
+
+    async def queue(**kwargs):
+        captured.update(kwargs)
+        return _job(pause=True)
+
     monkeypatch.setattr(
         education_book_pipeline_jobs,
         "get_household_context_for_parent",
-        AsyncMock(side_effect=AssertionError("must reject before parent lookup")),
+        parent,
     )
     monkeypatch.setattr(
         education_book_pipeline_jobs,
         "queue_book_pipeline_job",
-        AsyncMock(side_effect=AssertionError("must reject before job insert")),
+        queue,
     )
 
-    with pytest.raises(TextbookTransitionError, match="not available"):
-        await education_book_pipeline_jobs.queue_book_pipeline_for_parent(
-            parent_user_id="parent-1",
-            content_version_id=_job()["version_id"],
-            pause_after_chapter_analysis=True,
-        )
+    job = await education_book_pipeline_jobs.queue_book_pipeline_for_parent(
+        parent_user_id="parent-1",
+        content_version_id=_job()["version_id"],
+        pause_after_chapter_analysis=True,
+    )
+
+    assert captured["pause_after_chapter_analysis"] is True
+    assert job["pause_after_chapter_analysis"] is True
 
 
 @pytest.mark.asyncio
@@ -1491,6 +1540,7 @@ async def test_pause_checkpoint_closes_attempt_and_sets_awaiting_review(
         parent_user_id="parent-1",
         generation_job_id=_job()["generation_job_id"],
         attempt_id="attempt-1",
+        checkpoint_bundle_prefix=CHECKPOINT_PREFIX,
     )
 
     assert job["status"] == "awaiting_review"
@@ -1498,21 +1548,58 @@ async def test_pause_checkpoint_closes_attempt_and_sets_awaiting_review(
         "parent_user_id": "parent-1",
         "generation_job_id": _job()["generation_job_id"],
         "attempt_id": "attempt-1",
+        "checkpoint_bundle_prefix": CHECKPOINT_PREFIX,
     }
+
+
+@pytest.mark.asyncio
+async def test_pause_checkpoint_requires_nonempty_bundle_prefix(monkeypatch) -> None:
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    pause_db = AsyncMock()
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "pause_book_pipeline_for_chapter_review",
+        pause_db,
+    )
+
+    with pytest.raises(TextbookTransitionError, match="checkpoint bundle"):
+        await education_book_pipeline_jobs.pause_book_pipeline_for_parent(
+            parent_user_id="parent-1",
+            generation_job_id=_job()["generation_job_id"],
+            attempt_id="attempt-1",
+            checkpoint_bundle_prefix="",
+        )
+
+    pause_db.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_resume_book_pipeline_requeues_only_waiting_checkpoint(
     monkeypatch,
 ) -> None:
-    waiting = _job(status="awaiting_review", pause=True)
-    resumed = _job(status="queued", pause=False)
+    waiting = {
+        **_job(status="awaiting_review", pause=True),
+        "checkpoint_bundle_prefix": CHECKPOINT_PREFIX,
+    }
+    resumed = {
+        **_job(status="queued", pause=False),
+        "checkpoint_bundle_prefix": CHECKPOINT_PREFIX,
+    }
+    state = {"status": "awaiting_review"}
 
     async def parent(_parent_user_id):
         return {"household_id": "household-1"}
 
     async def get_job(**_kwargs):
-        return waiting
+        return (
+            {**waiting, "status": state["status"]}
+            if state["status"] == "awaiting_review"
+            else resumed
+        )
 
     async def resume(**kwargs):
         assert kwargs == {
@@ -1520,6 +1607,14 @@ async def test_resume_book_pipeline_requeues_only_waiting_checkpoint(
             "generation_job_id": waiting["generation_job_id"],
         }
         return resumed
+
+    async def launch(**kwargs):
+        assert kwargs == {
+            "parent_user_id": "parent-1",
+            "generation_job_id": waiting["generation_job_id"],
+        }
+        state["status"] = "queued"
+        return {"root_run_id": "continuation-run"}
 
     monkeypatch.setattr(
         education_book_pipeline_jobs,
@@ -1536,6 +1631,11 @@ async def test_resume_book_pipeline_requeues_only_waiting_checkpoint(
         "resume_book_pipeline_job",
         resume,
     )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "launch_book_pipeline_generation",
+        launch,
+    )
 
     job = await education_book_pipeline_jobs.resume_book_pipeline_for_parent(
         parent_user_id="parent-1",
@@ -1544,6 +1644,128 @@ async def test_resume_book_pipeline_requeues_only_waiting_checkpoint(
 
     assert job["status"] == "queued"
     assert job["pause_after_chapter_analysis"] is False
+
+
+@pytest.mark.asyncio
+async def test_resume_checkpoint_rejects_missing_bundle_prefix(monkeypatch) -> None:
+    waiting = _job(status="awaiting_review", pause=True)
+
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "get_generation_job_for_parent",
+        AsyncMock(return_value=waiting),
+    )
+    resume_db = AsyncMock()
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "resume_book_pipeline_job",
+        resume_db,
+    )
+
+    with pytest.raises(TextbookTransitionError, match="checkpoint bundle"):
+        await education_book_pipeline_jobs.resume_book_pipeline_for_parent(
+            parent_user_id="parent-1",
+            generation_job_id=waiting["generation_job_id"],
+        )
+
+    resume_db.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_continuation_launch_rejects_missing_bundle_prefix(
+    monkeypatch,
+) -> None:
+    resumed_job = {
+        **_job(status="queued", pause=False),
+        "attempt_count": 1,
+        "checkpoint_bundle_prefix": None,
+    }
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "get_generation_job_for_parent",
+        AsyncMock(return_value=resumed_job),
+    )
+    claim = AsyncMock()
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "claim_book_pipeline_launch",
+        claim,
+    )
+
+    with pytest.raises(TextbookTransitionError, match="checkpoint bundle"):
+        await education_book_pipeline_jobs.launch_book_pipeline_generation(
+            parent_user_id="parent-1",
+            generation_job_id=resumed_job["generation_job_id"],
+        )
+
+    claim.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_continuation_checkpoint_corruption_is_transition_error(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "stage_book_pipeline_checkpoint_bundle",
+        AsyncMock(
+            side_effect=education_teaching_storage.TeachingPackageStorageError(
+                "corrupt"
+            )
+        ),
+    )
+
+    with pytest.raises(TextbookTransitionError, match="checkpoint is corrupt"):
+        await education_book_pipeline_jobs._stage_continuation_checkpoint_bundle(
+            {
+                **_job(status="queued"),
+                "checkpoint_bundle_prefix": CHECKPOINT_PREFIX,
+            },
+            object(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_stop_never_imports_partial_book_package(
+    monkeypatch,
+) -> None:
+    stopped = asyncio.Event()
+    stopped.set()
+    settle = AsyncMock()
+
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "import_book_package",
+        AsyncMock(side_effect=AssertionError("partial package must not import")),
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "_fail_book_pipeline_attempt",
+        settle,
+    )
+
+    result = await education_book_pipeline_jobs.finalize_book_pipeline_generation(
+        job={
+            **_job(status="awaiting_review", pause=True),
+            "parent_user_id": "parent-1",
+            "checkpoint_bundle_prefix": CHECKPOINT_PREFIX,
+        },
+        frozen_input={},
+        attempt_id="attempt-1",
+        root_run_id="run-1",
+        sandbox=object(),
+        terminal_status="completed",
+        terminal_error=None,
+        checkpoint_stop_event=stopped,
+    )
+
+    assert result == {"status": "awaiting_review", "job_status": "awaiting_review"}
+    settle.assert_not_awaited()
 
 
 @pytest.mark.asyncio

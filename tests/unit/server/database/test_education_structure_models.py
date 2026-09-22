@@ -7,6 +7,12 @@ import pytest
 
 from src.server.database import education_textbooks
 
+CHECKPOINT_PREFIX = (
+    "education/household/textbook/v1/book-pipeline-checkpoints/"
+    "4d0112f8-0e00-4f1f-990a-4bc1b1cc20f3/"
+    "6f3f2de2-5c58-4bc2-84bc-95e97acd37f6"
+)
+
 
 @pytest.mark.asyncio
 async def test_queue_structure_authorizes_parent_and_creates_generation_job(
@@ -716,6 +722,7 @@ async def test_checkpoint_pause_closes_attempt_then_waits_for_review(
         parent_user_id="parent-1",
         generation_job_id="generation-pipeline-1",
         attempt_id="attempt-1",
+        checkpoint_bundle_prefix=CHECKPOINT_PREFIX,
     )
 
     assert result is not None
@@ -755,6 +762,7 @@ async def test_checkpoint_pause_rejects_foreign_or_invalid_job(
         parent_user_id="parent-1",
         generation_job_id="generation-pipeline-1",
         attempt_id="attempt-1",
+        checkpoint_bundle_prefix=CHECKPOINT_PREFIX,
     )
 
     assert result is None
@@ -786,7 +794,23 @@ async def test_checkpoint_pause_fails_if_attempt_transition_is_lost(
             parent_user_id="parent-1",
             generation_job_id="generation-pipeline-1",
             attempt_id="attempt-1",
+            checkpoint_bundle_prefix=CHECKPOINT_PREFIX,
         )
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_pause_rejects_empty_bundle_prefix_before_database(
+    mock_cursor,
+) -> None:
+    with pytest.raises(ValueError, match="checkpoint bundle prefix"):
+        await education_textbooks.pause_book_pipeline_for_chapter_review(
+            parent_user_id="parent-1",
+            generation_job_id="generation-pipeline-1",
+            attempt_id="attempt-1",
+            checkpoint_bundle_prefix="",
+        )
+
+    mock_cursor.execute.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -820,6 +844,8 @@ async def test_checkpoint_resume_consumes_pause_flag(
     assert "education_memberships AS memberships" in resume_sql
     assert "memberships.user_id = %s" in resume_sql
     assert "memberships.role = 'parent'" in resume_sql
+    assert "jobs.checkpoint_bundle_prefix IS NOT NULL" in resume_sql
+    assert "btrim(jobs.checkpoint_bundle_prefix) <> ''" in resume_sql
     assert mock_cursor.execute.call_args.args[1] == (
         "generation-pipeline-1",
         "parent-1",

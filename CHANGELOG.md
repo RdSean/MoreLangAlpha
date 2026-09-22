@@ -2,6 +2,17 @@
 
 ## 2026-09-22
 
+### 新增：托管教材运行实时语义进度与章节继续检查点
+
+- 新增 `ManagedProgressCollector`，在 managed workflow 运行期间独立轮询 sandbox 的 `.langalpha/progress.jsonl`，只在 typed `inserted` 或 payload 一致的 `already_exists` 返回后推进持久化字节 offset；临时数据库失败保留 pending line 并按有界退避重试，不会跳过事件。服务重启后重读相同字节会命中 `(attempt_id, sequence)` 幂等写入；同一 `event_key` 可通过后续 sequence 更新状态投影。
+- collector 读取超过 16 MiB 的文件、超过单行上限、非法 JSON、路径/凭据类内容或数据库暂时不可用时只记录有界错误，不中断 managed workflow。最终 graph 收口前会再 flush 一次，且在模型或工具 SSE 长时间空闲时，仅根据已脱敏工具活动生成 `substage=executing`、`label=执行环境步骤` 的有界 fallback 投影，不覆盖已完成的语义阶段。
+- structure、lesson 和 book pipeline 共用的 workflow wrapper 现在负责启动、记录活动并停止 collector；assets workflow 本轮不接入语义进度，捕获实际 sandbox 失败/关闭时仍不留下后台轮询任务。新增 service 层真实 PostgreSQL 写入测试，验证同 attempt/sequence 的同 payload 幂等、不同 payload 拒绝、同 event_key 状态更新、错误 run 与跨 job attempt 拒绝；只有 inserted 或内容一致的 already_exists 才能触发 checkpoint。
+- 新增迁移 `081_book_pipeline_checkpoint`，在 generation job 上持久化不可变 `checkpoint_bundle_prefix`，数据库约束只接受 `education/` 下且不含 `..` 的私有对象前缀，并要求 `awaiting_review` 必须有非空 prefix；有 checkpoint 数据时 downgrade fail-closed。
+- `pause_after_chapter_analysis=true` 不再由公开 API 强制返回 409。collector 持久化并观察到 `chapter_analysis/completed` 后先设置 stop signal；workflow wrapper 必须关闭 graph/consumer、确认没有 pending producer，完成 collector final flush 后，才归档完成章节所需的 `book_package.json`、`content_tree.json`（存在时也包含知识点与资产 manifest）并原子进入 `awaiting_review`。停止超时或归档失败不会产生不一致 checkpoint。
+- checkpoint continuation bundle 的 manifest 绑定 generation job、content version、source attempt、固定 projection keys、大小和 SHA-256，并以 manifest 作为最后写入的提交点。恢复时重新校验 prefix ownership、manifest lineage、固定 key、大小和哈希后才 staging 到新 sandbox；跨 job、错 attempt、错 key 或损坏内容均转为 transition error。
+- resume API 现在消费 `awaiting_review`，将同一 job 重新排队并立即创建 continuation attempt；恢复时只从私有 checkpoint bundle 还原固定 projection 到全新 sandbox，使用 `mode=full-pipeline-continuation` 从 Steps 4-9 继续，不重放 Steps 0-9、不重新分析章节。packaged managed overlay 同步声明 continuation 模式和权威 checkpoint 输入。
+- 新增测试覆盖：collector 文件增长、半行缓冲、重启重放、行/文件上限、最终 flush、15 秒 fallback、checkpoint callback 单次触发、structure/lesson/book pipeline 实际 dispatch wiring、checkpoint bundle 归档/恢复、终止时不导入部分包、resume 启动 continuation，以及真实 PostgreSQL 的幂等 ownership、081 字段与前缀约束。
+
 ### 新增：统一教材处理语义进度协议
 
 - 新增迁移 `080_education_job_progress`，为 attempts 增加 `(generation_job_id, attempt_id)` 唯一键，并创建 `education_generation_progress_events`，用 `attempt_id + sequence` 唯一约束形成 append-only 事件序。`event_key` 只表示逻辑身份，同一 key 可以在后续 sequence 重试追加，Task 7 的投影按 key 保留最新状态，不会把模型重试变成数据库唯一冲突。progress 同时引用 job 和 attempts 的复合 ownership pair，两个外键均级联删除，跨 job 使用其他 attempt 的写入会在 PostgreSQL 层拒绝。

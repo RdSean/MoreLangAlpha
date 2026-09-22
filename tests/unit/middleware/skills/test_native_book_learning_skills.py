@@ -13,6 +13,7 @@ from ptc_agent.agent.middleware.skills.registry import (
     list_skills,
 )
 from ptc_agent.config.agent import SkillsConfig
+from src.server.services import education_generation_progress
 
 
 NATIVE_BOOK_SKILLS = ("book-to-skill",)
@@ -93,8 +94,21 @@ def test_book_to_skill_managed_overlay_dispatches_callers_mode():
     assert "outputs/structure.json" in overlay
     assert "langalpha-managed-textbook-structure/v2" in overlay
     assert "mode=full-pipeline" in overlay
+    assert "mode=full-pipeline-continuation" in overlay
     assert "Steps 0-9" in overlay
+    assert "Steps 4-9" in overlay
+    assert "do not repeat Steps 0-3" in overlay
     assert "mode dispatch" in overlay.lower()
+    example = (
+        '{"event_key":"chapter_analysis:completed:job-version",'
+        '"stage":"chapter_analysis","status":"completed"}'
+    )
+    assert example in overlay
+    parsed = education_generation_progress.parse_progress_json_line(example)
+    assert parsed["event_key"] == "chapter_analysis:completed:job-version"
+    assert parsed["stage"] == "chapter_analysis"
+    assert parsed["status"] == "completed"
+    assert "before Steps 4-9" in overlay
 
 
 def test_book_to_skill_analyze_mode_keeps_the_v2_structure_schema():

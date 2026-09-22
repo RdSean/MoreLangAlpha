@@ -1,6 +1,7 @@
 """Managed generation contracts for one knowledge-point lesson."""
 
 import hashlib
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -318,3 +319,104 @@ async def test_finalize_lesson_generation_fails_only_the_target_job(monkeypatch)
 
     assert result["status"] == "failed"
     assert settle_calls[0]["error_code"] == "managed_lesson_invalid"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_lesson_starts_live_progress_collector(monkeypatch) -> None:
+    job_id = LESSON_JOB["generation_job_id"]
+    session = type("Session", (), {"sandbox": object()})()
+    captured: dict[str, object] = {}
+    collectors: list[dict[str, object]] = []
+    graph = object()
+
+    class FakeRunCoordinator:
+        async def start_run(self, **kwargs):
+            captured["run"] = kwargs
+            return type(
+                "RunHandle",
+                (),
+                {"run_id": kwargs["run_id"], "guard": object()},
+            )()
+
+    class FakeExecutor:
+        async def start_run(self, **kwargs):
+            captured["executor"] = kwargs
+
+    class FakeRunSSEProducer:
+        def __init__(self, **kwargs):
+            captured["handler"] = kwargs
+
+        async def stream_workflow(self, **_kwargs):
+            if False:
+                yield "unused"
+
+    class FakeProgressCollector:
+        def __init__(self, **kwargs):
+            collectors.append(kwargs)
+
+    async def build_graph(**_kwargs):
+        return graph, {"messages": []}, {"configurable": {"thread_id": "thread-1"}}
+
+    async def mark_running(**kwargs):
+        return {"status": "running", **kwargs}
+
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "stage_kp_lesson_inputs",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "build_managed_education_graph",
+        build_graph,
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "mark_generation_attempt_running",
+        mark_running,
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs.RunCoordinator,
+        "get_instance",
+        classmethod(lambda cls: FakeRunCoordinator()),
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs.LocalRunExecutor,
+        "get_instance",
+        classmethod(lambda cls: FakeExecutor()),
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "RunSSEProducer",
+        FakeRunSSEProducer,
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "ManagedProgressCollector",
+        FakeProgressCollector,
+    )
+
+    result = await education_lesson_jobs._dispatch_kp_lesson_root_run(
+        job=LESSON_JOB,
+        source_context="# Source",
+        scope={"slot": "reading_a"},
+        chapter_markdown="# Chapter",
+        attempt_id="attempt-1",
+        session=session,
+        workspace_id="workspace-1",
+        thread_id="thread-1",
+        agent_config=object(),
+        parent_user_id="parent-1",
+    )
+
+    assert result == {"root_run_id": captured["run"]["run_id"]}
+    assert collectors == [
+        {
+            "sandbox": session.sandbox,
+            "generation_job_id": job_id,
+            "attempt_id": "attempt-1",
+            "run_id": captured["run"]["run_id"],
+        }
+    ]
+    workflow = captured["executor"]["workflow_generator"]
+    await workflow.aclose()
