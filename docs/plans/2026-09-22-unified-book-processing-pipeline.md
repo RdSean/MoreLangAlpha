@@ -60,6 +60,15 @@ Vitest.
    freezes the launch action while a request is pending; the backend returns the
    existing active job for repeated clicks or retries.
 
+### 2026-09-22 execution adjustment
+
+The original Task 1 validator allowed quote-only source refs and treated quote
+resolution failures as hard failures. This created a retry paradox: a
+descriptive model quote could fail the whole package even when the surrounding
+chapter boundary was correct. The contract now requires deterministic ranges.
+The service ignores the model-provided `quote`, derives canonical quotes from
+the frozen Markdown, and lets UI/lesson generation use the trusted range.
+
 ## Generic Book Package Contract
 
 The managed run writes:
@@ -122,6 +131,25 @@ The managed run writes:
 }
 ```
 
+Every non-empty `source_refs` entry must contain either:
+
+```json
+{"char_start": 0, "char_end": 120, "source_id": "source-1"}
+```
+
+or:
+
+```json
+{"line_start": 1, "line_end": 20, "source_id": "source-1"}
+```
+
+`char_start` is inclusive, `char_end` is exclusive, and line numbers are
+1-based with an exclusive `line_end`. `quote` may be present as descriptive
+input, but the validator ignores it and always replaces it with
+`markdown[start:end]`. Raw string refs and quote-only refs are invalid. An
+empty, missing or null `source_refs` list remains allowed with a warning.
+Line offsets are indexed only when at least one valid line range is present.
+
 Allowed `node_type` values are open-ended, but the UI normalizes common values:
 
 ```text
@@ -140,7 +168,7 @@ procedure / problem_solving / theme / case / other
 
 Hard failures are limited to integrity and security:
 
-- source refs resolve inside the frozen Markdown;
+- each provided char/line range stays inside the frozen Markdown;
 - parent and node references exist;
 - node keys and candidate keys are unique;
 - paths stay inside the managed job/output root;
@@ -271,16 +299,18 @@ uv run pytest tests/unit/migrations/test_generic_content_tree.py -v
 
 Expected: FAIL because migration `076` does not exist.
 
-**Step 3: Write the package parser contract test**
+**Step 3: Write the package range-validation contract test**
 
 ```python
 package = validate_book_package(candidate)
 assert package["content_nodes"][1]["parent_key"] == "unit-1"
 assert package["knowledge_points"][0]["node_key"] == "unit-1-reading-a"
+assert package["knowledge_points"][0]["source_refs"][0]["quote"] == markdown_slice
 ```
 
-Also assert that an unknown node type becomes `other` with a warning rather
-than failing.
+Assert deterministic char and line ranges, canonical server-derived quotes,
+and that unknown node types become `other` with a warning rather than failing.
+Quote-only and raw string refs must fail without full-text quote searching.
 
 **Step 4: Implement deterministic validation**
 
@@ -362,6 +392,8 @@ The overlay must state:
 - the run writes append-only progress checkpoints;
 - output node/point types are descriptive, not a closed taxonomy;
 - no content tree structure is mandated.
+- every non-empty `source_refs` entry emits a deterministic char or line range;
+  `quote` is optional descriptive context and is not used for locating.
 
 **Step 4: Replace the structure-only prompt**
 

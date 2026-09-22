@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-22
+
+### 新增：通用教材内容树与 book package 校验契约
+
+- 新增迁移 `076_generic_content_tree`，创建 `education_content_nodes` 与 `education_content_assets`，支持任意父子层级、稳定节点键、来源引用和内容资产元数据；同级 position 使用 `NULLS NOT DISTINCT`，并通过复合外键阻止跨 structure 的 parent 与 asset 引用；structure 删除级联清理节点与资产，被引用 parent 删除保持受限。
+- 新增 `validate_book_package`，仅对来源范围、父子引用、键唯一性、知识点归属、路径安全和 UTF-8/大小限制执行硬校验；未知类型与非标准教材结构转换为 warning，不阻断处理。
+- 来源引用改为确定性 char/line range 契约：`char_start + char_end` 或 1-based `line_start + line_end` 必须完整落在冻结 Markdown 内；两种范围字段禁止混用。模型提供的 `quote` 仅作描述并被忽略，规范化输出始终从范围切片重新生成 quote；raw string、仅 quote、越界范围和不完整范围 hard fail。空、缺失或 null `source_refs` 保留 warning；行号索引只在确有 line refs 时构建，并且只保存请求行。知识点范围必须完整落入所属节点的至少一个范围。
+- 缺失 position 会在同级未使用位置中确定性补齐；position 和 asset size 执行 PostgreSQL 可持久化范围校验；非法或越界 confidence 按现有结构校验模式 warning 后使用有限默认值或 clamp，绝不输出 NaN/Inf。
+- 最终归一化 JSON 递归拒绝含 NUL 的键和值，避免 PostgreSQL TEXT/JSONB 持久化失败。
+- 验证：迁移与 package 契约 `43 passed`，真实 PostgreSQL 约束、级联和 downgrade integration `4 passed`，迁移回归 `119 passed`，相邻结构/资产校验回归 `18 passed`，`TextbookStructurePage` Vitest `10 passed`，Ruff 与 TypeScript 类型检查通过。
+
 ## 2026-09-21
 
 ### 验证：canonical 教材流水线端到端契约
