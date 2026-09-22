@@ -115,7 +115,8 @@ def test_managed_structure_prompt_selects_analyze_pass_mode() -> None:
         "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
     )
 
-    assert "mode=analyze-pass" in prompt
+    assert prompt.partition("。")[0] == "managed mode=analyze-pass"
+    assert "mode=mode" not in prompt
     assert "Steps 0-3" in prompt
     assert "outputs/structure.json" in prompt
     assert "langalpha-managed-textbook-structure/v2" in prompt
@@ -128,7 +129,8 @@ def test_managed_book_pipeline_prompt_declares_full_managed_contract() -> None:
         {},
     )
 
-    assert "mode=full-pipeline" in prompt
+    assert prompt.partition("。")[0] == "managed mode=full-pipeline"
+    assert "mode=mode" not in prompt
     assert "Steps 0-9" in prompt
     assert "book-to-skill/SKILL.md" in prompt
     assert "reference/langalpha-managed.md" in prompt
@@ -192,7 +194,8 @@ def test_managed_book_pipeline_continuation_prompt_starts_after_analysis() -> No
         processing_brief="保留所有学生活动。",
     )
 
-    assert "mode=full-pipeline-continuation" in prompt
+    assert prompt.partition("。")[0] == "managed mode=full-pipeline-continuation"
+    assert "mode=mode" not in prompt
     assert "不要重新执行 Steps 0-3" in prompt
     assert "Steps 4-9" in prompt
     assert "outputs/book_package.json" in prompt

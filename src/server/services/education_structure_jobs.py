@@ -97,7 +97,7 @@ def managed_structure_prompt(
     """Describe a non-interactive reading-scope analysis run."""
     root = f"/managed/textbook-job/{UUID(job_id)}"
     return (
-        "managed mode=mode=analyze-pass。这是服务托管的教材结构分析任务，"
+        "managed mode=analyze-pass。这是服务托管的教材结构分析任务，"
         "只执行 canonical Steps 0-3 的 analyze pass，不得执行 full-pipeline，"
         "不是与用户的对话或课程生成任务。"
         f"任务编号为 {job_id}。冻结输入位于 {root}/inputs/manifest.json 与 "
@@ -129,7 +129,7 @@ def managed_book_pipeline_prompt(
     """Describe the service-owned full book-to-skill pipeline."""
     root = f"/managed/textbook-job/{UUID(job_id)}"
     prompt = (
-        f"managed mode=mode=full-pipeline。这是 LangAlpha 服务托管的教材处理任务。"
+        f"managed mode=full-pipeline。这是 LangAlpha 服务托管的教材处理任务。"
         f"任务编号为 {job_id}，"
         f"managed job 根目录是 {root}。"
         f"先完整读取 {root}/.agents/skills/book-to-skill/SKILL.md，"
@@ -213,7 +213,7 @@ def managed_book_pipeline_continuation_prompt(
     """Describe a resume that continues from a durable chapter checkpoint."""
     root = f"/managed/textbook-job/{UUID(job_id)}"
     prompt = (
-        f"managed mode=mode=full-pipeline-continuation。这是 LangAlpha 服务托管的"
+        f"managed mode=full-pipeline-continuation。这是 LangAlpha 服务托管的"
         f"教材处理 continuation 任务。任务编号为 {job_id}，managed job 根目录是 "
         f"{root}。前一次运行已经完成 chapter_analysis，并将可信检查点恢复到 "
         f"{root}/outputs/。本轮不要重新执行 Steps 0-3，不要重新分析章节结构，"

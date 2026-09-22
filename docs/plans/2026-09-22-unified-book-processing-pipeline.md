@@ -1905,6 +1905,24 @@ assert progress_stages == [
 The test must verify that at least one progress event is observed while the
 managed run is still active, not only after finalization.
 
+The canonical integration test also builds the generic REX 3 package through
+`validate_book_package()`, imports the normalized package into real PostgreSQL,
+asserts generated candidates remain pending, rejects lesson creation before
+approval, accepts one candidate, and then verifies the accepted candidate can
+create a lesson job. The progress integration test uses the real
+`ManagedProgressCollector` plus PostgreSQL persistence, a fake growing sandbox,
+and the shared managed workflow wrapper to verify live-before-finalization
+events, four-stage projection, checkpoint stop/archive ordering, no partial
+package import, and the continuation prompt contract. It does not claim to
+execute the full resume workflow or managed Steps 4-9. Resume state transitions
+remain covered by the Task 7 tests in
+`tests/unit/server/services/test_education_book_pipeline_jobs.py` and
+`tests/integration/test_book_pipeline_jobs_db.py`.
+
+The real fixture path is required for Task 11 acceptance. The in-test skip is a
+portability guard only; the acceptance commands must confirm the fixture exists
+and report zero skipped tests.
+
 **Step 2: Run it to verify it fails, then implement any remaining wiring**
 
 ```bash
@@ -1930,7 +1948,7 @@ pnpm typecheck
 pnpm build
 ```
 
-Expected: PASS.
+Expected: PASS with zero skipped tests when the required REX 3 fixture exists.
 
 **Step 4: Update the changelog in Chinese**
 
@@ -1948,7 +1966,8 @@ Record:
 ```bash
 git add tests/integration/test_textbook_canonical_pipeline.py \
   tests/integration/test_unified_book_processing_progress.py \
-  CHANGELOG.md
+  CHANGELOG.md \
+  docs/plans/2026-09-22-unified-book-processing-pipeline.md
 git commit -m "test(textbooks): verify unified processing and live progress"
 ```
 

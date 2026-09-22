@@ -1118,6 +1118,9 @@ async def test_launch_book_pipeline_uses_shared_runtime_spine(monkeypatch) -> No
     assert graphed["managed_kind"] == "education_book_pipeline"
     assert graphed["prompt"] == started["query"].content
     assert "只提取学生活动页。" in str(graphed["prompt"])
+    full_prompt = str(graphed["prompt"])
+    assert full_prompt.partition("。")[0] == "managed mode=full-pipeline"
+    assert "mode=mode" not in full_prompt
     assert started["thread_id"] == "thread-1"
     assert marked == {
         "generation_job_id": job["generation_job_id"],
@@ -1142,8 +1145,13 @@ async def test_launch_book_pipeline_uses_shared_runtime_spine(monkeypatch) -> No
     )
 
     stage_checkpoint.assert_awaited_once()
-    assert "mode=full-pipeline-continuation" in str(graphed["prompt"])
-    assert "不要重新执行 Steps 0-3" in str(graphed["prompt"])
+    continuation_prompt = str(graphed["prompt"])
+    assert (
+        continuation_prompt.partition("。")[0]
+        == "managed mode=full-pipeline-continuation"
+    )
+    assert "mode=mode" not in continuation_prompt
+    assert "不要重新执行 Steps 0-3" in continuation_prompt
 
 
 @pytest.mark.asyncio

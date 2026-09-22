@@ -1,5 +1,16 @@
 # 变更日志
 
+## 2026-09-23
+
+### 验证：统一教材处理流水线完成 REX 3 端到端验收
+
+- 使用真实 `datalab-output-REX 3e SB3 Page1-50.pdf.md` 构建通用内容树：Unit 为根节点，Reading A/B 是普通 `reading` 子节点；节点与知识点只提交确定性行范围，服务端从冻结 Markdown 派生并校验 canonical quote。标准结构、节点和候选最终通过 `validate_book_package()`，非对称节点资产或知识点覆盖仅产生 warning，不阻断合法教材。
+- 真实 PostgreSQL 验收覆盖完整 package 导入结果：内容节点按父子拓扑持久化，知识点以 `origin='generated'`、`candidate_status='pending'` 绑定各自 content node，knowledge asset 一并写入。pending 候选调用课程接口会在创建 generation job 前失败；候选经人工接受后，同一知识点才能创建 `scope='lesson'` 的 queued job。
+- 新增 live progress 端到端测试，实际驱动 `ManagedProgressCollector` 和 PostgreSQL 持久化协议。collector 在 managed run 仍未结束时写入首批事件，随后投影固定四阶段“教材章节解析、内容智能处理、知识点生成、课程制作”，并确认三个处理阶段的事件在运行中被观察到，lesson 阶段保持 queued。
+- checkpoint 验收使用真实 collector 与数据库事件协议：`chapter_analysis/completed` 持久化后先停止 graph/consumer，再通过真实 pause service 写入 checkpoint prefix 和 `awaiting_review`，最后才允许 terminal finalization；带有 stop marker 的 finalization 明确拒绝导入部分 package。三个 managed prompt 的首句分别精确输出 `managed mode=analyze-pass`、`managed mode=full-pipeline` 和 `managed mode=full-pipeline-continuation`，不再包含 `mode=mode`；Task 11 只验证 continuation prompt contract 并声明从 Steps 4-9 继续，不把 prompt-only 断言冒充完整 resume 运行，真实 resume 状态转换仍由 Task 7 的 `test_resume_book_pipeline_requeues_only_waiting_checkpoint` 与 `test_pause_and_resume_enforce_household_acl` 覆盖。
+- 本轮把整条特性边界串联验收：book-to-skill 统一 Steps 0-9、通用内容树、pending 候选人工确认、四阶段实时进度与重连、章节 checkpoint/resume、人工确认后的课程制作、processing brief 与 request_id/active-job 幂等，以及 migrations `076`-`081`。测试不启动真实模型、sandbox 或网络，模型端生成质量仍需独立运行验证。
+- 验证：真实 REX 3 fixture 路径为必跑要求，本次验收确认文件存在且零 skipped。全量单元测试 `8305 passed, 8 deselected, 1 xpassed`；指定真实 Markdown/PostgreSQL integration `4 passed`；Education Vitest `80 passed`，`pnpm typecheck` 与 `pnpm build` 通过，critical path `355.5 kB gz`；Ruff 与 `git diff --check` 通过；迁移 head 为 `081_book_pipeline_checkpoint`。
+
 ## 2026-09-22
 
 ### 新增：仅从已确认且绑定内容资产的知识点生成课程
