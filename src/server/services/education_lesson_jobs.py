@@ -16,6 +16,8 @@ from src.config.settings import (
     get_ptc_recursion_limit,
 )
 from src.server.database.education_textbooks import (
+    LessonGenerationConflictError,
+    claim_lesson_launch,
     claim_generation_job,
     create_generation_job,
     create_kp_lesson_revision,
@@ -24,9 +26,11 @@ from src.server.database.education_textbooks import (
     get_teaching_input_for_parent,
     get_textbook_scopes_for_unit,
     mark_generation_attempt_running,
+    fail_claimed_lesson_launch,
     requeue_generation_job,
     settle_generation_job,
 )
+from src.server.services.education_textbooks import TextbookTransitionError
 from src.server.database.runs.lifecycle import QuerySpec
 from src.server.services.education_lesson_validation import (
     KnowledgePointLessonValidationError,
@@ -50,6 +54,7 @@ from src.server.services.education_progress_collector import (
 from src.server.services.education_teaching_storage import (
     download_kp_lesson_outputs,
     hydrate_source_asset_manifests,
+    read_content_node_asset,
     read_reading_asset_knowledge,
     stage_kp_lesson_inputs,
     stage_managed_teaching_skills,
@@ -67,6 +72,64 @@ logger = logging.getLogger(__name__)
 _MANAGED_KIND = "education_lesson"
 _PROFILE_VERSION = "kp-lesson-v1"
 MAX_LESSON_GENERATION_ATTEMPTS = 3
+_LESSON_PROGRESS_SUBSTAGES = (
+    "preparing",
+    "extracting_source",
+    "planning",
+    "generating_explanation",
+    "generating_practice",
+    "validating",
+    "completed",
+)
+
+
+def is_generic_lesson_job(job: Mapping[str, Any]) -> bool:
+    """Return whether one lesson is grounded in a generic content node."""
+    origin = str(job.get("origin") or job.get("knowledge_point_origin") or "")
+    return bool(job.get("content_node_id")) or origin == "generated"
+
+
+def _lesson_progress_prompt(
+    *,
+    job_id: str,
+    attempt_id: str | None,
+) -> str:
+    attempt = attempt_id or "current-attempt"
+    lines = [
+        "使用 `python .langalpha/progress.py '<json>'` 以 append-only 语义写入 "
+        "`.langalpha/progress.jsonl`；不得改写已有行，也不得直接编辑该文件。",
+        "必须依次写入以下检查点："
+        + "、".join(
+            f"lesson_preparation/{substage}" for substage in _LESSON_PROGRESS_SUBSTAGES
+        )
+        + "。每个 substage 先写 running，再写 completed；"
+        "最终 completed 检查点只需 completed：",
+    ]
+    for substage in _LESSON_PROGRESS_SUBSTAGES:
+        statuses = (
+            ("running", "completed") if substage != "completed" else ("completed",)
+        )
+        for status in statuses:
+            event_key = (
+                f"lesson:{job_id}:{attempt}:lesson_preparation:{substage}:{status}"
+            )
+            lines.append(
+                json.dumps(
+                    {
+                        "event_key": event_key,
+                        "stage": "lesson_preparation",
+                        "substage": substage,
+                        "status": status,
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            )
+    lines.append(
+        "progress 不得包含思维链、prompt、原始工具参数或结果、凭据、"
+        "完整 sandbox 路径或原始教材段落。"
+    )
+    return "\n".join(lines)
 
 
 def _processing_profile_sha256(*, auto_grading: bool) -> str:
@@ -90,19 +153,38 @@ def managed_lesson_prompt(
     *,
     scope: Mapping[str, Any] | None = None,
     chapter_markdown: str | None = None,
+    attempt_id: str | None = None,
 ) -> str:
     """Describe one lesson-only managed run."""
     job_id = str(job["generation_job_id"])
     root = f"/managed/textbook-job/{UUID(job_id)}"
-    scope_slot = str(
-        (scope or {}).get("slot")
-        or job.get("knowledge_point_scope_slot")
-        or ""
-    )
-    if scope_slot not in {"reading_a", "reading_b"}:
-        raise ValueError("Knowledge-point reading scope is unavailable")
     if not isinstance(chapter_markdown, str) or not chapter_markdown.strip():
         raise ValueError("Knowledge-point chapter asset is unavailable")
+    generic = is_generic_lesson_job(job)
+    if generic:
+        content_node_id = str(job.get("content_node_id") or "")
+        try:
+            path_id = str(UUID(content_node_id))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Knowledge-point content node is unavailable") from exc
+        source_path = f"inputs/content-nodes/{path_id}.md"
+        chapter_path = f"inputs/chapters/{path_id}-knowledge.md"
+        target_context = (
+            f"目标知识点是：{job.get('knowledge_point_title') or ''}；"
+            f"所属内容节点是：{job.get('content_node_title') or ''}。"
+        )
+    else:
+        scope_slot = str(
+            (scope or {}).get("slot") or job.get("knowledge_point_scope_slot") or ""
+        )
+        if scope_slot not in {"reading_a", "reading_b"}:
+            raise ValueError("Knowledge-point reading scope is unavailable")
+        source_path = f"inputs/readings/{scope_slot}.md"
+        chapter_path = f"inputs/chapters/{scope_slot}-knowledge.md"
+        target_context = (
+            f"目标知识点是：{job.get('knowledge_point_title') or ''}；"
+            f"所属单元是：{job.get('unit_title') or ''}。"
+        )
     practice_instruction = (
         f"同时输出 {root}/outputs/practice.json，供自动判题使用。"
         if job.get("auto_grading")
@@ -110,11 +192,11 @@ def managed_lesson_prompt(
     )
     return (
         "这是服务托管的单知识点课程生成任务，不是与用户的对话。"
-        f"任务编号为 {job_id}。目标知识点是：{job.get('knowledge_point_title') or ''}；"
-        f"所属单元是：{job.get('unit_title') or ''}。"
+        f"任务编号为 {job_id}。"
+        f"{target_context}"
         f"只读取 {root}/inputs/manifest.json、"
-        f"{root}/inputs/readings/{scope_slot}.md 和 "
-        f"{root}/inputs/chapters/{scope_slot}-knowledge.md，"
+        f"{root}/{source_path} 和 "
+        f"{root}/{chapter_path}，"
         "不要读取整本书，也不要访问网络、MCP、Vault 或普通工作区。"
         f"读取 {root}/.agents/skills/book-to-skill/SKILL.md 及其 managed lesson contract。"
         "课程主体必须是一个 Mentrix 风格的完整知识点静态页面：使用 Markdown，"
@@ -123,6 +205,8 @@ def managed_lesson_prompt(
         "不要为了统一格式生成 vocabulary.json 或 evidence.json。"
         f"{practice_instruction}"
         f"唯一允许的课程输出是 {root}/outputs/lesson.md。"
+        "\n\n"
+        + _lesson_progress_prompt(job_id=job_id, attempt_id=attempt_id)
         + (
             "\n\n"
             + processing_profile_prompt(
@@ -152,6 +236,8 @@ def build_lesson_source_context(
     job: Mapping[str, Any],
     frozen_input: Mapping[str, Any],
     scopes: list[Mapping[str, Any]] | None = None,
+    *,
+    content_node_markdown: str | None = None,
 ) -> tuple[str, list[str]]:
     """Return the authoritative source slice for one knowledge point.
 
@@ -159,6 +245,28 @@ def build_lesson_source_context(
     scope is available the lesson job fails loudly: authoring a lesson from a
     guessed range is exactly the failure this pipeline exists to prevent.
     """
+    if is_generic_lesson_job(job):
+        title = str(
+            job.get("content_node_title")
+            or job.get("knowledge_point_title")
+            or "Content node"
+        )
+        source_refs = (
+            job.get("content_node_source_refs")
+            if "content_node_source_refs" in job
+            else job.get("knowledge_point_source_refs") or []
+        )
+        slices = _generic_node_source_slices(frozen_input, source_refs)
+        if not slices:
+            asset_markdown = (
+                content_node_markdown
+                if isinstance(content_node_markdown, str)
+                else job.get("content_node_markdown")
+            )
+            if not isinstance(asset_markdown, str) or not asset_markdown.strip():
+                raise ValueError("Knowledge-point content node asset is unavailable")
+            slices = [asset_markdown.strip()]
+        return f"## {title}\n" + "\n\n".join(slices), []
     scope = select_reading_scope(job, scopes)
     source_id = str(scope.get("source_id") or "")
     raw_sources = frozen_input.get("sources")
@@ -194,6 +302,58 @@ def build_lesson_source_context(
     return f"{header}\n{markdown[start:end]}", []
 
 
+def _generic_node_source_slices(
+    frozen_input: Mapping[str, Any],
+    source_refs: object,
+) -> list[str]:
+    """Resolve only explicitly declared generic node source ranges."""
+    if not isinstance(source_refs, list):
+        return []
+    raw_sources = frozen_input.get("sources")
+    if not isinstance(raw_sources, list):
+        raw_sources = frozen_input.get("chapters")
+    sources = [
+        source
+        for source in raw_sources or []
+        if isinstance(source, Mapping) and isinstance(source.get("markdown"), str)
+    ]
+    if not sources:
+        return []
+    slices: list[str] = []
+    for ref in source_refs:
+        if not isinstance(ref, Mapping):
+            continue
+        source_id = str(ref.get("source_id") or "")
+        source = next(
+            (
+                candidate
+                for candidate in sources
+                if str(
+                    candidate.get("source_id")
+                    or candidate.get("content_chapter_id")
+                    or ""
+                )
+                == source_id
+            ),
+            sources[0] if len(sources) == 1 else None,
+        )
+        if source is None:
+            continue
+        markdown = str(source["markdown"])
+        raw_start = ref.get("start") if "start" in ref else ref.get("char_start")
+        raw_end = ref.get("end") if "end" in ref else ref.get("char_end")
+        try:
+            start = int(raw_start)
+            end = int(raw_end)
+        except (TypeError, ValueError):
+            continue
+        start = max(0, min(start, len(markdown)))
+        end = max(start, min(end, len(markdown)))
+        if end > start:
+            slices.append(markdown[start:end])
+    return slices
+
+
 def select_reading_scope(
     job: Mapping[str, Any],
     scopes: list[Mapping[str, Any]] | None,
@@ -227,7 +387,29 @@ async def queue_kp_lesson_generation_for_parent(
         knowledge_point_id=knowledge_point_id,
     )
     if not knowledge_point:
-        raise LookupError("Accepted knowledge point not found")
+        raise LookupError("accepted knowledge point is unavailable")
+    candidate_status = str(knowledge_point.get("candidate_status") or "").lower()
+    if candidate_status and candidate_status != "accepted":
+        raise LookupError("accepted knowledge point is required for lesson generation")
+    if is_generic_lesson_job(knowledge_point):
+        if not knowledge_point.get("content_node_id"):
+            raise LookupError("accepted knowledge point content node is unavailable")
+        if not knowledge_point.get("content_asset_key"):
+            raise LookupError("accepted knowledge point content asset is unavailable")
+        try:
+            job = await create_generation_job(
+                version_id=str(knowledge_point["version_id"]),
+                scope="lesson",
+                structure_id=None,
+                knowledge_point_id=knowledge_point_id,
+                processing_profile_sha256=_processing_profile_sha256(
+                    auto_grading=auto_grading
+                ),
+                auto_grading=auto_grading,
+            )
+        except LessonGenerationConflictError as exc:
+            raise TextbookTransitionError(str(exc)) from exc
+        return {**knowledge_point, **job}
     scope_slot = str(
         knowledge_point.get("scope_slot")
         or knowledge_point.get("knowledge_point_scope_slot")
@@ -241,16 +423,19 @@ async def queue_kp_lesson_generation_for_parent(
         str(scope.get("slot") or "") == scope_slot for scope in scopes
     ):
         raise LookupError("Knowledge point Reading scope is unavailable")
-    job = await create_generation_job(
-        version_id=str(knowledge_point["version_id"]),
-        scope="lesson",
-        structure_id=None,
-        knowledge_point_id=knowledge_point_id,
-        processing_profile_sha256=_processing_profile_sha256(
-            auto_grading=auto_grading
-        ),
-        auto_grading=auto_grading,
-    )
+    try:
+        job = await create_generation_job(
+            version_id=str(knowledge_point["version_id"]),
+            scope="lesson",
+            structure_id=None,
+            knowledge_point_id=knowledge_point_id,
+            processing_profile_sha256=_processing_profile_sha256(
+                auto_grading=auto_grading
+            ),
+            auto_grading=auto_grading,
+        )
+    except LessonGenerationConflictError as exc:
+        raise TextbookTransitionError(str(exc)) from exc
     return {**knowledge_point, **job}
 
 
@@ -393,6 +578,7 @@ async def _dispatch_kp_lesson_root_run(
         job,
         scope=scope,
         chapter_markdown=chapter_markdown,
+        attempt_id=attempt_id,
     )
     run_handle = await RunCoordinator.get_instance().start_run(
         thread_id=thread_id,
@@ -530,26 +716,68 @@ async def launch_kp_lesson_generation(
     )
     if not job:
         raise LookupError("Knowledge-point lesson job not found")
-    if job.get("scope") != "lesson" or job.get("status") != "queued":
+    if job.get("scope") != "lesson":
         raise RuntimeError("Knowledge-point lesson job cannot start")
     generation_job_id = str(job["generation_job_id"])
-    workspace = await create_generation_workspace(
+    status = str(job.get("status") or "")
+    if status in {"running", "validating"}:
+        return {
+            "generation_job_id": generation_job_id,
+            "status": status,
+            "launched": "false",
+        }
+    if status not in {"queued", "preparing"}:
+        raise RuntimeError("Knowledge-point lesson job cannot start")
+    expected_latest_attempt_id = job.get("latest_attempt_id")
+    claimed = await claim_lesson_launch(
         parent_user_id=parent_user_id,
-        job_id=generation_job_id,
-    )
-    workspace_id = str(workspace["workspace_id"])
-    thread = await create_generation_thread(
-        job_id=generation_job_id,
-        workspace_id=workspace_id,
-    )
-    thread_id = str(thread["conversation_thread_id"])
-    attempt = await claim_generation_job(
         generation_job_id=generation_job_id,
-        managed_workspace_id=workspace_id,
-        managed_thread_id=thread_id,
     )
-    if not attempt:
-        raise RuntimeError("Knowledge-point lesson job was claimed")
+    if not claimed:
+        current = await get_generation_job_for_parent(
+            parent_user_id=parent_user_id,
+            generation_job_id=generation_job_id,
+        )
+        current_status = str((current or {}).get("status") or "")
+        if current_status in {"preparing", "running", "validating"}:
+            return {
+                "generation_job_id": generation_job_id,
+                "status": current_status,
+                "launched": "false",
+            }
+        raise RuntimeError("Knowledge-point lesson launch was claimed")
+    job = {**job, **claimed}
+    try:
+        workspace = await create_generation_workspace(
+            parent_user_id=parent_user_id,
+            job_id=generation_job_id,
+        )
+        workspace_id = str(workspace["workspace_id"])
+        thread = await create_generation_thread(
+            job_id=generation_job_id,
+            workspace_id=workspace_id,
+        )
+        thread_id = str(thread["conversation_thread_id"])
+        attempt = await claim_generation_job(
+            generation_job_id=generation_job_id,
+            managed_workspace_id=workspace_id,
+            managed_thread_id=thread_id,
+            expected_job_status="preparing",
+        )
+        if not attempt:
+            raise RuntimeError("Knowledge-point lesson job was claimed")
+    except BaseException:
+        logger.exception(
+            "Knowledge-point lesson launch claim failed",
+            extra={"generation_job_id": generation_job_id},
+        )
+        await fail_claimed_lesson_launch(
+            generation_job_id=generation_job_id,
+            expected_latest_attempt_id=expected_latest_attempt_id,
+            error_code="managed_lesson_launch_failed",
+            error_message="单知识点课程生成无法启动，请稍后重试。",
+        )
+        raise
     attempt_id = str(attempt["attempt_id"])
     try:
         agent_config = await resolve_managed_education_agent_config(
@@ -588,20 +816,30 @@ async def launch_kp_lesson_generation(
         if not frozen_input:
             raise LookupError("Knowledge-point lesson input is unavailable")
         frozen_input = await hydrate_source_asset_manifests(frozen_input)
-        unit_id = str(job.get("unit_id") or "")
-        scopes = (
-            await get_textbook_scopes_for_unit(
-                parent_user_id=parent_user_id,
-                unit_id=unit_id,
+        if is_generic_lesson_job(job):
+            scope = None
+            chapter_markdown = await read_content_node_asset(job)
+            source_context, source_warnings = build_lesson_source_context(
+                job,
+                frozen_input,
+                [],
+                content_node_markdown=chapter_markdown,
             )
-            if unit_id
-            else []
-        )
-        scope = select_reading_scope(job, scopes)
-        source_context, source_warnings = build_lesson_source_context(
-            job, frozen_input, scopes
-        )
-        chapter_markdown = await read_reading_asset_knowledge(job, scope)
+        else:
+            unit_id = str(job.get("unit_id") or "")
+            scopes = (
+                await get_textbook_scopes_for_unit(
+                    parent_user_id=parent_user_id,
+                    unit_id=unit_id,
+                )
+                if unit_id
+                else []
+            )
+            scope = select_reading_scope(job, scopes)
+            source_context, source_warnings = build_lesson_source_context(
+                job, frozen_input, scopes
+            )
+            chapter_markdown = await read_reading_asset_knowledge(job, scope)
         if source_warnings:
             logger.warning(
                 "Knowledge-point lesson used fallback source ranges",

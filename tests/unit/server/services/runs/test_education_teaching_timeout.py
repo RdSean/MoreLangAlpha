@@ -27,4 +27,7 @@ def test_local_executor_uses_the_managed_teaching_disconnect_window():
     assert executor._abandoned_timeout_for_metadata(
         {"managed_execution": {"kind": "education_book_pipeline"}}
     ) == 86_400
+    assert executor._abandoned_timeout_for_metadata(
+        {"managed_execution": {"kind": "education_lesson"}}
+    ) == 86_400
     assert executor._abandoned_timeout_for_metadata({}) == 21_600

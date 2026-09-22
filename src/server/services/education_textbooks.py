@@ -682,7 +682,11 @@ async def get_student_kp_lesson(
     )
     if not lesson:
         raise TextbookNotFoundError("Published knowledge-point lesson not found")
-    content = await read_kp_lesson_revision(str(lesson["content_key"]))
+    content = await read_kp_lesson_revision(
+        str(lesson["content_key"]),
+        expected_sha256=str(lesson["content_sha256"]),
+        expected_size=int(lesson["size_bytes"]),
+    )
     return {
         **lesson,
         "content_markdown": content.decode("utf-8"),

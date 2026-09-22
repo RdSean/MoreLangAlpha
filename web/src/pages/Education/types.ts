@@ -408,6 +408,11 @@ export interface LessonGenerationStatus {
   started_at?: string | null;
   heartbeat_at?: string | null;
   root_run_id?: string | null;
+  source_kind: 'legacy_reading' | 'content_node';
+  candidate_status?: KnowledgePointCandidateStatus | null;
+  content_node_id?: string | null;
+  content_node_title?: string | null;
+  content_asset_available: boolean;
 }
 
 export interface StudentKnowledgePoint {

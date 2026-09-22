@@ -106,12 +106,6 @@ def test_book_pipeline_policy_allows_package_skill_and_manifest_asset_paths():
         ("outputs/content_tree.json", "{}"),
         ("outputs/knowledge_points.json", "{}"),
         ("outputs/assets_manifest.json", "{}"),
-        (
-            ".langalpha/progress.jsonl",
-            '{"event_key":"chapter:start","stage":"chapter_analysis","status":"running"}\n'
-            "\n"
-            '{"event_key":"chapter:done","stage":"chapter_analysis","status":"completed"}',
-        ),
         ("outputs/book-skill/SKILL.md", "# Textbook Skill"),
         ("outputs/book-skill/chapters/unit-1/reading-a.md", "# Reading A"),
         ("outputs/book-skill/glossary.md", "# Glossary"),
@@ -147,13 +141,13 @@ def test_book_pipeline_policy_allows_package_skill_and_manifest_asset_paths():
         (
             ".langalpha/progress.jsonl",
             '["not","an","object"]',
-            "progress contract",
+            "append-only",
         ),
         (
             ".langalpha/progress.jsonl",
             '{"event_key":"event-1","stage":"chapter_analysis","status":"running"}\n'
             "not json",
-            "progress contract",
+            "append-only",
         ),
     ),
 )
@@ -811,7 +805,7 @@ def test_managed_bash_allows_only_the_staged_progress_helper(interpreter):
         "education_book_pipeline_policy",
     ],
 )
-def test_all_managed_purposes_allow_only_the_progress_stream_under_langalpha(
+def test_all_managed_purposes_reject_direct_progress_stream_writes(
     policy_factory,
 ):
     managed_execution = import_module("ptc_agent.agent.managed_execution")
@@ -824,13 +818,8 @@ def test_all_managed_purposes_allow_only_the_progress_stream_under_langalpha(
         '"status":"running"}\n'
     )
 
-    assert managed_execution.validate_managed_textbook_write(
-        progress_path,
+    for content in (
         valid,
-        policy,
-    ) is None
-    assert managed_execution.validate_managed_textbook_write(
-        progress_path,
         json.dumps(
             {
                 "event_key": "chapter:start",
@@ -839,8 +828,14 @@ def test_all_managed_purposes_allow_only_the_progress_stream_under_langalpha(
                 "label": "已完成 1 / 3",
             }
         ),
-        policy,
-    ) is None
+    ):
+        error = managed_execution.validate_managed_textbook_write(
+            progress_path,
+            content,
+            policy,
+        )
+        assert "append-only" in str(error)
+        assert "progress.py" in str(error)
     for invalid_event in (
         {},
         {"event_key": "", "stage": "chapter_analysis", "status": "running"},
@@ -978,7 +973,7 @@ def test_progress_validators_agree_on_the_same_input(
     helper_accepted = helper_result.returncode == 0
 
     assert server_accepted == accepted
-    assert write_accepted == accepted
+    assert write_accepted is False
     assert helper_accepted == accepted
 
 

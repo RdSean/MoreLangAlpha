@@ -377,9 +377,10 @@ Emit semantic business checkpoints with optional `substage`, safe `label`, safe
 contain model reasoning, prompts, raw tool arguments or results, credentials,
 full sandbox paths, or raw book passages.
 
-The managed write gate rejects missing/empty required fields, invalid stage or
-status values, duplicate or non-standard JSON values, and the explicitly
-forbidden field keys `reasoning`, `prompt`, `tool_args`, `tool_result`,
-`credentials`, `credential`, `secret` and `sandbox_path`. The downstream
-progress parser remains authoritative for normalization, truncation and
-durable persistence.
+The managed write gate rejects every direct `Write`/`Edit` attempt to
+`.langalpha/progress.jsonl`; only the staged helper may append the stream.
+The helper rejects missing/empty required fields, invalid stage or status
+values, duplicate or non-standard JSON values, and the explicitly forbidden
+field keys `reasoning`, `prompt`, `tool_args`, `tool_result`, `credentials`,
+`credential`, `secret` and `sandbox_path`. The downstream progress parser
+remains authoritative for normalization, truncation and durable persistence.

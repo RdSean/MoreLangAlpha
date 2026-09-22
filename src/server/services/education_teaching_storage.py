@@ -926,30 +926,60 @@ async def stage_kp_lesson_inputs(
     if not job_id:
         raise TeachingPackageStorageError("Knowledge-point lesson job is unavailable")
     root = managed_job_root(job_id)
-    source_refs = job.get("knowledge_point_source_refs") or job.get("source_refs")
-    if not isinstance(source_refs, list) or not source_refs:
+    content_node_id = str(job.get("content_node_id") or "")
+    raw_source_refs = job.get("knowledge_point_source_refs")
+    if raw_source_refs is None:
+        raw_source_refs = job.get("source_refs")
+    if raw_source_refs is None and content_node_id:
+        source_refs: list[Any] = []
+    elif isinstance(raw_source_refs, list):
+        source_refs = raw_source_refs
+    else:
         raise TeachingPackageStorageError(
             "Knowledge-point lesson source refs are unavailable"
         )
-    scope_slot = str(job.get("knowledge_point_scope_slot") or "")
-    if scope_slot not in {"reading_a", "reading_b"}:
-        raise TeachingPackageStorageError(
-            "Knowledge-point reading scope is unavailable"
-        )
-    reading_path = f"inputs/readings/{scope_slot}.md"
-    chapter_path = f"inputs/chapters/{scope_slot}-knowledge.md"
-    manifest = {
-        "format": "langalpha-managed-kp-lesson-input/v1",
-        "job_id": job_id,
-        "knowledge_point_id": str(job["knowledge_point_id"]),
-        "knowledge_point_title": str(job.get("knowledge_point_title") or ""),
-        "unit_title": str(job.get("unit_title") or ""),
-        "auto_grading": bool(job.get("auto_grading")),
-        "scope_slot": scope_slot,
-        "source_refs": source_refs,
-        "reading_path": reading_path,
-        "chapter_path": chapter_path,
-    }
+    if content_node_id:
+        path_id = str(UUID(content_node_id))
+        source_path = f"inputs/content-nodes/{path_id}.md"
+        chapter_path = f"inputs/chapters/{path_id}-knowledge.md"
+        manifest = {
+            "format": "langalpha-managed-kp-lesson-input/v2",
+            "source_kind": "content_node",
+            "job_id": job_id,
+            "knowledge_point_id": str(job["knowledge_point_id"]),
+            "knowledge_point_title": str(job.get("knowledge_point_title") or ""),
+            "content_node_id": path_id,
+            "content_node_title": str(job.get("content_node_title") or ""),
+            "auto_grading": bool(job.get("auto_grading")),
+            "source_refs": source_refs,
+            "source_path": source_path,
+            "chapter_path": chapter_path,
+        }
+    else:
+        if not source_refs:
+            raise TeachingPackageStorageError(
+                "Knowledge-point lesson source refs are unavailable"
+            )
+        scope_slot = str(job.get("knowledge_point_scope_slot") or "")
+        if scope_slot not in {"reading_a", "reading_b"}:
+            raise TeachingPackageStorageError(
+                "Knowledge-point reading scope is unavailable"
+            )
+        source_path = f"inputs/readings/{scope_slot}.md"
+        chapter_path = f"inputs/chapters/{scope_slot}-knowledge.md"
+        manifest = {
+            "format": "langalpha-managed-kp-lesson-input/v1",
+            "source_kind": "legacy_reading",
+            "job_id": job_id,
+            "knowledge_point_id": str(job["knowledge_point_id"]),
+            "knowledge_point_title": str(job.get("knowledge_point_title") or ""),
+            "unit_title": str(job.get("unit_title") or ""),
+            "auto_grading": bool(job.get("auto_grading")),
+            "scope_slot": scope_slot,
+            "source_refs": source_refs,
+            "reading_path": source_path,
+            "chapter_path": chapter_path,
+        }
     files = [
         (
             f"{root}/inputs/manifest.json",
@@ -960,11 +990,45 @@ async def stage_kp_lesson_inputs(
                 separators=(",", ":"),
             ).encode("utf-8"),
         ),
-        (f"{root}/{reading_path}", source_context.encode("utf-8")),
+        (f"{root}/{source_path}", source_context.encode("utf-8")),
         (f"{root}/{chapter_path}", chapter_markdown.encode("utf-8")),
         (f"{root}/outputs/.keep", b""),
     ]
     await _upload_staged_files(sandbox, files)
+
+
+async def read_content_node_asset(job: Mapping[str, Any]) -> str:
+    """Read one declared generic content-node asset with integrity checks."""
+    content_key = str(job.get("content_asset_key") or "")
+    content_sha256 = str(job.get("content_asset_sha256") or "")
+    size_bytes = job.get("content_asset_size_bytes")
+    if (
+        not content_key.startswith("education/")
+        or ".." in content_key
+        or not _SHA256_RE.fullmatch(content_sha256)
+        or not isinstance(size_bytes, int)
+        or isinstance(size_bytes, bool)
+        or size_bytes <= 0
+        or size_bytes > _MAX_BOOK_PACKAGE_ASSET_BYTES
+    ):
+        raise TeachingPackageStorageError(
+            "Knowledge-point content node asset is unavailable"
+        )
+    content = await asyncio.to_thread(get_bytes, content_key)
+    if (
+        not isinstance(content, bytes)
+        or len(content) != size_bytes
+        or hashlib.sha256(content).hexdigest() != content_sha256
+    ):
+        raise TeachingPackageStorageError(
+            "Knowledge-point content node asset is invalid"
+        )
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise TeachingPackageStorageError(
+            "Knowledge-point content node asset is invalid"
+        ) from exc
 
 
 async def read_reading_asset_knowledge(
@@ -1542,51 +1606,74 @@ async def write_book_asset_bundle(
     return prefix, validated
 
 
-def kp_lesson_content_key(job: Mapping[str, Any]) -> str:
+def kp_lesson_content_key(
+    job: Mapping[str, Any],
+    *,
+    content_sha256: str,
+) -> str:
     """Return the deterministic private key for one Markdown lesson revision."""
+    if not _SHA256_RE.fullmatch(content_sha256):
+        raise TeachingPackageStorageError("Knowledge-point lesson hash is invalid")
     try:
         content_sequence = int(job["content_version_sequence"])
         structure_sequence = int(job["structure_sequence"])
-        unit_position = int(job["unit_position"])
-        knowledge_point_position = int(job["knowledge_point_position"])
-        raw_revision = job.get("lesson_revision")
-        if raw_revision is None:
-            lesson_revision = f"job-{UUID(str(job['generation_job_id']))}"
-        else:
-            numeric_revision = int(raw_revision)
-            if numeric_revision <= 0:
-                raise ValueError("lesson revision must be positive")
-            lesson_revision = f"v{numeric_revision}"
     except (KeyError, TypeError, ValueError) as exc:
         raise TeachingPackageStorageError(
             "Knowledge-point lesson version is invalid"
         ) from exc
-    if min(
-        content_sequence,
-        structure_sequence,
-        unit_position,
-        knowledge_point_position,
-    ) <= 0:
+    if min(content_sequence, structure_sequence) <= 0:
         raise TeachingPackageStorageError(
             "Knowledge-point lesson version is invalid"
         )
-    return (
-        "education/{household}/{textbook}/v{content}/structures/v{structure}/"
-        "units/{unit_position:02d}-{unit_slug}/knowledge-points/"
-        "{knowledge_point_position:02d}-{knowledge_point_slug}/lessons/"
-        "{lesson_revision}/lesson.md"
+    prefix = (
+        "education/{household}/{textbook}/v{content}/structures/v{structure}"
     ).format(
         household=_safe_component(job.get("household_id"), "household"),
         textbook=_safe_component(job.get("slug"), "textbook"),
         content=content_sequence,
         structure=structure_sequence,
+    )
+    content_node_id = str(job.get("content_node_id") or "")
+    if content_node_id:
+        try:
+            node_id = str(UUID(content_node_id))
+            knowledge_point_id = str(UUID(str(job["knowledge_point_id"])))
+        except (TypeError, ValueError) as exc:
+            raise TeachingPackageStorageError(
+                "Knowledge-point lesson identity is invalid"
+            ) from exc
+        candidate_key = str(
+            job.get("candidate_key") or job.get("knowledge_point_slug") or ""
+        )
+        candidate_digest = hashlib.sha256(candidate_key.encode("utf-8")).hexdigest()
+        return (
+            f"{prefix}/content-nodes/{node_id}/knowledge-points/"
+            f"{knowledge_point_id}-{candidate_digest}/lessons/"
+            f"{content_sha256}/lesson.md"
+        )
+    try:
+        unit_position = int(job["unit_position"])
+        knowledge_point_position = int(job["knowledge_point_position"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TeachingPackageStorageError(
+            "Knowledge-point lesson version is invalid"
+        ) from exc
+    if min(unit_position, knowledge_point_position) <= 0:
+        raise TeachingPackageStorageError(
+            "Knowledge-point lesson version is invalid"
+        )
+    return (
+        f"{prefix}/units/{{unit_position:02d}}-{{unit_slug}}/knowledge-points/"
+        "{knowledge_point_position:02d}-{knowledge_point_slug}/lessons/"
+        "{content_sha256}/lesson.md"
+    ).format(
         unit_position=unit_position,
         unit_slug=_safe_component(job.get("unit_slug"), "unit"),
         knowledge_point_position=knowledge_point_position,
         knowledge_point_slug=_safe_component(
             job.get("knowledge_point_slug"), "knowledge-point"
         ),
-        lesson_revision=lesson_revision,
+        content_sha256=content_sha256,
     )
 
 
@@ -1606,16 +1693,29 @@ async def write_kp_lesson_revision(
         raise TeachingPackageStorageError(
             "Knowledge-point lesson content must be UTF-8"
         ) from exc
-    content_key = kp_lesson_content_key(job)
-    await _put(content_key, content, "text/markdown; charset=utf-8")
+    content_sha256 = hashlib.sha256(content).hexdigest()
+    content_key = kp_lesson_content_key(job, content_sha256=content_sha256)
+    existing = await asyncio.to_thread(get_bytes, content_key)
+    if existing is not None:
+        if hashlib.sha256(existing).hexdigest() != content_sha256:
+            raise TeachingPackageStorageError(
+                "Knowledge-point lesson object hash collision"
+            )
+    else:
+        await _put(content_key, content, "text/markdown; charset=utf-8")
     return {
         "content_key": content_key,
-        "content_sha256": hashlib.sha256(content).hexdigest(),
+        "content_sha256": content_sha256,
         "size_bytes": len(content),
     }
 
 
-async def read_kp_lesson_revision(content_key: str) -> bytes:
+async def read_kp_lesson_revision(
+    content_key: str,
+    *,
+    expected_sha256: str | None = None,
+    expected_size: int | None = None,
+) -> bytes:
     """Read one private Markdown lesson revision by its database key."""
     if (
         not isinstance(content_key, str)
@@ -1631,4 +1731,22 @@ async def read_kp_lesson_revision(content_key: str) -> bytes:
         or len(content) > _MAX_CANDIDATE_BYTES
     ):
         raise TeachingPackageStorageError("Knowledge-point lesson content is unavailable")
+    if (
+        expected_sha256 is not None
+        and (
+            not _SHA256_RE.fullmatch(expected_sha256)
+            or hashlib.sha256(content).hexdigest() != expected_sha256
+        )
+    ):
+        raise TeachingPackageStorageError(
+            "Knowledge-point lesson content hash mismatch"
+        )
+    if expected_size is not None and (
+        isinstance(expected_size, bool)
+        or not isinstance(expected_size, int)
+        or len(content) != expected_size
+    ):
+        raise TeachingPackageStorageError(
+            "Knowledge-point lesson content size mismatch"
+        )
     return content

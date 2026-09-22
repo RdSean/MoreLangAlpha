@@ -652,13 +652,16 @@ async def test_create_lesson_generation_job_persists_one_target(
         yield mock_connection
 
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
-    mock_cursor.fetchone.return_value = {
-        "generation_job_id": "generation-lesson-1",
-        "version_id": "version-1",
-        "scope": "lesson",
-        "knowledge_point_id": "kp-1",
-        "status": "queued",
-    }
+    mock_cursor.fetchone.side_effect = [
+        None,
+        {
+            "generation_job_id": "generation-lesson-1",
+            "version_id": "version-1",
+            "scope": "lesson",
+            "knowledge_point_id": "kp-1",
+            "status": "queued",
+        },
+    ]
 
     result = await education_textbooks.create_generation_job(
         version_id="version-1",
@@ -669,10 +672,92 @@ async def test_create_lesson_generation_job_persists_one_target(
     )
 
     assert result["knowledge_point_id"] == "kp-1"
+    assert result["reused_existing_job"] is False
     insert_sql = mock_cursor.execute.call_args.args[0]
     assert "INSERT INTO education_generation_jobs" in insert_sql
     assert "scope" in insert_sql
     assert mock_cursor.execute.call_args.args[1][2] == "lesson"
+
+
+@pytest.mark.asyncio
+async def test_create_lesson_generation_job_reuses_active_job(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {
+        "generation_job_id": "generation-lesson-active",
+        "version_id": "version-1",
+        "scope": "lesson",
+        "knowledge_point_id": "kp-1",
+        "status": "running",
+        "auto_grading": False,
+        "attempt_count": 1,
+    }
+
+    result = await education_textbooks.create_generation_job(
+        version_id="version-1",
+        scope="lesson",
+        structure_id=None,
+        knowledge_point_id="kp-1",
+        processing_profile_sha256="a" * 64,
+    )
+
+    assert result == {
+        "generation_job_id": "generation-lesson-active",
+        "version_id": "version-1",
+        "scope": "lesson",
+        "knowledge_point_id": "kp-1",
+        "status": "running",
+        "auto_grading": False,
+        "attempt_count": 1,
+        "reused_existing_job": True,
+    }
+    assert all(
+        "INSERT INTO education_generation_jobs" not in call.args[0]
+        for call in mock_cursor.execute.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_lesson_generation_job_rejects_auto_grading_mismatch(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {
+        "generation_job_id": "generation-lesson-active",
+        "version_id": "version-1",
+        "scope": "lesson",
+        "knowledge_point_id": "kp-1",
+        "status": "running",
+        "auto_grading": True,
+        "attempt_count": 1,
+    }
+
+    with pytest.raises(
+        education_textbooks.LessonGenerationConflictError,
+        match="different auto-grading",
+    ):
+        await education_textbooks.create_generation_job(
+            version_id="version-1",
+            scope="lesson",
+            structure_id=None,
+            knowledge_point_id="kp-1",
+            processing_profile_sha256="a" * 64,
+            auto_grading=False,
+        )
+
+    assert all(
+        "INSERT INTO education_generation_jobs" not in call.args[0]
+        for call in mock_cursor.execute.call_args_list
+    )
 
 
 @pytest.mark.asyncio
@@ -1107,6 +1192,7 @@ async def test_create_kp_lesson_revision_updates_stable_lesson_latest_revision(
     mock_cursor.fetchone.side_effect = [
         {"knowledge_point_id": "kp-1"},
         None,
+        None,
         {"revision": 1},
         {"revision_id": "revision-1"},
         {"lesson_id": "lesson-1", "latest_revision_id": "revision-1"},
@@ -1123,10 +1209,62 @@ async def test_create_kp_lesson_revision_updates_stable_lesson_latest_revision(
 
     assert result["lesson_id"] == "lesson-1"
     UUID(result["revision_id"])
-    revision_sql = mock_cursor.execute.call_args_list[4].args[0]
+    revision_sql = mock_cursor.execute.call_args_list[5].args[0]
     assert "INSERT INTO education_kp_lesson_revisions" in revision_sql
-    update_sql = mock_cursor.execute.call_args_list[5].args[0]
+    update_sql = mock_cursor.execute.call_args_list[6].args[0]
     assert "latest_revision_id = %s" in update_sql
+
+
+@pytest.mark.asyncio
+async def test_create_kp_lesson_revision_repoints_latest_to_existing_content(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"knowledge_point_id": "kp-1"},
+        {
+            "lesson_id": "lesson-1",
+            "latest_revision_id": "revision-2",
+            "status": "approved",
+        },
+        {
+            "revision_id": "revision-1",
+            "revision": 1,
+            "content_key": "education/household/book/v1/lessons/a/lesson.md",
+            "content_sha256": "a" * 64,
+            "size_bytes": 100,
+            "processing_profile_sha256": "b" * 64,
+            "generation_job_id": None,
+            "created_at": None,
+        },
+        {
+            "lesson_id": "lesson-1",
+            "latest_revision_id": "revision-1",
+            "status": "review",
+            "reviewed_at": None,
+        },
+    ]
+
+    result = await education_textbooks.create_kp_lesson_revision(
+        knowledge_point_id="kp-1",
+        content_key="education/household/book/v1/lessons/a/lesson.md",
+        content_sha256="a" * 64,
+        size_bytes=100,
+        processing_profile_sha256="b" * 64,
+        generation_job_id=None,
+    )
+
+    assert result["revision_id"] == "revision-1"
+    assert result["latest_revision_id"] == "revision-1"
+    assert result["status"] == "review"
+    update_sql = mock_cursor.execute.call_args_list[3].args[0]
+    assert "latest_revision_id = %s" in update_sql
+    assert "status = 'review'" in update_sql
+    assert "reviewed_at = NULL" in update_sql
 
 
 @pytest.mark.asyncio
@@ -1322,6 +1460,236 @@ async def test_claim_book_pipeline_launch_serializes_queued_to_preparing(
 
 
 @pytest.mark.asyncio
+async def test_claim_lesson_launch_reclaims_only_stale_attemptless_preparing(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"latest_attempt_id": None},
+        {
+            "generation_job_id": "generation-lesson-1",
+            "version_id": "version-1",
+            "scope": "lesson",
+            "status": "preparing",
+            "latest_attempt_id": None,
+            "job_stale": True,
+        },
+        {
+            "generation_job_id": "generation-lesson-1",
+            "version_id": "version-1",
+            "scope": "lesson",
+            "status": "preparing",
+            "latest_attempt_id": None,
+        },
+    ]
+
+    claimed = await education_textbooks.claim_lesson_launch(
+        parent_user_id="parent-1",
+        generation_job_id="generation-lesson-1",
+    )
+
+    assert claimed is not None
+    assert claimed["status"] == "preparing"
+    select_sql = mock_cursor.execute.call_args_list[0].args[0]
+    assert "SELECT jobs.latest_attempt_id" in select_sql
+    job_lock_sql = mock_cursor.execute.call_args_list[1].args[0]
+    assert "FOR UPDATE OF jobs" in job_lock_sql
+    assert "AS job_stale" in job_lock_sql
+    update_sql = mock_cursor.execute.call_args_list[2].args[0]
+    assert "SET status = 'preparing', updated_at = NOW()" in update_sql
+
+
+@pytest.mark.asyncio
+async def test_claim_lesson_launch_fences_stale_attempt_before_reclaim(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"latest_attempt_id": "attempt-1"},
+        {
+            "attempt_id": "attempt-1",
+            "status": "preparing",
+            "root_run_id": None,
+            "attempt_stale": True,
+        },
+        {
+            "generation_job_id": "generation-lesson-1",
+            "version_id": "version-1",
+            "scope": "lesson",
+            "status": "preparing",
+            "latest_attempt_id": "attempt-1",
+            "job_stale": True,
+        },
+        {"attempt_id": "attempt-1"},
+        {
+            "generation_job_id": "generation-lesson-1",
+            "version_id": "version-1",
+            "scope": "lesson",
+            "status": "preparing",
+            "latest_attempt_id": "attempt-1",
+        },
+    ]
+
+    claimed = await education_textbooks.claim_lesson_launch(
+        parent_user_id="parent-1",
+        generation_job_id="generation-lesson-1",
+    )
+
+    assert claimed is not None
+    fence_sql = mock_cursor.execute.call_args_list[3].args[0]
+    assert "status = 'worker_lost'" in fence_sql
+    assert "error_code = 'launch_abandoned'" in fence_sql
+    assert "root_run_id IS NULL" in fence_sql
+    update_sql = mock_cursor.execute.call_args_list[4].args[0]
+    assert "SET status = 'preparing', updated_at = NOW()" in update_sql
+
+
+@pytest.mark.asyncio
+async def test_claim_lesson_launch_does_not_steal_unexpired_or_rooted_attempt(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"latest_attempt_id": "attempt-1"},
+        {
+            "attempt_id": "attempt-1",
+            "status": "preparing",
+            "root_run_id": None,
+            "attempt_stale": False,
+        },
+        {
+            "generation_job_id": "generation-lesson-1",
+            "version_id": "version-1",
+            "scope": "lesson",
+            "status": "preparing",
+            "latest_attempt_id": "attempt-1",
+            "job_stale": False,
+        },
+    ]
+
+    claimed = await education_textbooks.claim_lesson_launch(
+        parent_user_id="parent-1",
+        generation_job_id="generation-lesson-1",
+    )
+
+    assert claimed is None
+    assert len(mock_cursor.execute.call_args_list) == 3
+
+
+@pytest.mark.asyncio
+async def test_claim_lesson_launch_reclaims_worker_lost_attempt_without_refence(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"latest_attempt_id": "attempt-1"},
+        {
+            "attempt_id": "attempt-1",
+            "status": "worker_lost",
+            "root_run_id": None,
+            "attempt_stale": True,
+        },
+        {
+            "generation_job_id": "generation-lesson-1",
+            "version_id": "version-1",
+            "scope": "lesson",
+            "status": "preparing",
+            "latest_attempt_id": "attempt-1",
+            "job_stale": True,
+        },
+        {
+            "generation_job_id": "generation-lesson-1",
+            "version_id": "version-1",
+            "scope": "lesson",
+            "status": "preparing",
+            "latest_attempt_id": "attempt-1",
+        },
+    ]
+
+    claimed = await education_textbooks.claim_lesson_launch(
+        parent_user_id="parent-1",
+        generation_job_id="generation-lesson-1",
+    )
+
+    assert claimed is not None
+    assert len(mock_cursor.execute.call_args_list) == 4
+    assert "status = 'preparing', updated_at = NOW()" in (
+        mock_cursor.execute.call_args_list[3].args[0]
+    )
+
+
+@pytest.mark.asyncio
+async def test_claim_lesson_launch_locks_attempt_before_job(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {"latest_attempt_id": "attempt-1"},
+        {
+            "attempt_id": "attempt-1",
+            "status": "preparing",
+            "root_run_id": None,
+            "attempt_stale": True,
+        },
+        {
+            "generation_job_id": "generation-lesson-1",
+            "version_id": "version-1",
+            "scope": "lesson",
+            "status": "preparing",
+            "latest_attempt_id": "attempt-1",
+            "job_stale": True,
+        },
+        {"attempt_id": "attempt-1"},
+        {
+            "generation_job_id": "generation-lesson-1",
+            "version_id": "version-1",
+            "scope": "lesson",
+            "status": "preparing",
+            "latest_attempt_id": "attempt-1",
+        },
+    ]
+
+    claimed = await education_textbooks.claim_lesson_launch(
+        parent_user_id="parent-1",
+        generation_job_id="generation-lesson-1",
+    )
+
+    assert claimed is not None
+    pre_read = mock_cursor.execute.call_args_list[0].args[0]
+    assert "FOR UPDATE" not in pre_read
+    attempt_lock = mock_cursor.execute.call_args_list[1].args[0]
+    assert "FROM education_generation_attempts" in attempt_lock
+    assert "FOR UPDATE" in attempt_lock
+    job_lock = mock_cursor.execute.call_args_list[2].args[0]
+    assert "FROM education_generation_jobs AS jobs" in job_lock
+    assert "FOR UPDATE OF jobs" in job_lock
+    fence_update = mock_cursor.execute.call_args_list[3].args[0]
+    assert "error_code = 'launch_abandoned'" in fence_update
+    job_update = mock_cursor.execute.call_args_list[4].args[0]
+    assert "SET status = 'preparing', updated_at = NOW()" in job_update
+
+
+@pytest.mark.asyncio
 async def test_fail_claimed_book_pipeline_launch_closes_preparing_job(
     mock_connection, mock_cursor, monkeypatch
 ):
@@ -1362,6 +1730,11 @@ async def test_claim_generation_job_can_consume_pipeline_launch_preparing(
     monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
     mock_cursor.fetchone.side_effect = [
         {
+            "scope": "book_pipeline",
+            "status": "preparing",
+            "latest_attempt_id": None,
+        },
+        {
             "generation_job_id": "generation-1",
             "version_id": "version-1",
             "scope": "book_pipeline",
@@ -1388,8 +1761,65 @@ async def test_claim_generation_job_can_consume_pipeline_launch_preparing(
 
     assert attempt is not None
     assert attempt["attempt_id"] == "attempt-2"
-    select_sql = mock_cursor.execute.call_args_list[0].args[0]
+    select_sql = mock_cursor.execute.call_args_list[1].args[0]
     assert "status = 'preparing'" in select_sql
+
+
+@pytest.mark.asyncio
+async def test_claim_lesson_generation_locks_previous_attempt_before_job(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.side_effect = [
+        {
+            "scope": "lesson",
+            "status": "preparing",
+            "latest_attempt_id": "attempt-1",
+        },
+        {
+            "attempt_id": "attempt-1",
+            "status": "worker_lost",
+            "root_run_id": None,
+        },
+        {
+            "generation_job_id": "generation-lesson-1",
+            "version_id": "version-1",
+            "scope": "lesson",
+            "structure_id": None,
+            "knowledge_point_id": "kp-1",
+            "previous_attempt_id": "attempt-1",
+        },
+        {
+            "attempt_id": "attempt-2",
+            "generation_job_id": "generation-lesson-1",
+            "previous_attempt_id": "attempt-1",
+            "managed_workspace_id": "workspace-1",
+            "managed_thread_id": "thread-1",
+            "root_run_id": None,
+        },
+    ]
+
+    attempt = await education_textbooks.claim_generation_job(
+        generation_job_id="generation-lesson-1",
+        managed_workspace_id="workspace-1",
+        managed_thread_id="thread-1",
+        expected_job_status="preparing",
+    )
+
+    assert attempt is not None
+    assert attempt["previous_attempt_id"] == "attempt-1"
+    pre_read = mock_cursor.execute.call_args_list[0].args[0]
+    assert "FOR UPDATE" not in pre_read
+    previous_lock = mock_cursor.execute.call_args_list[1].args[0]
+    assert "FROM education_generation_attempts" in previous_lock
+    assert "FOR UPDATE" in previous_lock
+    job_lock = mock_cursor.execute.call_args_list[2].args[0]
+    assert "FROM education_generation_jobs" in job_lock
+    assert "FOR UPDATE" in job_lock
 
 
 @pytest.mark.asyncio

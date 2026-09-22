@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.server.services import education_lesson_jobs
+from src.server.services.education_book_package import validate_book_package
 
 
 FROZEN_INPUT = {
@@ -28,6 +29,8 @@ FROZEN_INPUT = {
         }
     ],
 }
+
+GENERIC_NODE_ID = "f5761267-11d1-4977-8107-e2671c99a2f0"
 
 
 LESSON_JOB = {
@@ -55,6 +58,46 @@ LESSON_JOB = {
     "processing_profile_sha256": "b" * 64,
 }
 
+GENERIC_LESSON_JOB = {
+    **LESSON_JOB,
+    "knowledge_point_id": "generic-kp-1",
+    "knowledge_point_title": "足球成为全球运动的原因",
+    "knowledge_point_scope_slot": None,
+    "knowledge_point_source_refs": [
+        {
+            "source_id": "source-1",
+            "char_start": 120,
+            "char_end": 190,
+        }
+    ],
+    "unit_id": None,
+    "unit_position": None,
+    "unit_slug": None,
+    "unit_title": None,
+    "origin": "generated",
+    "candidate_status": "accepted",
+    "content_structure_id": "structure-1",
+    "content_node_id": GENERIC_NODE_ID,
+    "content_node_key": "unit-1-reading",
+    "content_node_type": "reading",
+    "content_node_title": "The World's Game",
+    "content_node_source_refs": [
+        {
+            "source_id": "source-1",
+            "char_start": 120,
+            "char_end": 190,
+        }
+    ],
+    "content_asset_id": "asset-1",
+    "content_asset_type": "knowledge",
+    "content_asset_key": (
+        "education/household-1/english-2/v1/book-packages/job-1/"
+        "assets/book-skill/chapters/unit-1-reading/knowledge.md"
+    ),
+    "content_asset_sha256": "c" * 64,
+    "content_asset_size_bytes": 128,
+}
+
 
 def test_managed_lesson_prompt_contains_only_target_contract() -> None:
     prompt = education_lesson_jobs.managed_lesson_prompt(
@@ -71,6 +114,45 @@ def test_managed_lesson_prompt_contains_only_target_contract() -> None:
     assert "不要读取整本书" in prompt
     assert "vocabulary.json" in prompt
     assert "evidence.json" in prompt
+
+
+def test_generic_managed_lesson_prompt_does_not_require_reading_scope() -> None:
+    prompt = education_lesson_jobs.managed_lesson_prompt(
+        GENERIC_LESSON_JOB,
+        chapter_markdown="# Node knowledge\n",
+        attempt_id="attempt-1",
+    )
+
+    assert f"inputs/content-nodes/{GENERIC_NODE_ID}.md" in prompt
+    assert "-knowledge.md" in prompt
+    assert "所属内容节点是：The World's Game" in prompt
+    assert "inputs/readings/" not in prompt
+
+
+def test_managed_lesson_prompt_requires_semantic_progress_checkpoints() -> None:
+    prompt = education_lesson_jobs.managed_lesson_prompt(
+        LESSON_JOB,
+        scope={"slot": "reading_a"},
+        chapter_markdown="# Chapter knowledge\n",
+        attempt_id="attempt-1",
+    )
+
+    assert ".langalpha/progress.py" in prompt
+    assert "append-only" in prompt
+    for substage in (
+        "preparing",
+        "extracting_source",
+        "planning",
+        "generating_explanation",
+        "generating_practice",
+        "validating",
+        "completed",
+    ):
+        assert f"lesson_preparation/{substage}" in prompt
+    assert LESSON_JOB["generation_job_id"] in prompt
+    assert "attempt-1" in prompt
+    assert '"status":"running"' in prompt
+    assert '"status":"completed"' in prompt
 
 
 def _scope(markdown: str, start: int, end: int) -> dict:
@@ -149,6 +231,98 @@ def test_build_lesson_source_context_rejects_an_empty_scope() -> None:
             FROZEN_INPUT,
             [_scope(FROZEN_INPUT["sources"][0]["markdown"], 10, 10)],
         )
+
+
+def test_build_lesson_source_context_uses_generic_node_source_range() -> None:
+    markdown = FROZEN_INPUT["sources"][0]["markdown"]
+    start = markdown.index("The first paragraph.")
+    end = start + len("The first paragraph.")
+
+    context, warnings = education_lesson_jobs.build_lesson_source_context(
+        {
+            **GENERIC_LESSON_JOB,
+            "content_node_source_refs": [
+                {"source_id": "source-1", "char_start": start, "char_end": end}
+            ],
+        },
+        FROZEN_INPUT,
+        [],
+    )
+
+    assert warnings == []
+    assert context.startswith("## The World's Game")
+    assert "The first paragraph." in context
+    assert "filler sentence." not in context
+
+
+def test_build_lesson_source_context_falls_back_to_generic_node_asset() -> None:
+    context, warnings = education_lesson_jobs.build_lesson_source_context(
+        {
+            **GENERIC_LESSON_JOB,
+            "content_node_source_refs": [],
+        },
+        FROZEN_INPUT,
+        [],
+        content_node_markdown="# Generated node knowledge\n\nTrusted node asset.",
+    )
+
+    assert warnings == []
+    assert context.startswith("## The World's Game")
+    assert "Trusted node asset." in context
+    assert "filler sentence." not in context
+
+
+def test_build_lesson_source_context_uses_validator_normalized_node_range() -> None:
+    markdown = FROZEN_INPUT["sources"][0]["markdown"]
+    start = markdown.index("The first paragraph.")
+    end = start + len("The first paragraph.")
+    package, _warnings = validate_book_package(
+        {
+            "format": "langalpha-book-package/v1",
+            "source_revision": "revision-1",
+            "content_nodes": [
+                {
+                    "node_key": "unit-1-reading",
+                    "parent_key": None,
+                    "node_type": "reading",
+                    "label": None,
+                    "position": 1,
+                    "title": "The World's Game",
+                    "summary": "Reading overview",
+                    "source_refs": [
+                        {"char_start": start, "char_end": end, "source_id": "source-1"}
+                    ],
+                }
+            ],
+            "knowledge_points": [],
+            "assets": [],
+        },
+        markdown=markdown,
+    )
+    normalized_refs = package["content_nodes"][0]["source_refs"]
+    assert normalized_refs == [
+        {
+            "start": start,
+            "end": end,
+            "quote": "The first paragraph.",
+            "resolution_status": "resolved",
+            "source_id": "source-1",
+        }
+    ]
+
+    context, warnings = education_lesson_jobs.build_lesson_source_context(
+        {
+            **GENERIC_LESSON_JOB,
+            "content_node_source_refs": normalized_refs,
+        },
+        FROZEN_INPUT,
+        [],
+        content_node_markdown="# Asset fallback must not be used\n",
+    )
+
+    assert warnings == []
+    assert "The first paragraph." in context
+    assert "Asset fallback must not be used" not in context
 
 
 @pytest.mark.asyncio
@@ -231,6 +405,187 @@ async def test_queue_lesson_generation_rejects_unassigned_reading(monkeypatch) -
         await education_lesson_jobs.queue_kp_lesson_generation_for_parent(
             parent_user_id="parent-1",
             knowledge_point_id="kp-1",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "candidate_status",
+    ["pending", "rejected", "merged", "split"],
+)
+async def test_queue_lesson_generation_rejects_non_accepted_generic_candidate(
+    monkeypatch,
+    candidate_status: str,
+) -> None:
+    create_job = AsyncMock()
+
+    async def get_kp(**_kwargs):
+        return {
+            **GENERIC_LESSON_JOB,
+            "candidate_status": candidate_status,
+        }
+
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "get_knowledge_point_for_parent",
+        get_kp,
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "create_generation_job",
+        create_job,
+    )
+
+    with pytest.raises(LookupError, match="accepted knowledge point"):
+        await education_lesson_jobs.queue_kp_lesson_generation_for_parent(
+            parent_user_id="parent-1",
+            knowledge_point_id="generic-kp-1",
+        )
+
+    create_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_queue_lesson_generation_rejects_generic_candidate_without_node(
+    monkeypatch,
+) -> None:
+    create_job = AsyncMock()
+
+    async def get_kp(**_kwargs):
+        return {
+            **GENERIC_LESSON_JOB,
+            "content_node_id": None,
+            "content_asset_id": None,
+            "content_asset_key": None,
+        }
+
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "get_knowledge_point_for_parent",
+        get_kp,
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "create_generation_job",
+        create_job,
+    )
+
+    with pytest.raises(LookupError, match="content node"):
+        await education_lesson_jobs.queue_kp_lesson_generation_for_parent(
+            parent_user_id="parent-1",
+            knowledge_point_id="generic-kp-1",
+        )
+
+    create_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_queue_lesson_generation_rejects_generic_candidate_without_asset(
+    monkeypatch,
+) -> None:
+    create_job = AsyncMock()
+
+    async def get_kp(**_kwargs):
+        return {
+            **GENERIC_LESSON_JOB,
+            "content_asset_id": None,
+            "content_asset_key": None,
+        }
+
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "get_knowledge_point_for_parent",
+        get_kp,
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "create_generation_job",
+        create_job,
+    )
+
+    with pytest.raises(LookupError, match="content asset"):
+        await education_lesson_jobs.queue_kp_lesson_generation_for_parent(
+            parent_user_id="parent-1",
+            knowledge_point_id="generic-kp-1",
+        )
+
+    create_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_queue_lesson_generation_accepts_generic_candidate(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    scopes = AsyncMock()
+
+    async def get_kp(**_kwargs):
+        return dict(GENERIC_LESSON_JOB)
+
+    async def create_job(**kwargs):
+        captured.update(kwargs)
+        return {
+            "generation_job_id": "generation-generic-1",
+            "scope": "lesson",
+            "status": "queued",
+            "auto_grading": kwargs["auto_grading"],
+        }
+
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "get_knowledge_point_for_parent",
+        get_kp,
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "create_generation_job",
+        create_job,
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "get_textbook_scopes_for_unit",
+        scopes,
+    )
+
+    queued = await education_lesson_jobs.queue_kp_lesson_generation_for_parent(
+        parent_user_id="parent-1",
+        knowledge_point_id="generic-kp-1",
+        auto_grading=True,
+    )
+
+    assert queued["content_node_id"] == GENERIC_NODE_ID
+    assert captured["knowledge_point_id"] == "generic-kp-1"
+    assert captured["auto_grading"] is True
+    scopes.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_queue_lesson_generation_maps_auto_grading_conflict(monkeypatch) -> None:
+    async def get_kp(**_kwargs):
+        return dict(GENERIC_LESSON_JOB)
+
+    async def conflict(**_kwargs):
+        raise education_lesson_jobs.LessonGenerationConflictError(
+            "Active lesson job uses different auto-grading settings"
+        )
+
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "get_knowledge_point_for_parent",
+        get_kp,
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "create_generation_job",
+        conflict,
+    )
+
+    with pytest.raises(
+        education_lesson_jobs.TextbookTransitionError,
+        match="different auto-grading",
+    ):
+        await education_lesson_jobs.queue_kp_lesson_generation_for_parent(
+            parent_user_id="parent-1",
+            knowledge_point_id="kp-1",
+            auto_grading=True,
         )
 
 
@@ -420,3 +775,155 @@ async def test_dispatch_lesson_starts_live_progress_collector(monkeypatch) -> No
     ]
     workflow = captured["executor"]["workflow_generator"]
     await workflow.aclose()
+
+
+@pytest.mark.asyncio
+async def test_launch_lesson_running_job_does_not_create_resources(monkeypatch) -> None:
+    create_workspace = AsyncMock()
+
+    async def get_job(**_kwargs):
+        return {**LESSON_JOB, "status": "running", "latest_attempt_id": "attempt-1"}
+
+    monkeypatch.setattr(education_lesson_jobs, "get_generation_job_for_parent", get_job)
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "create_generation_workspace",
+        create_workspace,
+    )
+
+    result = await education_lesson_jobs.launch_kp_lesson_generation(
+        parent_user_id="parent-1",
+        generation_job_id=LESSON_JOB["generation_job_id"],
+    )
+
+    assert result["launched"] == "false"
+    assert result["status"] == "running"
+    create_workspace.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_launch_lesson_claim_loser_does_not_create_resources(monkeypatch) -> None:
+    create_workspace = AsyncMock()
+    projections = iter(
+        (
+            {**LESSON_JOB, "status": "queued", "latest_attempt_id": None},
+            {**LESSON_JOB, "status": "preparing", "latest_attempt_id": None},
+        )
+    )
+
+    async def get_job(**_kwargs):
+        return next(projections)
+
+    async def lose_claim(**_kwargs):
+        return None
+
+    monkeypatch.setattr(education_lesson_jobs, "get_generation_job_for_parent", get_job)
+    monkeypatch.setattr(education_lesson_jobs, "claim_lesson_launch", lose_claim)
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "create_generation_workspace",
+        create_workspace,
+    )
+
+    result = await education_lesson_jobs.launch_kp_lesson_generation(
+        parent_user_id="parent-1",
+        generation_job_id=LESSON_JOB["generation_job_id"],
+    )
+
+    assert result["launched"] == "false"
+    assert result["status"] == "preparing"
+    create_workspace.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_launch_lesson_attempt_claim_loser_does_not_create_resources(
+    monkeypatch,
+) -> None:
+    create_workspace = AsyncMock()
+    projections = iter(
+        (
+            {
+                **LESSON_JOB,
+                "status": "preparing",
+                "latest_attempt_id": "attempt-1",
+            },
+            {
+                **LESSON_JOB,
+                "status": "preparing",
+                "latest_attempt_id": "attempt-1",
+            },
+        )
+    )
+
+    async def get_job(**_kwargs):
+        return next(projections)
+
+    async def lose_claim(**_kwargs):
+        return None
+
+    monkeypatch.setattr(education_lesson_jobs, "get_generation_job_for_parent", get_job)
+    monkeypatch.setattr(education_lesson_jobs, "claim_lesson_launch", lose_claim)
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "create_generation_workspace",
+        create_workspace,
+    )
+
+    result = await education_lesson_jobs.launch_kp_lesson_generation(
+        parent_user_id="parent-1",
+        generation_job_id=LESSON_JOB["generation_job_id"],
+    )
+
+    assert result["launched"] == "false"
+    assert result["status"] == "preparing"
+    create_workspace.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_launch_lesson_pre_attempt_failure_marks_claim_failed(monkeypatch) -> None:
+    failures: list[dict[str, object]] = []
+
+    async def get_job(**_kwargs):
+        return {**LESSON_JOB, "status": "queued", "latest_attempt_id": None}
+
+    async def claim(**_kwargs):
+        return {
+            **LESSON_JOB,
+            "status": "preparing",
+            "latest_attempt_id": None,
+        }
+
+    async def fail_claim(**kwargs):
+        failures.append(kwargs)
+        return kwargs
+
+    async def create_workspace(**_kwargs):
+        raise RuntimeError("workspace unavailable")
+
+    monkeypatch.setattr(education_lesson_jobs, "get_generation_job_for_parent", get_job)
+    monkeypatch.setattr(education_lesson_jobs, "claim_lesson_launch", claim)
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "fail_claimed_lesson_launch",
+        fail_claim,
+    )
+    monkeypatch.setattr(
+        education_lesson_jobs,
+        "create_generation_workspace",
+        create_workspace,
+    )
+
+    with pytest.raises(RuntimeError, match="workspace unavailable"):
+        await education_lesson_jobs.launch_kp_lesson_generation(
+            parent_user_id="parent-1",
+            generation_job_id=LESSON_JOB["generation_job_id"],
+        )
+
+    assert failures == [
+        {
+            "generation_job_id": LESSON_JOB["generation_job_id"],
+            "expected_latest_attempt_id": None,
+            "error_code": "managed_lesson_launch_failed",
+            "error_message": "单知识点课程生成无法启动，请稍后重试。",
+        }
+    ]

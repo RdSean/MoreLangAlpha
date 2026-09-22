@@ -10,7 +10,25 @@ const approveLesson = vi.fn().mockResolvedValue({});
 const publish = vi.fn().mockResolvedValue({ publication_id: 'publication-1' });
 const refetch = vi.fn().mockResolvedValue({});
 let lessonData: Record<string, unknown> | null = null;
+let lessonLoading = false;
 let structureStatus = 'accepted';
+let generationJobData: Record<string, unknown> | undefined;
+let lessonGenerationPending = false;
+let lessonGenerationStatus: Record<string, unknown> = {
+  knowledge_point_id: 'kp-1',
+  generating: false,
+  generation_job_id: null,
+  status: null,
+  attempt_count: 0,
+  auto_grading: false,
+  error_code: null,
+  error_message: null,
+  source_kind: 'legacy_reading',
+  candidate_status: 'accepted',
+  content_node_id: null,
+  content_node_title: null,
+  content_asset_available: true,
+};
 
 vi.mock('../components/EducationMarkdown', () => ({
   default: ({ content }: { content: string }) => <div data-testid="education-markdown">{content}</div>,
@@ -19,7 +37,7 @@ vi.mock('../components/EducationMarkdown', () => ({
 vi.mock('../queries', () => ({
   useKnowledgePointLessonByPoint: () => ({
     data: lessonData,
-    isLoading: false,
+    isLoading: lessonLoading,
     refetch,
   }),
   useLatestTextbookStructure: () => ({
@@ -28,7 +46,11 @@ vi.mock('../queries', () => ({
     isPending: false,
     refetch,
   }),
-  useStructureGenerationJob: () => ({ data: undefined }),
+  useStructureGenerationJob: () => ({ data: generationJobData }),
+  useLessonGenerationStatus: () => ({
+    data: lessonGenerationStatus,
+    isPending: lessonGenerationPending,
+  }),
   useStructureMutations: () => ({
     generateLesson: { mutateAsync: generateLesson, isPending: false },
     saveLessonRevision: { mutateAsync: saveLessonRevision, isPending: false },
@@ -54,7 +76,25 @@ describe('KnowledgePointLessonReviewPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     lessonData = null;
+    lessonLoading = false;
     structureStatus = 'accepted';
+    generationJobData = undefined;
+    lessonGenerationPending = false;
+    lessonGenerationStatus = {
+      knowledge_point_id: 'kp-1',
+      generating: false,
+      generation_job_id: null,
+      status: null,
+      attempt_count: 0,
+      auto_grading: false,
+      error_code: null,
+      error_message: null,
+      source_kind: 'legacy_reading',
+      candidate_status: 'accepted',
+      content_node_id: null,
+      content_node_title: null,
+      content_asset_available: true,
+    };
   });
 
   it('generates a new lesson with the auto-grading option', async () => {
@@ -76,6 +116,128 @@ describe('KnowledgePointLessonReviewPage', () => {
 
     expect(screen.getByText('先接受教材结构，再生成课程')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '生成课程' })).not.toBeInTheDocument();
+  });
+
+  it('disables generation for a pending generic candidate', async () => {
+    structureStatus = 'review';
+    lessonGenerationStatus = {
+      ...lessonGenerationStatus,
+      source_kind: 'content_node',
+      candidate_status: 'pending',
+      content_node_id: 'node-1',
+      content_node_title: 'The World Game',
+      content_asset_available: true,
+    };
+    const user = userEvent.setup();
+    renderPage();
+
+    const button = screen.getByRole('button', { name: '生成课程' });
+    expect(button).toBeDisabled();
+    expect(screen.getByText('请先在知识点候选审阅中接受该知识点，再生成课程。')).toHaveAttribute('aria-live', 'polite');
+
+    await user.click(button);
+    expect(generateLesson).not.toHaveBeenCalled();
+  });
+
+  it('disables generation when the accepted generic node asset is missing', () => {
+    structureStatus = 'review';
+    lessonGenerationStatus = {
+      ...lessonGenerationStatus,
+      source_kind: 'content_node',
+      candidate_status: 'accepted',
+      content_node_id: 'node-1',
+      content_node_title: 'The World Game',
+      content_asset_available: false,
+    };
+    renderPage();
+
+    expect(screen.getByRole('button', { name: '生成课程' })).toBeDisabled();
+    expect(screen.getByText('该知识点尚未绑定可用的内容资产，暂时无法生成课程。')).toHaveAttribute('aria-live', 'polite');
+  });
+
+  it('generates a lesson for an accepted generic node without structure acceptance', async () => {
+    structureStatus = 'review';
+    lessonGenerationStatus = {
+      ...lessonGenerationStatus,
+      source_kind: 'content_node',
+      candidate_status: 'accepted',
+      content_node_id: 'node-1',
+      content_node_title: 'The World Game',
+      content_asset_available: true,
+    };
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: '生成课程' }));
+
+    await waitFor(() => expect(generateLesson).toHaveBeenCalledWith({
+      knowledgePointId: 'kp-1',
+      autoGrading: false,
+    }));
+  });
+
+  it('shows active lesson generation status and prevents an accidental retry', async () => {
+    generationJobData = { status: 'running' };
+    const user = userEvent.setup();
+    renderPage();
+
+    const button = screen.getByRole('button', { name: '正在生成课程' });
+    expect(button).toBeDisabled();
+    expect(screen.getByText('正在生成课程', { selector: 'p' })).toHaveAttribute('aria-live', 'polite');
+
+    await user.click(button);
+    expect(generateLesson).not.toHaveBeenCalled();
+  });
+
+  it('keeps generation frozen while lesson detail or status is loading', async () => {
+    lessonData = {
+      lesson_id: 'lesson-1',
+      status: 'review',
+      latest_revision_id: 'revision-1',
+      knowledge_point_id: 'kp-1',
+      knowledge_point_title: '世界运动',
+      structure_id: 'structure-1',
+      unit_id: 'unit-1',
+      unit_title: 'Unit 1',
+      content_markdown: '# 世界运动\n',
+      revisions: [],
+    };
+    lessonLoading = true;
+    lessonGenerationPending = true;
+    const user = userEvent.setup();
+    renderPage();
+
+    const button = screen.getByRole('button', { name: '重新生成' });
+    expect(button).toBeDisabled();
+    await user.click(button);
+    expect(generateLesson).not.toHaveBeenCalled();
+  });
+
+  it('keeps generation frozen when the status query reports an active job', async () => {
+    lessonGenerationStatus = {
+      ...lessonGenerationStatus,
+      generating: true,
+      generation_job_id: 'generation-active',
+    };
+    const user = userEvent.setup();
+    renderPage();
+
+    const button = screen.getByRole('button', { name: '正在生成课程' });
+    expect(button).toBeDisabled();
+    expect(screen.getByText('正在生成课程', { selector: 'p' })).toHaveAttribute('aria-live', 'polite');
+
+    await user.click(button);
+    expect(generateLesson).not.toHaveBeenCalled();
+  });
+
+  it('announces course generation failures politely', () => {
+    generationJobData = {
+      status: 'failed',
+      error_message: '课程生成失败，请重试。',
+    };
+    renderPage();
+
+    expect(screen.getByText('课程生成失败，请重试。')).toHaveAttribute('aria-live', 'polite');
   });
 
   it('renders Markdown, saves revisions, approves, and publishes', async () => {

@@ -1,5 +1,6 @@
 """Sandbox staging and private archive contracts for teaching packages."""
 
+import asyncio
 import json
 from hashlib import sha256
 from pathlib import Path
@@ -896,7 +897,7 @@ async def test_write_kp_lesson_revision_uses_private_revision_path(monkeypatch):
     expected_key = (
         "education/household-1/english-2/v1/structures/v1/"
         "units/01-unit-1-sports/knowledge-points/02-world-game/"
-        "lessons/job-5e3a0b43-8378-4b6c-926f-0f053577501d/lesson.md"
+        f"lessons/{sha256(content).hexdigest()}/lesson.md"
     )
     assert stored == {
         "content_key": expected_key,
@@ -906,6 +907,138 @@ async def test_write_kp_lesson_revision_uses_private_revision_path(monkeypatch):
     assert uploads == [
         (expected_key, content, "text/markdown; charset=utf-8")
     ]
+
+
+@pytest.mark.asyncio
+async def test_write_generic_kp_lesson_revision_uses_stable_content_node_path(
+    monkeypatch,
+) -> None:
+    uploads: list[tuple[str, bytes, str]] = []
+
+    async def put(key: str, content: bytes, content_type: str) -> None:
+        uploads.append((key, content, content_type))
+
+    monkeypatch.setattr(education_teaching_storage, "_put", put)
+    node_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
+    job = {
+        **_job(),
+        "structure_sequence": 2,
+        "content_node_id": node_id,
+        "knowledge_point_id": "11111111-1111-4111-8111-111111111111",
+        "candidate_key": "unit-1-reading-kp-1",
+        "generation_job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+    }
+    content = "# Generic lesson\n\nNode-scoped content.\n".encode()
+
+    content_sha256 = sha256(content).hexdigest()
+    content_key = education_teaching_storage.kp_lesson_content_key(
+        job,
+        content_sha256=content_sha256,
+    )
+    stored = await education_teaching_storage.write_kp_lesson_revision(job, content)
+
+    expected_key = (
+        "education/household-1/english-2/v1/structures/v2/"
+        f"content-nodes/{node_id}/knowledge-points/"
+        "11111111-1111-4111-8111-111111111111-"
+        f"{sha256(b'unit-1-reading-kp-1').hexdigest()}/"
+        f"lessons/{content_sha256}/lesson.md"
+    )
+    assert content_key == expected_key
+    assert stored == {
+        "content_key": expected_key,
+        "content_sha256": sha256(content).hexdigest(),
+        "size_bytes": len(content),
+    }
+    assert uploads == [(expected_key, content, "text/markdown; charset=utf-8")]
+
+
+@pytest.mark.asyncio
+async def test_generic_lesson_keys_do_not_collide_for_long_candidate_keys(
+    monkeypatch,
+) -> None:
+    uploads: list[tuple[str, bytes, str]] = []
+
+    async def put(key: str, content: bytes, content_type: str) -> None:
+        uploads.append((key, content, content_type))
+
+    monkeypatch.setattr(education_teaching_storage, "_put", put)
+    common = {
+        **_job(),
+        "structure_sequence": 2,
+        "content_node_id": "f5761267-11d1-4977-8107-e2671c99a2f0",
+        "generation_job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+    }
+    first_job = {
+        **common,
+        "knowledge_point_id": "11111111-1111-4111-8111-111111111111",
+        "candidate_key": "x" * 81 + "A",
+    }
+    second_job = {
+        **common,
+        "knowledge_point_id": "22222222-2222-4222-8222-222222222222",
+        "candidate_key": "x" * 81 + "B",
+    }
+
+    first_key = education_teaching_storage.kp_lesson_content_key(
+        first_job,
+        content_sha256=sha256(b"# First\n").hexdigest(),
+    )
+    second_key = education_teaching_storage.kp_lesson_content_key(
+        second_job,
+        content_sha256=sha256(b"# Second\n").hexdigest(),
+    )
+    assert first_key != second_key
+
+    first, second = await asyncio.gather(
+        education_teaching_storage.write_kp_lesson_revision(
+            first_job,
+            b"# First\n",
+        ),
+        education_teaching_storage.write_kp_lesson_revision(
+            second_job,
+            b"# Second\n",
+        ),
+    )
+
+    assert first["content_key"] == first_key
+    assert second["content_key"] == second_key
+    assert len({key for key, _content, _content_type in uploads}) == 2
+
+
+@pytest.mark.asyncio
+async def test_write_generic_lesson_revision_reuses_duplicate_content(
+    monkeypatch,
+) -> None:
+    objects: dict[str, bytes] = {}
+    uploads: list[str] = []
+
+    async def put(key: str, content: bytes, content_type: str) -> None:
+        del content_type
+        objects[key] = content
+        uploads.append(key)
+
+    monkeypatch.setattr(education_teaching_storage, "_put", put)
+    monkeypatch.setattr(
+        education_teaching_storage,
+        "get_bytes",
+        lambda key: objects.get(key),
+    )
+    job = {
+        **_job(),
+        "structure_sequence": 2,
+        "content_node_id": "f5761267-11d1-4977-8107-e2671c99a2f0",
+        "knowledge_point_id": "11111111-1111-4111-8111-111111111111",
+        "candidate_key": "stable-content",
+        "generation_job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+    }
+    content = b"# Stable lesson\n"
+
+    first = await education_teaching_storage.write_kp_lesson_revision(job, content)
+    second = await education_teaching_storage.write_kp_lesson_revision(job, content)
+
+    assert first == second
+    assert uploads == [first["content_key"]]
 
 
 @pytest.mark.asyncio
@@ -941,6 +1074,104 @@ async def test_stage_kp_lesson_inputs_contains_only_target_context():
     assert manifest["knowledge_point_id"] == "kp-1"
     assert manifest["scope_slot"] == "reading_a"
     assert manifest["auto_grading"] is False
+
+
+@pytest.mark.asyncio
+async def test_stage_generic_kp_lesson_uses_node_specific_paths():
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+    node_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
+
+    await education_teaching_storage.stage_kp_lesson_inputs(
+        {
+            "generation_job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+            "knowledge_point_id": "kp-1",
+            "knowledge_point_title": "世界运动",
+            "content_node_id": node_id,
+            "content_node_title": "The World's Game",
+            "auto_grading": False,
+            "knowledge_point_source_refs": [
+                {"source_id": "source-1", "char_start": 0, "char_end": 40}
+            ],
+        },
+        "# The World's Game\n\nsource excerpt",
+        "# Node knowledge",
+        sandbox,
+    )
+
+    uploaded = {
+        call.args[0]: call.args[1]
+        for call in sandbox.aupload_file_bytes.await_args_list
+    }
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+    assert uploaded[f"{root}inputs/content-nodes/{node_id}.md"] == (
+        b"# The World's Game\n\nsource excerpt"
+    )
+    assert uploaded[f"{root}inputs/chapters/{node_id}-knowledge.md"] == (
+        b"# Node knowledge"
+    )
+    manifest = json.loads(uploaded[f"{root}inputs/manifest.json"])
+    assert manifest["format"] == "langalpha-managed-kp-lesson-input/v2"
+    assert manifest["source_kind"] == "content_node"
+    assert manifest["content_node_id"] == node_id
+    assert "scope_slot" not in manifest
+
+
+@pytest.mark.asyncio
+async def test_stage_generic_kp_lesson_allows_missing_or_empty_source_refs():
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+    node_id = "f5761267-11d1-4977-8107-e2671c99a2f0"
+
+    await education_teaching_storage.stage_kp_lesson_inputs(
+        {
+            "generation_job_id": "5e3a0b43-8378-4b6c-926f-0f053577501d",
+            "knowledge_point_id": "kp-1",
+            "knowledge_point_title": "世界运动",
+            "content_node_id": node_id,
+            "content_node_title": "The World's Game",
+            "auto_grading": False,
+        },
+        "# Node source fallback",
+        "# Node knowledge",
+        sandbox,
+    )
+
+    uploaded = {
+        call.args[0]: call.args[1]
+        for call in sandbox.aupload_file_bytes.await_args_list
+    }
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
+    manifest = json.loads(uploaded[f"{root}inputs/manifest.json"])
+    assert manifest["source_kind"] == "content_node"
+    assert manifest["source_refs"] == []
+
+
+@pytest.mark.asyncio
+async def test_read_content_node_asset_verifies_hash_and_size(monkeypatch):
+    async def to_thread(function, *args):
+        return function(*args)
+
+    content = b"# Node knowledge\n"
+    monkeypatch.setattr(education_teaching_storage.asyncio, "to_thread", to_thread)
+    monkeypatch.setattr(
+        education_teaching_storage,
+        "get_bytes",
+        lambda _key: content,
+    )
+
+    loaded = await education_teaching_storage.read_content_node_asset(
+        {
+            "content_asset_key": (
+                "education/household/book/v1/book-packages/job/"
+                "assets/chapters/reading/knowledge.md"
+            ),
+            "content_asset_sha256": sha256(content).hexdigest(),
+            "content_asset_size_bytes": len(content),
+        }
+    )
+
+    assert loaded == "# Node knowledge\n"
 
 
 @pytest.mark.asyncio
@@ -994,10 +1225,34 @@ async def test_read_kp_lesson_revision_accepts_only_private_lesson_keys(monkeypa
     )
 
     content = await education_teaching_storage.read_kp_lesson_revision(
-        "education/household/book/v1/structures/v1/lessons/v1/lesson.md"
+        "education/household/book/v1/structures/v1/content-nodes/"
+        "f5761267-11d1-4977-8107-e2671c99a2f0/knowledge-points/"
+        f"unit-1-kp-1/lessons/{sha256(b'# Lesson\n').hexdigest()}/lesson.md",
+        expected_sha256=sha256(b"# Lesson\n").hexdigest(),
+        expected_size=len(b"# Lesson\n"),
     )
 
     assert content == b"# Lesson\n"
+    with pytest.raises(
+        education_teaching_storage.TeachingPackageStorageError,
+        match="hash mismatch",
+    ):
+        await education_teaching_storage.read_kp_lesson_revision(
+            "education/household/book/v1/structures/v1/lessons/"
+            f"{sha256(b'# Lesson\n').hexdigest()}/lesson.md",
+            expected_sha256="a" * 64,
+            expected_size=len(b"# Lesson\n"),
+        )
+    with pytest.raises(
+        education_teaching_storage.TeachingPackageStorageError,
+        match="size mismatch",
+    ):
+        await education_teaching_storage.read_kp_lesson_revision(
+            "education/household/book/v1/structures/v1/lessons/"
+            f"{sha256(b'# Lesson\n').hexdigest()}/lesson.md",
+            expected_sha256=sha256(b"# Lesson\n").hexdigest(),
+            expected_size=len(b"# Lesson\n") + 1,
+        )
     with pytest.raises(education_teaching_storage.TeachingPackageStorageError):
         await education_teaching_storage.read_kp_lesson_revision(
             "education/../secret"

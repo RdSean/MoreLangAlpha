@@ -12,6 +12,7 @@ from src.server.database.education_textbooks import (
     get_generation_job_for_parent,
     get_kp_lesson_by_knowledge_point_for_parent,
     get_kp_lesson_for_parent,
+    get_knowledge_point_for_parent,
     publish_textbook_structure,
 )
 from src.server.services.education_lesson_jobs import (
@@ -94,7 +95,11 @@ async def get_lesson_for_parent(
     )
     if latest_revision is None:
         raise TextbookNotFoundError("Knowledge-point lesson revision not found")
-    content = await read_kp_lesson_revision(str(latest_revision["content_key"]))
+    content = await read_kp_lesson_revision(
+        str(latest_revision["content_key"]),
+        expected_sha256=str(latest_revision["content_sha256"]),
+        expected_size=int(latest_revision["size_bytes"]),
+    )
     return {
         **lesson,
         "content_markdown": content.decode("utf-8"),
@@ -223,9 +228,22 @@ async def get_lesson_generation_status_for_parent(
     """Return the active lesson run for one knowledge point, if any."""
     if not await get_household_context_for_parent(parent_user_id):
         raise TextbookPermissionError("Only a parent can read lesson progress")
+    candidate = await get_knowledge_point_for_parent(
+        parent_user_id=parent_user_id,
+        knowledge_point_id=knowledge_point_id,
+    )
     job = await get_active_lesson_generation_for_parent(
         parent_user_id=parent_user_id,
         knowledge_point_id=knowledge_point_id,
+    )
+    source_kind = (
+        "content_node"
+        if candidate
+        and (
+            candidate.get("content_node_id")
+            or str(candidate.get("origin") or "") == "generated"
+        )
+        else "legacy_reading"
     )
     return {
         "knowledge_point_id": knowledge_point_id,
@@ -239,4 +257,19 @@ async def get_lesson_generation_status_for_parent(
         "started_at": job.get("started_at") if job else None,
         "heartbeat_at": job.get("heartbeat_at") if job else None,
         "root_run_id": str(job["root_run_id"]) if job and job.get("root_run_id") else None,
+        "source_kind": source_kind,
+        "candidate_status": (
+            str(candidate.get("candidate_status") or "") if candidate else None
+        ),
+        "content_node_id": (
+            str(candidate["content_node_id"])
+            if candidate and candidate.get("content_node_id")
+            else None
+        ),
+        "content_node_title": (
+            str(candidate.get("content_node_title") or "") if candidate else None
+        ),
+        "content_asset_available": bool(
+            candidate and candidate.get("content_asset_key")
+        ),
     }

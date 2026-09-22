@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import EducationMarkdown from './components/EducationMarkdown';
-import { useKnowledgePointLessonByPoint, useLatestTextbookStructure, useStructureGenerationJob, useStructureMutations } from './queries';
+import { useKnowledgePointLessonByPoint, useLatestTextbookStructure, useLessonGenerationStatus, useStructureGenerationJob, useStructureMutations } from './queries';
 
 function messageOf(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -18,10 +18,46 @@ export default function KnowledgePointLessonReviewPage() {
   const [draft, setDraft] = useState('');
   const lesson = useKnowledgePointLessonByPoint(knowledgePointId, true);
   const structure = useLatestTextbookStructure(versionId, true);
+  const lessonGeneration = useLessonGenerationStatus(knowledgePointId, true);
   const generation = useStructureGenerationJob(jobId, Boolean(jobId));
   const mutations = useStructureMutations();
   const { toast } = useToast();
   const structureAccepted = structure.data?.status === 'accepted';
+  const sourceKind = lessonGeneration.data?.source_kind ?? 'legacy_reading';
+  const genericCandidate = sourceKind === 'content_node';
+  const candidateAccepted = lessonGeneration.data?.candidate_status === 'accepted';
+  const contentAssetAvailable = lessonGeneration.data?.content_asset_available === true;
+  const generationStatus = generation.data?.status;
+  const generationActive = lesson.isLoading
+    || lessonGeneration.isPending
+    || lessonGeneration.data?.generating === true
+    || generationStatus === 'queued'
+    || generationStatus === 'preparing'
+    || generationStatus === 'running'
+    || generationStatus === 'validating';
+  const generationStatusLabel = generationStatus
+    ? {
+        queued: '课程生成已排队',
+        preparing: '正在准备课程生成',
+        running: '正在生成课程',
+        validating: '正在校验课程',
+        completed: '课程生成已完成',
+        failed: '课程生成失败',
+        cancelled: '课程生成已取消',
+      }[generationStatus]
+    : lessonGeneration.data?.generating
+      ? '正在生成课程'
+      : null;
+  const generationBlockedReason = !lessonGeneration.data
+    ? '正在确认知识点生成条件…'
+    : genericCandidate && !candidateAccepted
+      ? '请先在知识点候选审阅中接受该知识点，再生成课程。'
+      : genericCandidate && !contentAssetAvailable
+        ? '该知识点尚未绑定可用的内容资产，暂时无法生成课程。'
+        : !genericCandidate && !structureAccepted
+          ? '请先接受教材结构，再生成课程。'
+          : null;
+  const canGenerate = generationBlockedReason === null;
 
   useEffect(() => {
     if (!lesson.data) return;
@@ -33,8 +69,13 @@ export default function KnowledgePointLessonReviewPage() {
     void lesson.refetch();
   }, [generation.data?.status, lesson]);
 
+  useEffect(() => {
+    const activeJobId = lessonGeneration.data?.generation_job_id;
+    if (activeJobId) setJobId(activeJobId);
+  }, [lessonGeneration.data?.generation_job_id]);
+
   const generate = async () => {
-    if (!knowledgePointId) return;
+    if (!knowledgePointId || !canGenerate) return;
     try {
       const job = await mutations.generateLesson.mutateAsync({ knowledgePointId, autoGrading });
       setJobId(job.generation_job_id);
@@ -75,7 +116,7 @@ export default function KnowledgePointLessonReviewPage() {
     }
   };
 
-  if (lesson.isLoading) {
+  if (lesson.isLoading && !lesson.data) {
     return <main className="h-full overflow-y-auto bg-canvas p-8 text-sm text-muted-foreground">正在加载知识点课程…</main>;
   }
 
@@ -84,7 +125,7 @@ export default function KnowledgePointLessonReviewPage() {
   }
 
   if (!lesson.data) {
-    if (!structureAccepted) {
+    if (!genericCandidate && !structureAccepted) {
       return (
         <main className="h-full overflow-y-auto bg-canvas" data-testid="knowledge-point-lesson-review">
           <div className="mx-auto max-w-3xl px-6 py-12">
@@ -110,10 +151,12 @@ export default function KnowledgePointLessonReviewPage() {
           <h1 className="title-font mt-6 text-2xl font-semibold">生成知识点课程</h1>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">课程将以 `lesson.md` 生成，只有需要自动判题时才额外生成结构化练习。</p>
           <label className="mt-5 flex items-center gap-3 text-sm"><input type="checkbox" checked={autoGrading} onChange={(event) => setAutoGrading(event.target.checked)} />自动判题</label>
-          <Button className="mt-6" onClick={() => void generate()} disabled={mutations.generateLesson.isPending || generation.data?.status === 'running' || generation.data?.status === 'preparing'}>
-            <WandSparkles className="mr-2 size-4" />{generation.data?.status === 'running' || generation.data?.status === 'preparing' ? '正在生成课程' : '生成课程'}
+          <Button className="mt-6" onClick={() => void generate()} disabled={!canGenerate || mutations.generateLesson.isPending || generationActive}>
+            <WandSparkles className="mr-2 size-4" />{generationActive ? '正在生成课程' : '生成课程'}
           </Button>
-          {generation.data?.status === 'failed' && <p className="mt-4 text-sm" style={{ color: 'var(--color-loss)' }}>{generation.data.error_message ?? '课程生成失败，请重试。'}</p>}
+          {generationStatusLabel && <p className="mt-4 text-sm text-muted-foreground" role="status" aria-live="polite">{generationStatusLabel}</p>}
+          {generationBlockedReason && <p className="mt-4 text-sm text-muted-foreground" role="status" aria-live="polite">{generationBlockedReason}</p>}
+          {generation.data?.status === 'failed' && <p className="mt-4 text-sm" style={{ color: 'var(--color-loss)' }} role="status" aria-live="polite">{generation.data.error_message ?? '课程生成失败，请重试。'}</p>}
         </div>
       </main>
     );
@@ -131,7 +174,7 @@ export default function KnowledgePointLessonReviewPage() {
               <p className="mt-1 text-sm text-muted-foreground">{lesson.data.unit_title} · {lesson.data.status}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => void generate()} disabled={mutations.generateLesson.isPending}><RefreshCcw className="mr-2 size-4" />重新生成</Button>
+              <Button size="sm" variant="outline" onClick={() => void generate()} disabled={!canGenerate || mutations.generateLesson.isPending || generationActive}><RefreshCcw className="mr-2 size-4" />重新生成</Button>
               <Button size="sm" variant="outline" onClick={() => setEditing((value) => !value)}><Pencil className="mr-2 size-4" />{editing ? '取消编辑' : '编辑 Markdown'}</Button>
               {lesson.data.status !== 'approved' && <Button size="sm" onClick={() => void approve()} disabled={mutations.approveLesson.isPending}><CheckCircle2 className="mr-2 size-4" />通过当前版本</Button>}
             </div>

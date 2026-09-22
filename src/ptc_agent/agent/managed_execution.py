@@ -274,7 +274,10 @@ def validate_managed_textbook_write(
     if _contains_c0_control(path) or "\\" in path or ".." in relative.parts:
         return "managed teaching candidate path is not allowed"
     if relative == PurePosixPath(".langalpha/progress.jsonl"):
-        return _validate_progress_jsonl(content)
+        return (
+            "managed progress stream is append-only through the staged helper; "
+            "use python .langalpha/progress.py"
+        )
     if policy.purpose == "book_pipeline":
         if relative in _BOOK_PIPELINE_JSON_OBJECTS:
             return _validate_strict_json_object(

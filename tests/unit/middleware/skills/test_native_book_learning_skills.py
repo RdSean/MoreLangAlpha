@@ -72,6 +72,7 @@ def test_book_to_skill_managed_overlay_declares_full_pipeline_contract():
     assert ".langalpha/progress.jsonl" in overlay
     assert "python .langalpha/progress.py" in overlay
     assert "Do not write" in overlay
+    assert "rejects every direct `Write`/`Edit` attempt" in overlay
     assert "shell chaining" in overlay
     assert "char_start" in overlay and "char_end" in overlay
     assert "line_start" in overlay and "line_end" in overlay

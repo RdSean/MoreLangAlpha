@@ -85,6 +85,65 @@ async def test_queue_lesson_requires_parent_and_launches(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_queue_lesson_delegates_reused_job_to_launch_fence(monkeypatch):
+    launched: list[dict[str, str]] = []
+
+    async def household(_user_id):
+        return {"household_id": "household-1"}
+
+    async def queue(**_kwargs):
+        return {
+            "generation_job_id": "generation-active",
+            "scope": "lesson",
+            "status": "running",
+            "reused_existing_job": True,
+        }
+
+    async def launch(**kwargs):
+        launched.append(kwargs)
+
+    async def projection(**_kwargs):
+        return {
+            "generation_job_id": "generation-active",
+            "status": "running",
+        }
+
+    monkeypatch.setattr(
+        education_lesson_review,
+        "get_household_context_for_parent",
+        household,
+    )
+    monkeypatch.setattr(
+        education_lesson_review,
+        "queue_kp_lesson_generation_for_parent",
+        queue,
+    )
+    monkeypatch.setattr(
+        education_lesson_review,
+        "launch_kp_lesson_generation",
+        launch,
+    )
+    monkeypatch.setattr(
+        education_lesson_review,
+        "get_generation_job_for_parent",
+        projection,
+    )
+
+    result = await education_lesson_review.queue_lesson_for_parent(
+        parent_user_id="parent-1",
+        knowledge_point_id="kp-1",
+    )
+
+    assert result["status"] == "running"
+    assert launched == [
+        {
+            "parent_user_id": "parent-1",
+            "generation_job_id": "generation-active",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_get_lesson_requires_parent_and_reads_latest_markdown(monkeypatch):
     async def missing(_user_id):
         return None
@@ -106,7 +165,7 @@ async def test_get_lesson_requires_parent_and_reads_latest_markdown(monkeypatch)
     async def get_lesson(**_kwargs):
         return LESSON
 
-    async def read_revision(_key):
+    async def read_revision(_key, **_kwargs):
         return "# 世界运动\n".encode()
 
     monkeypatch.setattr(

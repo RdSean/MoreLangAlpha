@@ -48,6 +48,10 @@ class KnowledgePointCandidateTransitionError(ValueError):
     """A generated knowledge-point candidate cannot take the requested state."""
 
 
+class LessonGenerationConflictError(ValueError):
+    """An active lesson job conflicts with the requested generation settings."""
+
+
 class ProgressEventPersistenceOutcome(str, Enum):
     """Outcome of one idempotent semantic progress write."""
 
@@ -942,6 +946,190 @@ async def fail_claimed_book_pipeline_launch(
                     RETURNING generation_job_id, version_id, scope,
                               structure_id, knowledge_point_id, status,
                               attempt_count, pause_after_chapter_analysis,
+                              error_code, error_message, created_at, updated_at
+                    """,
+                    (
+                        error_code,
+                        error_message,
+                        generation_job_id,
+                        expected_latest_attempt_id,
+                    ),
+                )
+                failed = await cur.fetchone()
+    return dict(failed) if failed else None
+
+
+async def claim_lesson_launch(
+    *,
+    parent_user_id: str,
+    generation_job_id: str,
+) -> dict[str, Any] | None:
+    """Claim a lesson launch, fencing an abandoned pre-run attempt when stale."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT jobs.latest_attempt_id
+                    FROM education_generation_jobs AS jobs
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = jobs.version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE jobs.generation_job_id = %s
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                      AND jobs.scope = 'lesson'
+                    """,
+                    (generation_job_id, parent_user_id),
+                )
+                pre_read = await cur.fetchone()
+                if not pre_read:
+                    return None
+                candidate_attempt_id = (
+                    str(pre_read["latest_attempt_id"])
+                    if pre_read.get("latest_attempt_id") is not None
+                    else None
+                )
+
+                attempt: dict[str, Any] | None = None
+                if candidate_attempt_id is not None:
+                    await cur.execute(
+                        """
+                        SELECT attempt_id, status, root_run_id, started_at,
+                               heartbeat_at,
+                               COALESCE(heartbeat_at, started_at) <
+                                   NOW() - INTERVAL '5 minutes' AS attempt_stale
+                        FROM education_generation_attempts
+                        WHERE attempt_id = %s
+                        FOR UPDATE
+                        """,
+                        (candidate_attempt_id,),
+                    )
+                    attempt_row = await cur.fetchone()
+                    if attempt_row:
+                        attempt = dict(attempt_row)
+
+                await cur.execute(
+                    """
+                    SELECT jobs.generation_job_id, jobs.version_id,
+                           jobs.scope, jobs.structure_id,
+                           jobs.knowledge_point_id, jobs.status,
+                           jobs.attempt_count, jobs.latest_attempt_id,
+                           jobs.auto_grading, jobs.error_code,
+                           jobs.error_message, jobs.created_at,
+                           jobs.updated_at,
+                           jobs.updated_at <
+                               NOW() - INTERVAL '5 minutes' AS job_stale
+                    FROM education_generation_jobs AS jobs
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = jobs.version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE jobs.generation_job_id = %s
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                      AND jobs.scope = 'lesson'
+                    FOR UPDATE OF jobs
+                    """,
+                    (generation_job_id, parent_user_id),
+                )
+                job = await cur.fetchone()
+                if not job:
+                    return None
+                locked_attempt_id = (
+                    str(job["latest_attempt_id"])
+                    if job.get("latest_attempt_id") is not None
+                    else None
+                )
+                if locked_attempt_id != candidate_attempt_id:
+                    return None
+                status = str(job["status"])
+                fence_attempt_id: str | None = None
+                if status == "queued":
+                    can_claim = True
+                elif status == "preparing" and job["job_stale"]:
+                    if locked_attempt_id is None:
+                        can_claim = True
+                    elif (
+                        attempt is not None
+                        and str(attempt["attempt_id"]) == locked_attempt_id
+                        and attempt.get("status") in {"preparing", "worker_lost"}
+                        and attempt.get("root_run_id") is None
+                        and attempt.get("attempt_stale")
+                    ):
+                        can_claim = True
+                        if attempt.get("status") == "preparing":
+                            fence_attempt_id = str(attempt["attempt_id"])
+                    else:
+                        can_claim = False
+                else:
+                    can_claim = False
+                if not can_claim:
+                    return None
+                if fence_attempt_id is not None:
+                    await cur.execute(
+                        """
+                        UPDATE education_generation_attempts
+                        SET status = 'worker_lost',
+                            error_code = 'launch_abandoned',
+                            error_message = 'lesson launch abandoned before root run',
+                            completed_at = NOW()
+                        WHERE attempt_id = %s
+                          AND status = 'preparing'
+                          AND root_run_id IS NULL
+                        RETURNING attempt_id
+                        """,
+                        (fence_attempt_id,),
+                    )
+                    if not await cur.fetchone():
+                        return None
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs AS jobs
+                    SET status = 'preparing', updated_at = NOW()
+                    WHERE generation_job_id = %s
+                    RETURNING jobs.generation_job_id, jobs.version_id,
+                              jobs.scope, jobs.structure_id,
+                              jobs.knowledge_point_id, jobs.status,
+                              jobs.attempt_count, jobs.latest_attempt_id,
+                              jobs.auto_grading, jobs.error_code,
+                              jobs.error_message, jobs.created_at,
+                              jobs.updated_at
+                    """,
+                    (generation_job_id,),
+                )
+                claimed = await cur.fetchone()
+    return dict(claimed) if claimed else None
+
+
+async def fail_claimed_lesson_launch(
+    *,
+    generation_job_id: str,
+    expected_latest_attempt_id: str | None,
+    error_code: str,
+    error_message: str,
+) -> dict[str, Any] | None:
+    """Close a lesson launch claim when no runtime attempt was created."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs AS jobs
+                    SET status = 'failed', error_code = %s,
+                        error_message = %s, updated_at = NOW()
+                    WHERE jobs.generation_job_id = %s
+                      AND jobs.scope = 'lesson'
+                      AND jobs.status = 'preparing'
+                      AND jobs.latest_attempt_id IS NOT DISTINCT FROM %s
+                    RETURNING generation_job_id, version_id, scope,
+                              structure_id, knowledge_point_id, status,
+                              attempt_count, latest_attempt_id, auto_grading,
                               error_code, error_message, created_at, updated_at
                     """,
                     (
@@ -2244,6 +2432,25 @@ async def get_generation_job_for_parent(
                        knowledge_points.summary AS knowledge_point_summary,
                        knowledge_points.scope_slot AS knowledge_point_scope_slot,
                        knowledge_points.source_refs AS knowledge_point_source_refs,
+                       knowledge_points.candidate_key,
+                       knowledge_points.origin AS knowledge_point_origin,
+                       CASE
+                           WHEN knowledge_points.origin = 'generated'
+                           THEN knowledge_points.candidate_status
+                           ELSE 'accepted'
+                       END AS candidate_status,
+                       knowledge_points.content_structure_id,
+                       knowledge_points.content_node_id,
+                       nodes.node_key AS content_node_key,
+                       nodes.node_type AS content_node_type,
+                       nodes.title AS content_node_title,
+                       nodes.summary AS content_node_summary,
+                       nodes.source_refs AS content_node_source_refs,
+                       asset.asset_id AS content_asset_id,
+                       asset.asset_type AS content_asset_type,
+                       asset.content_key AS content_asset_key,
+                       asset.content_sha256 AS content_asset_sha256,
+                       asset.size_bytes AS content_asset_size_bytes,
                        units.unit_id,
                        units.position AS unit_position,
                        units.slug AS unit_slug,
@@ -2273,9 +2480,32 @@ async def get_generation_job_for_parent(
                      jobs.knowledge_point_id
                 LEFT JOIN education_structure_units AS units
                   ON units.unit_id = knowledge_points.unit_id
+                LEFT JOIN education_content_nodes AS nodes
+                  ON nodes.node_id = knowledge_points.content_node_id
+                 AND nodes.structure_id = knowledge_points.content_structure_id
+                LEFT JOIN LATERAL (
+                    SELECT content_assets.asset_id,
+                           content_assets.asset_type,
+                           content_assets.content_key,
+                           content_assets.content_sha256,
+                           content_assets.size_bytes
+                    FROM education_content_assets AS content_assets
+                    WHERE content_assets.structure_id =
+                          knowledge_points.content_structure_id
+                      AND content_assets.node_id =
+                          knowledge_points.content_node_id
+                      AND content_assets.asset_type = 'knowledge'
+                    ORDER BY content_assets.created_at,
+                        content_assets.asset_id
+                    LIMIT 1
+                ) AS asset ON TRUE
                 LEFT JOIN education_textbook_structures AS structures
                   ON structures.structure_id =
-                     COALESCE(jobs.structure_id, units.structure_id)
+                     COALESCE(
+                         jobs.structure_id,
+                         units.structure_id,
+                         knowledge_points.content_structure_id
+                     )
                 LEFT JOIN education_processing_profiles AS profiles
                   ON profiles.profile_id = structures.processing_profile_id
                 LEFT JOIN education_generation_attempts AS attempts
@@ -2549,7 +2779,7 @@ async def get_run_sse_events(*, run_id: str) -> list[Any]:
 async def get_knowledge_point_for_parent(
     *, parent_user_id: str, knowledge_point_id: str
 ) -> dict[str, Any] | None:
-    """Read one accepted knowledge point with its Unit and structure context."""
+    """Read one lesson-eligible knowledge point with its source context."""
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
@@ -2561,6 +2791,25 @@ async def get_knowledge_point_for_parent(
                        knowledge_points.summary AS knowledge_point_summary,
                        knowledge_points.scope_slot,
                        knowledge_points.source_refs AS knowledge_point_source_refs,
+                       knowledge_points.candidate_key,
+                       knowledge_points.origin,
+                       CASE
+                           WHEN knowledge_points.origin = 'generated'
+                           THEN knowledge_points.candidate_status
+                           ELSE 'accepted'
+                       END AS candidate_status,
+                       knowledge_points.content_structure_id,
+                       knowledge_points.content_node_id,
+                       nodes.node_key AS content_node_key,
+                       nodes.node_type AS content_node_type,
+                       nodes.title AS content_node_title,
+                       nodes.summary AS content_node_summary,
+                       nodes.source_refs AS content_node_source_refs,
+                       asset.asset_id AS content_asset_id,
+                       asset.asset_type AS content_asset_type,
+                       asset.content_key AS content_asset_key,
+                       asset.content_sha256 AS content_asset_sha256,
+                       asset.size_bytes AS content_asset_size_bytes,
                        units.unit_id,
                        units.position AS unit_position,
                        units.slug AS unit_slug,
@@ -2573,10 +2822,32 @@ async def get_knowledge_point_for_parent(
                        textbooks.textbook_id, textbooks.household_id,
                        textbooks.slug, textbooks.title
                 FROM education_structure_knowledge_points AS knowledge_points
-                JOIN education_structure_units AS units
+                LEFT JOIN education_structure_units AS units
                   ON units.unit_id = knowledge_points.unit_id
+                LEFT JOIN education_content_nodes AS nodes
+                  ON nodes.node_id = knowledge_points.content_node_id
+                 AND nodes.structure_id = knowledge_points.content_structure_id
+                LEFT JOIN LATERAL (
+                    SELECT content_assets.asset_id,
+                           content_assets.asset_type,
+                           content_assets.content_key,
+                           content_assets.content_sha256,
+                           content_assets.size_bytes
+                    FROM education_content_assets AS content_assets
+                    WHERE content_assets.structure_id =
+                          knowledge_points.content_structure_id
+                      AND content_assets.node_id =
+                          knowledge_points.content_node_id
+                      AND content_assets.asset_type = 'knowledge'
+                    ORDER BY content_assets.created_at,
+                        content_assets.asset_id
+                    LIMIT 1
+                ) AS asset ON TRUE
                 JOIN education_textbook_structures AS structures
-                  ON structures.structure_id = units.structure_id
+                  ON structures.structure_id = COALESCE(
+                      units.structure_id,
+                      knowledge_points.content_structure_id
+                  )
                 JOIN education_textbook_versions AS versions
                   ON versions.version_id = structures.version_id
                 JOIN education_textbooks AS textbooks
@@ -2584,11 +2855,23 @@ async def get_knowledge_point_for_parent(
                 JOIN education_memberships AS memberships
                   ON memberships.household_id = textbooks.household_id
                 WHERE knowledge_points.knowledge_point_id = %s
-                  AND knowledge_points.status = 'accepted'
-                  AND units.status = 'accepted'
-                  AND structures.status = 'accepted'
                   AND memberships.user_id = %s
                   AND memberships.role = 'parent'
+                  AND (
+                      (
+                          knowledge_points.origin = 'manual'
+                          AND knowledge_points.status = 'accepted'
+                          AND units.status = 'accepted'
+                          AND structures.status = 'accepted'
+                      )
+                      OR
+                      (
+                          knowledge_points.origin = 'generated'
+                          AND knowledge_points.content_node_id IS NOT NULL
+                          AND nodes.node_id IS NOT NULL
+                          AND structures.status IN ('review', 'accepted')
+                      )
+                  )
                 """,
                 (knowledge_point_id, parent_user_id),
             )
@@ -2910,29 +3193,59 @@ async def create_generation_job(
 
     generation_job_id = str(uuid4())
     async with get_db_connection() as conn:
-        async with conn.cursor(row_factory=dict_row) as cur:
-            await cur.execute(
-                """
-                INSERT INTO education_generation_jobs (
-                    generation_job_id, version_id, scope, structure_id,
-                    knowledge_point_id, status, auto_grading,
-                    processing_profile_sha256
-                ) VALUES (%s, %s, %s, %s, %s, 'queued', %s, %s)
-                RETURNING generation_job_id, version_id, scope, structure_id,
-                          knowledge_point_id, status, auto_grading
-                """,
-                (
-                    generation_job_id,
-                    version_id,
-                    scope,
-                    structure_target,
-                    knowledge_point_target,
-                    auto_grading,
-                    processing_profile_sha256,
-                ),
-            )
-            row = await cur.fetchone()
-    return dict(row)
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                if scope == "lesson":
+                    await cur.execute(
+                        "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                        (f"education-lesson:{knowledge_point_target}",),
+                    )
+                    await cur.execute(
+                        """
+                        SELECT generation_job_id, version_id, scope,
+                               structure_id, knowledge_point_id, status,
+                               auto_grading, attempt_count
+                        FROM education_generation_jobs
+                        WHERE version_id = %s
+                          AND scope = 'lesson'
+                          AND knowledge_point_id = %s
+                          AND status IN (
+                              'queued', 'preparing', 'running', 'validating'
+                          )
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """,
+                        (version_id, knowledge_point_target),
+                    )
+                    existing = await cur.fetchone()
+                    if existing:
+                        if bool(existing["auto_grading"]) != bool(auto_grading):
+                            raise LessonGenerationConflictError(
+                                "Active lesson job uses different auto-grading settings"
+                            )
+                        return {**dict(existing), "reused_existing_job": True}
+                await cur.execute(
+                    """
+                    INSERT INTO education_generation_jobs (
+                        generation_job_id, version_id, scope, structure_id,
+                        knowledge_point_id, status, auto_grading,
+                        processing_profile_sha256
+                    ) VALUES (%s, %s, %s, %s, %s, 'queued', %s, %s)
+                    RETURNING generation_job_id, version_id, scope, structure_id,
+                              knowledge_point_id, status, auto_grading
+                    """,
+                    (
+                        generation_job_id,
+                        version_id,
+                        scope,
+                        structure_target,
+                        knowledge_point_target,
+                        auto_grading,
+                        processing_profile_sha256,
+                    ),
+                )
+                row = await cur.fetchone()
+    return {**dict(row), "reused_existing_job": False}
 
 
 async def claim_generation_job(
@@ -2950,18 +3263,84 @@ async def claim_generation_job(
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
                 await cur.execute(
-                    f"""
-                    SELECT generation_job_id, version_id, scope, structure_id,
-                           knowledge_point_id, latest_attempt_id AS previous_attempt_id
+                    """
+                    SELECT scope, status, latest_attempt_id
                     FROM education_generation_jobs
                     WHERE generation_job_id = %s
-                      AND status = '{expected_job_status}'
-                    FOR UPDATE
                     """,
                     (generation_job_id,),
                 )
+                pre_read = await cur.fetchone()
+                if not pre_read:
+                    return None
+                previous_attempt_id = (
+                    str(pre_read["latest_attempt_id"])
+                    if pre_read.get("latest_attempt_id") is not None
+                    else None
+                )
+                if pre_read.get("scope") == "lesson":
+                    if previous_attempt_id is not None:
+                        await cur.execute(
+                            """
+                            SELECT attempt_id, status, root_run_id
+                            FROM education_generation_attempts
+                            WHERE attempt_id = %s
+                            FOR UPDATE
+                            """,
+                            (previous_attempt_id,),
+                        )
+                        previous_attempt = await cur.fetchone()
+                        if not previous_attempt:
+                            return None
+                        if (
+                            previous_attempt["status"] == "preparing"
+                            and previous_attempt["root_run_id"] is None
+                        ):
+                            return None
+                        if previous_attempt["status"] not in {
+                            "worker_lost",
+                            "failed",
+                            "cancelled",
+                        }:
+                            return None
+                    await cur.execute(
+                        f"""
+                        SELECT generation_job_id, version_id, scope, structure_id,
+                               knowledge_point_id,
+                               latest_attempt_id AS previous_attempt_id
+                        FROM education_generation_jobs
+                        WHERE generation_job_id = %s
+                          AND status = '{expected_job_status}'
+                          AND scope = 'lesson'
+                        FOR UPDATE
+                        """,
+                        (generation_job_id,),
+                    )
+                else:
+                    await cur.execute(
+                        f"""
+                        SELECT generation_job_id, version_id, scope, structure_id,
+                               knowledge_point_id,
+                               latest_attempt_id AS previous_attempt_id
+                        FROM education_generation_jobs
+                        WHERE generation_job_id = %s
+                          AND status = '{expected_job_status}'
+                        FOR UPDATE
+                        """,
+                        (generation_job_id,),
+                    )
                 job = await cur.fetchone()
                 if not job:
+                    return None
+                locked_previous_attempt_id = (
+                    str(job["previous_attempt_id"])
+                    if job.get("previous_attempt_id") is not None
+                    else None
+                )
+                if (
+                    pre_read.get("scope") == "lesson"
+                    and locked_previous_attempt_id != previous_attempt_id
+                ):
                     return None
                 await cur.execute(
                     """
@@ -3418,6 +3797,38 @@ async def create_kp_lesson_revision(
                     )
                 await cur.execute(
                     """
+                    SELECT revision_id, revision, content_key, content_sha256,
+                           size_bytes, processing_profile_sha256,
+                           generation_job_id, created_at
+                    FROM education_kp_lesson_revisions
+                    WHERE lesson_id = %s AND content_sha256 = %s
+                    ORDER BY revision
+                    LIMIT 1
+                    """,
+                    (lesson_id, content_sha256),
+                )
+                existing_revision = await cur.fetchone()
+                if existing_revision:
+                    await cur.execute(
+                        """
+                        UPDATE education_kp_lessons
+                        SET latest_revision_id = %s,
+                            status = 'review',
+                            reviewed_at = NULL
+                        WHERE lesson_id = %s
+                        RETURNING lesson_id, knowledge_point_id,
+                                  latest_revision_id, status, reviewed_at
+                        """,
+                        (existing_revision["revision_id"], lesson_id),
+                    )
+                    updated = dict(await cur.fetchone())
+                    return {
+                        **updated,
+                        "knowledge_point_id": knowledge_point_id,
+                        **dict(existing_revision),
+                    }
+                await cur.execute(
+                    """
                     SELECT COALESCE(MAX(revision), 0) + 1 AS revision
                     FROM education_kp_lesson_revisions
                     WHERE lesson_id = %s
@@ -3486,10 +3897,14 @@ async def get_kp_lesson_for_parent(
                        knowledge_points.position AS knowledge_point_position,
                        knowledge_points.slug AS knowledge_point_slug,
                        knowledge_points.title AS knowledge_point_title,
-                       units.unit_id,
+                       knowledge_points.origin,
+                       knowledge_points.content_structure_id,
+                       knowledge_points.content_node_id,
+                       knowledge_points.candidate_key,
+                       COALESCE(units.unit_id, nodes.node_id) AS unit_id,
                        units.position AS unit_position,
                        units.slug AS unit_slug,
-                       units.title AS unit_title,
+                       COALESCE(units.title, nodes.title) AS unit_title,
                        structures.structure_id,
                        structures.sequence AS structure_sequence,
                        versions.version_id,
@@ -3500,10 +3915,16 @@ async def get_kp_lesson_for_parent(
                 JOIN education_structure_knowledge_points AS knowledge_points
                   ON knowledge_points.knowledge_point_id =
                      lessons.knowledge_point_id
-                JOIN education_structure_units AS units
+                LEFT JOIN education_structure_units AS units
                   ON units.unit_id = knowledge_points.unit_id
+                LEFT JOIN education_content_nodes AS nodes
+                  ON nodes.node_id = knowledge_points.content_node_id
+                 AND nodes.structure_id = knowledge_points.content_structure_id
                 JOIN education_textbook_structures AS structures
-                  ON structures.structure_id = units.structure_id
+                  ON structures.structure_id = COALESCE(
+                      units.structure_id,
+                      knowledge_points.content_structure_id
+                  )
                 JOIN education_textbook_versions AS versions
                   ON versions.version_id = structures.version_id
                 JOIN education_textbooks AS textbooks
@@ -3548,10 +3969,13 @@ async def get_kp_lesson_by_knowledge_point_for_parent(
                 JOIN education_structure_knowledge_points AS knowledge_points
                   ON knowledge_points.knowledge_point_id =
                      lessons.knowledge_point_id
-                JOIN education_structure_units AS units
+                LEFT JOIN education_structure_units AS units
                   ON units.unit_id = knowledge_points.unit_id
                 JOIN education_textbook_structures AS structures
-                  ON structures.structure_id = units.structure_id
+                  ON structures.structure_id = COALESCE(
+                      units.structure_id,
+                      knowledge_points.content_structure_id
+                  )
                 JOIN education_textbook_versions AS versions
                   ON versions.version_id = structures.version_id
                 JOIN education_textbooks AS textbooks
@@ -3587,10 +4011,13 @@ async def approve_kp_lesson_revision(
                     JOIN education_structure_knowledge_points AS knowledge_points
                       ON knowledge_points.knowledge_point_id =
                          lessons.knowledge_point_id
-                    JOIN education_structure_units AS units
+                    LEFT JOIN education_structure_units AS units
                       ON units.unit_id = knowledge_points.unit_id
                     JOIN education_textbook_structures AS structures
-                      ON structures.structure_id = units.structure_id
+                      ON structures.structure_id = COALESCE(
+                          units.structure_id,
+                          knowledge_points.content_structure_id
+                      )
                     JOIN education_textbook_versions AS versions
                       ON versions.version_id = structures.version_id
                     JOIN education_textbooks AS textbooks

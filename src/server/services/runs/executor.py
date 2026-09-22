@@ -159,6 +159,7 @@ class LocalRunExecutor:
         managed = metadata.get("managed_execution")
         if isinstance(managed, dict) and managed.get("kind") in {
             "education_teaching",
+            "education_lesson",
             "education_book_pipeline",
         }:
             return get_education_teaching_abandoned_timeout()

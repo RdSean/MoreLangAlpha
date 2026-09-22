@@ -814,6 +814,11 @@ class LessonGenerationStatusResponse(BaseModel):
     started_at: datetime | None = None
     heartbeat_at: datetime | None = None
     root_run_id: UUID | None = None
+    source_kind: Literal["legacy_reading", "content_node"] = "legacy_reading"
+    candidate_status: str | None = None
+    content_node_id: UUID | None = None
+    content_node_title: str | None = None
+    content_asset_available: bool = False
 
 
 class CreateKnowledgePointLessonRevisionRequest(BaseModel):

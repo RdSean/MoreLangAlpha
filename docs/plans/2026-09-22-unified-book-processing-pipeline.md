@@ -1652,9 +1652,23 @@ git commit -m "feat(textbooks): review generated knowledge point candidates"
 **Files:**
 - Modify: `src/server/services/education_lesson_jobs.py`
 - Modify: `src/server/services/education_lesson_review.py`
-- Modify: `src/server/services/education_structure_jobs.py`
+- Modify: `src/server/services/education_teaching_storage.py`
+- Modify: `src/server/database/education_textbooks.py`
+- Modify: `src/server/app/education/models.py`
+- Modify: `src/server/services/runs/executor.py`
+- Modify: `src/ptc_agent/agent/managed_execution.py`
+- Modify: `plugins/langalpha_local/skills/book-to-skill/reference/langalpha-managed.md`
 - Modify: `web/src/pages/Education/KnowledgePointLessonReviewPage.tsx`
+- Modify: `web/src/pages/Education/types.ts`
 - Test: `tests/unit/server/services/test_education_lesson_jobs.py`
+- Test: `tests/unit/server/services/test_education_lesson_review.py`
+- Test: `tests/unit/server/services/test_education_teaching_storage.py`
+- Test: `tests/unit/server/services/runs/test_education_teaching_timeout.py`
+- Test: `tests/unit/server/database/test_education_structure_models.py`
+- Test: `tests/unit/ptc_agent/test_managed_textbook_execution_policy.py`
+- Test: `tests/unit/middleware/skills/test_native_book_learning_skills.py`
+- Test: `tests/unit/server/services/test_education_structure_jobs.py`
+- Test: `tests/integration/test_education_candidate_review_db.py`
 - Test: `web/src/pages/Education/__tests__/KnowledgePointLessonReviewPage.test.tsx`
 
 **Step 1: Write the failing gate test**
@@ -1715,15 +1729,151 @@ pnpm build
 
 Expected: PASS.
 
+**Execution update**
+
+The lesson eligibility projection now joins both legacy Unit/Reading rows and
+generic content-node candidates through the same parent-owned version query.
+Generated candidates must be `candidate_status='accepted'`, have a non-null
+`content_node_id`, and have a declared `knowledge` content asset before a
+lesson job can be created. Pending, rejected, merged, split, unbound and
+asset-less candidates fail before `create_generation_job()`; legacy accepted
+manual knowledge points retain the existing Unit/Reading path.
+
+Generic lesson jobs do not synthesize a Reading. The launch path reads the
+declared content-node asset through its private `content_asset_key` after
+validating size and SHA-256. `build_lesson_source_context()` first derives only
+the node's declared frozen source ranges, accepting the canonical persisted
+`start`/`end` fields emitted by `validate_book_package()` as well as the
+compatible `char_start`/`char_end` input form. A valid declared range is used
+directly and never silently falls through to the node asset; only when no
+usable range exists does the source context use that same node asset, never the
+full book. An explicitly empty `content_node_source_refs` list is treated the
+same as no declared range and therefore falls back to the node knowledge asset;
+it is not interpreted as missing required input. The runtime stages the node
+source as `inputs/content-nodes/<node_uuid>.md` and the node knowledge asset as
+`inputs/chapters/<node_uuid>-knowledge.md`, with a v2 manifest that has no
+Reading slot.
+
+Generic lesson revisions use an immutable node-scoped private key at
+`education/<household>/<textbook>/vN/structures/vN/content-nodes/<node_uuid>/knowledge-points/<knowledge_point_uuid>-<candidate_key_sha256>/lessons/<content_sha256>/lesson.md`.
+The full knowledge-point UUID and full SHA-256 of the complete candidate key
+are path identity, and the lesson content SHA-256 is the final immutable object
+identity. Different content can never map to one object key; duplicate content
+reuses the existing object. Legacy paths use the same content-addressed final
+segment. Concurrent manual saves compute the same object key only when their
+content is identical; DB insertion is serialized under the lesson row and
+returns the existing revision for duplicate content. Re-saving content that
+matches an older revision atomically repoints `lesson.latest_revision_id` to
+that revision, sets `status='review'` and clears `reviewed_at`; the returned
+projection is the updated lesson row rather than the stale prior latest.
+The revision writer no longer reads `unit_position` or `unit_slug` for generic
+jobs. Lesson get/review projections return `content_node_id` and
+`candidate_key`, so manual revisions and review APIs continue to work with the
+same path contract. Reads verify stored bytes against the revision DB SHA-256
+and size and fail closed on drift.
+
+The managed lesson prompt writes append-only `lesson_preparation` checkpoints
+through the staged helper for `preparing`, `extracting_source`, `planning`,
+`generating_explanation`, `generating_practice`, `validating` and `completed`.
+Each non-final substage has explicit running/completed event keys containing
+the generation job and attempt identities. The existing collector persists
+them without adding any new progress transport.
+
+The lesson page reads `source_kind`, `candidate_status`,
+`content_node_title` and `content_asset_available` from the existing
+lesson-generation status endpoint. A pending generic candidate or an accepted
+candidate without an asset has a disabled generation action and a specific
+reason; an accepted generic candidate can generate even while the overall
+structure is still in `review`. Legacy Unit/Reading generation keeps the
+existing structure-accepted gate. Refreshing the page restores the active
+generation job from the status response.
+
+Repeated lesson queue requests serialize on a per-knowledge-point advisory
+lock and reuse an existing `queued`, `preparing`, `running` or `validating`
+lesson job. The reused result is marked `reused_existing_job=True`, and the
+launch path claims a separate `queued -> preparing` fence before creating any
+workspace or thread. A reused queued job with no attempt can be retried; one
+concurrent claimant wins, losers return the existing lifecycle state without
+creating resources, and failures before attempt creation close the claim as
+failed so a later job can be queued. Mismatched `auto_grading` on an active job
+returns the existing transition conflict (HTTP 409) instead of silently
+reusing it. A `preparing` job with no attempt can also be reclaimed after its
+five-minute lease expires; reclamation updates `updated_at` atomically, while
+unexpired preparing jobs and all running jobs with an attempt remain
+unstealable. If an attempt was created but crashed before binding a root run,
+reclamation is allowed only when both job and attempt exceed the lease, the
+attempt remains `preparing` or is already `worker_lost`, and `root_run_id` is
+null. A still-preparing attempt is atomically fenced to `worker_lost` with
+`error_code='launch_abandoned'`; an already-fenced attempt is not rewritten.
+The job lease is then refreshed to `preparing`, allowing a replacement attempt
+even if a process crashed again after the first fencing. The replacement can
+be created and settled normally. A workspace-creation failure may leave a workspace with no
+attempt, but the job claim is still closed to `failed` so retry is never
+blocked by a stuck `preparing` row. The page also freezes
+generation while the status query reports `generating` or while lesson detail
+or status is loading, and announces status/blocked/error copy through
+`aria-live`.
+
+Managed `.langalpha/progress.jsonl` is append-only through the staged Bash
+helper. Direct `Write`/`Edit` writes are rejected by the managed policy for
+all textbook purposes; the overlay and full-pipeline prompt state that only
+`python .langalpha/progress.py` may append progress.
+
+Managed lesson runs use the same 24-hour abandoned/reconnect timeout window as
+other textbook jobs.
+
+Stale reclaim uses the same attempt-first lock order as
+`mark_generation_attempt_running()` and `settle_generation_job()`: it first
+pre-reads `latest_attempt_id` without a lock, locks that attempt with
+`FOR UPDATE`, then locks the job and revalidates latest-attempt identity,
+status, root-run binding, and both leases in the same transaction. Attemptless
+recovery locks only the job. This prevents the old job-first/attempt-first
+deadlock cycle; a real PostgreSQL race between `mark_running` and reclaim
+completes with exactly one winner and a consistent final job/attempt state.
+
+Lesson-scope `claim_generation_job()` follows the same protocol. It first
+reads job status/scope/latest attempt without a lock, locks the previous
+attempt when present, then locks the job and revalidates expected status and
+that `latest_attempt_id` did not change. A replacement can only chain from an
+already-terminal previous attempt such as `worker_lost`; an unresolved
+preparing attempt returns no claim so stale reclaim must fence it first.
+Attemptless claims lock only the job. A real PostgreSQL race between
+replacement claim and stale reclaim completes without deadlock and always
+leaves a valid previous-attempt chain.
+
+Verification: Task 10 focused unit/DB/timeout tests `115 passed`; structure
+API/DB + managed-policy regression `117 passed`; real PostgreSQL generic
+gate/concurrency/launch-claim/revision-repoint/archive/projection integration
+`14 passed`; Education Vitest `80 passed`;
+`pnpm typecheck` and `pnpm build` passed with a `355.5 kB gz` critical path.
+Migration head remains `081_book_pipeline_checkpoint`; this task adds no
+migration.
+
 **Step 6: Commit**
 
 ```bash
 git add src/server/services/education_lesson_jobs.py \
   src/server/services/education_lesson_review.py \
-  src/server/services/education_structure_jobs.py \
+  src/server/services/education_teaching_storage.py \
+  src/server/database/education_textbooks.py \
+  src/server/app/education/models.py \
+  src/server/services/runs/executor.py \
+  src/ptc_agent/agent/managed_execution.py \
+  plugins/langalpha_local/skills/book-to-skill/reference/langalpha-managed.md \
   web/src/pages/Education/KnowledgePointLessonReviewPage.tsx \
+  web/src/pages/Education/types.ts \
   tests/unit/server/services/test_education_lesson_jobs.py \
-  web/src/pages/Education/__tests__/KnowledgePointLessonReviewPage.test.tsx
+  tests/unit/server/services/test_education_lesson_review.py \
+  tests/unit/server/services/test_education_teaching_storage.py \
+  tests/unit/server/services/runs/test_education_teaching_timeout.py \
+  tests/unit/server/database/test_education_structure_models.py \
+  tests/unit/ptc_agent/test_managed_textbook_execution_policy.py \
+  tests/unit/middleware/skills/test_native_book_learning_skills.py \
+  tests/unit/server/services/test_education_structure_jobs.py \
+  tests/integration/test_education_candidate_review_db.py \
+  web/src/pages/Education/__tests__/KnowledgePointLessonReviewPage.test.tsx \
+  CHANGELOG.md \
+  docs/plans/2026-09-22-unified-book-processing-pipeline.md
 git commit -m "feat(textbooks): produce lessons from reviewed candidates"
 ```
 
