@@ -1297,12 +1297,19 @@ git commit -m "feat(textbooks): collect managed progress while runs are live"
 - Modify: `src/server/app/education/textbooks.py`
 - Modify: `src/server/app/education/models.py`
 - Modify: `src/server/services/education_structure_progress.py`
+- Modify: `web/src/lib/queryKeys.ts`
+- Modify: `web/src/pages/Education/api.ts`
 - Modify: `web/src/pages/Education/queries.ts`
 - Modify: `web/src/pages/Education/BookProcessingPage.tsx`
 - Modify: `web/src/pages/Education/BookProcessingPage.css`
 - Modify: `web/src/pages/Education/types.ts`
 - Test: `tests/unit/server/app/education/test_textbook_structures.py`
+- Test: `tests/unit/server/database/test_education_structure_models.py`
+- Test: `tests/integration/test_education_job_progress_db.py`
 - Test: `web/src/pages/Education/__tests__/BookProcessingPage.test.tsx`
+- Test: `web/src/pages/Education/__tests__/queries.test.tsx`
+- Modify: `CHANGELOG.md`
+- Modify: `docs/plans/2026-09-22-unified-book-processing-pipeline.md`
 
 **Step 1: Write the failing API test**
 
@@ -1347,12 +1354,41 @@ The GET response:
       "events": []
     }
   ],
-  "last_sequence": 41
+  "last_sequence": 41,
+  "truncated": false
 }
 ```
 
-The first implementation may poll every 2 seconds. SSE uses the same response
-contract and reads PostgreSQL first; Redis may only be used to wake the stream.
+All four stages are returned in fixed order even when no event exists for a
+stage. The projection reads PostgreSQL events across the job attempt lineage,
+processes each stage per attempt, and suppresses fallback only when that same
+attempt and stage already emitted a terminal status. A newer attempt's
+running/queued state overrides the older attempt's display state; if the newer
+attempt has no event for a stage, the older completed state remains. Current
+and total come from the newest attempt event with counts. Every stage returns
+only the bounded sanitized event fields `sequence`, `substage`, `status`,
+`label`, `detail`, `current`, `total` and `timestamp`. If an
+`awaiting_review` or `completed` job has no events, the service derives only
+stage lifecycle state and does not fabricate events or content.
+
+The database projection joins `education_generation_attempts` and returns
+`attempt_started_at`. Event ordering is attempt start time, attempt id and
+sequence; `last_sequence` is the sequence of the final ordered event, not the
+numeric maximum across attempts. This keeps a resumed attempt with sequence 2
+ahead of an older attempt with sequence 41. SQL uses a recent 2,000-event
+window plus the latest, latest-terminal and latest-counted row for each stage,
+so completed and count context cannot disappear. Current/total fall back to
+the latest counted event within the final attempt that emitted that stage; if
+the new attempt has no counted event, current/total are null and never inherit
+from an older attempt. The response exposes a deterministic `truncated` flag
+when older rows were omitted.
+
+SSE uses the same response contract, emits the current snapshot first, polls
+PostgreSQL every 2 seconds while the job is active, and stops on
+`awaiting_review`, `completed`, `failed` or `cancelled`. Redis wake-up remains
+an optional later optimization. Each SSE frame carries a semantically unique
+`id: <attempt_id>:<sequence>` cursor; the cursor is internal frame metadata and
+does not change the JSON snapshot contract.
 
 **Step 4: Build the timeline UI**
 
@@ -1378,10 +1414,19 @@ The page renders:
 
 Do not show raw logs or chain-of-thought.
 
+After task creation the page stores the job id in `?job=...` and reads that
+query parameter on refresh. React Query polls every 2 seconds while the job is
+active and stops on the stable lifecycle states above. The timeline renders the
+fixed four labels, persisted sanitized event labels/details, content progress
+counts, pending Unit range, candidate count and the course gate without logging
+or exposing raw event payload fields.
+
 **Step 5: Run tests and build**
 
 ```bash
 uv run pytest tests/unit/server/app/education/test_textbook_structures.py -q
+uv run pytest -m integration \
+  tests/integration/test_education_job_progress_db.py -q
 cd web
 pnpm vitest run src/pages/Education/__tests__/BookProcessingPage.test.tsx
 pnpm typecheck
@@ -1396,12 +1441,19 @@ Expected: PASS.
 git add src/server/app/education/textbooks.py \
   src/server/app/education/models.py \
   src/server/services/education_structure_progress.py \
+  web/src/lib/queryKeys.ts \
+  web/src/pages/Education/api.ts \
   web/src/pages/Education/queries.ts \
   web/src/pages/Education/BookProcessingPage.tsx \
   web/src/pages/Education/BookProcessingPage.css \
   web/src/pages/Education/types.ts \
   tests/unit/server/app/education/test_textbook_structures.py \
-  web/src/pages/Education/__tests__/BookProcessingPage.test.tsx
+  tests/unit/server/database/test_education_structure_models.py \
+  tests/integration/test_education_job_progress_db.py \
+  web/src/pages/Education/__tests__/BookProcessingPage.test.tsx \
+  web/src/pages/Education/__tests__/queries.test.tsx \
+  CHANGELOG.md \
+  docs/plans/2026-09-22-unified-book-processing-pipeline.md
 git commit -m "feat(textbooks): show four-stage live processing timeline"
 ```
 

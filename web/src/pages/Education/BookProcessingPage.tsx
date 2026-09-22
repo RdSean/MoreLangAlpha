@@ -1,6 +1,13 @@
 import { useRef, useState } from 'react';
-import { ArrowLeft, CheckCircle2, Loader2, WandSparkles } from 'lucide-react';
-import { Link, useParams } from 'react-router-dom';
+import {
+  AlertCircle,
+  ArrowLeft,
+  CheckCircle2,
+  Circle,
+  Loader2,
+  WandSparkles,
+} from 'lucide-react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -12,12 +19,55 @@ import {
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
-import { useBookPipelineMutations, useTextbook } from './queries';
-import type { BookPipelineJob } from './types';
+import {
+  useBookPipelineMutations,
+  useBookPipelineProgress,
+  useTextbook,
+} from './queries';
+import type {
+  BookPipelineJob,
+  BookPipelineProgressStage,
+  BookPipelineProgressStatus,
+} from './types';
 import './BookProcessingPage.css';
 
 const processingBriefPlaceholder =
   '例如：这是一本法语教材；忽略教师指导页；只提取学生活动页；数学教材中的公式和例题请按原顺序保留。';
+
+const emptyBookPipelineStages: BookPipelineProgressStage[] = [
+  {
+    name: 'chapter_analysis',
+    label: '教材章节解析',
+    status: 'queued',
+    current: null,
+    total: null,
+    events: [],
+  },
+  {
+    name: 'content_processing',
+    label: '内容智能处理',
+    status: 'queued',
+    current: null,
+    total: null,
+    events: [],
+  },
+  {
+    name: 'knowledge_point_generation',
+    label: '知识点生成',
+    status: 'queued',
+    current: null,
+    total: null,
+    events: [],
+  },
+  {
+    name: 'lesson_preparation',
+    label: '课程制作',
+    status: 'queued',
+    current: null,
+    total: null,
+    events: [],
+  },
+];
 
 function messageOf(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -48,6 +98,7 @@ export default function BookProcessingPage() {
   }>();
   const textbook = useTextbook(textbookId);
   const pipeline = useBookPipelineMutations();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [processingBrief, setProcessingBrief] = useState('');
@@ -59,6 +110,15 @@ export default function BookProcessingPage() {
     (candidate) => candidate.version_id === versionId,
   );
   const pending = submitting || pipeline.create.isPending;
+  const jobId = searchParams.get('job') ?? undefined;
+  const progress = useBookPipelineProgress(jobId, Boolean(jobId));
+  const jobStatus = progress.data?.status ?? job?.status;
+  const progressIsActive =
+    progress.isPending ||
+    jobStatus === 'queued' ||
+    jobStatus === 'preparing' ||
+    jobStatus === 'running' ||
+    jobStatus === 'validating';
 
   const submit = async () => {
     if (submitLock.current || pending || !versionId) return;
@@ -75,6 +135,9 @@ export default function BookProcessingPage() {
         },
       });
       setJob(created);
+      const nextSearchParams = new URLSearchParams(searchParams);
+      nextSearchParams.set('job', created.generation_job_id);
+      setSearchParams(nextSearchParams, { replace: true });
       setOpen(false);
     } catch (submitError) {
       const message = messageOf(submitError, '请稍后重试。');
@@ -168,23 +231,47 @@ export default function BookProcessingPage() {
           </div>
         </header>
 
-        {job ? (
+        {jobId ? (
           <section
-            className="book-processing-status"
-            aria-label="教材处理任务"
+            className="book-processing-progress"
+            aria-label="教材处理进度"
           >
-            <CheckCircle2 className="size-5" aria-hidden="true" />
-            <div>
-              <h2>处理任务已创建</h2>
-              <p>
-                {job.reused_existing_job
-                  ? '已复用同一教材正在进行的处理任务。'
-                  : '任务已进入处理队列。'}
-              </p>
-              <p className="book-processing-job-id">
-                任务编号 {job.generation_job_id}
-              </p>
+            <div className="book-processing-progress-head">
+              <span
+                className={`book-processing-progress-mark ${
+                  progressIsActive ? 'is-running' : ''
+                }`}
+                aria-hidden="true"
+              >
+                {progressIsActive ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : progress.isError ||
+                  jobStatus === 'failed' ||
+                  jobStatus === 'cancelled' ? (
+                  <AlertCircle className="size-4" />
+                ) : (
+                  <CheckCircle2 className="size-4" />
+                )}
+              </span>
+              <div className="book-processing-progress-copy">
+                <h2>处理任务已创建</h2>
+                <p>
+                  {job?.reused_existing_job
+                    ? '已复用同一教材正在进行的处理任务。'
+                    : '任务已进入处理队列。'}
+                </p>
+                <p className="book-processing-job-id">任务编号 {jobId}</p>
+              </div>
             </div>
+            {progress.isError && (
+              <p className="book-processing-progress-error" role="alert">
+                暂时无法读取处理进度。
+              </p>
+            )}
+            <BookProcessingTimeline
+              stages={progress.data?.stages ?? emptyBookPipelineStages}
+              loading={progress.isPending && !progress.data}
+            />
           </section>
         ) : (
           <section className="book-processing-empty">
@@ -195,6 +282,106 @@ export default function BookProcessingPage() {
         )}
       </div>
     </main>
+  );
+}
+
+const stageStatusIcons: Record<
+  BookPipelineProgressStatus,
+  React.ReactNode
+> = {
+  completed: <CheckCircle2 className="size-4" />,
+  running: <Loader2 className="size-4 animate-spin" />,
+  failed: <AlertCircle className="size-4" />,
+  queued: <Circle className="size-4" />,
+  skipped: <Circle className="size-4" />,
+};
+
+function stageStatusText(stage: BookPipelineProgressStage) {
+  if (stage.status === 'completed') {
+    return stage.name === 'knowledge_point_generation' && stage.current != null
+      ? `已完成 ${stage.current} 个候选`
+      : '已完成';
+  }
+  if (stage.status === 'running') {
+    if (
+      stage.name === 'content_processing' &&
+      stage.current != null &&
+      stage.total != null
+    ) {
+      return `进行中：Unit ${stage.current} / 共 ${stage.total} 个`;
+    }
+    return stage.name === 'lesson_preparation' ? '正在制作课程' : '进行中';
+  }
+  if (stage.status === 'failed') return '处理失败';
+  if (stage.status === 'skipped') return '已跳过';
+  return stage.name === 'lesson_preparation' ? '等待知识点确认' : '待处理';
+}
+
+function pendingContentText(stage: BookPipelineProgressStage) {
+  if (
+    stage.name !== 'content_processing' ||
+    stage.status !== 'running' ||
+    stage.current == null ||
+    stage.total == null ||
+    stage.current >= stage.total
+  ) {
+    return null;
+  }
+  const firstPending = stage.current + 1;
+  return firstPending === stage.total
+    ? `待处理：Unit ${stage.total}`
+    : `待处理：Unit ${firstPending} - Unit ${stage.total}`;
+}
+
+function BookProcessingTimeline({
+  stages,
+  loading,
+}: {
+  stages: BookPipelineProgressStage[];
+  loading: boolean;
+}) {
+  return (
+    <ol
+      className="book-processing-timeline"
+      aria-label="四阶段处理进度"
+      aria-live="polite"
+    >
+      {stages.map((stage, index) => {
+        const pending = pendingContentText(stage);
+        return (
+          <li
+            key={stage.name}
+            className={`book-processing-stage is-${stage.status}`}
+          >
+            <span className="book-processing-stage-icon" aria-hidden="true">
+              {stageStatusIcons[stage.status]}
+            </span>
+            <div className="book-processing-stage-body">
+              <div className="book-processing-stage-title">
+                <span>阶段 {index + 1}</span>
+                <h3>{stage.label}</h3>
+              </div>
+              <p className="book-processing-stage-status">
+                {loading ? '读取进度' : stageStatusText(stage)}
+              </p>
+              {pending && <p className="book-processing-stage-pending">{pending}</p>}
+              {stage.events.length > 0 && (
+                <ul className="book-processing-stage-events">
+                  {stage.events.map((event, eventIndex) => (
+                    <li
+                      key={`${event.sequence}-${event.label}-${eventIndex}`}
+                    >
+                      <span>{event.label}</span>
+                      {event.detail && <small>{event.detail}</small>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

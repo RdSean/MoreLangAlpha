@@ -543,6 +543,47 @@ export interface BookPipelineJob {
   heartbeat_at?: string | null;
 }
 
+export type BookPipelineStageName =
+  | 'chapter_analysis'
+  | 'content_processing'
+  | 'knowledge_point_generation'
+  | 'lesson_preparation';
+
+export type BookPipelineProgressStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'skipped';
+
+export interface BookPipelineProgressEvent {
+  sequence: number;
+  substage?: string | null;
+  status: BookPipelineProgressStatus;
+  label: string;
+  detail?: string | null;
+  current?: number | null;
+  total?: number | null;
+  timestamp?: string | null;
+}
+
+export interface BookPipelineProgressStage {
+  name: BookPipelineStageName;
+  label: string;
+  status: BookPipelineProgressStatus;
+  current?: number | null;
+  total?: number | null;
+  events: BookPipelineProgressEvent[];
+}
+
+export interface BookPipelineProgress {
+  job_id: string;
+  status: BookPipelineJobStatus;
+  stages: BookPipelineProgressStage[];
+  last_sequence: number;
+  truncated: boolean;
+}
+
 export interface TextbookAssignment {
   assignment_id: string;
   publication_id: string;

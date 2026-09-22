@@ -1,12 +1,19 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+} from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import BookProcessingPage from '../BookProcessingPage';
 
 const state = vi.hoisted(() => ({
   create: vi.fn(),
+  progress: null as Record<string, unknown> | null,
+  progressCalls: [] as Array<[string | undefined, boolean]>,
   textbook: {
     textbook_id: 'textbook-1',
     household_id: 'household-1',
@@ -29,6 +36,17 @@ const state = vi.hoisted(() => ({
 
 vi.mock('../queries', () => ({
   useTextbook: () => ({ data: state.textbook, isLoading: false }),
+  useBookPipelineProgress: (
+    jobId: string | undefined,
+    enabled: boolean,
+  ) => {
+    state.progressCalls.push([jobId, enabled]);
+    return {
+      data: enabled ? state.progress : undefined,
+      isPending: false,
+      isError: false,
+    };
+  },
   useBookPipelineMutations: () => ({
     create: {
       mutateAsync: state.create,
@@ -40,19 +58,29 @@ vi.mock('../queries', () => ({
 const placeholder =
   '例如：这是一本法语教材；忽略教师指导页；只提取学生活动页；数学教材中的公式和例题请按原顺序保留。';
 
-function renderPage() {
+function renderPage(
+  initialEntry = '/textbooks/textbook-1/versions/version-1/processing',
+) {
   return render(
-    <MemoryRouter
-      initialEntries={['/textbooks/textbook-1/versions/version-1/processing']}
-    >
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route
           path="/textbooks/:textbookId/versions/:versionId/processing"
-          element={<BookProcessingPage />}
+          element={
+            <>
+              <BookProcessingPage />
+              <LocationProbe />
+            </>
+          }
         />
       </Routes>
     </MemoryRouter>,
   );
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{location.search}</div>;
 }
 
 async function openDialog() {
@@ -65,6 +93,8 @@ async function openDialog() {
 }
 
 beforeEach(() => {
+  state.progress = null;
+  state.progressCalls = [];
   state.create.mockReset().mockResolvedValue({
     generation_job_id: 'job-1',
     version_id: 'version-1',
@@ -79,7 +109,110 @@ beforeEach(() => {
   );
 });
 
+const progress = {
+  job_id: 'job-1',
+  status: 'running',
+  last_sequence: 41,
+  stages: [
+    {
+      name: 'chapter_analysis',
+      label: '教材章节解析',
+      status: 'completed',
+      current: 1,
+      total: 12,
+      events: [],
+    },
+    {
+      name: 'content_processing',
+      label: '内容智能处理',
+      status: 'running',
+      current: 2,
+      total: 12,
+      events: [
+        { sequence: 2, label: '已完成：Unit 1', status: 'completed' },
+        {
+          sequence: 3,
+          label: '正在生成 Reading A 知识稿',
+          detail: '正在提取术语',
+          status: 'running',
+        },
+      ],
+    },
+    {
+      name: 'knowledge_point_generation',
+      label: '知识点生成',
+      status: 'completed',
+      current: 22,
+      total: 22,
+      events: [{ sequence: 4, label: '知识点候选已完成', status: 'completed' }],
+    },
+    {
+      name: 'lesson_preparation',
+      label: '课程制作',
+      status: 'queued',
+      current: null,
+      total: null,
+      events: [],
+    },
+  ],
+};
+
+describe('BookProcessingPage progress timeline', () => {
+  it('renders four fixed stages and the persisted event labels', async () => {
+    state.progress = progress;
+    renderPage(
+      '/textbooks/textbook-1/versions/version-1/processing?job=job-from-url',
+    );
+
+    expect(await screen.findByText('教材章节解析')).toBeInTheDocument();
+    expect(screen.getByText('内容智能处理')).toBeInTheDocument();
+    expect(screen.getByText('知识点生成')).toBeInTheDocument();
+    expect(screen.getByText('课程制作')).toBeInTheDocument();
+    expect(screen.getByText('正在生成 Reading A 知识稿')).toBeInTheDocument();
+    expect(screen.getByText('已完成：Unit 1')).toBeInTheDocument();
+    expect(screen.getByText('进行中：Unit 2 / 共 12 个')).toBeInTheDocument();
+    expect(screen.getByText('待处理：Unit 3 - Unit 12')).toBeInTheDocument();
+    expect(screen.getByText('已完成 22 个候选')).toBeInTheDocument();
+    expect(screen.getByText('等待知识点确认')).toBeInTheDocument();
+    expect(state.progressCalls).toContainEqual(['job-from-url', true]);
+  });
+
+  it('does not render unsafe event payload fields', async () => {
+    state.progress = {
+      ...progress,
+      stages: progress.stages.map((stage) => ({
+        ...stage,
+        events: stage.events.map((event) => ({
+          ...event,
+          reasoning: 'PRIVATE_CHAIN_OF_THOUGHT',
+          tool_result: 'PRIVATE_TOOL_RESULT',
+        })),
+      })),
+    };
+    renderPage(
+      '/textbooks/textbook-1/versions/version-1/processing?job=job-from-url',
+    );
+
+    expect(await screen.findByText('内容智能处理')).toBeInTheDocument();
+    expect(screen.queryByText('PRIVATE_CHAIN_OF_THOUGHT')).not.toBeInTheDocument();
+    expect(screen.queryByText('PRIVATE_TOOL_RESULT')).not.toBeInTheDocument();
+  });
+});
+
 describe('BookProcessingPage processing brief', () => {
+  it('stores the created job id in the URL for refresh recovery', async () => {
+    const { dialog } = await openDialog();
+
+    await userEvent
+      .setup()
+      .click(within(dialog).getByRole('button', { name: '开始处理' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent('?job=job-1'),
+    );
+    expect(state.progressCalls).toContainEqual(['job-1', true]);
+  });
+
   it('opens the optional brief dialog and submits an empty brief', async () => {
     const { user, dialog } = await openDialog();
 

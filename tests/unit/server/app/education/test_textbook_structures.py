@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from src.server.app.education.textbooks import router
 from src.server.app.education.models import CreateBookPipelineRequest
+from src.server.services import education_structure_progress as progress_service
 from src.server.services.education_textbooks import TextbookPermissionError
 from src.server.utils.api import get_current_user_id
 
@@ -399,6 +400,298 @@ async def test_parent_reads_structure_generation_progress(client):
     progress_call.assert_awaited_once()
 
 
+def test_build_book_pipeline_progress_keeps_fixed_order_and_completed_state():
+    job = {
+        "generation_job_id": uuid4(),
+        "scope": "book_pipeline",
+        "status": "running",
+    }
+    events = [
+        {
+            "attempt_id": "attempt-1",
+            "sequence": 1,
+            "event_key": "chapter:done",
+            "stage": "chapter_analysis",
+            "status": "completed",
+            "label": "章节解析已完成",
+            "detail": None,
+            "current_value": 12,
+            "total_value": 12,
+            "metadata": {"source": "skill"},
+            "created_at": "2026-09-22T01:00:00+00:00",
+        },
+        {
+            "attempt_id": "attempt-1",
+            "sequence": 2,
+            "event_key": "content:unit-2",
+            "stage": "content_processing",
+            "status": "running",
+            "label": "正在生成 Reading A 知识稿",
+            "detail": "正在提取术语",
+            "current_value": 2,
+            "total_value": 12,
+            "metadata": {},
+            "created_at": "2026-09-22T01:01:00+00:00",
+        },
+        {
+            "attempt_id": "attempt-1",
+            "sequence": 3,
+            "event_key": "knowledge:done",
+            "stage": "knowledge_point_generation",
+            "status": "completed",
+            "label": "知识点候选已完成",
+            "detail": None,
+            "current_value": 22,
+            "total_value": 22,
+            "metadata": {},
+            "created_at": "2026-09-22T01:02:00+00:00",
+        },
+        {
+            "attempt_id": "attempt-1",
+            "sequence": 4,
+            "event_key": "chapter:fallback",
+            "stage": "chapter_analysis",
+            "status": "running",
+            "label": "执行环境步骤",
+            "detail": None,
+            "current_value": None,
+            "total_value": None,
+            "metadata": {"fallback": True},
+            "created_at": "2026-09-22T01:03:00+00:00",
+        },
+    ]
+
+    progress = progress_service.build_book_pipeline_progress(job=job, events=events)
+
+    assert [stage["name"] for stage in progress["stages"]] == [
+        "chapter_analysis",
+        "content_processing",
+        "knowledge_point_generation",
+        "lesson_preparation",
+    ]
+    assert [stage["label"] for stage in progress["stages"]] == [
+        "教材章节解析",
+        "内容智能处理",
+        "知识点生成",
+        "课程制作",
+    ]
+    assert [stage["status"] for stage in progress["stages"]] == [
+        "completed",
+        "running",
+        "completed",
+        "queued",
+    ]
+    assert progress["stages"][1]["current"] == 2
+    assert progress["stages"][1]["total"] == 12
+    assert progress["last_sequence"] == 4
+    assert progress["stages"][1]["events"][-1]["label"] == "正在生成 Reading A 知识稿"
+    assert "event_key" not in progress["stages"][1]["events"][-1]
+    assert "metadata" not in progress["stages"][1]["events"][-1]
+
+
+def test_build_book_pipeline_progress_derives_checkpoint_lifecycle_without_events():
+    progress = progress_service.build_book_pipeline_progress(
+        job={
+            "generation_job_id": uuid4(),
+            "scope": "book_pipeline",
+            "status": "awaiting_review",
+        },
+        events=[],
+    )
+
+    assert [stage["status"] for stage in progress["stages"]] == [
+        "completed",
+        "queued",
+        "queued",
+        "queued",
+    ]
+    assert all(stage["events"] == [] for stage in progress["stages"])
+    assert progress["last_sequence"] == 0
+
+
+def test_build_book_pipeline_progress_derives_completed_import_lifecycle():
+    progress = progress_service.build_book_pipeline_progress(
+        job={
+            "generation_job_id": uuid4(),
+            "scope": "book_pipeline",
+            "status": "completed",
+        },
+        events=[],
+    )
+
+    assert [stage["status"] for stage in progress["stages"]] == [
+        "completed",
+        "completed",
+        "completed",
+        "queued",
+    ]
+    assert progress["stages"][3]["label"] == "课程制作"
+
+
+def test_build_book_pipeline_progress_uses_attempt_order_for_last_sequence():
+    progress = progress_service.build_book_pipeline_progress(
+        job={
+            "generation_job_id": uuid4(),
+            "scope": "book_pipeline",
+            "status": "running",
+        },
+        events=[
+            {
+                "attempt_id": "old-attempt",
+                "attempt_started_at": "2026-09-22T01:00:00+00:00",
+                "sequence": 41,
+                "stage": "content_processing",
+                "status": "completed",
+                "label": "旧 attempt 事件",
+                "current_value": 12,
+                "total_value": 12,
+                "created_at": "2026-09-22T01:30:00+00:00",
+            },
+            {
+                "attempt_id": "new-attempt",
+                "attempt_started_at": "2026-09-22T02:00:00+00:00",
+                "sequence": 2,
+                "stage": "content_processing",
+                "status": "running",
+                "label": "新 attempt 事件",
+                "current_value": 2,
+                "total_value": 12,
+                "created_at": "2026-09-22T02:01:00+00:00",
+            },
+        ],
+    )
+
+    stage = progress["stages"][1]
+    assert progress["last_sequence"] == 2
+    assert stage["status"] == "running"
+    assert stage["current"] == 2
+    assert [event["label"] for event in stage["events"]] == [
+        "旧 attempt 事件",
+        "新 attempt 事件",
+    ]
+    assert "_sse_cursor" not in progress
+    assert (
+        progress_service.build_book_pipeline_progress(
+            job={
+                "generation_job_id": uuid4(),
+                "scope": "book_pipeline",
+                "status": "running",
+            },
+            events=[
+                {
+                    "attempt_id": "new-attempt",
+                    "attempt_started_at": "2026-09-22T02:00:00+00:00",
+                    "sequence": 2,
+                    "stage": "content_processing",
+                    "status": "running",
+                    "label": "新 attempt 事件",
+                }
+            ],
+            include_sse_cursor=True,
+        )["_sse_cursor"]
+        == "new-attempt:2"
+    )
+
+
+def test_build_book_pipeline_progress_falls_back_to_latest_counted_event():
+    progress = progress_service.build_book_pipeline_progress(
+        job={
+            "generation_job_id": uuid4(),
+            "scope": "book_pipeline",
+            "status": "running",
+        },
+        events=[
+            {
+                "attempt_id": "attempt-1",
+                "attempt_started_at": "2026-09-22T01:00:00+00:00",
+                "sequence": 1,
+                "stage": "knowledge_point_generation",
+                "status": "running",
+                "label": "正在生成知识点",
+                "current_value": 10,
+                "total_value": 12,
+            },
+            {
+                "attempt_id": "attempt-1",
+                "attempt_started_at": "2026-09-22T01:00:00+00:00",
+                "sequence": 2_000,
+                "stage": "knowledge_point_generation",
+                "status": "completed",
+                "label": "知识点生成完成",
+            },
+        ],
+        truncated=True,
+    )
+
+    stage = progress["stages"][2]
+    assert progress["truncated"] is True
+    assert stage["status"] == "completed"
+    assert stage["current"] == 10
+    assert stage["total"] == 12
+
+
+def test_build_book_pipeline_progress_does_not_inherit_old_attempt_counts():
+    progress = progress_service.build_book_pipeline_progress(
+        job={
+            "generation_job_id": uuid4(),
+            "scope": "book_pipeline",
+            "status": "running",
+        },
+        events=[
+            {
+                "attempt_id": "old-attempt",
+                "attempt_started_at": "2026-09-22T01:00:00+00:00",
+                "sequence": 10,
+                "stage": "lesson_preparation",
+                "status": "running",
+                "label": "旧课程制作进度",
+                "current_value": 10,
+                "total_value": 12,
+            },
+            {
+                "attempt_id": "new-attempt",
+                "attempt_started_at": "2026-09-22T02:00:00+00:00",
+                "sequence": 2,
+                "stage": "lesson_preparation",
+                "status": "running",
+                "label": "新课程制作进度",
+            },
+        ],
+    )
+
+    stage = progress["stages"][3]
+    assert stage["status"] == "running"
+    assert stage["current"] is None
+    assert stage["total"] is None
+
+
+@pytest.mark.asyncio
+async def test_book_pipeline_progress_rejects_other_scopes():
+    with (
+        patch.object(
+            progress_service,
+            "get_household_context_for_parent",
+            new=AsyncMock(return_value={"household_id": "household-1"}),
+        ),
+        patch.object(
+            progress_service,
+            "get_generation_job_for_parent",
+            new=AsyncMock(
+                return_value={
+                    "generation_job_id": uuid4(),
+                    "scope": "structure",
+                    "status": "running",
+                }
+            ),
+        ),
+    ):
+        with pytest.raises(progress_service.TextbookNotFoundError):
+            await progress_service.get_book_pipeline_progress_for_parent(
+                parent_user_id="parent-1",
+                generation_job_id=str(uuid4()),
+            )
+
+
 @pytest.mark.asyncio
 async def test_parent_queues_gets_and_resumes_book_pipeline(client):
     app = client._transport.app
@@ -470,6 +763,137 @@ async def test_parent_queues_gets_and_resumes_book_pipeline(client):
     assert queue.await_args.kwargs["pause_after_chapter_analysis"] is False
     get_job.assert_awaited_once()
     resume.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_parent_reads_book_pipeline_four_stage_progress(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    generation_job_id = uuid4()
+    progress = {
+        "job_id": generation_job_id,
+        "status": "running",
+        "stages": [
+            {
+                "name": "chapter_analysis",
+                "label": "教材章节解析",
+                "status": "completed",
+                "current": 12,
+                "total": 12,
+                "events": [],
+            },
+            {
+                "name": "content_processing",
+                "label": "内容智能处理",
+                "status": "running",
+                "current": 2,
+                "total": 12,
+                "events": [],
+            },
+            {
+                "name": "knowledge_point_generation",
+                "label": "知识点生成",
+                "status": "queued",
+                "current": None,
+                "total": None,
+                "events": [],
+            },
+            {
+                "name": "lesson_preparation",
+                "label": "课程制作",
+                "status": "queued",
+                "current": None,
+                "total": None,
+                "events": [],
+            },
+        ],
+        "last_sequence": 41,
+        "truncated": True,
+    }
+    with patch(
+        "src.server.app.education.textbooks.get_book_pipeline_progress_for_parent",
+        new=AsyncMock(return_value=progress),
+    ) as progress_call:
+        response = await client.get(
+            f"/api/v1/education/jobs/{generation_job_id}/progress"
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [stage["name"] for stage in payload["stages"]] == [
+        "chapter_analysis",
+        "content_processing",
+        "knowledge_point_generation",
+        "lesson_preparation",
+    ]
+    assert [stage["label"] for stage in payload["stages"]] == [
+        "教材章节解析",
+        "内容智能处理",
+        "知识点生成",
+        "课程制作",
+    ]
+    assert payload["last_sequence"] == 41
+    assert payload["truncated"] is True
+    progress_call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_parent_streams_book_pipeline_progress_until_terminal(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    generation_job_id = uuid4()
+    running = {
+        "job_id": generation_job_id,
+        "status": "running",
+        "stages": [
+            {
+                "name": "chapter_analysis",
+                "label": "教材章节解析",
+                "status": "running",
+                "current": None,
+                "total": None,
+                "events": [],
+            }
+        ],
+        "last_sequence": 1,
+        "_sse_cursor": "attempt-1:1",
+    }
+    completed = {
+        **running,
+        "status": "completed",
+        "last_sequence": 2,
+        "_sse_cursor": "attempt-2:2",
+    }
+    sleep = AsyncMock()
+    with (
+        patch(
+            "src.server.app.education.textbooks.get_book_pipeline_progress_for_parent",
+            new=AsyncMock(side_effect=[running, completed]),
+        ) as progress_call,
+        patch(
+            "src.server.app.education.textbooks.asyncio.sleep",
+            new=sleep,
+        ),
+    ):
+        response = await client.get(
+            f"/api/v1/education/jobs/{generation_job_id}/progress/stream",
+            headers={"accept": "text/event-stream"},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.text.count("event: progress") == 2
+    assert "id: attempt-1:1\nevent: progress" in response.text
+    assert "id: attempt-2:2\nevent: progress" in response.text
+    assert "_sse_cursor" not in response.text
+    assert '"status":"running"' in response.text
+    assert '"status":"completed"' in response.text
+    assert progress_call.await_count == 2
+    assert all(
+        call.kwargs["include_sse_cursor"] is True
+        for call in progress_call.await_args_list
+    )
+    sleep.assert_awaited_once_with(2.0)
 
 
 @pytest.mark.asyncio

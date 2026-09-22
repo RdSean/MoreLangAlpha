@@ -2,6 +2,16 @@
 
 ## 2026-09-22
 
+### 新增：统一教材处理四阶段实时进度接口与时间线
+
+- 新增 parent-only 的 `GET /api/v1/education/jobs/{job_id}/progress` 与 `/progress/stream`。读取以 PostgreSQL 进度事件为准，固定返回“教材章节解析、内容智能处理、知识点生成、课程制作”四个阶段；未知 job 或其他 scope 返回 404。
+- 进度查询连接 generation attempts 并保留 `attempt_started_at`，服务按 attempt 开始时间、attempt identity 和 sequence 确定性聚合。`last_sequence` 返回最后有序事件的 sequence，而不是跨 attempt 的数字最大值，因此旧 attempt 的 41 后接新 attempt 的 2 时 cursor 正确前进为 2。阶段状态按 attempt 分别处理：只有同一 attempt 的同一阶段已经出现终态后才抑制后续 fallback；新 attempt 的 running/queued 会覆盖旧 attempt 展示状态，若新 attempt 没有该阶段事件则保留旧状态。current/total 只取最新 attempt 的事件，每阶段只返回最近 8 条白名单字段，不返回 prompt、reasoning、工具参数/结果、凭据、sandbox 路径或原始 metadata。
+- 没有事件但 job 已进入 `awaiting_review` 或 `completed` 时，只用 job 生命周期推导阶段状态：章节检查点只标记第一章完成；完整导入完成后前三阶段完成，课程制作保持等待人工确认。不会伪造事件或内容。
+- SQL 查询使用最近 2,000 条事件加每阶段最新事件、最新终态事件和最新带计数事件构成有界窗口，避免普通 GET/SSE 全量读取历史；完整阶段和 current/total 上下文不会因窗口截断消失。current/total 只在最终用于该 stage 的 latest attempt 内反向查找计数字段；新 attempt 没有 count 事件时返回 null，绝不继承旧 attempt 的计数。响应通过 `truncated` 明确标记历史是否被省略。真实 PostgreSQL 测试覆盖多 attempt 排序、2000+ 事件截断、旧 completed 阶段保留、同 attempt running `10/12` 后无计数 completed 仍保留计数，以及新 attempt 无计数时不继承旧 attempt 计数。
+- SSE 首帧发送当前快照，之后每 2 秒重新读取 PostgreSQL，并在 `awaiting_review/completed/failed/cancelled` 收口；当前不依赖 Redis wake-up。每帧携带语义唯一的 `id: <attempt_id>:<sequence>` compound cursor，但不改变 JSON snapshot contract，响应使用 `no-cache`、`X-Accel-Buffering: no` 与 SSE content type。
+- 教材处理页新增四阶段时间线：展示已完成、运行中 Unit 数量、待处理 Unit 范围、知识点候选数和等待知识点确认状态；持久化事件 label/detail 只做文本展示。创建或复用 job 后把 job id 写入 `?job=...`，刷新会从 URL 恢复；React Query 仅在活动状态每 2 秒轮询，稳定状态停止。
+- 验证：后端 Task 8 聚焦测试 `58 passed`，相邻进度/collector 回归 `206 passed`，真实 PostgreSQL progress integration `9 passed`，前端聚焦测试 `10 passed`，Education 前端回归 `62 passed`。跨 attempt completed→running、attempt-scoped counted fallback、DB 有界窗口与 order metadata、running→completed SSE fake-clock，以及 React Query fake-timer 2 秒轮询和终态停止均有测试覆盖；`pnpm typecheck`、`pnpm build`、修改文件 Ruff 与 `git diff --check` 通过。迁移 head 保持 `081_book_pipeline_checkpoint`。
+
 ### 新增：托管教材运行实时语义进度与章节继续检查点
 
 - 新增 `ManagedProgressCollector`，在 managed workflow 运行期间独立轮询 sandbox 的 `.langalpha/progress.jsonl`，只在 typed `inserted` 或 payload 一致的 `already_exists` 返回后推进持久化字节 offset；临时数据库失败保留 pending line 并按有界退避重试，不会跳过事件。服务重启后重读相同字节会命中 `(attempt_id, sequence)` 幂等写入；同一 `event_key` 可通过后续 sequence 更新状态投影。

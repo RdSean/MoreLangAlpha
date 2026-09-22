@@ -1283,3 +1283,39 @@ async def test_claim_generation_job_can_consume_pipeline_launch_preparing(
     assert attempt["attempt_id"] == "attempt-2"
     select_sql = mock_cursor.execute.call_args_list[0].args[0]
     assert "status = 'preparing'" in select_sql
+
+
+@pytest.mark.asyncio
+async def test_list_generation_progress_events_preserves_attempt_order_metadata(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchall.return_value = [
+        {
+            "generation_job_id": "generation-1",
+            "attempt_id": "old-attempt",
+            "attempt_started_at": "2026-09-22T01:00:00+00:00",
+            "sequence": 41,
+            "stage": "content_processing",
+            "progress_truncated": True,
+        }
+    ]
+
+    rows = await education_textbooks.list_generation_progress_events(
+        generation_job_id="generation-1"
+    )
+
+    assert rows[0]["attempt_started_at"] == "2026-09-22T01:00:00+00:00"
+    assert rows[0]["progress_truncated"] is True
+    executed = mock_cursor.execute.call_args.args[0]
+    assert "JOIN education_generation_attempts AS attempts" in executed
+    assert "attempts.started_at AS attempt_started_at" in executed
+    assert "ROW_NUMBER() OVER" in executed
+    assert "GREATEST(total_event_count - %s, 0)" in executed
+    assert "stage_counted_order" in executed
+    assert "progress_truncated" in executed
+    assert "ORDER BY attempts.started_at," in executed

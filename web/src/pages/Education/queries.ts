@@ -302,9 +302,37 @@ export function useBookPipelineMutations() {
         versionId: string;
         input: CreateBookPipelineJobInput;
       }) => educationApi.createBookPipelineJob(versionId, input),
-      onSuccess: invalidate,
+      onSuccess: (job) => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.education.bookPipelineJobProgress(
+            job.generation_job_id,
+          ),
+        });
+        void invalidate();
+      },
     }),
   };
+}
+
+export function useBookPipelineProgress(
+  jobId: string | undefined,
+  enabled = true,
+) {
+  const stableStatuses = new Set([
+    'awaiting_review',
+    'completed',
+    'failed',
+    'cancelled',
+  ]);
+  return useQuery({
+    queryKey: queryKeys.education.bookPipelineJobProgress(jobId ?? ''),
+    queryFn: () => educationApi.getBookPipelineJobProgress(jobId ?? ''),
+    enabled: Boolean(jobId) && enabled,
+    staleTime: 1_000,
+    refetchInterval: (query) =>
+      stableStatuses.has(query.state.data?.status ?? '') ? false : 2_000,
+    refetchIntervalInBackground: true,
+  });
 }
 
 export function useStructureMutations() {

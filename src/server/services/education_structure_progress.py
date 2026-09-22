@@ -10,12 +10,15 @@ and tool payloads never leave the server.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Mapping
+import unicodedata
 
 from src.server.database.education_textbooks import (
     get_generation_job_for_parent,
     get_run_id_for_generation_job,
     get_run_sse_events,
+    list_generation_progress_events,
 )
 from src.server.services.education_textbooks import (
     TextbookNotFoundError,
@@ -26,6 +29,19 @@ from src.server.services.education_textbooks import (
 
 _MAX_EVENTS = 80
 _MAX_SEARCH_EVENTS = 240
+_MAX_BOOK_STAGE_EVENTS = 8
+
+BOOK_PIPELINE_STAGES = (
+    ("chapter_analysis", "教材章节解析"),
+    ("content_processing", "内容智能处理"),
+    ("knowledge_point_generation", "知识点生成"),
+    ("lesson_preparation", "课程制作"),
+)
+_BOOK_PIPELINE_STAGE_NAMES = frozenset(name for name, _ in BOOK_PIPELINE_STAGES)
+_BOOK_PIPELINE_EVENT_STATUSES = frozenset(
+    {"queued", "running", "completed", "failed", "skipped"}
+)
+_BOOK_PIPELINE_TERMINAL_STATUSES = frozenset({"completed", "failed", "skipped"})
 
 _TOOL_LABELS = {
     "Read": "读取资料",
@@ -107,7 +123,10 @@ def _run_status_from_result(status: Any, content: Any) -> str:
     text = str(content or "").strip().lower()
     if text.startswith("traceback"):
         return "failed"
-    if any(marker in text[:400] for marker in ("not allowed in a managed", "outside the managed")):
+    if any(
+        marker in text[:400]
+        for marker in ("not allowed in a managed", "outside the managed")
+    ):
         return "skipped"
     if text.startswith("error:") or "failed to" in text[:200]:
         return "failed"
@@ -211,7 +230,9 @@ def build_progress_events(events: list[Any]) -> tuple[list[dict[str, Any]], bool
             existing["status"] = "failed"
         if existing["timestamp"] is None:
             existing["timestamp"] = entry["timestamp"]
-    projected = sorted(deduped.values(), key=lambda item: (item["sequence"], item["count"]))
+    projected = sorted(
+        deduped.values(), key=lambda item: (item["sequence"], item["count"])
+    )
     projected = projected[-_MAX_EVENTS:]
     for position, entry in enumerate(projected):
         entry["sequence"] = position
@@ -253,3 +274,237 @@ async def get_structure_progress_for_parent(
         "events": projected,
         "truncated": truncated,
     }
+
+
+def _progress_text(value: object, *, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    without_controls = "".join(
+        character
+        for character in text
+        if not unicodedata.category(character).startswith("C")
+    )
+    return without_controls[:limit]
+
+
+def _progress_optional_text(value: object, *, limit: int) -> str | None:
+    normalized = _progress_text(value, limit=limit)
+    return normalized or None
+
+
+def _progress_integer(value: object, *, minimum: int = 0) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value >= minimum else None
+
+
+def _book_progress_attempt_order(event: Mapping[str, Any]) -> tuple[str, str]:
+    attempt_started_at = event.get("attempt_started_at")
+    if isinstance(attempt_started_at, datetime):
+        attempt_key = attempt_started_at.isoformat()
+    else:
+        attempt_key = str(attempt_started_at or "")
+    return attempt_key, str(event.get("attempt_id") or "")
+
+
+def _book_progress_event_order(event: Mapping[str, Any]) -> tuple[str, str, int]:
+    sequence = _progress_integer(event.get("sequence"))
+    return (
+        *_book_progress_attempt_order(event),
+        sequence if sequence is not None else 0,
+    )
+
+
+def _book_progress_is_fallback(event: Mapping[str, Any]) -> bool:
+    metadata = event.get("metadata")
+    return isinstance(metadata, Mapping) and metadata.get("fallback") is True
+
+
+def _book_progress_effective_stage_events(
+    stage_events: list[Mapping[str, Any]],
+) -> tuple[list[Mapping[str, Any]], list[list[Mapping[str, Any]]]]:
+    """Suppress fallback after terminal within each attempt, preserving attempt order."""
+    attempt_groups: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+    for event in stage_events:
+        attempt_key = _book_progress_attempt_order(event)
+        attempt_events = attempt_groups.setdefault(attempt_key, [])
+        terminal_seen = any(
+            str(previous.get("status")) in _BOOK_PIPELINE_TERMINAL_STATUSES
+            for previous in attempt_events
+        )
+        if terminal_seen and _book_progress_is_fallback(event):
+            continue
+        attempt_events.append(event)
+    groups = list(attempt_groups.values())
+    return [event for group in groups for event in group], groups
+
+
+def _book_progress_event_projection(
+    event: Mapping[str, Any],
+) -> dict[str, Any]:
+    created_at = event.get("created_at") or event.get("timestamp")
+    if isinstance(created_at, datetime):
+        timestamp = created_at.isoformat()
+    else:
+        timestamp = _progress_optional_text(created_at, limit=64)
+    return {
+        "sequence": _progress_integer(event.get("sequence")) or 0,
+        "substage": _progress_optional_text(event.get("substage"), limit=64),
+        "status": str(event.get("status") or "queued"),
+        "label": _progress_text(event.get("label"), limit=200) or "处理中",
+        "detail": _progress_optional_text(event.get("detail"), limit=1_000),
+        "current": _progress_integer(event.get("current_value", event.get("current"))),
+        "total": _progress_integer(event.get("total_value", event.get("total"))),
+        "timestamp": timestamp,
+    }
+
+
+def _book_stage_lifecycle_status(
+    *,
+    stage_name: str,
+    job_status: str,
+    all_stages_empty: bool,
+) -> str:
+    if not all_stages_empty:
+        return "queued"
+    if job_status == "awaiting_review":
+        return "completed" if stage_name == "chapter_analysis" else "queued"
+    if job_status == "completed":
+        return "queued" if stage_name == "lesson_preparation" else "completed"
+    return "queued"
+
+
+def build_book_pipeline_progress(
+    *,
+    job: Mapping[str, Any],
+    events: list[Mapping[str, Any]],
+    truncated: bool = False,
+    include_sse_cursor: bool = False,
+) -> dict[str, Any]:
+    """Project durable book-pipeline events onto the fixed parent-facing timeline."""
+    ordered = sorted(events, key=_book_progress_event_order)
+    events_by_stage: dict[str, list[Mapping[str, Any]]] = {
+        name: [] for name, _ in BOOK_PIPELINE_STAGES
+    }
+    last_ordered_event: Mapping[str, Any] | None = None
+    for event in ordered:
+        stage_name = str(event.get("stage") or "")
+        status = str(event.get("status") or "")
+        if (
+            stage_name not in _BOOK_PIPELINE_STAGE_NAMES
+            or status not in _BOOK_PIPELINE_EVENT_STATUSES
+        ):
+            continue
+        events_by_stage[stage_name].append(event)
+        last_ordered_event = event
+
+    all_stages_empty = not any(events_by_stage.values())
+    job_status = str(job.get("status") or "queued")
+    stages: list[dict[str, Any]] = []
+    for stage_name, label in BOOK_PIPELINE_STAGES:
+        effective_events, attempt_groups = _book_progress_effective_stage_events(
+            events_by_stage[stage_name]
+        )
+        if attempt_groups:
+            latest_attempt_events = attempt_groups[-1]
+            stage_status = str(latest_attempt_events[-1].get("status"))
+        else:
+            latest_attempt_events = []
+            stage_status = _book_stage_lifecycle_status(
+                stage_name=stage_name,
+                job_status=job_status,
+                all_stages_empty=all_stages_empty,
+            )
+
+        latest_counts: Mapping[str, Any] | None = None
+        for event in reversed(latest_attempt_events):
+            if (
+                _progress_integer(event.get("current_value", event.get("current")))
+                is not None
+                or _progress_integer(event.get("total_value", event.get("total")))
+                is not None
+            ):
+                latest_counts = event
+                break
+
+        stages.append(
+            {
+                "name": stage_name,
+                "label": label,
+                "status": stage_status,
+                "current": (
+                    _progress_integer(
+                        latest_counts.get(
+                            "current_value",
+                            latest_counts.get("current"),
+                        )
+                    )
+                    if latest_counts is not None
+                    else None
+                ),
+                "total": (
+                    _progress_integer(
+                        latest_counts.get(
+                            "total_value",
+                            latest_counts.get("total"),
+                        )
+                    )
+                    if latest_counts is not None
+                    else None
+                ),
+                "events": [
+                    _book_progress_event_projection(event)
+                    for event in effective_events[-_MAX_BOOK_STAGE_EVENTS:]
+                ],
+            }
+        )
+
+    last_sequence = (
+        _progress_integer(last_ordered_event.get("sequence"))
+        if last_ordered_event is not None
+        else None
+    )
+    return {
+        "job_id": job.get("generation_job_id"),
+        "status": job_status,
+        "stages": stages,
+        "last_sequence": last_sequence or 0,
+        "truncated": truncated,
+        **(
+            {
+                "_sse_cursor": (
+                    f"{last_ordered_event.get('attempt_id')}:{last_sequence or 0}"
+                    if last_ordered_event is not None
+                    else "0:0"
+                )
+            }
+            if include_sse_cursor
+            else {}
+        ),
+    }
+
+
+async def get_book_pipeline_progress_for_parent(
+    *,
+    parent_user_id: str,
+    generation_job_id: str,
+    include_sse_cursor: bool = False,
+) -> dict[str, Any]:
+    """Read the durable four-stage projection for one parent-owned pipeline job."""
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError(
+            "Only a parent can read textbook processing progress"
+        )
+    job = await get_generation_job_for_parent(
+        parent_user_id=parent_user_id,
+        generation_job_id=generation_job_id,
+    )
+    if not job or job.get("scope") != "book_pipeline":
+        raise TextbookNotFoundError("Textbook processing job not found")
+    events = await list_generation_progress_events(generation_job_id=generation_job_id)
+    truncated = bool(events[0].get("progress_truncated")) if events else False
+    return build_book_pipeline_progress(
+        job=job,
+        events=events,
+        truncated=truncated,
+        include_sse_cursor=include_sse_cursor,
+    )

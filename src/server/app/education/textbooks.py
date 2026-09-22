@@ -1,13 +1,17 @@
 """Parent textbook management and student deterministic-learning routes."""
 
+import asyncio
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from src.server.app.education.models import (
     AssignTextbookPublicationRequest,
     ApproveKnowledgePointLessonRequest,
     BookPipelineJobResponse,
+    BookPipelineProgressResponse,
     CreateBookPipelineRequest,
     CreateKnowledgePointLessonRevisionRequest,
     CreateLearningItemRequest,
@@ -46,6 +50,7 @@ from src.server.services.education_structure_review import (
     resume_structure_generation_for_parent,
 )
 from src.server.services.education_structure_progress import (
+    get_book_pipeline_progress_for_parent,
     get_structure_progress_for_parent,
 )
 from src.server.services.education_lesson_review import (
@@ -100,6 +105,16 @@ from src.server.utils.api import CurrentUserId
 
 
 router = APIRouter(prefix="/api/v1/education", tags=["Education textbooks"])
+
+_BOOK_PROGRESS_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",
+    "Connection": "keep-alive",
+}
+_BOOK_PROGRESS_POLL_SECONDS = 2.0
+_BOOK_PROGRESS_STREAM_STOP_STATUSES = frozenset(
+    {"awaiting_review", "completed", "failed", "cancelled"}
+)
 
 
 def _textbook_http_error(exc: TextbookError) -> HTTPException:
@@ -190,6 +205,73 @@ async def get_family_book_pipeline_job(
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/jobs/{generation_job_id}/progress",
+    response_model=BookPipelineProgressResponse,
+)
+async def get_book_pipeline_progress(
+    generation_job_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_book_pipeline_progress_for_parent(
+            parent_user_id=user_id,
+            generation_job_id=str(generation_job_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/jobs/{generation_job_id}/progress/stream",
+    response_class=StreamingResponse,
+)
+async def stream_book_pipeline_progress(
+    generation_job_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        initial = await get_book_pipeline_progress_for_parent(
+            parent_user_id=user_id,
+            generation_job_id=str(generation_job_id),
+            include_sse_cursor=True,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+    async def event_generator():
+        snapshot = initial
+        while True:
+            cursor = str(snapshot.pop("_sse_cursor", "0:0"))
+            payload = json.dumps(
+                snapshot,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+            )
+            yield f"id: {cursor}\nevent: progress\ndata: {payload}\n\n"
+            if str(snapshot.get("status") or "") in _BOOK_PROGRESS_STREAM_STOP_STATUSES:
+                return
+            await asyncio.sleep(_BOOK_PROGRESS_POLL_SECONDS)
+            try:
+                snapshot = await get_book_pipeline_progress_for_parent(
+                    parent_user_id=user_id,
+                    generation_job_id=str(generation_job_id),
+                    include_sse_cursor=True,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                yield 'event: error\ndata: {"error":"progress unavailable"}\n\n'
+                return
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers=_BOOK_PROGRESS_SSE_HEADERS,
+    )
 
 
 @router.post(

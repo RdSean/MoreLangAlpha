@@ -27,6 +27,7 @@ _CHECKPOINT_BUNDLE_PREFIX = re.compile(
     r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
     r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
 )
+MAX_GENERATION_PROGRESS_EVENTS = 2_000
 
 
 class TextbookQueueValidationError(ValueError):
@@ -1773,21 +1774,101 @@ async def list_generation_progress_events(
     generation_job_id: str,
     attempt_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Read durable progress rows in deterministic attempt/sequence order."""
+    """Read a bounded progress window with latest/terminal stage context."""
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
+                WITH ordered_events AS (
+                    SELECT progress.event_id, progress.generation_job_id,
+                           progress.attempt_id, progress.run_id,
+                           progress.sequence, progress.event_key,
+                           progress.stage, progress.substage,
+                           progress.status, progress.label, progress.detail,
+                           progress.node_key, progress.current_value,
+                           progress.total_value, progress.metadata,
+                           progress.created_at,
+                           attempts.started_at AS attempt_started_at,
+                           ROW_NUMBER() OVER (
+                               ORDER BY attempts.started_at,
+                                        progress.attempt_id,
+                                        progress.sequence
+                           ) AS event_order,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY progress.stage
+                               ORDER BY attempts.started_at DESC,
+                                        progress.attempt_id DESC,
+                                        progress.sequence DESC
+                           ) AS stage_latest_order,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY progress.stage
+                               ORDER BY CASE
+                                   WHEN progress.status IN (
+                                       'completed', 'failed', 'skipped'
+                                   ) THEN 0
+                                   ELSE 1
+                               END,
+                               attempts.started_at DESC,
+                               progress.attempt_id DESC,
+                               progress.sequence DESC
+                           ) AS stage_terminal_order,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY progress.stage
+                               ORDER BY CASE
+                                   WHEN progress.current_value IS NOT NULL
+                                     OR progress.total_value IS NOT NULL
+                                   THEN 0
+                                   ELSE 1
+                               END,
+                               attempts.started_at DESC,
+                               progress.attempt_id DESC,
+                               progress.sequence DESC
+                           ) AS stage_counted_order,
+                           COUNT(*) OVER () AS total_event_count
+                    FROM education_generation_progress_events AS progress
+                    JOIN education_generation_attempts AS attempts
+                      ON attempts.generation_job_id =
+                         progress.generation_job_id
+                     AND attempts.attempt_id = progress.attempt_id
+                    WHERE progress.generation_job_id = %s
+                      AND (
+                          %s::uuid IS NULL
+                          OR progress.attempt_id = %s::uuid
+                      )
+                ),
+                bounded_events AS (
+                    SELECT *
+                    FROM ordered_events
+                    WHERE event_order > GREATEST(total_event_count - %s, 0)
+                       OR stage_latest_order = 1
+                       OR (
+                           stage_terminal_order = 1
+                           AND status IN ('completed', 'failed', 'skipped')
+                       )
+                       OR (
+                           stage_counted_order = 1
+                           AND (
+                               current_value IS NOT NULL
+                               OR total_value IS NOT NULL
+                           )
+                       )
+                )
                 SELECT event_id, generation_job_id, attempt_id, run_id,
                        sequence, event_key, stage, substage, status, label,
                        detail, node_key, current_value, total_value,
-                       metadata, created_at
-                FROM education_generation_progress_events
-                WHERE generation_job_id = %s
-                  AND (%s::uuid IS NULL OR attempt_id = %s::uuid)
-                ORDER BY attempt_id, sequence
+                       metadata, created_at, attempt_started_at,
+                       total_event_count,
+                       total_event_count > %s AS progress_truncated
+                FROM bounded_events
+                ORDER BY event_order
                 """,
-                (generation_job_id, attempt_id, attempt_id),
+                (
+                    generation_job_id,
+                    attempt_id,
+                    attempt_id,
+                    MAX_GENERATION_PROGRESS_EVENTS,
+                    MAX_GENERATION_PROGRESS_EVENTS,
+                ),
             )
             rows = await cur.fetchall()
     return [dict(row) for row in rows]

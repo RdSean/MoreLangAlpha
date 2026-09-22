@@ -443,6 +443,42 @@ class BookPipelineJobResponse(BaseModel):
     heartbeat_at: datetime | None = None
 
 
+BookPipelineStageName = Literal[
+    "chapter_analysis",
+    "content_processing",
+    "knowledge_point_generation",
+    "lesson_preparation",
+]
+
+
+class BookPipelineProgressEventResponse(BaseModel):
+    sequence: int
+    substage: str | None = None
+    status: Literal["queued", "running", "completed", "failed", "skipped"]
+    label: str
+    detail: str | None = None
+    current: int | None = None
+    total: int | None = None
+    timestamp: str | None = None
+
+
+class BookPipelineProgressStageResponse(BaseModel):
+    name: BookPipelineStageName
+    label: str
+    status: Literal["queued", "running", "completed", "failed", "skipped"]
+    current: int | None = None
+    total: int | None = None
+    events: list[BookPipelineProgressEventResponse] = Field(default_factory=list)
+
+
+class BookPipelineProgressResponse(BaseModel):
+    job_id: UUID
+    status: str
+    stages: list[BookPipelineProgressStageResponse]
+    last_sequence: int = 0
+    truncated: bool = False
+
+
 class StructureKnowledgePointResponse(StructureKnowledgePointWrite):
     knowledge_point_id: UUID
     status: str

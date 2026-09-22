@@ -16,6 +16,9 @@ from src.server.database.education_textbooks import (
     ProgressEventPersistenceOutcome,
 )
 from src.server.database.workspace import create_workspace
+from src.server.services.education_structure_progress import (
+    build_book_pipeline_progress,
+)
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -182,6 +185,53 @@ async def _seed_job(db_conn: psycopg.AsyncConnection) -> tuple[str, str]:
                 (attempt_id, generation_job_id),
             )
     return generation_job_id, attempt_id
+
+
+async def _seed_additional_attempt(
+    db_conn: psycopg.AsyncConnection,
+    *,
+    generation_job_id: str,
+    previous_attempt_id: str,
+    started_at: str,
+) -> str:
+    attempt_id = str(uuid4())
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT managed_workspace_id
+            FROM education_generation_attempts
+            WHERE attempt_id = %s
+            """,
+            (previous_attempt_id,),
+        )
+        managed_workspace_id = (await cur.fetchone())["managed_workspace_id"]
+    thread = await create_thread(
+        conversation_thread_id=str(uuid4()),
+        workspace_id=str(managed_workspace_id),
+        current_status="completed",
+        msg_type="ptc",
+        conn=db_conn,
+    )
+    async with db_conn.transaction():
+        async with db_conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO education_generation_attempts (
+                    attempt_id, generation_job_id, previous_attempt_id,
+                    managed_workspace_id, managed_thread_id, status,
+                    started_at
+                ) VALUES (%s, %s, %s, %s, %s, 'running', %s)
+                """,
+                (
+                    attempt_id,
+                    generation_job_id,
+                    previous_attempt_id,
+                    managed_workspace_id,
+                    thread["conversation_thread_id"],
+                    started_at,
+                ),
+            )
+    return attempt_id
 
 
 @pytest.mark.asyncio
@@ -620,6 +670,161 @@ async def test_progress_writer_is_idempotent_and_rejects_wrong_run_ownership(
         (2, "chapter:start", "completed"),
     ]
     assert other_attempt_id != attempt_id
+
+
+@pytest.mark.asyncio
+async def test_progress_query_is_bounded_and_orders_attempts_by_attempt_start(
+    cleanup_tables,
+    db_conn: psycopg.AsyncConnection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ConnectionContext:
+        async def __aenter__(self):
+            return db_conn
+
+        async def __aexit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_db_connection",
+        lambda: _ConnectionContext(),
+    )
+    generation_job_id, old_attempt_id = await _seed_job(db_conn)
+    new_attempt_id = await _seed_additional_attempt(
+        db_conn,
+        generation_job_id=generation_job_id,
+        previous_attempt_id=old_attempt_id,
+        started_at="2099-01-01T00:00:00+00:00",
+    )
+    async with db_conn.transaction():
+        async with db_conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO education_generation_progress_events (
+                    generation_job_id, attempt_id, sequence, event_key,
+                    stage, status, label, current_value, total_value
+                ) VALUES (
+                    %s, %s, 2, 'knowledge:running',
+                    'knowledge_point_generation', 'running',
+                    'Knowledge running', 10, 12
+                )
+                """,
+                (generation_job_id, new_attempt_id),
+            )
+            await cur.execute(
+                """
+                INSERT INTO education_generation_progress_events (
+                    generation_job_id, attempt_id, sequence, event_key,
+                    stage, status, label, current_value, total_value
+                ) VALUES (
+                    %s, %s, 41, 'chapter:old-completed',
+                    'chapter_analysis', 'completed', 'Old completed', 1, 1
+                )
+                """,
+                (generation_job_id, old_attempt_id),
+            )
+            await cur.execute(
+                """
+                INSERT INTO education_generation_progress_events (
+                    generation_job_id, attempt_id, sequence, event_key,
+                    stage, status, label, current_value, total_value
+                ) VALUES (
+                    %s, %s, 42, 'lesson:old-counted',
+                    'lesson_preparation', 'running',
+                    'Old lesson progress', 10, 12
+                )
+                """,
+                (generation_job_id, old_attempt_id),
+            )
+            await cur.execute(
+                """
+                INSERT INTO education_generation_progress_events (
+                    generation_job_id, attempt_id, sequence, event_key,
+                    stage, status, label, current_value, total_value
+                ) VALUES (
+                    %s, %s, 1, 'chapter:new-running',
+                    'chapter_analysis', 'running', 'New running', 2, 12
+                )
+                """,
+                (generation_job_id, new_attempt_id),
+            )
+            await cur.execute(
+                """
+                INSERT INTO education_generation_progress_events (
+                    generation_job_id, attempt_id, sequence, event_key,
+                    stage, status, label
+                ) VALUES (
+                    %s, %s, 2004, 'lesson:new-running',
+                    'lesson_preparation', 'running',
+                    'New lesson progress'
+                )
+                """,
+                (generation_job_id, new_attempt_id),
+            )
+            await cur.execute(
+                """
+                INSERT INTO education_generation_progress_events (
+                    generation_job_id, attempt_id, sequence, event_key,
+                    stage, status, label, current_value, total_value
+                )
+                SELECT %s, %s, sequence, 'content:' || sequence,
+                       'content_processing', 'running', 'Content ' || sequence,
+                       sequence, 2002
+                FROM generate_series(3, 2002) AS sequence
+                """,
+                (generation_job_id, new_attempt_id),
+            )
+            await cur.execute(
+                """
+                INSERT INTO education_generation_progress_events (
+                    generation_job_id, attempt_id, sequence, event_key,
+                    stage, status, label
+                ) VALUES (
+                    %s, %s, 2003, 'knowledge:completed',
+                    'knowledge_point_generation', 'completed',
+                    'Knowledge completed'
+                )
+                """,
+                (generation_job_id, new_attempt_id),
+            )
+
+    rows = await education_textbooks.list_generation_progress_events(
+        generation_job_id=generation_job_id
+    )
+
+    assert len(rows) == 2004
+    assert str(rows[0]["attempt_id"]) == old_attempt_id
+    assert rows[0]["stage"] == "chapter_analysis"
+    assert rows[0]["status"] == "completed"
+    assert str(rows[1]["attempt_id"]) == old_attempt_id
+    assert rows[1]["stage"] == "lesson_preparation"
+    assert rows[1]["current_value"] == 10
+    assert str(rows[2]["attempt_id"]) == new_attempt_id
+    assert rows[2]["stage"] == "chapter_analysis"
+    assert rows[2]["status"] == "running"
+    assert any(
+        row["stage"] == "content_processing" and row["sequence"] == 2002
+        for row in rows
+    )
+    assert all(row["progress_truncated"] is True for row in rows)
+    projected = build_book_pipeline_progress(
+        job={
+            "generation_job_id": generation_job_id,
+            "scope": "book_pipeline",
+            "status": "running",
+        },
+        events=rows,
+        truncated=True,
+    )
+    knowledge_stage = projected["stages"][2]
+    assert knowledge_stage["status"] == "completed"
+    assert knowledge_stage["current"] == 10
+    assert knowledge_stage["total"] == 12
+    lesson_stage = projected["stages"][3]
+    assert lesson_stage["status"] == "running"
+    assert lesson_stage["current"] is None
+    assert lesson_stage["total"] is None
 
 
 @pytest.mark.asyncio

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { waitFor } from '@testing-library/react';
+import { act, waitFor } from '@testing-library/react';
 import { createTestQueryClient, renderHookWithProviders } from '@/test/utils';
 import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from '../api';
-import { useCompletedParseJobs, useEducationTaskCalendar, useEducationTaskDetail, useTextbookMutations } from '../queries';
+import { useBookPipelineProgress, useCompletedParseJobs, useEducationTaskCalendar, useEducationTaskDetail, useTextbookMutations } from '../queries';
 
 vi.mock('../api', () => ({
   getEducationTaskCalendar: vi.fn(),
@@ -15,12 +15,14 @@ vi.mock('../api', () => ({
   runTextbookProcessing: vi.fn(),
   retryTextbookProcessing: vi.fn(),
   assignTextbookPublication: vi.fn(),
+  getBookPipelineJobProgress: vi.fn(),
 }));
 
 const getEducationTaskCalendar = educationApi.getEducationTaskCalendar as unknown as ReturnType<typeof vi.fn>;
 const getEducationTaskDetail = educationApi.getEducationTaskDetail as unknown as ReturnType<typeof vi.fn>;
 const listCompletedParseJobs = educationApi.listCompletedParseJobs as unknown as ReturnType<typeof vi.fn>;
 const startTextbookProcessingFromParseJobs = educationApi.startTextbookProcessingFromParseJobs as unknown as ReturnType<typeof vi.fn>;
+const getBookPipelineJobProgress = educationApi.getBookPipelineJobProgress as unknown as ReturnType<typeof vi.fn>;
 
 describe('education queries', () => {
   beforeEach(() => {
@@ -28,6 +30,7 @@ describe('education queries', () => {
     getEducationTaskDetail.mockReset();
     listCompletedParseJobs.mockReset();
     startTextbookProcessingFromParseJobs.mockReset();
+    getBookPipelineJobProgress.mockReset();
   });
 
   it('loads completed parse-job candidates once when enabled', async () => {
@@ -111,5 +114,54 @@ describe('education queries', () => {
       end_date: '2026-08-31',
       student_id: 'student-1',
     });
+  });
+
+  it('polls book-pipeline progress every two seconds until terminal', async () => {
+    vi.useFakeTimers();
+    try {
+      getBookPipelineJobProgress
+        .mockResolvedValueOnce({
+          job_id: 'job-1',
+          status: 'running',
+          stages: [],
+          last_sequence: 1,
+        })
+        .mockResolvedValue({
+          job_id: 'job-1',
+          status: 'completed',
+          stages: [],
+          last_sequence: 2,
+        });
+
+      const { result, queryClient } = renderHookWithProviders(() =>
+        useBookPipelineProgress('job-1'),
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(getBookPipelineJobProgress).toHaveBeenCalledTimes(1);
+      expect(result.current.data?.status).toBe('running');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(getBookPipelineJobProgress).toHaveBeenCalledTimes(2);
+      expect(
+        queryClient.getQueryData<{ status: string }>(
+          queryKeys.education.bookPipelineJobProgress('job-1'),
+        )?.status,
+      ).toBe('completed');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(getBookPipelineJobProgress).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
