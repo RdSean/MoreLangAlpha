@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import json
 import math
 import re
+import shlex
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID
@@ -29,31 +30,6 @@ _BOOK_PIPELINE_CANONICAL_FILES = frozenset(
 _BOOK_PIPELINE_ASSET_EXTENSIONS = frozenset(
     {".md", ".json", ".txt", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".csv"}
 )
-_BOOK_PIPELINE_PROGRESS_STAGES = frozenset(
-    {
-        "chapter_analysis",
-        "content_processing",
-        "knowledge_point_generation",
-        "lesson_preparation",
-    }
-)
-_BOOK_PIPELINE_PROGRESS_STATUSES = frozenset(
-    {"queued", "running", "completed", "failed", "skipped"}
-)
-_BOOK_PIPELINE_FORBIDDEN_PROGRESS_KEYS = frozenset(
-    {
-        "reasoning",
-        "prompt",
-        "tool_args",
-        "tool_result",
-        "credentials",
-        "credential",
-        "secret",
-        "sandbox_path",
-    }
-)
-
-
 class _StrictJsonError(ValueError):
     """A JSON value is valid syntax but violates the managed subset."""
 
@@ -115,23 +91,24 @@ def _validate_strict_json_object(
     return None
 
 
-def _contains_forbidden_progress_key(value: Any) -> bool:
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            if (
-                isinstance(key, str)
-                and key.strip().casefold() in _BOOK_PIPELINE_FORBIDDEN_PROGRESS_KEYS
-            ):
-                return True
-            if _contains_forbidden_progress_key(item):
-                return True
-    elif isinstance(value, (list, tuple)):
-        return any(_contains_forbidden_progress_key(item) for item in value)
-    return False
-
-
 def _contains_c0_control(value: str) -> bool:
     return any(ord(character) < 32 for character in value)
+
+
+def _validate_progress_jsonl(content: str) -> str | None:
+    from src.server.services.education_generation_progress import (
+        ProgressEventValidationError,
+        parse_progress_json_line,
+    )
+
+    for line in content.splitlines():
+        if not line.strip():
+            continue
+        try:
+            parse_progress_json_line(line)
+        except ProgressEventValidationError:
+            return "managed progress line violates the semantic progress contract"
+    return None
 
 
 @dataclass(frozen=True)
@@ -252,6 +229,28 @@ def validate_managed_bash_command(
     forbidden = ("..", "$", "`", ";", "&&", "||", "|", "<", ">", "\\")
     if re.search(r"(?:^|\s)/", command) or any(token in command for token in forbidden):
         return "ERROR: command reaches outside the managed textbook job root"
+    if _contains_c0_control(command):
+        return "ERROR: command is not allowed in a managed textbook run"
+    helper = re.fullmatch(
+        r"(?:python|python3) \.langalpha/progress\.py(?: (?P<event>.+))?",
+        command,
+    )
+    if helper is not None:
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            return "ERROR: managed progress helper command is invalid"
+        if len(tokens) == 2:
+            return None
+        if len(tokens) != 3:
+            return "ERROR: managed progress helper accepts one JSON object"
+        try:
+            decoded = _strict_json_loads(tokens[2])
+        except ValueError:
+            return "ERROR: managed progress helper requires one JSON object"
+        if not isinstance(decoded, dict):
+            return "ERROR: managed progress helper requires one JSON object"
+        return None
     if command == "sha256sum inputs/manifest.json":
         return None
     if not re.fullmatch(
@@ -274,6 +273,8 @@ def validate_managed_textbook_write(
         return "managed teaching candidate path is not allowed"
     if _contains_c0_control(path) or "\\" in path or ".." in relative.parts:
         return "managed teaching candidate path is not allowed"
+    if relative == PurePosixPath(".langalpha/progress.jsonl"):
+        return _validate_progress_jsonl(content)
     if policy.purpose == "book_pipeline":
         if relative in _BOOK_PIPELINE_JSON_OBJECTS:
             return _validate_strict_json_object(
@@ -281,29 +282,6 @@ def validate_managed_textbook_write(
                 invalid_message="managed book package must be valid JSON before writing",
                 object_message="managed book package must be a JSON object",
             )
-        if relative == PurePosixPath(".langalpha/progress.jsonl"):
-            for line in content.splitlines():
-                if not line.strip():
-                    continue
-                try:
-                    decoded = _strict_json_loads(line)
-                except ValueError:
-                    return "managed progress line must be valid JSON before writing"
-                if not isinstance(decoded, dict):
-                    return "managed progress line must be a JSON object"
-                for field in ("event_key", "stage", "status"):
-                    field_value = decoded.get(field)
-                    if not isinstance(field_value, str) or not field_value.strip():
-                        return (
-                            f"managed progress event must contain a non-empty {field}"
-                        )
-                if decoded["stage"] not in _BOOK_PIPELINE_PROGRESS_STAGES:
-                    return "managed progress event has an invalid stage"
-                if decoded["status"] not in _BOOK_PIPELINE_PROGRESS_STATUSES:
-                    return "managed progress event has an invalid status"
-                if _contains_forbidden_progress_key(decoded):
-                    return "managed progress event contains a forbidden field"
-            return None
         if relative in _BOOK_PIPELINE_CANONICAL_FILES:
             return None
         if (

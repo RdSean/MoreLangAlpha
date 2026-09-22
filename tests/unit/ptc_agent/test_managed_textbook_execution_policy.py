@@ -1,6 +1,9 @@
 """Execution-boundary contracts for managed textbook PTC runs."""
 
+import json
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 
 from importlib import import_module
@@ -8,6 +11,9 @@ from importlib.util import find_spec
 from unittest.mock import AsyncMock
 
 import pytest
+
+from src.server.services import education_generation_progress
+from src.server.services import education_teaching_storage
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -138,12 +144,16 @@ def test_book_pipeline_policy_allows_package_skill_and_manifest_asset_paths():
     (
         ("outputs/book_package.json", "[]", "JSON object"),
         ("outputs/content_tree.json", "not json", "valid JSON"),
-        (".langalpha/progress.jsonl", '["not","an","object"]', "JSON object"),
+        (
+            ".langalpha/progress.jsonl",
+            '["not","an","object"]',
+            "progress contract",
+        ),
         (
             ".langalpha/progress.jsonl",
             '{"event_key":"event-1","stage":"chapter_analysis","status":"running"}\n'
             "not json",
-            "valid JSON",
+            "progress contract",
         ),
     ),
 )
@@ -752,6 +762,224 @@ def test_managed_bash_rejects_shell_escapes_from_the_job_root():
             "curl https://example.com", policy
         )
     )
+
+
+@pytest.mark.parametrize("interpreter", ["python", "python3"])
+def test_managed_bash_allows_only_the_staged_progress_helper(interpreter):
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_pipeline_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+    event = json.dumps(
+        {
+            "event_key": "chapter:start",
+            "stage": "chapter_analysis",
+            "status": "running",
+        }
+    )
+
+    assert (
+        managed_execution.validate_managed_bash_command(
+            f"{interpreter} .langalpha/progress.py",
+            policy,
+        )
+        is None
+    )
+    assert (
+        managed_execution.validate_managed_bash_command(
+            f"{interpreter} .langalpha/progress.py '{event}'",
+            policy,
+        )
+        is None
+    )
+    for command in (
+        f"{interpreter} .langalpha/progress.py '{event}' && cat inputs/manifest.json",
+        f"{interpreter} .langalpha/progress.py \"$(cat inputs/manifest.json)\"",
+        f"/usr/bin/{interpreter} .langalpha/progress.py '{event}'",
+        f"{interpreter} {policy.filesystem_root}/.langalpha/progress.py '{event}'",
+        f"{interpreter} .langalpha/progress.py '[]'",
+    ):
+        assert managed_execution.validate_managed_bash_command(command, policy)
+
+
+@pytest.mark.parametrize(
+    "policy_factory",
+    [
+        "education_structure_policy",
+        "education_lesson_policy",
+        "education_book_asset_policy",
+        "education_book_pipeline_policy",
+    ],
+)
+def test_all_managed_purposes_allow_only_the_progress_stream_under_langalpha(
+    policy_factory,
+):
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = getattr(managed_execution, policy_factory)(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+    progress_path = f"{policy.filesystem_root}/.langalpha/progress.jsonl"
+    valid = (
+        '{"event_key":"chapter:start","stage":"chapter_analysis",'
+        '"status":"running"}\n'
+    )
+
+    assert managed_execution.validate_managed_textbook_write(
+        progress_path,
+        valid,
+        policy,
+    ) is None
+    assert managed_execution.validate_managed_textbook_write(
+        progress_path,
+        json.dumps(
+            {
+                "event_key": "chapter:start",
+                "stage": "chapter_analysis",
+                "status": "running",
+                "label": "已完成 1 / 3",
+            }
+        ),
+        policy,
+    ) is None
+    for invalid_event in (
+        {},
+        {"event_key": "", "stage": "chapter_analysis", "status": "running"},
+        {"event_key": "bad key", "stage": "chapter_analysis", "status": "running"},
+        {
+            "event_key": "x" * 256,
+            "stage": "chapter_analysis",
+            "status": "running",
+        },
+        {
+            "event_key": "chapter:start",
+            "stage": "unknown",
+            "status": "running",
+        },
+        {
+            "event_key": "chapter:start",
+            "stage": "chapter_analysis",
+            "status": "running",
+            "label": "zero\u200bwidth",
+        },
+        {
+            "event_key": "chapter:start",
+            "stage": "chapter_analysis",
+            "status": "running",
+            "label": "/home/parent/book.md",
+        },
+        {
+            "event_key": "chapter:start",
+            "stage": "chapter_analysis",
+            "status": "running",
+            "label": "api_key=opaque-value",
+        },
+    ):
+        assert managed_execution.validate_managed_textbook_write(
+            progress_path,
+            json.dumps(invalid_event),
+            policy,
+        )
+    for relative_path in (
+        ".langalpha/progress.py",
+        ".langalpha/progress.jsonl.bak",
+    ):
+        assert managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/{relative_path}",
+            valid,
+            policy,
+        )
+
+
+@pytest.mark.parametrize(
+    ("event", "accepted"),
+    [
+        (
+            {
+                "event_key": "chapter:start",
+                "stage": "chapter_analysis",
+                "status": "running",
+                "label": "已完成 1 / 3",
+            },
+            True,
+        ),
+        (
+            {
+                "event_key": "bad key",
+                "stage": "chapter_analysis",
+                "status": "running",
+            },
+            False,
+        ),
+        (
+            {
+                "event_key": "chapter:start",
+                "stage": "chapter_analysis",
+                "status": "running",
+                "label": "zero\u200bwidth",
+            },
+            False,
+        ),
+        (
+            {
+                "event_key": "chapter:start",
+                "stage": "chapter_analysis",
+                "status": "running",
+                "label": "/home/parent/book.md",
+            },
+            False,
+        ),
+        (
+            {
+                "event_key": "chapter:start",
+                "stage": "chapter_analysis",
+                "status": "running",
+                "label": "api_key=opaque-value",
+            },
+            False,
+        ),
+    ],
+)
+def test_progress_validators_agree_on_the_same_input(
+    event,
+    accepted,
+    tmp_path,
+):
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_pipeline_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+    raw = json.dumps(event, ensure_ascii=False)
+
+    try:
+        education_generation_progress.parse_progress_json_line(raw)
+    except education_generation_progress.ProgressEventValidationError:
+        server_accepted = False
+    else:
+        server_accepted = True
+
+    write_accepted = (
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/.langalpha/progress.jsonl",
+            raw,
+            policy,
+        )
+        is None
+    )
+
+    helper = tmp_path / "progress.py"
+    helper.write_bytes(education_teaching_storage.progress_helper_source())
+    helper_result = subprocess.run(
+        [sys.executable, str(helper)],
+        input=raw,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    helper_accepted = helper_result.returncode == 0
+
+    assert server_accepted == accepted
+    assert write_accepted == accepted
+    assert helper_accepted == accepted
 
 
 def test_managed_candidate_write_requires_strict_json_before_saving():

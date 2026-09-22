@@ -2,6 +2,18 @@
 
 ## 2026-09-22
 
+### 新增：统一教材处理语义进度协议
+
+- 新增迁移 `080_education_job_progress`，为 attempts 增加 `(generation_job_id, attempt_id)` 唯一键，并创建 `education_generation_progress_events`，用 `attempt_id + sequence` 唯一约束形成 append-only 事件序。`event_key` 只表示逻辑身份，同一 key 可以在后续 sequence 重试追加，Task 7 的投影按 key 保留最新状态，不会把模型重试变成数据库唯一冲突。progress 同时引用 job 和 attempts 的复合 ownership pair，两个外键均级联删除，跨 job 使用其他 attempt 的写入会在 PostgreSQL 层拒绝。
+- managed Bash 策略新增唯一窄授权：仅允许 `python .langalpha/progress.py` / `python3 .langalpha/progress.py` 使用 stdin 或一个 strict JSON object 参数；shell chaining、命令替换、重定向、绝对解释器和绝对 helper 路径仍拒绝。managed write 策略对 structure/assets/lesson/book_pipeline 统一允许 `.langalpha/progress.jsonl`，direct Write/Edit 逐行调用与服务端 parser、staged helper 相同的 `parse_progress_json_line`，完整执行 event_key、Unicode `Cf`、路径/凭据和输入上限校验；其他 `.langalpha` 文件继续拒绝。overlay 明确要求调用 staged helper，不允许直接重写 JSONL。
+- 新增 `parse_progress_event`，固定 `chapter_analysis`、`content_processing`、`knowledge_point_generation`、`lesson_preparation` 四个用户可见阶段及 `queued/running/completed/failed/skipped` 五种状态；substage 归一为小写安全 token，label/detail 分别截断为 200/1000 字符。
+- 脱敏与路径规则在服务端 parser 和 staged helper 间共享同一组正则。裸 `private_key`、`public_key`、`token`、`client_secret` 等普通领域词不再误报；API/ACCESS/SECRET KEY、PASSWORD/PASSWD/TOKEN 赋值、JSON-like 凭据字段、OPENAI/ANTHROPIC/GITHUB 凭据、`ghp_`/`github_pat_`/`sk-`/`AKIA...`/`ASIA...` 等真实凭据形态仍拒绝。路径只拒绝字符串起始绝对路径、敏感 root、多段 path、带扩展名路径、Windows drive path 和 UNC host/share；`TCP /IP`、`1 /3`、`Reading A /B`、`1 / 3`、`Reading A / B` 均正常通过。
+- 每行原始 progress JSON 在解析前限制为 64 KiB，每个字符串字段在任何 regex 前限制为 8 KiB，staged helper 的 argv/stdin 使用同一限制并做有界读取；label/detail 继续截断到既有更小上限。普通文本允许，但零宽字符、bidi 控制和其他 Unicode `Cf` format controls 会拒绝。helper 与服务端共享 64-bit metadata integer 上限常量，避免漂移。
+- 进度字段只保留 `event_key`、stage/status/substage、安全 label/detail、`node_key`、可选 `current_value/total_value`、带时区的原始 timestamp 和经过递归白名单清洗的 metadata；同时提供计数非负、整数上限、`current <= total` 与非有限浮点数校验。
+- `stage_managed_teaching_skills()` 现在额外写入固定的 `<root>/.langalpha/progress.py`。该 helper 不接受 skill 代码注入，不访问网络或数据库，只接受 argv/stdin 中的 strict JSON 对象，拒绝重复 key，并仅以 append 模式逐行写入 `<root>/.langalpha/progress.jsonl`；测试实际执行 staged helper 验证续写、stdin、截断和非法事件不落盘。
+- Task 6 只提供事件协议、持久表与 sandbox 写入助手；读取文件、增量持久化、checkpoint 触发和 continuation 仍由 Task 7 接入，当前不伪造任何用户可见进度。
+- 验证：Task 6 聚焦测试 `164 passed`，managed policy/overlay `66 passed`，storage `28 passed`，migration 回归 `131 passed`，真实 PostgreSQL ownership/unique/index/cascade/downgrade integration `4 passed`，修改文件 Ruff 与 `git diff --check` 通过。
+
 ### 新增：通用教材包导入与统一流水线启动
 
 - 新增迁移 `079_book_pipeline_package_import`：允许 legacy 知识点保留空 `unit_id`，为生成候选增加 `content_node_id`、`candidate_key`、开放 `point_type`、`origin` 与 `candidate_status`，并约束 generated candidate 必须绑定内容节点和候选键；唯一索引限制同一内容节点下的候选键重复。`book_pipeline` 完成后可回填 `structure_id`，长 `source_revision` 扩展为 255；存在通用包数据或已完成流水线绑定时 downgrade fail-closed。

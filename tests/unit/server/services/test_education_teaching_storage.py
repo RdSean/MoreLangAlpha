@@ -2,11 +2,64 @@
 
 import json
 from hashlib import sha256
+from pathlib import Path
+import subprocess
+import sys
 from unittest.mock import AsyncMock
 
 import pytest
 
+from src.server.services import education_generation_progress
 from src.server.services import education_teaching_storage
+
+
+UNSAFE_PROGRESS_TEXT_CASES = (
+    "OPENAI_API_KEY=opaque-value",
+    "ANTHROPIC_ACCESS_TOKEN: opaque-value",
+    "GITHUB_TOKEN opaque-value",
+    "prefix_api_key=opaque-value",
+    "access_key_id: opaque-value",
+    "secret_key=opaque-value",
+    "PASSWORD=opaque-value",
+    "passwd_suffix: opaque-value",
+    "TOKEN=opaque-value",
+    "client_secret: opaque-value",
+    '{"token":"opaque-value"}',
+    "sk-ant-api03-abcdefghijklmnopqrstuvwxyz",
+    "ghp_abcdefghijklmnopqrstuvwxyz1234",
+    "github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz",
+    "AKIA1234567890ABCDEF",
+    "ASIA1234567890ABCDEF",
+    "/etc/passwd",
+    "/foo",
+    "path /foo",
+    "见 /foo",
+    "path: /foo",
+    "path=/etc/passwd",
+    "参见 /notes.md",
+    "打开 /content/chapter.md",
+    "/managed/textbook-job/secret",
+    "/home/parent/book.md",
+    "/tmp/progress.jsonl",
+    r"C:\Users\parent\book.md",
+    "C:/Users/parent/book.md",
+    r"\\server\share\book.md",
+    "s3://bucket/private",
+    "file:///tmp/private",
+    "https://user:password@example.com/book",
+)
+
+SAFE_PROGRESS_TEXT_CASES = (
+    "private_key",
+    "public_key",
+    "token",
+    "client_secret",
+    "已完成 1 / 3 个文件",
+    "Reading A / B",
+    "TCP /IP",
+    "1 /3",
+    "Reading A /B",
+)
 
 
 def _job() -> dict:
@@ -510,6 +563,235 @@ async def test_stage_managed_teaching_skills_stages_complete_static_builtin_skil
     assert f"{root}book-to-skill/scripts/extract.py" in paths
     assert f"{root}book-to-skill/book_to_skill/parsers/text.py" in paths
     assert all("the-knowledge-guy" not in path for path in paths)
+
+
+@pytest.mark.asyncio
+async def test_stage_managed_teaching_skills_stages_progress_helper():
+    sandbox = AsyncMock(spec=["aupload_file_bytes"])
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    await education_teaching_storage.stage_managed_teaching_skills(
+        _job()["job_id"],
+        sandbox,
+        skill_names=("book-to-skill",),
+    )
+
+    uploaded = {
+        call.args[0]: call.args[1]
+        for call in sandbox.aupload_file_bytes.await_args_list
+    }
+    root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d"
+    assert f"{root}/.langalpha/progress.py" in uploaded
+    assert str(education_generation_progress.MAX_METADATA_INTEGER).encode() in uploaded[
+        f"{root}/.langalpha/progress.py"
+    ]
+
+
+def test_staged_progress_helper_appends_valid_events_and_never_rewrites(tmp_path: Path):
+    helper = tmp_path / "progress.py"
+    helper.write_bytes(education_teaching_storage.progress_helper_source())
+    first = {
+        "event_key": "chapter:start",
+        "stage": "chapter_analysis",
+        "status": "running",
+        "label": "Chapter analysis",
+    }
+
+    for raw in (
+        json.dumps(first, ensure_ascii=False),
+        json.dumps(
+            {
+                "event_key": "chapter:done",
+                "stage": "chapter_analysis",
+                "status": "completed",
+                "label": "x" * 250,
+            },
+            ensure_ascii=False,
+        ),
+    ):
+        result = subprocess.run(
+            [sys.executable, str(helper), raw],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+
+    lines = (tmp_path / "progress.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert json.loads(lines[0])["event_key"] == "chapter:start"
+    assert json.loads(lines[1])["event_key"] == "chapter:done"
+    assert len(json.loads(lines[1])["label"]) == (
+        education_generation_progress.MAX_LABEL_LENGTH
+    )
+    assert "\n" not in lines[0] and "\n" not in lines[1]
+
+
+def test_staged_progress_helper_accepts_stdin_and_rejects_unsafe_input(tmp_path: Path):
+    helper = tmp_path / "progress.py"
+    helper.write_bytes(education_teaching_storage.progress_helper_source())
+    valid = subprocess.run(
+        [sys.executable, str(helper)],
+        input=json.dumps(
+            {
+                "event_key": "content:start",
+                "stage": "content_processing",
+                "status": "running",
+            }
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert valid.returncode == 0, valid.stderr
+    output = tmp_path / "progress.jsonl"
+    before = output.read_bytes()
+
+    invalid_inputs = (
+        json.dumps(["not", "an", "object"]),
+        json.dumps(
+            {
+                "event_key": "invalid:stage",
+                "stage": "unknown",
+                "status": "running",
+            }
+        ),
+        json.dumps(
+            {
+                "event_key": "invalid:status",
+                "stage": "chapter_analysis",
+                "status": "waiting",
+            }
+        ),
+        json.dumps(
+            {
+                "event_key": "invalid:substage",
+                "stage": "chapter_analysis",
+                "status": "running",
+                "substage": "../unsafe",
+            }
+        ),
+        json.dumps(
+            {
+                "event_key": "invalid:control",
+                "stage": "chapter_analysis",
+                "status": "running",
+                "label": "bad\x00label",
+            }
+        ),
+        json.dumps(
+            {
+                "event_key": "invalid:format",
+                "stage": "chapter_analysis",
+                "status": "running",
+                "label": "zero\u200bwidth",
+            }
+        ),
+        json.dumps(
+            {
+                "event_key": "unsafe:path",
+                "stage": "chapter_analysis",
+                "status": "running",
+                "label": "/managed/private",
+            }
+        ),
+        json.dumps(
+            {
+                "event_key": "unsafe:secret",
+                "stage": "chapter_analysis",
+                "status": "running",
+                "detail": "api_key=sk-live-abcdefghijklmnopqrstuvwxyz",
+            }
+        ),
+        (
+            '{"event_key":"first","event_key":"second",'
+            '"stage":"chapter_analysis","status":"running"}'
+        ),
+    ) + tuple(
+        json.dumps(
+            {
+                "event_key": f"unsafe:case-{index}",
+                "stage": "chapter_analysis",
+                "status": "running",
+                "label": unsafe,
+            }
+        )
+        for index, unsafe in enumerate(UNSAFE_PROGRESS_TEXT_CASES)
+    )
+    for invalid_input in invalid_inputs:
+        invalid = subprocess.run(
+            [sys.executable, str(helper)],
+            input=invalid_input,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert invalid.returncode != 0
+        assert output.read_bytes() == before
+
+
+def test_staged_progress_helper_accepts_safe_domain_text(tmp_path: Path):
+    helper = tmp_path / "progress.py"
+    helper.write_bytes(education_teaching_storage.progress_helper_source())
+
+    for index, label in enumerate(SAFE_PROGRESS_TEXT_CASES):
+        result = subprocess.run(
+            [sys.executable, str(helper)],
+            input=json.dumps(
+                {
+                    "event_key": f"spaced:slash:{index}",
+                    "stage": "chapter_analysis",
+                    "status": "running",
+                    "label": label,
+                },
+                ensure_ascii=False,
+            ),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+
+    lines = (tmp_path / "progress.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line)["label"] for line in lines] == list(
+        SAFE_PROGRESS_TEXT_CASES
+    )
+
+
+def test_staged_progress_helper_enforces_input_size_limits(tmp_path: Path):
+    helper = tmp_path / "progress.py"
+    helper.write_bytes(education_teaching_storage.progress_helper_source())
+    output = tmp_path / "progress.jsonl"
+    valid = json.dumps(
+        {
+            "event_key": "safe:key",
+            "stage": "chapter_analysis",
+            "status": "running",
+        }
+    )
+
+    oversized_line = (
+        " " * (education_generation_progress.MAX_PROGRESS_EVENT_BYTES + 1) + valid
+    )
+    oversized_string = json.dumps(
+        {
+            "event_key": "safe:key",
+            "stage": "chapter_analysis",
+            "status": "running",
+            "label": "x"
+            * (education_generation_progress.MAX_PROGRESS_STRING_BYTES + 1),
+        }
+    )
+    for raw in (oversized_line, oversized_string):
+        result = subprocess.run(
+            [sys.executable, str(helper)],
+            input=raw,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode != 0
+        assert not output.exists()
 
 
 @pytest.mark.asyncio

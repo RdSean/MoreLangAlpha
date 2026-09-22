@@ -324,8 +324,19 @@ assets.
 
 ## Progress stream
 
-Append one JSON object per line to `<root>/.langalpha/progress.jsonl`; never
-rewrite prior lines. Use only these stable stage IDs:
+Use the staged helper to append one JSON object per line to
+`<root>/.langalpha/progress.jsonl`; never rewrite prior lines. Invoke exactly:
+
+```bash
+python .langalpha/progress.py '{"event_key":"...","stage":"...","status":"..."}'
+```
+
+or `python3 .langalpha/progress.py` with one JSON object on stdin. Do not write
+or edit `progress.jsonl` directly with Write/Edit tools. Do not use shell chaining,
+command substitution, absolute interpreter paths or an absolute
+helper path. The helper is the only authorized executable under `.langalpha/`.
+
+Use only these stable stage IDs:
 
 ```text
 chapter_analysis

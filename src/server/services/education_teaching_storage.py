@@ -22,6 +22,7 @@ from src.server.services.education_book_package import (
     BookPackageValidationError,
     validate_book_package,
 )
+from src.server.services.education_generation_progress import progress_helper_source
 from src.server.services.education_reading_assets import (
     READING_ASSET_FORMAT,
     build_reading_asset_inputs,
@@ -187,7 +188,7 @@ async def stage_managed_teaching_skills(
     *,
     skill_names: tuple[str, ...] = _MANAGED_SKILL_NAMES,
 ) -> None:
-    """Stage the selected complete static built-in skills, never executable helpers."""
+    """Stage selected skills plus the service-authored progress append helper."""
     root = managed_job_root(job_id)
     from ptc_agent.config.agent import host_skill_dirs
 
@@ -216,6 +217,7 @@ async def stage_managed_teaching_skills(
                 raise TeachingPackageStorageError("Managed teaching skill is unavailable") from exc
             relative_path = source.relative_to(source_root).as_posix()
             files.append((f"{root}/.agents/skills/{skill_name}/{relative_path}", content))
+    files.append((f"{root}/.langalpha/progress.py", progress_helper_source()))
     await _upload_staged_files(sandbox, files)
 
 

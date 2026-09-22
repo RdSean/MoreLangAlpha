@@ -936,9 +936,14 @@ git commit -m "feat(textbooks): import generic book packages"
 - Create: `migrations/versions/080_education_job_progress.py`
 - Create: `src/server/services/education_generation_progress.py`
 - Modify: `src/server/services/education_teaching_storage.py`
+- Modify: `src/ptc_agent/agent/managed_execution.py`
+- Modify: `plugins/langalpha_local/skills/book-to-skill/reference/langalpha-managed.md`
 - Test: `tests/unit/migrations/test_education_job_progress.py`
 - Test: `tests/unit/server/services/test_education_generation_progress.py`
 - Test: `tests/unit/server/services/test_education_teaching_storage.py`
+- Test: `tests/unit/ptc_agent/test_managed_textbook_execution_policy.py`
+- Test: `tests/unit/middleware/skills/test_native_book_learning_skills.py`
+- Test: `tests/integration/test_education_job_progress_db.py`
 
 **Step 1: Write the failing migration test**
 
@@ -967,8 +972,16 @@ Unique constraints:
 
 ```text
 (attempt_id, sequence)
-(attempt_id, event_key, sequence)
 ```
+
+The migration adds a unique key on
+`education_generation_attempts(generation_job_id, attempt_id)` and uses a
+composite ownership foreign key from progress events to that pair. The job
+foreign key and composite ownership foreign key both cascade delete progress
+rows. A job/attempt/sequence index supports bounded incremental reads.
+`event_key` is a logical identity, not a uniqueness key: a rerun may append the
+same key at a later sequence, and Task 7's projection retains the latest state
+for each key without turning a model retry into a database error.
 
 **Step 2: Run it to verify it fails**
 
@@ -995,6 +1008,23 @@ The helper appends validated JSON lines to:
 
 It performs no network or database access.
 
+The helper source is generated from the service's fixed protocol constants and
+staged as service-authored Python, not as a skill script. It accepts exactly one
+JSON object from argv or stdin, validates it with an embedded equivalent of the
+server parser, and opens `progress.jsonl` in append mode only.
+
+Managed Bash policy exposes one narrow executable exception:
+`python .langalpha/progress.py` and `python3 .langalpha/progress.py`, either
+with no argument for stdin input or one strict JSON object argument. Shell
+chaining, command substitution, redirects, absolute interpreters and absolute
+helper paths remain rejected. The managed write policy allows
+`.langalpha/progress.jsonl` for structure, assets, lesson and book-pipeline
+purposes, and validates every non-empty line by calling the same
+`parse_progress_json_line` used by the server service and generated helper. The
+direct Write/Edit gate therefore enforces event_key syntax/length, Unicode `Cf`
+rejection, path/credential rules, and 64 KiB/8 KiB limits identically. All
+other `.langalpha` paths remain rejected.
+
 **Step 4: Define the parser**
 
 Create:
@@ -1006,11 +1036,34 @@ def parse_progress_event(raw: object) -> dict[str, Any]:
 
 The parser:
 
-- whitelists stage/status/substage;
+- whitelists the four fixed stages and five fixed statuses;
+- normalizes a nonempty substage to a lowercase safe token matching
+  `[a-z][a-z0-9_.-]{0,63}`; spaces and hyphens become underscores;
 - truncates label/detail;
-- strips control characters;
+- strips control characters and rejects Unicode `Cf` format controls;
 - rejects paths and secret-looking fields;
 - preserves `event_key`, `node_key`, counts and timestamp.
+
+Counts are optional and may appear individually; when both are present,
+`current_value <= total_value` is required. Unknown top-level fields,
+non-finite metadata numbers and forbidden nested keys are rejected.
+
+Credential detection rejects assignments and real token formats rather than
+bare domain terms: `private_key`, `public_key`, `token` and `client_secret` are
+allowed as ordinary text, while API/access/secret/password assignments,
+JSON-like credential fields, provider-prefixed credentials and known prefixes
+such as `ghp_`, `github_pat_`, `sk-` and `AKIA...` are rejected. Path checks
+reject string-start absolute paths, sensitive roots, multi-segment paths and
+path-like extensions, plus Windows drive paths and UNC host/share paths. The
+helper source embeds the same pattern tuple used by the server parser. Thus
+`path /foo`, `见 /foo`, `path: /foo`, `/foo`, `/etc/passwd` and `/notes.md` are
+rejected, while `TCP /IP`, `1 /3`, `Reading A /B`, `1 / 3` and
+`Reading A / B` remain valid.
+
+Before JSON parsing, one raw progress line is capped at 64 KiB. Before any
+regex, every string field is capped at 8 KiB. The helper applies the same raw
+line and string budgets, including bounded stdin reads. Final label/detail
+values are still truncated to their smaller persistence limits.
 
 **Step 5: Run tests**
 
@@ -1019,6 +1072,8 @@ uv run pytest \
   tests/unit/migrations/test_education_job_progress.py \
   tests/unit/server/services/test_education_generation_progress.py \
   tests/unit/server/services/test_education_teaching_storage.py -q
+uv run pytest -m integration \
+  tests/integration/test_education_job_progress_db.py -q
 ```
 
 Expected: PASS.
@@ -1029,9 +1084,16 @@ Expected: PASS.
 git add migrations/versions/080_education_job_progress.py \
   src/server/services/education_generation_progress.py \
   src/server/services/education_teaching_storage.py \
+  src/ptc_agent/agent/managed_execution.py \
+  plugins/langalpha_local/skills/book-to-skill/reference/langalpha-managed.md \
   tests/unit/migrations/test_education_job_progress.py \
   tests/unit/server/services/test_education_generation_progress.py \
-  tests/unit/server/services/test_education_teaching_storage.py
+  tests/unit/server/services/test_education_teaching_storage.py \
+  tests/unit/ptc_agent/test_managed_textbook_execution_policy.py \
+  tests/unit/middleware/skills/test_native_book_learning_skills.py \
+  tests/integration/test_education_job_progress_db.py \
+  CHANGELOG.md \
+  docs/plans/2026-09-22-unified-book-processing-pipeline.md
 git commit -m "feat(textbooks): add semantic progress protocol"
 ```
 
@@ -1083,9 +1145,10 @@ It:
 
 - reads the progress file by byte offset;
 - ignores an incomplete final line;
-- persists complete events;
-- deduplicates by `event_key`;
-- updates the current state projection;
+- persists every complete append-only event with the next attempt sequence;
+- updates the current state projection to the latest event for each
+  `event_key`, allowing the same logical key to be retried without a database
+  uniqueness error;
 - stops after finalization and performs one final flush.
 
 **Step 4: Start and stop it around every managed workflow**
