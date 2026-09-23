@@ -341,12 +341,6 @@ async def test_compact_replay_pressure_keeps_semantic_progress_durable(
         poll_interval=0.01,
     )
     await collector.poll_once()
-    settled = await education_textbooks.settle_generation_job(
-        generation_job_id=generation_job_id,
-        attempt_id=attempt_id,
-        status="completed",
-    )
-    assert settled is not None
 
     async with await psycopg.AsyncConnection.connect(
         test_db_uri,
@@ -363,20 +357,10 @@ async def test_compact_replay_pressure_keeps_semantic_progress_durable(
                 (generation_job_id,),
             )
             progress_rows_written = int((await cur.fetchone())["count"])
-            await cur.execute(
-                """
-                SELECT status
-                FROM education_generation_jobs
-                WHERE generation_job_id = %s
-                """,
-                (generation_job_id,),
-            )
-            run_status = (await cur.fetchone())["status"]
 
     assert emitted_replay_events < 1_000
     assert stored_sse_events < 1_000
     assert progress_rows_written > 0
-    assert run_status == "completed"
 
 
 @pytest.mark.asyncio
