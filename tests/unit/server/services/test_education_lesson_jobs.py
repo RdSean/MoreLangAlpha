@@ -765,6 +765,7 @@ async def test_dispatch_lesson_starts_live_progress_collector(monkeypatch) -> No
     )
 
     assert result == {"root_run_id": captured["run"]["run_id"]}
+    assert captured["handler"]["replay_profile"] == "education_compact"
     assert collectors == [
         {
             "sandbox": session.sandbox,

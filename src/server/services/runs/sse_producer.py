@@ -11,7 +11,7 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Set, Tuple, cast
 
 import json_repair
 
@@ -47,6 +47,16 @@ SSE_EVENT_LOG_ENABLED = is_sse_event_log_enabled()
 MERGED_STREAM_CHUNK_MAX_BYTES_DEFAULT = get_merged_chunk_max_bytes()
 
 DEFAULT_TOKEN_THRESHOLD = 120000
+_EDUCATION_COMPACT_REPLAY_EVENT_TYPES = frozenset(
+    {
+        "metadata",
+        "warning",
+        "error",
+        "interrupt",
+        "model_retry",
+        "model_fallback",
+    }
+)
 
 
 def resolve_token_threshold(agent_config=None) -> int:
@@ -393,6 +403,7 @@ class RunSSEProducer:
         workflow_timeout: Optional[int] = None,
         merged_stream_chunk_max_bytes: int = MERGED_STREAM_CHUNK_MAX_BYTES_DEFAULT,
         agent_config: Optional[Any] = None,
+        replay_profile: Literal["full", "education_compact"] = "full",
     ):
         """Initialize the workflow stream handler.
 
@@ -412,6 +423,7 @@ class RunSSEProducer:
         self.tool_tracker = tool_tracker
         self.workflow_timeout = workflow_timeout or WORKFLOW_TIMEOUT
         self.agent_config = agent_config
+        self.replay_profile = replay_profile
 
         # Cache for tool usage result (for cross-context access)
         self._tool_usage_result: Optional[Dict[str, int]] = None
@@ -530,6 +542,21 @@ class RunSSEProducer:
             self._compaction_active = False
 
     async def stream_workflow(
+        self,
+        graph: Any,
+        input_state: Any,
+        config: dict,
+    ) -> AsyncGenerator[str, None]:
+        """Yield only non-empty frames from the selected replay profile."""
+        async for event in self._stream_workflow_unfiltered(
+            graph,
+            input_state,
+            config,
+        ):
+            if event:
+                yield event
+
+    async def _stream_workflow_unfiltered(
         self,
         graph: Any,
         input_state: Any,
@@ -1812,6 +1839,12 @@ class RunSSEProducer:
         Returns:
             SSE-formatted string (id: seq\\nevent: type\\ndata: json\\n\\n)
         """
+        if (
+            self.replay_profile == "education_compact"
+            and event_type not in _EDUCATION_COMPACT_REPLAY_EVENT_TYPES
+        ):
+            return ""
+
         # Remove empty content to reduce payload size
         if data.get("content") == "":
             data.pop("content")

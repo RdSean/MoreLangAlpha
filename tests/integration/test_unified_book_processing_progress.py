@@ -19,6 +19,7 @@ from src.server.services.education_progress_collector import ManagedProgressColl
 from src.server.services.education_structure_progress import (
     get_book_pipeline_progress_for_parent,
 )
+from src.server.services.runs.sse_producer import RunSSEProducer
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -271,6 +272,111 @@ async def test_live_pipeline_progress_is_durable_before_run_completion(
         "knowledge_point_generation": "completed",
         "lesson_preparation": "queued",
     }
+
+
+@pytest.mark.asyncio
+async def test_compact_replay_pressure_keeps_semantic_progress_durable(
+    cleanup_tables,
+    db_conn,
+    test_db_uri,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _parent_user_id,
+        generation_job_id,
+        attempt_id,
+        run_id,
+    ) = await _seed_running_pipeline(db_conn)
+    test_connection = _test_connection(db_conn)
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_db_connection",
+        test_connection,
+    )
+    monkeypatch.setattr(
+        education_tasks,
+        "get_db_connection",
+        test_connection,
+    )
+
+    producer = RunSSEProducer(
+        thread_id="pressure-thread",
+        run_id=run_id,
+        replay_profile="education_compact",
+    )
+    emitted_replay_events = 0
+    for index in range(150_001):
+        emitted_replay_events += bool(
+            producer._format_sse_event(
+                "message_chunk",
+                {
+                    "thread_id": "pressure-thread",
+                    "agent": "main",
+                    "id": "message-1",
+                    "content": str(index),
+                },
+            )
+        )
+    emitted_replay_events += bool(
+        producer._format_sse_event(
+            "metadata",
+            {"thread_id": "pressure-thread", "run_id": run_id},
+        )
+    )
+    stored_sse_events = len(producer.get_sse_events() or [])
+
+    sandbox = _GrowingSandbox(
+        [
+            (
+                b'{"event_key":"chapter_analysis:running:pressure",'
+                b'"stage":"chapter_analysis","status":"running"}\n'
+            )
+        ]
+    )
+    collector = ManagedProgressCollector(
+        sandbox=sandbox,
+        generation_job_id=generation_job_id,
+        attempt_id=attempt_id,
+        run_id=run_id,
+        poll_interval=0.01,
+    )
+    await collector.poll_once()
+    settled = await education_textbooks.settle_generation_job(
+        generation_job_id=generation_job_id,
+        attempt_id=attempt_id,
+        status="completed",
+    )
+    assert settled is not None
+
+    async with await psycopg.AsyncConnection.connect(
+        test_db_uri,
+        autocommit=True,
+        row_factory=psycopg.rows.dict_row,
+    ) as readback_conn:
+        async with readback_conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM education_generation_progress_events
+                WHERE generation_job_id = %s
+                """,
+                (generation_job_id,),
+            )
+            progress_rows_written = int((await cur.fetchone())["count"])
+            await cur.execute(
+                """
+                SELECT status
+                FROM education_generation_jobs
+                WHERE generation_job_id = %s
+                """,
+                (generation_job_id,),
+            )
+            run_status = (await cur.fetchone())["status"]
+
+    assert emitted_replay_events < 1_000
+    assert stored_sse_events < 1_000
+    assert progress_rows_written > 0
+    assert run_status == "completed"
 
 
 @pytest.mark.asyncio

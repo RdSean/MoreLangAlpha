@@ -373,6 +373,7 @@ async def launch_book_asset_generation(
             thread_id=thread_id,
             run_id=run_id,
             workflow_timeout=get_education_teaching_workflow_timeout(),
+            replay_profile="education_compact",
         )
 
         async def on_terminal(task_info: Any, status: str) -> None:

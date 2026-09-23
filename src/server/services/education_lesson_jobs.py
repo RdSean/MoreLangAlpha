@@ -636,6 +636,7 @@ async def _dispatch_kp_lesson_root_run(
             thread_id=thread_id,
             run_id=run_id,
             workflow_timeout=get_education_teaching_workflow_timeout(),
+            replay_profile="education_compact",
         )
         progress_collector = ManagedProgressCollector(
             sandbox=session.sandbox,
