@@ -268,7 +268,11 @@ async def finalize_book_pipeline_generation(
                 None if status == "cancelled" else "教材智能处理未能完成，请重新运行。"
             ),
         )
-    checkpointed = bool(job.get("pause_after_chapter_analysis"))
+    checkpoint_prefix = str(job.get("checkpoint_bundle_prefix") or "").rstrip("/")
+    checkpointed = bool(checkpoint_prefix)
+    checkpoint_attempt_id = (
+        checkpoint_prefix.rsplit("/", 1)[-1] if checkpoint_prefix else None
+    )
     events = await list_generation_progress_events(
         generation_job_id=str(job["generation_job_id"])
     )
@@ -291,9 +295,10 @@ async def finalize_book_pipeline_generation(
         if checkpointed
         else set(_REQUIRED_BOOK_PIPELINE_STAGES)
     )
-    has_checkpoint_chapter = any(
-        stage == "chapter_analysis" for _event_attempt_id, stage in accepted_completed
-    )
+    has_checkpoint_chapter = (
+        checkpoint_attempt_id,
+        "chapter_analysis",
+    ) in accepted_completed
     if not required_stages.issubset(completed_current_attempt) or (
         checkpointed and not has_checkpoint_chapter
     ):
@@ -468,6 +473,7 @@ async def _dispatch_book_pipeline_root_run(
             thread_id=thread_id,
             run_id=run_id,
             workflow_timeout=get_education_teaching_workflow_timeout(),
+            replay_profile="education_compact",
         )
         checkpoint_stop_event = asyncio.Event()
 

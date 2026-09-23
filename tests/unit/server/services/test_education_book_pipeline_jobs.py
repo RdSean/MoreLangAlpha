@@ -899,6 +899,97 @@ async def test_finalize_book_pipeline_requires_current_attempt_stage_events(
 
 
 @pytest.mark.asyncio
+async def test_finalize_book_pipeline_continuation_uses_checkpoint_chapter_attempt(
+    monkeypatch,
+) -> None:
+    checkpoint_attempt_id = CHECKPOINT_PREFIX.rsplit("/", 1)[-1]
+    events = _completed_pipeline_progress_events()
+    for event in events:
+        event["attempt_id"] = (
+            checkpoint_attempt_id
+            if event["stage"] == "chapter_analysis"
+            else "attempt-1"
+        )
+    import_package = AsyncMock(
+        return_value={
+            "status": "review",
+            "job_status": "completed",
+        }
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "list_generation_progress_events",
+        AsyncMock(return_value=events),
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "import_book_package",
+        import_package,
+    )
+
+    result = await education_book_pipeline_jobs.finalize_book_pipeline_generation(
+        job={
+            **_job(status="running"),
+            "checkpoint_bundle_prefix": CHECKPOINT_PREFIX,
+        },
+        frozen_input={"sources": []},
+        attempt_id="attempt-1",
+        root_run_id="run-1",
+        sandbox=object(),
+        terminal_status="completed",
+        terminal_error=None,
+    )
+
+    assert result["status"] == "review"
+    import_package.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_finalize_book_pipeline_rejects_unbound_checkpoint_chapter(
+    monkeypatch,
+) -> None:
+    settled: dict[str, object] = {}
+    events = _completed_pipeline_progress_events()
+    events[0]["attempt_id"] = "unrelated-old-attempt"
+
+    async def fake_settle(**kwargs):
+        settled.update(kwargs)
+        return {"status": kwargs["status"]}
+
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "list_generation_progress_events",
+        AsyncMock(return_value=events),
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "settle_generation_job",
+        fake_settle,
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "import_book_package",
+        AsyncMock(side_effect=AssertionError("must not trust unrelated checkpoint")),
+    )
+
+    result = await education_book_pipeline_jobs.finalize_book_pipeline_generation(
+        job={
+            **_job(status="running"),
+            "checkpoint_bundle_prefix": CHECKPOINT_PREFIX,
+        },
+        frozen_input={"sources": []},
+        attempt_id="attempt-1",
+        root_run_id="run-1",
+        sandbox=object(),
+        terminal_status="completed",
+        terminal_error=None,
+    )
+
+    assert result["status"] == "failed"
+    assert settled["error_code"] == "managed_book_pipeline_incomplete_progress"
+
+
+@pytest.mark.asyncio
 async def test_import_book_package_supports_multiple_sources(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -1103,6 +1194,7 @@ async def test_launch_book_pipeline_uses_shared_runtime_spine(monkeypatch) -> No
     graphed: dict[str, object] = {}
     executed: dict[str, object] = {}
     marked: dict[str, object] = {}
+    captured: dict[str, object] = {}
     collectors: list[dict[str, object]] = []
     graph = object()
 
@@ -1148,6 +1240,7 @@ async def test_launch_book_pipeline_uses_shared_runtime_spine(monkeypatch) -> No
     class FakeRunSSEProducer:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+            captured["handler"] = kwargs
 
         async def stream_workflow(self, **_kwargs):
             if False:
@@ -1273,6 +1366,7 @@ async def test_launch_book_pipeline_uses_shared_runtime_spine(monkeypatch) -> No
     )
 
     assert result == {"root_run_id": started["run_id"]}
+    assert captured["handler"]["replay_profile"] == "education_compact"
     assert staged["session"]["policy"].purpose == "book_pipeline"
     assert graphed["policy"].purpose == "book_pipeline"
     assert graphed["managed_kind"] == "education_book_pipeline"
