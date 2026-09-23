@@ -2,6 +2,13 @@
 
 ## 2026-09-23
 
+### 新增：用户课程要求注入 managed lesson prompt
+
+- 知识点课程生成会把 job 中的规范化用户要求追加到固定 managed contract 之后，并限制为最多 4000 字符。
+- 用户要求只能影响课程语言和目标受众、结构与顺序、篇幅与深度、难度、表达风格、例子和练习形式；目标知识点、source refs、输出路径与格式、lesson/practice schema、sandbox 与安全边界明确保持最高优先级。
+- 用户内容经过 HTML 转义后放入 `<lesson_generation_prompt>`，不能通过伪造结束标签改写 managed contract；空要求不追加任何 section。
+- 验证：lesson prompt 聚焦 `7 passed`，完整 lesson jobs 回归与 Ruff 通过。
+
 ### 新增：知识点课程生成要求持久化与冲突保护
 
 - 知识点课程首次生成和重新生成现在接受最多 4000 字的可选 `prompt`，并在服务边界去除首尾空白后持久化到现有 `education_generation_jobs.processing_brief`，无需数据库迁移。
