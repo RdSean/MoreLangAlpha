@@ -1,9 +1,14 @@
 import { api } from '@/api/client';
 
+export const PROFILE_REQUEST_TIMEOUT_MS = 10_000;
+
 export async function getCurrentUser(
   params?: { refresh_tier?: boolean },
 ): Promise<Record<string, unknown>> {
-  const { data } = await api.get('/api/v1/users/me', { params });
+  const { data } = await api.get('/api/v1/users/me', {
+    params,
+    timeout: PROFILE_REQUEST_TIMEOUT_MS,
+  });
   return data;
 }
 

@@ -20,7 +20,10 @@
     "back": "Back",
     "done": "Done",
     "failed": "Failed",
-    "optional": "(Optional)"
+    "optional": "(Optional)",
+    "profileUnavailable": "Unable to load your account",
+    "profileUnavailableDescription": "The connection was interrupted. Retry, or log out and sign in again.",
+    "logout": "Logout"
   },
   "auth": {
     "login": "Sign in",

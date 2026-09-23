@@ -66,15 +66,37 @@ describe('useSetupGate', () => {
   });
 
   it('returns isLoading=true while user data is loading', () => {
+    const refetch = vi.fn();
     mockUseUser.mockReturnValue({
       user: null,
       isLoading: true,
+      isError: false,
+      refetch,
     });
 
     const { result } = renderHookWithProviders(() => useSetupGate());
 
     expect(result.current.isLoading).toBe(true);
     expect(result.current.needsSetup).toBe(false);
+    expect(result.current.profileUnavailable).toBe(false);
+    expect(result.current.refetch).toBe(refetch);
+  });
+
+  it('stops loading and exposes retry state when the profile request fails', () => {
+    const refetch = vi.fn();
+    mockUseUser.mockReturnValue({
+      user: null,
+      isLoading: false,
+      isError: true,
+      refetch,
+    });
+
+    const { result } = renderHookWithProviders(() => useSetupGate());
+
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.needsSetup).toBe(false);
+    expect(result.current.profileUnavailable).toBe(true);
+    expect(result.current.refetch).toBe(refetch);
   });
 
   it('returns needsSetup=false when setup was skipped via sessionStorage', () => {

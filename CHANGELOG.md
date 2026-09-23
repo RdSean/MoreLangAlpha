@@ -2,6 +2,13 @@
 
 ## 2026-09-23
 
+### 修复：用户资料请求失败时前端不再无限加载
+
+- `useSetupGate()` 现在只在用户资料请求真实处于初始 loading 时保持加载状态；请求错误或返回空用户且已结束等待时，会返回 `profileUnavailable=true`，不再把应用永久锁在 `PageLoading`。
+- 用户资料不可用时会显示明确的错误页，提供“重试”和“退出登录”操作；重试直接调用共享用户查询的 `refetch`，成功后恢复正常应用门禁。
+- `/api/v1/users/me` 与 `/api/v1/auth/me` 分别设置 10 秒请求超时，避免受限网络下请求永久挂起并阻塞应用初始化；未设置 axios 全局超时。
+- 验证：新增查询失败、正常 loading、用户资料超时和认证超时契约测试，聚焦 Vitest `11 passed`；Education Vitest `86 passed`；`pnpm typecheck`、`pnpm build`（critical path `355.8 kB gz`）通过。
+
 ### 新增：取消运行中的教材处理任务
 
 - 新增 `POST /api/v1/education/book-pipeline-jobs/{job_id}/cancel`。终态任务幂等返回当前投影；`queued`、`preparing` 和 `awaiting_review` 在无 root run 时由 PostgreSQL 事务原子取消 job 和正在准备的 attempt；`running`、`validating` 统一委托既有 `cancel_workflow(thread_id, run_id)`，终态仍由原 finalizer 收口。

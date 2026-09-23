@@ -1,6 +1,7 @@
 import React, { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MotionConfig } from 'framer-motion';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import AppSidebar from './components/Sidebar/AppSidebar';
 import { SIDEBAR_DEFAULT_WIDTH, clampSidebarWidth } from './components/Sidebar/sidebarWidth';
 import { useScrollMemory } from './lib/scrollMemory';
@@ -8,6 +9,7 @@ import BottomTabBar from './components/BottomTabBar/BottomTabBar';
 import Main from './components/Main/Main';
 import { preloadRouteChunk } from './components/Main/routeChunks';
 import PageLoading from './components/PageLoading/PageLoading';
+import { Button } from './components/ui/button';
 import { useAuth } from './contexts/AuthContext';
 import { useIsMobile } from './hooks/useIsMobile';
 import { useSetupGate } from './hooks/useSetupGate';
@@ -61,11 +63,12 @@ const SIDEBAR_COLLAPSED_KEY = 'app-sidebar-collapsed';
 const SIDEBAR_WIDTH_KEY = 'app-sidebar-width';
 
 function AuthenticatedShell() {
+  const { t } = useTranslation();
   const isMobile = useIsMobile();
   const location = useLocation();
   const hideTabBar = isMobile && location.pathname.startsWith('/chat/t/');
-  const { isLoading, needsSetup } = useSetupGate();
-  const { member } = useAuth();
+  const { isLoading, needsSetup, profileUnavailable, refetch } = useSetupGate();
+  const { member, logout } = useAuth();
 
   // Warm the target route's chunk while /users/me resolves — the gate below
   // otherwise serializes two network legs (profile fetch, then the lazy
@@ -144,6 +147,19 @@ function AuthenticatedShell() {
   // flashing protected content before the gate check completes.
   if (isLoading) {
     return <PageLoading />;
+  }
+
+  if (profileUnavailable) {
+    return (
+      <main className="profile-unavailable" role="alert">
+        <h1>{t('common.profileUnavailable')}</h1>
+        <p>{t('common.profileUnavailableDescription')}</p>
+        <div className="profile-unavailable__actions">
+          <Button onClick={() => void refetch()}>{t('common.retry')}</Button>
+          <Button variant="outline" onClick={() => void logout()}>{t('common.logout')}</Button>
+        </div>
+      </main>
+    );
   }
 
   if (needsSetup && member?.role !== 'student') {

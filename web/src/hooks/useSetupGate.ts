@@ -20,16 +20,20 @@ export function skipSetup(): void {
  * so they can skip it freely. Clicking "Exit" sets a sessionStorage flag
  * that suppresses the redirect for the rest of this browser session.
  */
-export function useSetupGate(): { isLoading: boolean; needsSetup: boolean } {
-  const { user, isLoading } = useUser();
+export function useSetupGate() {
+  const { user, isLoading, isError, refetch } = useUser();
 
-  if (isLoading || !user) {
-    return { isLoading: true, needsSetup: false };
+  if (isLoading) {
+    return { isLoading: true, needsSetup: false, profileUnavailable: false, refetch };
+  }
+
+  if (isError || !user) {
+    return { isLoading: false, needsSetup: false, profileUnavailable: true, refetch };
   }
 
   // User explicitly skipped the wizard this session
   if (sessionStorage.getItem(SKIP_KEY)) {
-    return { isLoading: false, needsSetup: false };
+    return { isLoading: false, needsSetup: false, profileUnavailable: false, refetch };
   }
 
   const hasApiKey = Boolean(user.has_api_key);
@@ -37,5 +41,5 @@ export function useSetupGate(): { isLoading: boolean; needsSetup: boolean } {
   const hasPlatformAccess = (user.access_tier ?? -1) >= 0;
   const needsSetup = !hasApiKey && !hasOAuth && !hasPlatformAccess;
 
-  return { isLoading: false, needsSetup };
+  return { isLoading: false, needsSetup, profileUnavailable: false, refetch };
 }

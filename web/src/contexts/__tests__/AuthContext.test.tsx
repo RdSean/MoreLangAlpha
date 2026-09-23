@@ -48,7 +48,7 @@ describe('AuthContext', () => {
 
     renderWithQueryClient(<AuthProvider><Consumer /></AuthProvider>);
 
-    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/v1/auth/me'));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/v1/auth/me', { timeout: 10_000 }));
     expect(screen.getByTestId('user')).toHaveTextContent('parent-user');
   });
 

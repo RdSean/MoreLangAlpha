@@ -20,7 +20,10 @@
     "back": "返回",
     "done": "完成",
     "failed": "失败",
-    "optional": "（可选）"
+    "optional": "（可选）",
+    "profileUnavailable": "暂时无法加载账户信息",
+    "profileUnavailableDescription": "连接已中断。请重试，或退出登录后重新进入。",
+    "logout": "退出登录"
   },
   "auth": {
     "login": "登录",

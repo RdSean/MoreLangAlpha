@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/api/client';
+import { PROFILE_REQUEST_TIMEOUT_MS } from '@/api/user';
 import { queryKeys } from '@/lib/queryKeys';
 import { resetNavPanelExpansion } from '@/pages/ChatAgent/components/navExpansionStore';
 import { resetStableNavOrder } from '@/pages/ChatAgent/hooks/useNavigationData';
@@ -60,7 +61,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const { data } = await api.get<AuthMember>('/api/v1/auth/me');
+      const { data } = await api.get<AuthMember>('/api/v1/auth/me', {
+        timeout: PROFILE_REQUEST_TIMEOUT_MS,
+      });
       acceptMember(data);
     } catch {
       acceptMember(null);
