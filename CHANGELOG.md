@@ -2,6 +2,11 @@
 
 ## 2026-09-23
 
+### 修复：知识点候选接口因超长 quote 返回 500
+
+- `StructureSourceRefResponse` 在响应序列化边界将 `source_refs[].quote` 截断到 500 字符；数据库和 package 仍保留完整 canonical quote，不再因单个长引用让整个候选列表返回 500。
+- 真实 structure `75c7f0d8...` 已验证可构造完整候选响应：21 个 content nodes、24 个 pending candidates，返回 quote 最大 500 字符。
+
 ### 修复：教材 projection 格式与 asset manifest 过度校验
 
 - importer 现在承认规范 projection 格式：`content_tree.json` 的 `langalpha-content-tree/v1`、`knowledge_points.json` 的 `langalpha-knowledge-points/v1`，以及既有 assets manifest 格式；这些文件的内容、引用、投影一致性、asset size/hash 仍继续校验。

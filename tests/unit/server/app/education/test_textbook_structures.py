@@ -10,7 +10,10 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
 from src.server.app.education.textbooks import router
-from src.server.app.education.models import CreateBookPipelineRequest
+from src.server.app.education.models import (
+    CreateBookPipelineRequest,
+    StructureSourceRefResponse,
+)
 from src.server.services import education_structure_progress as progress_service
 from src.server.services.education_textbooks import (
     TextbookNotFoundError,
@@ -90,6 +93,18 @@ def _structure() -> dict:
             }
         ],
     }
+
+
+def test_source_ref_response_truncates_long_quotes_for_api_safety():
+    source_ref = StructureSourceRefResponse(
+        source_id="source-1",
+        start=0,
+        end=1000,
+        quote="x" * 2_000,
+    )
+
+    assert source_ref.quote is not None
+    assert len(source_ref.quote) == 500
 
 
 @pytest.mark.asyncio

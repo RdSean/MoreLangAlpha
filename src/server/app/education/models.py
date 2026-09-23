@@ -342,6 +342,11 @@ class StructureSourceRefResponse(BaseModel):
     quote: str | None = Field(default=None, max_length=500)
     heading_path: list[str] = Field(default_factory=list, max_length=8)
 
+    @field_validator("quote", mode="before")
+    @classmethod
+    def truncate_quote(cls, value: object) -> object:
+        return value[:500] if isinstance(value, str) else value
+
     @model_validator(mode="after")
     def validate_range(self) -> "StructureSourceRefResponse":
         if self.start is None or self.end is None:
