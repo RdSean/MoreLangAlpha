@@ -321,6 +321,8 @@ def parse_progress_event(raw: object) -> dict[str, Any]:
         label="progress event_key",
         pattern=_EVENT_KEY_RE,
     )
+    if len(event_key) > MAX_EVENT_KEY_LENGTH:
+        raise ProgressEventValidationError("progress event_key is too long")
     if event_key.split(":", 1)[0].lower() in _REJECTED_EVENT_KEY_PREFIXES:
         raise ProgressEventValidationError("progress event_key prefix is reserved")
     stage_raw = raw.get("stage")
@@ -469,6 +471,18 @@ def parse_progress_json_line(raw_line: str | bytes) -> dict[str, Any]:
             raise
         raise ProgressEventValidationError("progress line is invalid JSON") from exc
     return parse_progress_event(decoded)
+
+
+def is_accepted_progress_event(raw: object) -> bool:
+    """Whether one persisted row still satisfies the authoritative parser contract."""
+    if not isinstance(raw, Mapping):
+        return False
+    candidate = {key: value for key, value in raw.items() if key in _ALLOWED_FIELDS}
+    try:
+        parse_progress_event(candidate)
+    except ProgressEventValidationError:
+        return False
+    return True
 
 
 _PROGRESS_HELPER_TEMPLATE = '''\
@@ -648,6 +662,8 @@ def parse_event(raw: object) -> dict:
     if not isinstance(event_key, str) or not EVENT_KEY_RE.fullmatch(event_key.strip()):
         raise InvalidProgress("event_key")
     event_key = event_key.strip()
+    if len(event_key) > MAX_EVENT_KEY_LENGTH:
+        raise InvalidProgress("event_key length")
     if event_key.split(":", 1)[0].lower() in REJECTED_EVENT_KEY_PREFIXES:
         raise InvalidProgress("event_key prefix")
     reject_unsafe_text(event_key)

@@ -813,6 +813,92 @@ async def test_finalize_book_pipeline_requires_durable_completed_stages(
 
 
 @pytest.mark.asyncio
+async def test_finalize_book_pipeline_rejects_parser_rejected_stage_events(
+    monkeypatch,
+) -> None:
+    settled: dict[str, object] = {}
+    events = _completed_pipeline_progress_events()
+    for event in events:
+        event["event_key"] = f"probe:noop:{event['stage']}"
+
+    async def fake_settle(**kwargs):
+        settled.update(kwargs)
+        return {"status": kwargs["status"]}
+
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "list_generation_progress_events",
+        AsyncMock(return_value=events),
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "settle_generation_job",
+        fake_settle,
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "import_book_package",
+        AsyncMock(side_effect=AssertionError("must not trust rejected rows")),
+    )
+
+    result = await education_book_pipeline_jobs.finalize_book_pipeline_generation(
+        job=_job(status="running"),
+        frozen_input={"sources": []},
+        attempt_id="attempt-1",
+        root_run_id="run-1",
+        sandbox=object(),
+        terminal_status="completed",
+        terminal_error=None,
+    )
+
+    assert result["status"] == "failed"
+    assert settled["error_code"] == "managed_book_pipeline_incomplete_progress"
+
+
+@pytest.mark.asyncio
+async def test_finalize_book_pipeline_requires_current_attempt_stage_events(
+    monkeypatch,
+) -> None:
+    settled: dict[str, object] = {}
+    events = _completed_pipeline_progress_events()
+    for event in events:
+        event["attempt_id"] = "attempt-old"
+
+    async def fake_settle(**kwargs):
+        settled.update(kwargs)
+        return {"status": kwargs["status"]}
+
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "list_generation_progress_events",
+        AsyncMock(return_value=events),
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "settle_generation_job",
+        fake_settle,
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "import_book_package",
+        AsyncMock(side_effect=AssertionError("must not trust old attempt rows")),
+    )
+
+    result = await education_book_pipeline_jobs.finalize_book_pipeline_generation(
+        job=_job(status="running"),
+        frozen_input={"sources": []},
+        attempt_id="attempt-1",
+        root_run_id="run-1",
+        sandbox=object(),
+        terminal_status="completed",
+        terminal_error=None,
+    )
+
+    assert result["status"] == "failed"
+    assert settled["error_code"] == "managed_book_pipeline_incomplete_progress"
+
+
+@pytest.mark.asyncio
 async def test_import_book_package_supports_multiple_sources(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

@@ -25,6 +25,9 @@ from src.server.services.education_textbooks import (
     TextbookPermissionError,
     get_household_context_for_parent,
 )
+from src.server.services.education_generation_progress import (
+    is_accepted_progress_event,
+)
 
 
 _MAX_EVENTS = 80
@@ -387,25 +390,13 @@ def build_book_pipeline_progress(
     }
     last_ordered_event: Mapping[str, Any] | None = None
     for event in ordered:
-        event_key = str(event.get("event_key") or "")
-        if event_key.split(":", 1)[0].lower() in {
-            "probe",
-            "diagnostic",
-            "test",
-            "debug",
-        }:
+        if not is_accepted_progress_event(event):
             continue
         stage_name = str(event.get("stage") or "")
         status = str(event.get("status") or "")
         if (
             stage_name not in _BOOK_PIPELINE_STAGE_NAMES
             or status not in _BOOK_PIPELINE_EVENT_STATUSES
-        ):
-            continue
-        metadata = event.get("metadata")
-        if status == "skipped" and (
-            not isinstance(metadata, Mapping)
-            or metadata.get("reason") != "checkpoint_review"
         ):
             continue
         events_by_stage[stage_name].append(event)

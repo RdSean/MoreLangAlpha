@@ -6,7 +6,7 @@
 
 - `event_key` 现在要求稳定分段格式，并拒绝 `probe:*`、`diagnostic:*`、`test:*`、`debug:*`；服务端 parser、staged helper 和四阶段 projection 使用同一规则，历史污染事件也不会进入时间线。
 - `skipped` 只在 metadata reason 为 `checkpoint_review` 时允许，普通阶段不能被伪装成 skipped。
-- 非 checkpoint 的完整 pipeline 在导入前必须存在 `chapter_analysis`、`content_processing`、`knowledge_point_generation` 三个 durable `completed` 事件；缺失任一阶段都会 fail closed，不下载或导入半成品。
+- 非 checkpoint 的完整 pipeline 在导入前必须存在当前 attempt 的 `chapter_analysis`、`content_processing`、`knowledge_point_generation` 三个 parser-accepted durable `completed` 事件；旧 attempt 或 `probe/diagnostic` 等已拒绝行不能满足门禁，缺失任一阶段都会 fail closed，不下载或导入半成品。continuation 模式只允许从 durable checkpoint attempt 继承 chapter completion，content 和 knowledge 仍需当前 attempt 完成。
 - 验证：progress、projection、collector、teaching storage、pipeline jobs 与 managed policy 聚焦回归 `305 passed`，Ruff 通过。
 
 ### 重构：managed write gate 改为区域边界校验

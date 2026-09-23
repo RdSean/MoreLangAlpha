@@ -39,6 +39,9 @@ from src.server.services.education_managed_runs import (
     build_managed_education_graph,
     resolve_managed_education_agent_config,
 )
+from src.server.services.education_generation_progress import (
+    is_accepted_progress_event,
+)
 from src.server.services.education_progress_collector import (
     ManagedProgressCollector,
 )
@@ -265,23 +268,42 @@ async def finalize_book_pipeline_generation(
                 None if status == "cancelled" else "教材智能处理未能完成，请重新运行。"
             ),
         )
-    if not bool(job.get("pause_after_chapter_analysis")):
-        events = await list_generation_progress_events(
-            generation_job_id=str(job["generation_job_id"])
+    checkpointed = bool(job.get("pause_after_chapter_analysis"))
+    events = await list_generation_progress_events(
+        generation_job_id=str(job["generation_job_id"])
+    )
+    accepted_completed = {
+        (
+            str(event.get("attempt_id") or ""),
+            str(event.get("stage") or ""),
         )
-        completed_stages = {
-            str(event.get("stage") or "")
-            for event in events
-            if str(event.get("status") or "") == "completed"
-        }
-        if not set(_REQUIRED_BOOK_PIPELINE_STAGES).issubset(completed_stages):
-            return await _fail_book_pipeline_attempt(
-                job=job,
-                attempt_id=attempt_id,
-                status="failed",
-                error_code="managed_book_pipeline_incomplete_progress",
-                error_message="教材处理缺少必需的完成阶段，请重新运行。",
-            )
+        for event in events
+        if is_accepted_progress_event(event)
+        and str(event.get("status") or "") == "completed"
+    }
+    completed_current_attempt = {
+        stage
+        for event_attempt_id, stage in accepted_completed
+        if event_attempt_id == attempt_id
+    }
+    required_stages = (
+        {"content_processing", "knowledge_point_generation"}
+        if checkpointed
+        else set(_REQUIRED_BOOK_PIPELINE_STAGES)
+    )
+    has_checkpoint_chapter = any(
+        stage == "chapter_analysis" for _event_attempt_id, stage in accepted_completed
+    )
+    if not required_stages.issubset(completed_current_attempt) or (
+        checkpointed and not has_checkpoint_chapter
+    ):
+        return await _fail_book_pipeline_attempt(
+            job=job,
+            attempt_id=attempt_id,
+            status="failed",
+            error_code="managed_book_pipeline_incomplete_progress",
+            error_message="教材处理缺少必需的完成阶段，请重新运行。",
+        )
     try:
         imported = await import_book_package(
             {**dict(job), "attempt_id": attempt_id},

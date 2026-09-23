@@ -141,6 +141,43 @@ def test_book_pipeline_projection_ignores_non_checkpoint_skip_events():
     ]
 
 
+def test_book_pipeline_projection_ignores_parser_rejected_completed_events():
+    projected = education_structure_progress.build_book_pipeline_progress(
+        job={
+            "generation_job_id": "job-1",
+            "status": "running",
+        },
+        events=[
+            {
+                "generation_job_id": "job-1",
+                "attempt_id": "attempt-1",
+                "sequence": 1,
+                "event_key": "garbage",
+                "stage": "chapter_analysis",
+                "status": "completed",
+            },
+            {
+                "generation_job_id": "job-1",
+                "attempt_id": "attempt-1",
+                "sequence": 2,
+                "event_key": "chapter_analysis:running:job-1",
+                "stage": "chapter_analysis",
+                "status": "running",
+            },
+        ],
+    )
+
+    chapter_analysis = next(
+        stage
+        for stage in projected["stages"]
+        if stage["name"] == "chapter_analysis"
+    )
+    assert chapter_analysis["status"] == "running"
+    assert [event["status"] for event in chapter_analysis["events"]] == [
+        "running"
+    ]
+
+
 def test_caps_projected_events_and_flags_truncation():
     events = [
         _call(f"c{index}", "Read", {"file_path": f"inputs/sources/{index}.md"})

@@ -160,6 +160,20 @@ def test_skipped_events_require_checkpoint_review_reason() -> None:
     assert parsed["metadata"] == {"reason": "checkpoint_review"}
 
 
+def test_parse_progress_event_enforces_event_key_length() -> None:
+    with pytest.raises(education_generation_progress.ProgressEventValidationError):
+        education_generation_progress.parse_progress_event(
+            {
+                "event_key": (
+                    "chapter_analysis:completed:"
+                    + "x" * education_generation_progress.MAX_EVENT_KEY_LENGTH
+                ),
+                "stage": "chapter_analysis",
+                "status": "completed",
+            }
+        )
+
+
 @pytest.mark.parametrize(
     "raw",
     [
