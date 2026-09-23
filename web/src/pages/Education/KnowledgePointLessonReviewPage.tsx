@@ -4,11 +4,8 @@ import { Link, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import EducationMarkdown from './components/EducationMarkdown';
+import { educationErrorMessage } from './errorMessage';
 import { useKnowledgePointLessonByPoint, useLatestTextbookStructure, useLessonGenerationStatus, useStructureGenerationJob, useStructureMutations } from './queries';
-
-function messageOf(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 export default function KnowledgePointLessonReviewPage() {
   const { textbookId, versionId, knowledgePointId } = useParams();
@@ -77,9 +74,19 @@ export default function KnowledgePointLessonReviewPage() {
   }, [lessonGeneration.data?.generation_job_id]);
 
   useEffect(() => {
-    if (promptTouched) return;
+    setPrompt('');
+    setPromptTouched(false);
+  }, [knowledgePointId]);
+
+  useEffect(() => {
+    if (promptTouched || lessonGeneration.data?.knowledge_point_id !== knowledgePointId) return;
     setPrompt(lessonGeneration.data?.prompt ?? '');
-  }, [lessonGeneration.data?.prompt, promptTouched]);
+  }, [
+    knowledgePointId,
+    lessonGeneration.data?.knowledge_point_id,
+    lessonGeneration.data?.prompt,
+    promptTouched,
+  ]);
 
   const generate = async () => {
     if (!knowledgePointId || !canGenerate) return;
@@ -92,7 +99,7 @@ export default function KnowledgePointLessonReviewPage() {
       setJobId(job.generation_job_id);
       setEditing(false);
     } catch (error) {
-      toast({ variant: 'destructive', title: '无法生成课程', description: messageOf(error, '请稍后重试。') });
+      toast({ variant: 'destructive', title: '无法生成课程', description: educationErrorMessage(error, '请稍后重试。') });
     }
   };
 
@@ -120,7 +127,7 @@ export default function KnowledgePointLessonReviewPage() {
       setEditing(false);
       await lesson.refetch();
     } catch (error) {
-      toast({ variant: 'destructive', title: '无法保存课程修订', description: messageOf(error, '请检查 Markdown 后重试。') });
+      toast({ variant: 'destructive', title: '无法保存课程修订', description: educationErrorMessage(error, '请检查 Markdown 后重试。') });
     }
   };
 
@@ -130,7 +137,7 @@ export default function KnowledgePointLessonReviewPage() {
       await mutations.approveLesson.mutateAsync({ lessonId: lesson.data.lesson_id, revisionId: lesson.data.latest_revision_id });
       await lesson.refetch();
     } catch (error) {
-      toast({ variant: 'destructive', title: '无法通过课程', description: messageOf(error, '请重新生成或修订课程。') });
+      toast({ variant: 'destructive', title: '无法通过课程', description: educationErrorMessage(error, '请重新生成或修订课程。') });
     }
   };
 
@@ -140,7 +147,7 @@ export default function KnowledgePointLessonReviewPage() {
       await mutations.publish.mutateAsync({ versionId, structureId: lesson.data.structure_id });
       toast({ title: '教材结构版本已发布' });
     } catch (error) {
-      toast({ variant: 'destructive', title: '无法发布教材', description: messageOf(error, '请确认所有知识点课程都已通过。') });
+      toast({ variant: 'destructive', title: '无法发布教材', description: educationErrorMessage(error, '请确认所有知识点课程都已通过。') });
     }
   };
 

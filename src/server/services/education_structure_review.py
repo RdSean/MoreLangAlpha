@@ -310,4 +310,7 @@ async def get_structure_generation_job(
     )
     if not job:
         raise TextbookNotFoundError("Textbook structure generation job not found")
-    return job
+    return {
+        **job,
+        "prompt": str(job.get("processing_brief") or ""),
+    }

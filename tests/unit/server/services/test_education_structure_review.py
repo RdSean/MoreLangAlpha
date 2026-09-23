@@ -456,3 +456,33 @@ async def test_accept_structure_projects_not_found_and_success(monkeypatch):
     )
 
     assert accepted["status"] == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_structure_generation_job_projects_persisted_prompt(monkeypatch):
+    async def household(_user_id: str):
+        return {"household_id": "household-1"}
+
+    async def job(**_kwargs):
+        return {
+            "generation_job_id": "generation-1",
+            "processing_brief": "使用中文讲解。",
+        }
+
+    monkeypatch.setattr(
+        education_structure_review,
+        "get_household_context_for_parent",
+        household,
+    )
+    monkeypatch.setattr(
+        education_structure_review,
+        "get_generation_job_for_parent",
+        job,
+    )
+
+    projection = await education_structure_review.get_structure_generation_job(
+        parent_user_id="parent-1",
+        generation_job_id="generation-1",
+    )
+
+    assert projection["prompt"] == "使用中文讲解。"

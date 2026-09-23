@@ -9,13 +9,10 @@ import EducationMarkdown from './components/EducationMarkdown';
 import GenerationProgressCard, { type GenerationJobView } from './components/GenerationProgressCard';
 import ProcessingProfileDialog, { type ProcessingProfileValue } from './components/ProcessingProfileDialog';
 import TextbookWorkflowStepper, { type TextbookWorkflowStep } from './components/TextbookWorkflowStepper';
+import { educationErrorMessage } from './errorMessage';
 import { useKnowledgePointLessonByPoint, useKnowledgePointSourcePreview, useLatestTextbookStructure, useLessonGenerationStatus, useStructureGenerationJob, useStructureMutations } from './queries';
 import type { KnowledgePointSourcePreview, StructureGenerationJob, TextbookKnowledgePoint, TextbookStructureUnit } from './types';
 import './TextbookStructurePage.css';
-
-function messageOf(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 const structureWarningLabels: Record<string, string> = {
   knowledge_point_source_refs_missing: '部分知识点没有来源引用，已保留内容供人工确认。',
@@ -232,9 +229,19 @@ function KnowledgePointWorkspace({
   }, [generation.data?.status, lesson]);
 
   useEffect(() => {
-    if (promptTouched) return;
+    setPrompt('');
+    setPromptTouched(false);
+  }, [point.knowledge_point_id]);
+
+  useEffect(() => {
+    if (promptTouched || lessonGeneration.data?.knowledge_point_id !== point.knowledge_point_id) return;
     setPrompt(lessonGeneration.data?.prompt ?? '');
-  }, [lessonGeneration.data?.prompt, promptTouched]);
+  }, [
+    lessonGeneration.data?.knowledge_point_id,
+    lessonGeneration.data?.prompt,
+    point.knowledge_point_id,
+    promptTouched,
+  ]);
 
   const generate = async () => {
     if (!scopeReady) return;
@@ -251,7 +258,7 @@ function KnowledgePointWorkspace({
       toast({
         variant: 'destructive',
         title: '无法生成课程',
-        description: messageOf(error, '请稍后重试。'),
+        description: educationErrorMessage(error, '请稍后重试。'),
       });
     }
   };
@@ -719,7 +726,7 @@ export default function TextbookStructurePage() {
       setProfileOpen(false);
       setJobId(job.generation_job_id);
     } catch (error) {
-      toast({ variant: 'destructive', title: '无法生成教材结构', description: messageOf(error, '请稍后重试。') });
+      toast({ variant: 'destructive', title: '无法生成教材结构', description: educationErrorMessage(error, '请稍后重试。') });
     } finally {
       setStructureSubmitting(false);
     }
@@ -734,7 +741,7 @@ export default function TextbookStructurePage() {
       setJobId(job.generation_job_id);
       await structure.refetch();
     } catch (error) {
-      toast({ variant: 'destructive', title: '无法继续结构分析', description: messageOf(error, '请稍后重试。') });
+      toast({ variant: 'destructive', title: '无法继续结构分析', description: educationErrorMessage(error, '请稍后重试。') });
     } finally {
       setStructureSubmitting(false);
     }
@@ -748,7 +755,7 @@ export default function TextbookStructurePage() {
       toast({ title: '知识包生成任务已启动' });
       await structure.refetch();
     } catch (error) {
-      toast({ variant: 'destructive', title: '无法生成教材知识包', description: messageOf(error, '请稍后重试。') });
+      toast({ variant: 'destructive', title: '无法生成教材知识包', description: educationErrorMessage(error, '请稍后重试。') });
     }
   };
 
@@ -758,7 +765,7 @@ export default function TextbookStructurePage() {
       await mutations.save.mutateAsync({ structureId: structure.data.structure_id, units });
       toast({ title: '结构修改已保存' });
     } catch (error) {
-      toast({ variant: 'destructive', title: '无法保存结构', description: messageOf(error, '请检查知识点后重试。') });
+      toast({ variant: 'destructive', title: '无法保存结构', description: educationErrorMessage(error, '请检查知识点后重试。') });
     }
   };
 
@@ -768,7 +775,7 @@ export default function TextbookStructurePage() {
       await mutations.save.mutateAsync({ structureId: structure.data.structure_id, units });
       await mutations.accept.mutateAsync(structure.data.structure_id);
     } catch (error) {
-      toast({ variant: 'destructive', title: '无法接受结构', description: messageOf(error, '至少保留一个知识点。') });
+      toast({ variant: 'destructive', title: '无法接受结构', description: educationErrorMessage(error, '至少保留一个知识点。') });
     }
   };
 

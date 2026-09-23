@@ -2,6 +2,13 @@
 
 ## 2026-09-23
 
+### 修复：课程生成 prompt 的跨知识点状态与冲突提示
+
+- 结构审阅页切换知识点时会重置并重新加载该知识点自己的生成要求，避免把上一个知识点的 prompt 提交给下一个知识点。
+- 前端统一从 Axios/FastAPI 的 `response.data.detail` 提取错误信息，真实 409 冲突现在会显示服务端说明而不是泛化的 HTTP 状态文本，且仍保留用户输入。
+- structure generation job 响应现在把持久化的 `processing_brief` 投影为 `prompt`，API projection 与 lesson queue/status 保持一致。
+- 验证：Education 定向 Vitest `34 passed`，后端结构/课程/review 回归 `129 passed`，Ruff 与 `pnpm typecheck` 通过。
+
 ### 新增：知识点课程生成要求输入与恢复
 
 - 结构审阅页的“生成课程”入口和课程审阅页的“重新生成”入口新增“课程生成要求（可选）”textarea，最多输入 4000 字；首次生成和重新生成共用相同的规范化提交逻辑。

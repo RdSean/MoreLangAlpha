@@ -16,6 +16,7 @@ const create = vi.fn().mockResolvedValue({ generation_job_id: 'generation-1' });
 const generateLesson = vi.fn().mockResolvedValue({ generation_job_id: 'lesson-1' });
 const refetch = vi.fn().mockResolvedValue({});
 let progressData: Record<string, unknown> | null = null;
+let lessonGenerationPrompts: Record<string, string> = {};
 let lessonGenerationStatus: Record<string, unknown> = {
   knowledge_point_id: 'kp-1',
   generating: false,
@@ -155,8 +156,17 @@ vi.mock('../queries', () => ({
     isLoading: false,
     isError: false,
   }),
-  useLessonGenerationStatus: () => ({
-    data: lessonGenerationStatus,
+  useLessonGenerationStatus: (knowledgePointId: string) => ({
+    data: {
+      ...lessonGenerationStatus,
+      knowledge_point_id: knowledgePointId,
+      prompt: Object.prototype.hasOwnProperty.call(
+        lessonGenerationPrompts,
+        knowledgePointId,
+      )
+        ? lessonGenerationPrompts[knowledgePointId]
+        : lessonGenerationStatus.prompt ?? '',
+    },
     isPending: false,
     isError: false,
   }),
@@ -190,6 +200,7 @@ describe('TextbookStructurePage', () => {
     structureState.statusOverride = undefined;
     structureState.scopeVerifiedOverride = undefined;
     progressData = null;
+    lessonGenerationPrompts = {};
     lessonGenerationStatus = {
       knowledge_point_id: 'kp-1',
       generating: false,
@@ -382,6 +393,24 @@ describe('TextbookStructurePage', () => {
     expect(
       screen.getByRole('textbox', { name: '课程生成要求（可选）' }),
     ).toHaveValue('使用中文讲解，保留英文术语。');
+  });
+
+  it('resets guidance state when switching knowledge points', async () => {
+    structureState.statusOverride = 'accepted';
+    lessonGenerationPrompts = {
+      'kp-1': '使用中文讲解。',
+      'kp-2': '改用英文讲解。',
+    };
+    const user = userEvent.setup();
+    renderPage();
+
+    const prompt = screen.getByRole('textbox', { name: '课程生成要求（可选）' });
+    expect(prompt).toHaveValue('使用中文讲解。');
+    await user.clear(prompt);
+    await user.type(prompt, '只对第一个知识点生效。');
+    await user.click(screen.getByRole('button', { name: '选择知识点 足球之爱' }));
+
+    await waitFor(() => expect(prompt).toHaveValue('改用英文讲解。'));
   });
 
   it('supports add, split, merge, and delete knowledge-point actions', async () => {
