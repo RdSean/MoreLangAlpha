@@ -798,6 +798,16 @@ class TestDockerProvider:
         assert "Binds" not in host_config
 
     @pytest.mark.asyncio
+    async def test_create_managed_security_adds_immutable_capability(
+        self, provider, mock_client
+    ):
+        await provider.create(managed_security=True)
+        call_kwargs = mock_client.containers.create.call_args
+        config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
+
+        assert config["HostConfig"]["CapAdd"] == ["LINUX_IMMUTABLE"]
+
+    @pytest.mark.asyncio
     async def test_create_installs_mcp_packages(self, provider, mock_client):
         """create() should run npm install -g for each MCP package."""
         mock_container = mock_client.containers.create.return_value

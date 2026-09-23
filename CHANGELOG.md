@@ -46,6 +46,7 @@
 - 新增统一的 managed textbook 目录契约，预创建 `work/`、`outputs/`、`outputs/book-skill/chapters/`、`outputs/content/`、`outputs/chapters/`、`outputs/knowledge/` 与 `.langalpha/`；`inputs/` 单独以只读权限创建，不进入可写目录列表。
 - managed sandbox 初始化现在逐个验证可写目录属于 runtime 用户，并通过 provider upload 创建 helper 专用的空 `.langalpha/progress.jsonl`，不再依赖 staging 作为唯一的目录/文件创建机制。
 - frozen inputs staging 完成后重新把 `inputs/` 收紧为 `0555`，同时 Docker tar 的 `ensure_directory()` 只给目标叶子目录应用指定 mode，祖先目录保持 `0755`。
+- Docker managed sandbox 增加 `LINUX_IMMUTABLE` capability，由 runtime root 通道对 staged inputs 设置 immutable、对 `progress.jsonl` 设置 append-only；provider 不支持时回退到递归只读 mode，collector 同时校验已消费 progress prefix，阻止同长度重写。
 - 验证：managed policy 与 storage 聚焦回归 `101 passed`，Docker tar 上传单测 `5 passed`，Ruff 通过。
 
 ### 修复：sandbox 上传目录统一归 runtime 用户所有

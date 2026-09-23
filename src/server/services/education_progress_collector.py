@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 from contextlib import suppress
+import hashlib
 import logging
 from time import monotonic
 from typing import Any, Protocol
@@ -65,6 +66,7 @@ class ManagedProgressCollector:
         self._task: asyncio.Task[None] | None = None
         self._stopping = False
         self._offset = 0
+        self._prefix_sha256 = hashlib.sha256(b"").digest()
         self._next_sequence = 0
         self._retry_backoff_seconds = 0.0
         self._last_semantic_at = self._clock()
@@ -100,10 +102,21 @@ class ManagedProgressCollector:
             if len(content) < self._offset:
                 self._record_error("managed progress file shrank unexpectedly")
                 return
+            if (
+                self._offset > 0
+                and hashlib.sha256(content[: self._offset]).digest()
+                != self._prefix_sha256
+            ):
+                self._record_error("managed progress file prefix was rewritten")
+                return
             if len(content) == self._offset:
                 await self._maybe_emit_fallback()
                 return
             persisted = await self._consume_available_bytes(content)
+            if self._offset > 0:
+                self._prefix_sha256 = hashlib.sha256(
+                    content[: self._offset]
+                ).digest()
             if persisted:
                 await self._maybe_emit_fallback()
         except asyncio.CancelledError:

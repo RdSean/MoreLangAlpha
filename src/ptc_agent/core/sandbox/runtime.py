@@ -223,6 +223,30 @@ class SandboxRuntime(ABC):
                 f"{result.stderr or result.stdout}"
             )
 
+    async def seal_directory_read_only(self, path: str) -> None:
+        """Best-effort recursive read-only seal for service-owned inputs."""
+        result = await self.exec(
+            f"chmod -R a-w {shlex.quote(path)}",
+            timeout=60,
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(
+                f"Failed to seal sandbox directory {path}: "
+                f"{result.stderr or result.stdout}"
+            )
+
+    async def seal_file_append_only(self, path: str) -> None:
+        """Best-effort append-only seal; providers with immutability override this."""
+        result = await self.exec(
+            f"test -f {shlex.quote(path)} && chmod u+w {shlex.quote(path)}",
+            timeout=30,
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(
+                f"Failed to protect sandbox progress file {path}: "
+                f"{result.stderr or result.stdout}"
+            )
+
     @abstractmethod
     async def download_file(self, path: str) -> bytes:
         """Download a file from the sandbox."""

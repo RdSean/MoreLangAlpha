@@ -329,6 +329,23 @@ class DockerRuntime(SandboxRuntime):
         if missing:
             await self._container.put_archive("/", archive)
 
+    async def seal_directory_read_only(self, path: str) -> None:
+        quoted = shlex.quote(path)
+        result = await self._exec_as_root(f"chattr -R +i {quoted}")
+        if result.exit_code != 0:
+            result = await self.exec(f"chmod -R a-w {quoted}", timeout=60)
+        if result.exit_code != 0:
+            raise RuntimeError(
+                f"Failed to seal sandbox directory {path}: "
+                f"{result.stderr or result.stdout}"
+            )
+
+    async def seal_file_append_only(self, path: str) -> None:
+        quoted = shlex.quote(path)
+        result = await self._exec_as_root(f"chattr +a {quoted}")
+        if result.exit_code != 0:
+            await super().seal_file_append_only(path)
+
     async def download_file(self, path: str) -> bytes:
         if self._dev_mode and self._host_work_dir:
             return self._host_read(path)
@@ -639,6 +656,29 @@ class DockerRuntime(SandboxRuntime):
             self._owner_id_cache = (uid, gid)
         return self._owner_id_cache
 
+    async def _exec_as_root(self, command: str, timeout: int = 30) -> ExecResult:
+        try:
+            exec_obj = await self._container.exec(
+                cmd=["bash", "-c", command],
+                workdir=self._working_dir,
+                user="root",
+            )
+            stdout_parts: list[str] = []
+            async with exec_obj.start() as stream:
+                while True:
+                    msg = await stream.read_out()
+                    if msg is None:
+                        break
+                    stdout_parts.append(msg.data.decode("utf-8", errors="replace"))
+            inspect = await exec_obj.inspect()
+            return ExecResult(
+                stdout="".join(stdout_parts),
+                stderr="",
+                exit_code=inspect.get("ExitCode", -1),
+            )
+        except Exception as exc:
+            return ExecResult(stdout="", stderr=str(exc), exit_code=-1)
+
     async def _tar_upload(self, dest_path: str, content: bytes) -> None:
         """Upload a single file into the container via a tar archive.
 
@@ -815,6 +855,8 @@ class DockerProvider(SandboxProvider):
             "AutoRemove": False,  # We manage removal ourselves
             "Init": True,  # tini as PID 1 for zombie reaping
         }
+        if kwargs.get("managed_security"):
+            host_config["CapAdd"] = ["LINUX_IMMUTABLE"]
 
         # host.docker.internal resolves natively on Docker Desktop but not on
         # Linux bridge networks; pin it so the egress relay's default base URL

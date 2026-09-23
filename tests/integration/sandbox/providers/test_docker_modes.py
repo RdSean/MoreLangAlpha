@@ -43,7 +43,10 @@ class TestTarMode:
             image=os.environ.get("DOCKER_SANDBOX_IMAGE", "langalpha-sandbox:latest"),
             dev_mode=False,
         ))
-        rt = await provider.create(env_vars={"TEST_VAR": "tar_test"})
+        rt = await provider.create(
+            env_vars={"TEST_VAR": "tar_test"},
+            managed_security=True,
+        )
         yield rt
         try:
             await rt.delete()
@@ -131,12 +134,20 @@ class TestTarMode:
             await runtime.ensure_directory(directory)
         await runtime.ensure_directory(f"{root}/inputs", mode=0o555)
         await runtime.upload_file(b"# Frozen source\n", f"{root}/inputs/source.md")
+        await runtime.upload_file(
+            b"# Nested frozen source\n",
+            f"{root}/inputs/nested/source.md",
+        )
         await runtime.ensure_directory(f"{root}/inputs", mode=0o555)
+        await runtime.seal_directory_read_only(f"{root}/inputs")
         await runtime.upload_file(
             progress_helper_source(),
             f"{root}/.langalpha/progress.py",
         )
         await runtime.upload_file(b"", f"{root}/.langalpha/progress.jsonl")
+        await runtime.seal_file_append_only(
+            f"{root}/.langalpha/progress.jsonl"
+        )
 
         event = (
             '{"event_key":"chapter_analysis:completed:smoke",'
@@ -159,16 +170,23 @@ class TestTarMode:
         )
         assert result.exit_code == 0, result.stderr or result.stdout
 
-        denied = await runtime.exec(
-            f"printf 'bad\\n' > {root}/inputs/forbidden.txt"
-        )
-        assert denied.exit_code != 0
+        for target in (
+            f"{root}/inputs/source.md",
+            f"{root}/inputs/nested/source.md",
+            f"{root}/inputs/forbidden.txt",
+        ):
+            denied = await runtime.exec(f"printf 'bad\\n' > {target}")
+            assert denied.exit_code != 0
 
         progress = await runtime.exec(
             f"tail -n 1 {root}/.langalpha/progress.jsonl"
         )
         assert progress.exit_code == 0
         assert '"event_key":"chapter_analysis:completed:smoke"' in progress.stdout
+        overwritten = await runtime.exec(
+            f"printf 'replaced\\n' > {root}/.langalpha/progress.jsonl"
+        )
+        assert overwritten.exit_code != 0
 
     async def test_code_run_basic(self, runtime: DockerRuntime):
         """code_run should execute Python and return stdout."""

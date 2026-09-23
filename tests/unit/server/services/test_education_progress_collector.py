@@ -149,6 +149,27 @@ async def test_collector_persists_growing_events_before_managed_run_finishes(
 
 
 @pytest.mark.asyncio
+async def test_collector_rejects_same_length_rewrite_of_progress_prefix(
+    monkeypatch,
+) -> None:
+    first = (
+        b'{"event_key":"chapter_analysis:running:chapter",'
+        b'"stage":"chapter_analysis","status":"running","label":"first"}\n'
+    )
+    rewritten = first.replace(b'"first"', b'"other"')
+    assert len(first) == len(rewritten)
+    sandbox = _GrowingSandbox([first, rewritten])
+    store = _Store()
+    collector = _collector(monkeypatch, sandbox, store)
+
+    await collector.poll_once()
+    await collector.poll_once()
+
+    assert list(store.rows) == [(ATTEMPT_ID, 1)]
+    assert any("rewritten" in error for error in collector.errors)
+
+
+@pytest.mark.asyncio
 async def test_collector_keeps_incomplete_final_line_for_the_next_poll(
     monkeypatch,
 ) -> None:

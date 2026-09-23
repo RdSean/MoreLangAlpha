@@ -94,6 +94,10 @@ class ManagedTeachingSandbox(Protocol):
         mode: int = 0o755,
     ) -> None: ...
 
+    async def seal_directory_read_only(self, path: str) -> None: ...
+
+    async def seal_file_append_only(self, path: str) -> None: ...
+
 
 _MANAGED_SKILL_NAMES = ("book-to-skill",)
 _STATIC_SKILL_SUFFIXES = frozenset({".css", ".html", ".json", ".md", ".py", ".toml"})
@@ -209,7 +213,9 @@ async def _seal_managed_inputs(
     ``inputs/`` resets that directory to the provider's default. Seal it only
     after all input files for the job have been staged.
     """
-    await sandbox.ensure_directories([f"{root}/inputs"], mode=0o555)
+    inputs_root = f"{root}/inputs"
+    await sandbox.ensure_directories([inputs_root], mode=0o555)
+    await sandbox.seal_directory_read_only(inputs_root)
 
 
 async def stage_managed_teaching_skills(
@@ -250,6 +256,7 @@ async def stage_managed_teaching_skills(
     files.append((f"{root}/.langalpha/progress.jsonl", b""))
     files.append((f"{root}/.langalpha/progress.py", progress_helper_source()))
     await _upload_staged_files(sandbox, files)
+    await sandbox.seal_file_append_only(f"{root}/.langalpha/progress.jsonl")
 
 
 def _safe_component(value: object, fallback: str) -> str:

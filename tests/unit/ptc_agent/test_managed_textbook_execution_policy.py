@@ -728,6 +728,7 @@ async def test_managed_sandbox_initialization_precreates_writable_layout(monkeyp
             "ptc_agent.core.sandbox.retry"
         ).RetryPolicy.SAFE,
         allow_reconnect=False,
+        managed_security=True,
     )
     assert sandbox.sandbox_id == "sandbox-1"
     assert sandbox._work_dir == policy.filesystem_root

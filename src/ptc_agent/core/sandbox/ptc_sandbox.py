@@ -444,6 +444,7 @@ class PTCSandbox:
             mcp_packages=[],
             retry_policy=RetryPolicy.SAFE,
             allow_reconnect=False,
+            managed_security=True,
         )
         assert self.runtime is not None
         self.sandbox_id = self.runtime.id
@@ -484,6 +485,16 @@ class PTCSandbox:
                 for directory in directories
             )
         )
+
+    async def seal_directory_read_only(self, path: str) -> None:
+        """Remove write permission recursively for a service-owned input tree."""
+        assert self.runtime is not None
+        await self.runtime.seal_directory_read_only(path)
+
+    async def seal_file_append_only(self, path: str) -> None:
+        """Protect a service-owned progress stream from replacement."""
+        assert self.runtime is not None
+        await self.runtime.seal_file_append_only(path)
 
     async def setup_tools_and_mcp(
         self,
