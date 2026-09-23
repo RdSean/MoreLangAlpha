@@ -721,6 +721,154 @@ git commit -m "docs(book-to-skill): document managed sandbox capabilities"
 
 ---
 
+### Task 7: Add Compact Replay Profile For Education Jobs Only
+
+**Files:**
+- Modify: `src/server/services/runs/sse_producer.py`
+- Modify: `src/server/services/education_structure_jobs.py`
+- Modify: `src/server/services/education_book_pipeline_jobs.py`
+- Modify: `src/server/services/education_lesson_jobs.py`
+- Modify: `src/server/services/education_book_asset_jobs.py`
+- Test: `tests/unit/server/services/runs/test_sse_producer.py`
+- Test: `tests/unit/server/services/test_education_book_pipeline_jobs.py`
+- Test: `tests/unit/server/services/test_education_structure_jobs.py`
+- Test: `tests/unit/server/services/test_education_lesson_jobs.py`
+- Test: `tests/integration/test_unified_book_processing_progress.py`
+
+**Step 1: Write the failing education-stream tests**
+
+Add a profile parameter to `RunSSEProducer`:
+
+```python
+replay_profile: Literal["full", "education_compact"] = "full"
+```
+
+For `education_compact`, assert these event types are emitted:
+
+```text
+metadata
+warning
+error
+interrupt
+model_retry
+model_fallback
+```
+
+Assert these high-volume or raw events are not emitted to the run replay
+stream or accumulated in `conversation_responses.sse_events`:
+
+```text
+message_chunk
+tool_call_chunks
+tool_calls
+tool_call_result
+compaction_chunk
+context_window
+provenance
+steering_delivered
+```
+
+Add a pressure test that generates more than 150,000 raw message/tool deltas
+and assert:
+
+```python
+assert emitted_replay_events < 1_000
+assert stored_sse_events < 1_000
+assert run_status == "completed"
+assert progress_rows_written > 0
+```
+
+**Step 2: Run tests to verify they fail**
+
+```bash
+uv run pytest tests/unit/server/services/runs/test_sse_producer.py \
+  -k education_compact -v
+```
+
+Expected: FAIL because all profile values currently use the full stream.
+
+**Step 3: Implement the compact profile before sequence allocation**
+
+In `RunSSEProducer._format_sse_event()`:
+
+1. Check `self.replay_profile`.
+2. For `education_compact` and a non-replay event type, return an empty
+   sentinel before incrementing `event_sequence` and before adding to
+   `_stream_event_accumulator`.
+3. Ensure `stream_workflow()` filters the empty sentinel so no empty SSE frame
+   reaches `LocalRunExecutor`.
+4. Keep the default `full` branch byte-for-byte behaviorally identical.
+
+This is required because `stream_writer.buffer_event()` uses the SSE frame's
+sequence ID as its event count. Filtering after ID allocation would still hit
+the 150k quota.
+
+**Step 4: Opt in only from education job call sites**
+
+Every managed education `RunSSEProducer(...)` call passes:
+
+```python
+replay_profile="education_compact"
+```
+
+Normal PTC and Flash constructors do not pass the parameter and therefore
+keep `full`.
+
+The education frontend continues to use:
+
+```text
+GET /api/v1/education/jobs/{job_id}/progress
+```
+
+backed by `education_generation_progress_events` in PostgreSQL. It does not use
+token deltas for timeline progress.
+
+**Step 5: Add regression tests for normal PTC**
+
+Assert `RunSSEProducer(replay_profile="full")` still emits and accumulates:
+
+```text
+message_chunk
+tool_call_chunks
+tool_calls
+tool_call_result
+```
+
+Run the existing PTC run/SSE reader tests unchanged.
+
+**Step 6: Run tests**
+
+```bash
+uv run pytest \
+  tests/unit/server/services/runs/test_sse_producer.py \
+  tests/unit/server/services/test_education_book_pipeline_jobs.py \
+  tests/unit/server/services/test_education_structure_jobs.py \
+  tests/unit/server/services/test_education_lesson_jobs.py -q
+uv run pytest -m integration \
+  tests/integration/test_unified_book_processing_progress.py -q
+```
+
+Expected: PASS. The pressure run completes without approaching the Redis
+quota, while normal PTC stream shape remains unchanged.
+
+**Step 7: Commit**
+
+```bash
+git add src/server/services/runs/sse_producer.py \
+  src/server/services/education_structure_jobs.py \
+  src/server/services/education_book_pipeline_jobs.py \
+  src/server/services/education_lesson_jobs.py \
+  src/server/services/education_book_asset_jobs.py \
+  tests/unit/server/services/runs/test_sse_producer.py \
+  tests/unit/server/services/test_education_book_pipeline_jobs.py \
+  tests/unit/server/services/test_education_structure_jobs.py \
+  tests/unit/server/services/test_education_lesson_jobs.py \
+  tests/integration/test_unified_book_processing_progress.py
+git commit -m "fix(education): use compact replay stream for managed jobs"
+```
+
+---
+
 ## Final Acceptance Criteria
 
 - Docker and Daytona uploads preserve sandbox-user ownership for files and
@@ -739,3 +887,8 @@ git commit -m "docs(book-to-skill): document managed sandbox capabilities"
 - `probe:*` and `diagnostic:*` events never affect the four-stage timeline.
 - Non-checkpoint full pipelines require real chapter-analysis completion and
   cannot display a false `chapter_analysis / skipped`.
+- Managed education jobs use `education_compact` replay by default; normal PTC
+  and Flash remain on `full` replay with unchanged event semantics.
+- A managed job that emits more than 150,000 raw model/tool deltas still
+  persists semantic progress to PostgreSQL and completes without exceeding
+  the Redis replay-event quota.
