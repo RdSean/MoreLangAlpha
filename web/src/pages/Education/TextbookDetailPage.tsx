@@ -148,7 +148,7 @@ function StartProcessingDialog({ textbookId }: { textbookId: string }) {
           选择教材来源
         </Button>
       </DialogTrigger>
-      <DialogContent variant="centered" className="max-w-2xl">
+      <DialogContent variant="centered" dismissible={false} className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>从图书馆选择来源</DialogTitle>
         </DialogHeader>

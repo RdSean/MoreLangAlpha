@@ -41,10 +41,22 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     /** 'default' = bottom-sheet on mobile, centered on desktop. 'centered' = always centered. */
     variant?: 'default' | 'centered';
+    /** When false, outside clicks and Escape cannot dismiss the dialog. */
+    dismissible?: boolean;
   }
->(({ className, children, variant = 'default', ...props }, ref) => {
+>(({ className, children, variant = 'default', dismissible = true, ...props }, ref) => {
   const isMobile = useIsMobile();
   const swipeEnabled = isMobile && variant === 'default';
+  const guardDismiss = React.useCallback(
+    <T extends { preventDefault: () => void }>(handler: ((event: T) => void) | undefined) =>
+      (event: T) => {
+        if (!dismissible) {
+          event.preventDefault();
+        }
+        handler?.(event);
+      },
+    [dismissible],
+  );
 
   // Hidden close button ref — clicking it triggers Radix's onOpenChange(false)
   const closeRef = React.useRef<HTMLButtonElement>(null);
@@ -83,6 +95,8 @@ const DialogContent = React.forwardRef<
           aria-describedby={undefined}
           ref={containerRefCb}
           className={cn(DIALOG_MOBILE_SHEET_CLASSES, className)}
+          onInteractOutside={guardDismiss(props.onInteractOutside)}
+          onEscapeKeyDown={guardDismiss(props.onEscapeKeyDown)}
           {...props}
         >
           {/* Drag handle */}
@@ -122,6 +136,8 @@ const DialogContent = React.forwardRef<
           DIALOG_CENTERED_CLASSES,
           className
         )}
+        onInteractOutside={guardDismiss(props.onInteractOutside)}
+        onEscapeKeyDown={guardDismiss(props.onEscapeKeyDown)}
         {...props}>
         {children}
         <DialogPrimitive.Close

@@ -149,6 +149,21 @@ describe('TextbookDetailPage', () => {
     );
   });
 
+  it('only closes the source picker from its close button', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: '选择教材来源' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
   it('shows the four workflow steps and links review versions to unified processing', () => {
     state.textbook = {
       ...state.textbook,

@@ -2,6 +2,11 @@
 
 ## 2026-09-23
 
+### 修复：教材来源选择弹窗误触关闭
+
+- “从图书馆选择来源”弹窗改为显式关闭模式，点击遮罩或按 Escape 不再关闭，只能使用弹窗内的关闭按钮退出，避免误以为已开始的教材准备任务被取消。
+- 验证：`TextbookDetailPage` Vitest 8 项通过，`pnpm typecheck`、`pnpm build` 通过。
+
 ### 修复：用户资料请求失败时前端不再无限加载
 
 - `useSetupGate()` 现在只在用户资料请求真实处于初始 loading 时保持加载状态；请求错误或返回空用户且已结束等待时，会返回 `profileUnavailable=true`，不再把应用永久锁在 `PageLoading`。
