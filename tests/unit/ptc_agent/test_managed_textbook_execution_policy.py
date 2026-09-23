@@ -410,6 +410,9 @@ async def test_managed_sandbox_initialization_creates_only_the_job_root(monkeypa
         async def exec(self, *_args, **_kwargs):
             return None
 
+        async def ensure_directory(self, *_args, **_kwargs):
+            return None
+
     runtime = Runtime()
     sandbox = object.__new__(PTCSandbox)
     sandbox.config = managed_execution.managed_core_config(
@@ -437,6 +440,8 @@ async def test_managed_sandbox_initialization_creates_only_the_job_root(monkeypa
     sandbox.provider.create.return_value = runtime
 
     async def runtime_call(func, *args, **kwargs):
+        if getattr(func, "__name__", "") == "ensure_directories":
+            kwargs.pop("retry_policy", None)
         return await func(*args, **kwargs)
 
     sandbox._runtime_call = AsyncMock(side_effect=runtime_call)
@@ -457,9 +462,7 @@ async def test_managed_sandbox_initialization_creates_only_the_job_root(monkeypa
     )
     assert sandbox.sandbox_id == "sandbox-1"
     assert sandbox._work_dir == policy.filesystem_root
-    assert (
-        sandbox._runtime_call.await_args.args[1] == f"mkdir -p {policy.filesystem_root}"
-    )
+    assert sandbox._runtime_call.await_args.args[1] == [policy.filesystem_root]
 
 
 @pytest.mark.asyncio

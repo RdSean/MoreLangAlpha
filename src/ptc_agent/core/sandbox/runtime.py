@@ -1,5 +1,6 @@
 """Abstract runtime and provider interfaces for sandbox backends."""
 
+import shlex
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -209,6 +210,18 @@ class SandboxRuntime(ABC):
         bytes content or a local file path string.
         """
         ...
+
+    async def ensure_directory(self, path: str, *, mode: int = 0o755) -> None:
+        """Create a directory owned by the sandbox runtime user."""
+        result = await self.exec(
+            f"mkdir -p {shlex.quote(path)} && chmod {mode:o} {shlex.quote(path)}",
+            timeout=30,
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(
+                f"Failed to create sandbox directory {path}: "
+                f"{result.stderr or result.stdout}"
+            )
 
     @abstractmethod
     async def download_file(self, path: str) -> bytes:

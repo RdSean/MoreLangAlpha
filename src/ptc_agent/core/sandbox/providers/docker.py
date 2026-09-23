@@ -289,28 +289,29 @@ class DockerRuntime(SandboxRuntime):
         if not prepared:
             return
 
-        # Best-effort mkdir for parent dirs (tar extraction at "/" should
-        # create them anyway, but this avoids permission issues).
-        if parent_dirs:
-            mkdir_cmd = "mkdir -p " + " ".join(
-                f"'{d}'" for d in sorted(parent_dirs)
-            )
-            await self.exec(mkdir_cmd, timeout=30)
-
-        # Build one tar archive with full absolute paths.
-        buf = io.BytesIO()
         uid, gid = await self._owner_ids()
-        with tarfile.open(fileobj=buf, mode="w") as tar:
-            for data, dest_path in prepared:
-                tar_name = dest_path.lstrip("/")
-                info = tarfile.TarInfo(name=tar_name)
-                info.size = len(data)
-                info.mode = 0o644
-                info.uid, info.gid = uid, gid
-                tar.addfile(info, io.BytesIO(data))
-        buf.seek(0)
+        archive = self._build_tar_archive(
+            prepared,
+            directories=parent_dirs,
+            uid=uid,
+            gid=gid,
+        )
+        await self._container.put_archive("/", archive)
 
-        await self._container.put_archive("/", buf.read())
+    async def ensure_directory(self, path: str, *, mode: int = 0o755) -> None:
+        if self._dev_mode and self._host_work_dir:
+            os.makedirs(self._host_resolve(path), mode=mode, exist_ok=True)
+            return
+
+        uid, gid = await self._owner_ids()
+        archive = self._build_tar_archive(
+            [],
+            directories={path},
+            directory_mode=mode,
+            uid=uid,
+            gid=gid,
+        )
+        await self._container.put_archive("/", archive)
 
     async def download_file(self, path: str) -> bytes:
         if self._dev_mode and self._host_work_dir:
@@ -626,24 +627,60 @@ class DockerRuntime(SandboxRuntime):
         """Upload a single file into the container via a tar archive.
 
         Uses ``put_archive("/", ...)`` with the full path encoded in the tar
-        entry so we don't depend on the parent directory already existing.
+        entry. Parent directory entries carry the runtime user's ownership so
+        later sandbox processes can write beneath them.
         """
         parent = os.path.dirname(dest_path)
-        if parent:
-            await self.exec(f"mkdir -p {shlex.quote(parent)}", timeout=10)
-
         uid, gid = await self._owner_ids()
-        buf = io.BytesIO()
-        tar_name = dest_path.lstrip("/")
-        with tarfile.open(fileobj=buf, mode="w") as tar:
-            info = tarfile.TarInfo(name=tar_name)
-            info.size = len(content)
-            info.mode = 0o644
-            info.uid, info.gid = uid, gid
-            tar.addfile(info, io.BytesIO(content))
-        buf.seek(0)
+        archive = self._build_tar_archive(
+            [(content, dest_path)],
+            directories={parent} if parent else set(),
+            uid=uid,
+            gid=gid,
+        )
+        await self._container.put_archive("/", archive)
 
-        await self._container.put_archive("/", buf.read())
+    @staticmethod
+    def _directory_archive_names(paths: set[str]) -> list[str]:
+        directories: set[str] = set()
+        for path in paths:
+            parts = path.strip("/").split("/")
+            if not parts or parts == [""]:
+                continue
+            directories.update(
+                "/".join(parts[:index]) for index in range(1, len(parts) + 1)
+            )
+        return sorted(
+            (f"{name}/" for name in directories),
+            key=lambda name: (name.count("/"), name),
+        )
+
+    def _build_tar_archive(
+        self,
+        files: list[tuple[bytes, str]],
+        *,
+        directories: set[str],
+        uid: int,
+        gid: int,
+        directory_mode: int = 0o755,
+    ) -> bytes:
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for name in self._directory_archive_names(directories):
+                info = tarfile.TarInfo(name=name)
+                info.type = tarfile.DIRTYPE
+                info.mode = directory_mode
+                info.uid, info.gid = uid, gid
+                tar.addfile(info)
+
+            for data, dest_path in files:
+                info = tarfile.TarInfo(name=dest_path.lstrip("/"))
+                info.size = len(data)
+                info.mode = 0o644
+                info.uid, info.gid = uid, gid
+                tar.addfile(info, io.BytesIO(data))
+
+        return buf.getvalue()
 
     async def _exec_download(self, path: str) -> bytes:
         """Download a file via exec + base64 (avoids Docker archive API issues)."""

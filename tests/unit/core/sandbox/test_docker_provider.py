@@ -416,17 +416,47 @@ class TestDockerRuntimeTarUpload:
         assert isinstance(tar_data, bytes)
         with tarfile.open(fileobj=io.BytesIO(tar_data), mode="r") as tar:
             members = tar.getmembers()
-            assert len(members) == 1
-            assert members[0].name == "home/workspace/test.txt"
-            f = tar.extractfile(members[0])
+            assert [m.name for m in members] == [
+                "home",
+                "home/workspace",
+                "home/workspace/test.txt",
+            ]
+            assert all(m.isdir() for m in members[:-1])
+            f = tar.extractfile(members[-1])
             assert f.read() == b"file content"
 
     @pytest.mark.asyncio
-    async def test_upload_creates_parent_dir(self, runtime, container):
-        """_tar_upload should exec mkdir -p for the parent directory."""
-        await runtime.upload_file(b"data", "/home/workspace/subdir/file.txt")
-        # The exec call is for mkdir
-        container.exec.assert_called()
+    async def test_upload_creates_owned_parent_directories_in_tar(
+        self, runtime, container
+    ):
+        container.exec = AsyncMock(
+            side_effect=lambda **kw: _make_exec_mock("1001\n1001\n")
+        )
+
+        await runtime.upload_file(b"data", "/home/workspace/a/b/file.txt")
+
+        tar_data = container.put_archive.call_args[0][1]
+        with tarfile.open(fileobj=io.BytesIO(tar_data), mode="r") as tar:
+            members = tar.getmembers()
+
+        assert [m.name for m in members] == [
+            "home",
+            "home/workspace",
+            "home/workspace/a",
+            "home/workspace/a/b",
+            "home/workspace/a/b/file.txt",
+        ]
+        for directory in members[:-1]:
+            assert directory.isdir()
+            assert directory.mode == 0o755
+            assert (directory.uid, directory.gid) == (1001, 1001)
+        assert members[-1].mode == 0o644
+        assert (members[-1].uid, members[-1].gid) == (1001, 1001)
+
+        commands = [
+            " ".join(call.kwargs["cmd"]) for call in container.exec.call_args_list
+        ]
+        assert commands == ["bash -c id -u; id -g"]
 
     @pytest.mark.asyncio
     async def test_uploads_are_owned_by_the_container_user(self, runtime, container):

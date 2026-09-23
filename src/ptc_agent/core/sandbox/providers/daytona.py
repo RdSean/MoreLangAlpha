@@ -232,6 +232,13 @@ class DaytonaRuntime(SandboxRuntime):
         batch = [FileUpload(source=src, destination=dst) for src, dst in files]
         await self._sandbox.fs.upload_files(batch, timeout=_FS_TIMEOUT_S)
 
+    async def ensure_directory(self, path: str, *, mode: int = 0o755) -> None:
+        try:
+            await self._sandbox.fs.create_folder(path, f"{mode:o}")
+        except Exception as exc:
+            if "exist" not in str(exc).lower():
+                raise
+
     async def download_file(self, path: str) -> bytes:
         # SDK's download_file uses *args dispatch; pass timeout positionally.
         return await self._sandbox.fs.download_file(path, _FS_TIMEOUT_S)

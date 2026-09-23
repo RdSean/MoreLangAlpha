@@ -2,6 +2,12 @@
 
 ## 2026-09-23
 
+### 修复：sandbox 上传目录统一归 runtime 用户所有
+
+- Docker tar 上传现在显式为每个父目录写入带 runtime uid/gid 的目录 entry，不再依赖 root 权限的 `mkdir` 或 Docker 隐式创建；普通 PTC、managed textbook 与批量上传共用同一归档构造。
+- 新增 runtime 级 `ensure_directory()` 契约：Docker tar/bind、Daytona 和默认 shell runtime 都以 sandbox runtime 用户创建目录，`PTCSandbox` 的普通 workspace 与 managed job 初始化统一经该能力完成。
+- 验证：聚焦 sandbox 单元 `152 passed`，managed setup 联合回归 `212 passed`；真实 Docker provider 集成 `24 passed`，包含嵌套上传父目录与文件的 uid/gid 校验；Ruff 通过。
+
 ### 修复：教材来源选择弹窗误触关闭
 
 - “从图书馆选择来源”弹窗改为显式关闭模式，点击遮罩或按 Escape 不再关闭，只能使用弹窗内的关闭按钮退出，避免误以为已开始的教材准备任务被取消。

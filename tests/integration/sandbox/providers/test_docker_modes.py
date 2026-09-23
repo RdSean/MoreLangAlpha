@@ -16,7 +16,7 @@ from ptc_agent.core.sandbox.providers.docker import DockerProvider, DockerRuntim
 from ptc_agent.core.sandbox.runtime import RuntimeState
 
 pytestmark = [
-    pytest.mark.asyncio,
+    pytest.mark.asyncio(loop_scope="class"),
     pytest.mark.skipif(
         "docker" not in os.getenv(
             "SANDBOX_TEST_PROVIDERS",
@@ -76,6 +76,29 @@ class TestTarMode:
         await runtime.upload_file(content, dest)
         downloaded = await runtime.download_file(dest)
         assert downloaded == content
+
+    async def test_upload_preserves_runtime_ownership_for_parents(
+        self, runtime: DockerRuntime
+    ):
+        result = await runtime.exec("id -u; id -g")
+        uid, gid = (int(part) for part in result.stdout.split()[:2])
+
+        result = await runtime.exec(
+            "mkdir -p nested/a && test -w nested/a && "
+            "touch nested/a/file && rm nested/a/file"
+        )
+        assert result.exit_code == 0
+
+        await runtime.upload_file(
+            b"x", f"{runtime.working_dir}/nested/b/file.txt"
+        )
+        result = await runtime.exec(
+            f"test $(stat -c %u {runtime.working_dir}/nested/b) -eq {uid} && "
+            f"test $(stat -c %g {runtime.working_dir}/nested/b) -eq {gid} && "
+            f"test $(stat -c %u {runtime.working_dir}/nested/b/file.txt) -eq {uid} && "
+            f"test $(stat -c %g {runtime.working_dir}/nested/b/file.txt) -eq {gid}"
+        )
+        assert result.exit_code == 0
 
     async def test_code_run_basic(self, runtime: DockerRuntime):
         """code_run should execute Python and return stdout."""

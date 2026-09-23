@@ -140,6 +140,29 @@ class TestPTCSandboxDelegation:
 
     @patch("ptc_agent.core.sandbox.ptc_sandbox.create_provider")
     @pytest.mark.asyncio
+    async def test_ensure_directories_routes_to_runtime(
+        self, mock_create_provider, mock_provider, mock_runtime
+    ):
+        from ptc_agent.core.sandbox.ptc_sandbox import PTCSandbox
+
+        mock_create_provider.return_value = mock_provider
+        mock_runtime.ensure_directory = AsyncMock()
+        sandbox = PTCSandbox(config=_make_config())
+        sandbox.runtime = mock_runtime
+
+        await sandbox.ensure_directories(["/work/a", "/work/b"], mode=0o750)
+
+        assert mock_runtime.ensure_directory.await_args_list[0].args == ("/work/a",)
+        assert mock_runtime.ensure_directory.await_args_list[0].kwargs == {
+            "mode": 0o750
+        }
+        assert mock_runtime.ensure_directory.await_args_list[1].args == ("/work/b",)
+        assert mock_runtime.ensure_directory.await_args_list[1].kwargs == {
+            "mode": 0o750
+        }
+
+    @patch("ptc_agent.core.sandbox.ptc_sandbox.create_provider")
+    @pytest.mark.asyncio
     async def test_adownload_file_bytes_routes_to_runtime(
         self, mock_create_provider, mock_provider, mock_runtime
     ):

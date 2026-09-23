@@ -232,6 +232,55 @@ class TestSandboxRuntimeABC:
             await runtime.archive()
 
     @pytest.mark.asyncio
+    async def test_ensure_directory_defaults_to_runtime_user_exec(self):
+        calls: list[str] = []
+
+        class StubRuntime(SandboxRuntime):
+            @property
+            def id(self):
+                return "s"
+
+            @property
+            def working_dir(self):
+                return "/"
+
+            async def start(self, timeout=120):
+                pass
+
+            async def stop(self, timeout=60):
+                pass
+
+            async def delete(self):
+                pass
+
+            async def get_state(self):
+                return RuntimeState.RUNNING
+
+            async def exec(self, command, timeout=60):
+                calls.append(command)
+                return ExecResult("", "", 0)
+
+            async def code_run(self, code, env=None, timeout=300):
+                return CodeRunResult("", "", 0)
+
+            async def upload_file(self, content, dest_path):
+                pass
+
+            async def upload_files(self, files):
+                pass
+
+            async def download_file(self, path):
+                return b""
+
+            async def list_files(self, directory):
+                return []
+
+        runtime = StubRuntime()
+        await runtime.ensure_directory("/work/a/b", mode=0o750)
+
+        assert calls == ["mkdir -p /work/a/b && chmod 750 /work/a/b"]
+
+    @pytest.mark.asyncio
     async def test_get_metadata_defaults(self):
         class StubRuntime(SandboxRuntime):
             @property

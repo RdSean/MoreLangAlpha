@@ -432,11 +432,26 @@ class PTCSandbox:
         self.sandbox_id = self.runtime.id
         self._work_dir = root
         await self._runtime_call(
-            self.runtime.exec,
-            f"mkdir -p {shlex.quote(root)}",
+            self.ensure_directories,
+            [root],
             retry_policy=RetryPolicy.SAFE,
         )
         logger.info("Managed textbook sandbox ready", sandbox_id=self.sandbox_id)
+
+    async def ensure_directories(
+        self,
+        directories: list[str],
+        *,
+        mode: int = 0o755,
+    ) -> None:
+        """Create directories through the runtime's ownership-aware primitive."""
+        assert self.runtime is not None
+        await asyncio.gather(
+            *(
+                self.runtime.ensure_directory(directory, mode=mode)
+                for directory in directories
+            )
+        )
 
     async def setup_tools_and_mcp(
         self,
@@ -986,20 +1001,15 @@ class PTCSandbox:
             f"{work_dir}/_internal/src",
         ]
 
-        # Create all directories in parallel for faster setup
-        async def create_directory(directory: str) -> None:
-            try:
-                assert self.runtime is not None
-                await self._runtime_call(
-                    self.runtime.exec,
-                    f"mkdir -p {shlex.quote(directory)}",
-                    retry_policy=RetryPolicy.SAFE,
-                )
-                logger.info(f"Created directory: {directory}")
-            except Exception as e:
-                logger.warning(f"Error creating directory {directory}: {e}")
-
-        await asyncio.gather(*[create_directory(d) for d in directories])
+        try:
+            await self._runtime_call(
+                self.ensure_directories,
+                directories,
+                retry_policy=RetryPolicy.SAFE,
+            )
+            logger.info("Created workspace directories", directories=directories)
+        except Exception as e:
+            logger.warning(f"Error creating workspace directories: {e}")
 
         # Sweep orphaned MCP trace files from a prior/reused session
         # (best-effort). Normal cleanup is per-execution in _collect_mcp_trace;
