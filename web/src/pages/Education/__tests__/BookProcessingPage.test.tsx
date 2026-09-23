@@ -12,6 +12,8 @@ import BookProcessingPage from '../BookProcessingPage';
 
 const state = vi.hoisted(() => ({
   create: vi.fn(),
+  cancel: vi.fn(),
+  cancelPending: false,
   progress: null as Record<string, unknown> | null,
   progressCalls: [] as Array<[string | undefined, boolean]>,
   textbook: {
@@ -51,6 +53,10 @@ vi.mock('../queries', () => ({
     create: {
       mutateAsync: state.create,
       isPending: false,
+    },
+    cancel: {
+      mutateAsync: state.cancel,
+      isPending: state.cancelPending,
     },
   }),
 }));
@@ -95,12 +101,22 @@ async function openDialog() {
 beforeEach(() => {
   state.progress = null;
   state.progressCalls = [];
+  state.cancelPending = false;
   state.create.mockReset().mockResolvedValue({
     generation_job_id: 'job-1',
     version_id: 'version-1',
     scope: 'book_pipeline',
     status: 'queued',
     attempt_count: 0,
+    pause_after_chapter_analysis: false,
+    reused_existing_job: false,
+  });
+  state.cancel.mockReset().mockResolvedValue({
+    generation_job_id: 'job-1',
+    version_id: 'version-1',
+    scope: 'book_pipeline',
+    status: 'running',
+    attempt_count: 1,
     pause_after_chapter_analysis: false,
     reused_existing_job: false,
   });
@@ -196,6 +212,75 @@ describe('BookProcessingPage progress timeline', () => {
     expect(await screen.findByText('内容智能处理')).toBeInTheDocument();
     expect(screen.queryByText('PRIVATE_CHAIN_OF_THOUGHT')).not.toBeInTheDocument();
     expect(screen.queryByText('PRIVATE_TOOL_RESULT')).not.toBeInTheDocument();
+  });
+
+  it('offers cancellation while the job is active', async () => {
+    state.progress = progress;
+    renderPage(
+      '/textbooks/textbook-1/versions/version-1/processing?job=job-from-url',
+    );
+
+    expect(
+      await screen.findByRole('button', { name: '取消处理' }),
+    ).toBeEnabled();
+  });
+
+  it('submits cancellation once and shows the pending state', async () => {
+    state.progress = progress;
+    let resolveCancel: ((value: unknown) => void) | undefined;
+    state.cancel.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCancel = resolve;
+        }),
+    );
+    renderPage(
+      '/textbooks/textbook-1/versions/version-1/processing?job=job-from-url',
+    );
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: '取消处理' }));
+    const dialog = await screen.findByRole('dialog');
+    const confirm = within(dialog).getByRole('button', {
+      name: '确认取消处理',
+    });
+
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(state.cancel).toHaveBeenCalledTimes(1));
+    expect(state.cancel).toHaveBeenCalledWith('job-from-url');
+    expect(confirm).toBeDisabled();
+
+    resolveCancel?.({
+      generation_job_id: 'job-from-url',
+      version_id: 'version-1',
+      scope: 'book_pipeline',
+      status: 'running',
+      attempt_count: 1,
+      pause_after_chapter_analysis: false,
+      reused_existing_job: false,
+    });
+
+    const cancelling = await screen.findByRole('button', {
+      name: '正在取消',
+    });
+    expect(cancelling).toBeDisabled();
+  });
+
+  it('hides cancellation for a terminal job', async () => {
+    state.progress = { ...progress, status: 'completed' };
+    renderPage(
+      '/textbooks/textbook-1/versions/version-1/processing?job=job-from-url',
+    );
+
+    expect(await screen.findByText('教材章节解析')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '取消处理' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '正在取消' }),
+    ).not.toBeInTheDocument();
   });
 });
 

@@ -18,6 +18,7 @@ from src.config.settings import (
 )
 from src.server.database.conversation import create_thread
 from src.server.database.education_textbooks import (
+    cancel_book_pipeline_without_run_for_parent,
     claim_book_pipeline_launch,
     claim_generation_job,
     complete_book_pipeline_import,
@@ -30,6 +31,7 @@ from src.server.database.education_textbooks import (
     resume_book_pipeline_job,
     settle_generation_job,
 )
+from src.server.services.cancel_dispatch import cancel_workflow
 from src.server.database.runs.lifecycle import QuerySpec
 from src.server.database.workspace import create_workspace
 from src.server.services.education_managed_runs import (
@@ -741,6 +743,45 @@ async def get_book_pipeline_job_for_parent(
     if not job or job.get("scope") != "book_pipeline":
         raise TextbookNotFoundError("Textbook processing job not found")
     return _job_projection(job)
+
+
+async def cancel_book_pipeline_for_parent(
+    *,
+    parent_user_id: str,
+    generation_job_id: str,
+) -> dict[str, Any]:
+    """Cancel one parent-owned unified processing job without bypassing finalize."""
+    if not await get_household_context_for_parent(parent_user_id):
+        raise TextbookPermissionError(
+            "Only a parent can cancel textbook processing jobs"
+        )
+
+    for _attempt in range(3):
+        decision = await cancel_book_pipeline_without_run_for_parent(
+            parent_user_id=parent_user_id,
+            generation_job_id=generation_job_id,
+        )
+        if not decision:
+            raise TextbookNotFoundError("Textbook processing job not found")
+        mode = str(decision.get("cancel_mode") or "")
+        if mode in {"terminal", "cancelled"}:
+            return _job_projection(decision)
+        if mode == "retry":
+            continue
+        if mode == "running":
+            thread_id = str(decision.get("managed_thread_id") or "")
+            run_id = str(decision.get("root_run_id") or "")
+            if not thread_id or not run_id:
+                raise TextbookTransitionError(
+                    "Textbook processing run cannot be cancelled"
+                )
+            await cancel_workflow(thread_id, run_id)
+            return _job_projection(decision)
+        raise TextbookTransitionError("Textbook processing job cannot be cancelled")
+
+    raise TextbookTransitionError(
+        "Textbook processing job changed while cancellation was requested"
+    )
 
 
 async def pause_book_pipeline_for_parent(

@@ -959,6 +959,181 @@ async def fail_claimed_book_pipeline_launch(
     return dict(failed) if failed else None
 
 
+async def cancel_book_pipeline_without_run_for_parent(
+    *,
+    parent_user_id: str,
+    generation_job_id: str,
+) -> dict[str, Any] | None:
+    """Resolve cancellation and atomically close a parent-owned pre-run job."""
+    async with get_db_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    """
+                    SELECT jobs.latest_attempt_id
+                    FROM education_generation_jobs AS jobs
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = jobs.version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE jobs.generation_job_id = %s
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                      AND jobs.scope = 'book_pipeline'
+                    """,
+                    (generation_job_id, parent_user_id),
+                )
+                pre_read = await cur.fetchone()
+                if not pre_read:
+                    return None
+                candidate_attempt_id = (
+                    str(pre_read["latest_attempt_id"])
+                    if pre_read.get("latest_attempt_id") is not None
+                    else None
+                )
+
+                attempt: dict[str, Any] | None = None
+                if candidate_attempt_id is not None:
+                    await cur.execute(
+                        """
+                        SELECT attempt_id, status, root_run_id, managed_thread_id
+                        FROM education_generation_attempts
+                        WHERE attempt_id = %s AND generation_job_id = %s
+                        FOR UPDATE
+                        """,
+                        (candidate_attempt_id, generation_job_id),
+                    )
+                    attempt_row = await cur.fetchone()
+                    if attempt_row:
+                        attempt = dict(attempt_row)
+
+                await cur.execute(
+                    """
+                    SELECT jobs.generation_job_id, jobs.version_id,
+                           jobs.scope, jobs.structure_id,
+                           jobs.knowledge_point_id, jobs.status,
+                           jobs.attempt_count, jobs.latest_attempt_id,
+                           jobs.pause_after_chapter_analysis,
+                           jobs.checkpoint_bundle_prefix,
+                           jobs.error_code, jobs.error_message,
+                           jobs.created_at, jobs.updated_at
+                    FROM education_generation_jobs AS jobs
+                    JOIN education_textbook_versions AS versions
+                      ON versions.version_id = jobs.version_id
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.textbook_id = versions.textbook_id
+                    JOIN education_memberships AS memberships
+                      ON memberships.household_id = textbooks.household_id
+                    WHERE jobs.generation_job_id = %s
+                      AND memberships.user_id = %s
+                      AND memberships.role = 'parent'
+                      AND jobs.scope = 'book_pipeline'
+                    FOR UPDATE OF jobs
+                    """,
+                    (generation_job_id, parent_user_id),
+                )
+                job_row = await cur.fetchone()
+                if not job_row:
+                    return None
+                job = dict(job_row)
+                locked_attempt_id = (
+                    str(job["latest_attempt_id"])
+                    if job.get("latest_attempt_id") is not None
+                    else None
+                )
+                if locked_attempt_id != candidate_attempt_id:
+                    return {**job, "cancel_mode": "retry"}
+
+                job["managed_thread_id"] = (
+                    attempt.get("managed_thread_id") if attempt else None
+                )
+                job["root_run_id"] = attempt.get("root_run_id") if attempt else None
+                job["attempt_status"] = attempt.get("status") if attempt else None
+                status = str(job.get("status") or "")
+                if status in {"completed", "failed", "cancelled"}:
+                    return {**job, "cancel_mode": "terminal"}
+
+                if status == "awaiting_review":
+                    await cur.execute(
+                        """
+                        UPDATE education_generation_jobs
+                        SET status = 'cancelled',
+                            error_code = 'managed_book_pipeline_cancelled',
+                            error_message = NULL,
+                            updated_at = NOW()
+                        WHERE generation_job_id = %s
+                          AND status = 'awaiting_review'
+                          AND latest_attempt_id IS NOT DISTINCT FROM %s
+                        RETURNING generation_job_id
+                        """,
+                        (generation_job_id, candidate_attempt_id),
+                    )
+                    if not await cur.fetchone():
+                        return {**job, "cancel_mode": "retry"}
+                    return {
+                        **job,
+                        "status": "cancelled",
+                        "error_code": "managed_book_pipeline_cancelled",
+                        "error_message": None,
+                        "cancel_mode": "cancelled",
+                    }
+
+                if job.get("root_run_id") is not None and job.get("managed_thread_id"):
+                    return {**job, "cancel_mode": "running"}
+
+                if status not in {"queued", "preparing"}:
+                    return {**job, "cancel_mode": "unavailable"}
+                if attempt is not None:
+                    attempt_status = str(attempt.get("status") or "")
+                    if attempt_status == "preparing":
+                        if job.get("root_run_id") is not None:
+                            return {**job, "cancel_mode": "unavailable"}
+                        await cur.execute(
+                            """
+                            UPDATE education_generation_attempts
+                            SET status = 'cancelled',
+                                error_code = 'managed_book_pipeline_cancelled',
+                                error_message = NULL,
+                                completed_at = NOW()
+                            WHERE attempt_id = %s AND generation_job_id = %s
+                              AND status = 'preparing'
+                              AND root_run_id IS NULL
+                            RETURNING attempt_id
+                            """,
+                            (candidate_attempt_id, generation_job_id),
+                        )
+                        if not await cur.fetchone():
+                            return {**job, "cancel_mode": "retry"}
+                    elif attempt_status not in {"worker_lost", "cancelled", "failed"}:
+                        return {**job, "cancel_mode": "unavailable"}
+
+                await cur.execute(
+                    """
+                    UPDATE education_generation_jobs
+                    SET status = 'cancelled',
+                        error_code = 'managed_book_pipeline_cancelled',
+                        error_message = NULL,
+                        updated_at = NOW()
+                    WHERE generation_job_id = %s
+                      AND status IN ('queued', 'preparing')
+                      AND latest_attempt_id IS NOT DISTINCT FROM %s
+                    RETURNING generation_job_id
+                    """,
+                    (generation_job_id, candidate_attempt_id),
+                )
+                if not await cur.fetchone():
+                    return {**job, "cancel_mode": "retry"}
+                return {
+                    **job,
+                    "status": "cancelled",
+                    "error_code": "managed_book_pipeline_cancelled",
+                    "error_message": None,
+                    "cancel_mode": "cancelled",
+                }
+
+
 async def claim_lesson_launch(
     *,
     parent_user_id: str,
@@ -2420,7 +2595,8 @@ async def get_generation_job_for_parent(
                        jobs.processing_brief, jobs.request_id,
                        jobs.processing_profile_sha256, jobs.error_code,
                        jobs.error_message, jobs.created_at, jobs.updated_at,
-                       attempts.root_run_id, attempts.started_at,
+                       attempts.root_run_id, attempts.managed_thread_id,
+                       attempts.started_at,
                        attempts.heartbeat_at,
                        versions.sequence AS content_version_sequence,
                        textbooks.textbook_id, textbooks.household_id,

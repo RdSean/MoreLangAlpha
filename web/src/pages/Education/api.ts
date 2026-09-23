@@ -170,6 +170,15 @@ export async function createBookPipelineJob(
   return data;
 }
 
+export async function cancelBookPipelineJob(
+  jobId: string,
+): Promise<BookPipelineJob> {
+  const { data } = await api.post<BookPipelineJob>(
+    `/api/v1/education/book-pipeline-jobs/${jobId}/cancel`,
+  );
+  return data;
+}
+
 export async function getBookPipelineJobProgress(
   jobId: string,
 ): Promise<BookPipelineProgress> {

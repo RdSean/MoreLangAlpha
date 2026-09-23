@@ -1149,6 +1149,71 @@ async def test_parent_queues_gets_and_resumes_book_pipeline(client):
 
 
 @pytest.mark.asyncio
+async def test_parent_cancels_book_pipeline(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    generation_job_id = uuid4()
+    version_id = uuid4()
+    cancelled = {
+        "generation_job_id": generation_job_id,
+        "version_id": version_id,
+        "scope": "book_pipeline",
+        "structure_id": None,
+        "knowledge_point_id": None,
+        "status": "cancelled",
+        "attempt_count": 1,
+        "pause_after_chapter_analysis": False,
+        "error_code": "managed_book_pipeline_cancelled",
+        "error_message": None,
+        "created_at": None,
+        "updated_at": None,
+        "root_run_id": None,
+        "started_at": None,
+        "heartbeat_at": None,
+        "reused_existing_job": False,
+    }
+    with patch(
+        "src.server.app.education.textbooks.cancel_book_pipeline_for_parent",
+        new=AsyncMock(return_value=cancelled),
+    ) as cancel:
+        response = await client.post(
+            f"/api/v1/education/book-pipeline-jobs/{generation_job_id}/cancel"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    cancel.assert_awaited_once_with(
+        parent_user_id="parent-1",
+        generation_job_id=str(generation_job_id),
+    )
+
+
+@pytest.mark.asyncio
+async def test_parent_cancel_maps_not_found_and_transition_errors(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    generation_job_id = uuid4()
+    with patch(
+        "src.server.app.education.textbooks.cancel_book_pipeline_for_parent",
+        new=AsyncMock(
+            side_effect=[
+                TextbookNotFoundError("Textbook processing job not found"),
+                TextbookTransitionError("Textbook processing job cannot be cancelled"),
+            ]
+        ),
+    ):
+        missing = await client.post(
+            f"/api/v1/education/book-pipeline-jobs/{generation_job_id}/cancel"
+        )
+        conflict = await client.post(
+            f"/api/v1/education/book-pipeline-jobs/{generation_job_id}/cancel"
+        )
+
+    assert missing.status_code == 404
+    assert conflict.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_parent_reads_book_pipeline_four_stage_progress(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-1"

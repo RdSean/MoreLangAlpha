@@ -428,8 +428,7 @@ async def test_write_book_package_bundle_archives_immutable_keys_and_hashes(
     )
 
     expected_prefix = (
-        "education/household/textbook/v2/book-packages/"
-        f"{job['generation_job_id']}"
+        f"education/household/textbook/v2/book-packages/{job['generation_job_id']}"
     )
     assert result["prefix"] == expected_prefix
     assert [key for key, _content in written] == [
@@ -442,8 +441,7 @@ async def test_write_book_package_bundle_archives_immutable_keys_and_hashes(
     ]
     assert result["asset_content_keys"] == {
         asset_path: (
-            f"{expected_prefix}/assets/"
-            "book-skill/chapters/node-1/knowledge.md"
+            f"{expected_prefix}/assets/book-skill/chapters/node-1/knowledge.md"
         )
     }
     for relative_path, content in raw_files.items():
@@ -454,8 +452,7 @@ async def test_write_book_package_bundle_archives_immutable_keys_and_hashes(
         {
             "path": asset_path,
             "content_key": (
-                f"{expected_prefix}/assets/"
-                "book-skill/chapters/node-1/knowledge.md"
+                f"{expected_prefix}/assets/book-skill/chapters/node-1/knowledge.md"
             ),
             "content_sha256": hashlib.sha256(asset_bytes).hexdigest(),
             "size_bytes": len(asset_bytes),
@@ -1829,5 +1826,131 @@ async def test_get_book_pipeline_rejects_another_scope(monkeypatch) -> None:
     with pytest.raises(TextbookNotFoundError):
         await education_book_pipeline_jobs.get_book_pipeline_job_for_parent(
             parent_user_id="parent-1",
+            generation_job_id=_job()["generation_job_id"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_cancel_book_pipeline_returns_terminal_job_idempotently(
+    monkeypatch,
+) -> None:
+    terminal = {
+        **_job(status="completed"),
+        "cancel_mode": "terminal",
+    }
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "cancel_book_pipeline_without_run_for_parent",
+        AsyncMock(return_value=terminal),
+    )
+    cancel_workflow = AsyncMock()
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "cancel_workflow",
+        cancel_workflow,
+    )
+
+    result = await education_book_pipeline_jobs.cancel_book_pipeline_for_parent(
+        parent_user_id="parent-1",
+        generation_job_id=terminal["generation_job_id"],
+    )
+
+    assert result["status"] == "completed"
+    assert "cancel_mode" not in result
+    cancel_workflow.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cancel_book_pipeline_cancels_queued_job_without_run(
+    monkeypatch,
+) -> None:
+    cancelled = {
+        **_job(status="cancelled"),
+        "cancel_mode": "cancelled",
+    }
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "cancel_book_pipeline_without_run_for_parent",
+        AsyncMock(return_value=cancelled),
+    )
+    cancel_workflow = AsyncMock()
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "cancel_workflow",
+        cancel_workflow,
+    )
+
+    result = await education_book_pipeline_jobs.cancel_book_pipeline_for_parent(
+        parent_user_id="parent-1",
+        generation_job_id=cancelled["generation_job_id"],
+    )
+
+    assert result["status"] == "cancelled"
+    cancel_workflow.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cancel_book_pipeline_delegates_running_job_to_workflow_cancel(
+    monkeypatch,
+) -> None:
+    running = {
+        **_job(status="running"),
+        "cancel_mode": "running",
+        "managed_thread_id": "thread-1",
+        "root_run_id": "run-1",
+    }
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "household-1"}),
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "cancel_book_pipeline_without_run_for_parent",
+        AsyncMock(return_value=running),
+    )
+    cancel_workflow = AsyncMock(return_value={"cancelled": True})
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "cancel_workflow",
+        cancel_workflow,
+    )
+
+    result = await education_book_pipeline_jobs.cancel_book_pipeline_for_parent(
+        parent_user_id="parent-1",
+        generation_job_id=running["generation_job_id"],
+    )
+
+    assert result["status"] == "running"
+    assert result["root_run_id"] == "run-1"
+    cancel_workflow.assert_awaited_once_with("thread-1", "run-1")
+
+
+@pytest.mark.asyncio
+async def test_cancel_book_pipeline_rejects_wrong_parent(monkeypatch) -> None:
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "get_household_context_for_parent",
+        AsyncMock(return_value={"household_id": "parent-household"}),
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "cancel_book_pipeline_without_run_for_parent",
+        AsyncMock(return_value=None),
+    )
+
+    with pytest.raises(TextbookNotFoundError):
+        await education_book_pipeline_jobs.cancel_book_pipeline_for_parent(
+            parent_user_id="other-parent",
             generation_job_id=_job()["generation_job_id"],
         )

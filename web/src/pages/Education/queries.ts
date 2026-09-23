@@ -365,6 +365,15 @@ export function useBookPipelineMutations() {
         void invalidate();
       },
     }),
+    cancel: useMutation({
+      mutationFn: educationApi.cancelBookPipelineJob,
+      onSuccess: (_job, jobId) => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.education.bookPipelineJobProgress(jobId),
+        });
+        void invalidate();
+      },
+    }),
   };
 }
 

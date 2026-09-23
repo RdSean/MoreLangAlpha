@@ -51,6 +51,14 @@
   font-size: 0.875rem;
 }
 
+.book-processing-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .book-processing-progress,
 .book-processing-empty {
   margin-top: 28px;

@@ -14,7 +14,9 @@ from psycopg.rows import dict_row
 import pytest
 
 from migrations import textbook_ddl
+from src.server.database.conversation import create_thread
 from src.server.database import education_textbooks
+from src.server.database.workspace import create_workspace
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -201,9 +203,7 @@ async def test_078_schema_uniqueness_and_fail_closed_downgrade(
                     sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema_name))
                 )
                 await cur.execute(
-                    sql.SQL("SET search_path TO {}").format(
-                        sql.Identifier(schema_name)
-                    )
+                    sql.SQL("SET search_path TO {}").format(sql.Identifier(schema_name))
                 )
                 await cur.execute(
                     """
@@ -1321,3 +1321,213 @@ async def test_pause_uses_attempt_first_lock_order(
                 )
             )
         await setup_conn.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_book_pipeline_queued_is_atomic_and_parent_scoped(
+    cleanup_tables,
+    db_conn,
+    test_db_uri: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_user_id, version_id = await _seed_book_pipeline_parent(db_conn)
+    other_parent_user_id, _other_version_id = await _seed_book_pipeline_parent(db_conn)
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_db_connection",
+        _test_connection(test_db_uri),
+    )
+
+    queued = await education_textbooks.queue_book_pipeline_job(
+        parent_user_id=parent_user_id,
+        content_version_id=str(version_id),
+        processing_profile_sha256="a" * 64,
+    )
+    assert queued is not None
+    generation_job_id = str(queued["generation_job_id"])
+
+    assert (
+        await education_textbooks.cancel_book_pipeline_without_run_for_parent(
+            parent_user_id=other_parent_user_id,
+            generation_job_id=generation_job_id,
+        )
+        is None
+    )
+    cancelled = await education_textbooks.cancel_book_pipeline_without_run_for_parent(
+        parent_user_id=parent_user_id,
+        generation_job_id=generation_job_id,
+    )
+    assert cancelled is not None
+    assert cancelled["cancel_mode"] == "cancelled"
+    assert cancelled["status"] == "cancelled"
+
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT status, latest_attempt_id
+            FROM education_generation_jobs
+            WHERE generation_job_id = %s
+            """,
+            (generation_job_id,),
+        )
+        assert await cur.fetchone() == {
+            "status": "cancelled",
+            "latest_attempt_id": None,
+        }
+
+
+@pytest.mark.asyncio
+async def test_cancel_book_pipeline_preparing_closes_attempt(
+    cleanup_tables,
+    db_conn,
+    test_db_uri: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_user_id, version_id = await _seed_book_pipeline_parent(db_conn)
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_db_connection",
+        _test_connection(test_db_uri),
+    )
+
+    queued = await education_textbooks.queue_book_pipeline_job(
+        parent_user_id=parent_user_id,
+        content_version_id=str(version_id),
+        processing_profile_sha256="a" * 64,
+    )
+    assert queued is not None
+    generation_job_id = str(queued["generation_job_id"])
+    claimed = await education_textbooks.claim_book_pipeline_launch(
+        parent_user_id=parent_user_id,
+        generation_job_id=generation_job_id,
+    )
+    assert claimed is not None
+    workspace = await create_workspace(
+        user_id=parent_user_id,
+        name=f"Cancel workspace {uuid4()}",
+        status="running",
+        conn=db_conn,
+    )
+    thread = await create_thread(
+        conversation_thread_id=str(uuid4()),
+        workspace_id=str(workspace["workspace_id"]),
+        current_status="completed",
+        msg_type="ptc",
+        conn=db_conn,
+    )
+    attempt = await education_textbooks.claim_generation_job(
+        generation_job_id=generation_job_id,
+        managed_workspace_id=str(workspace["workspace_id"]),
+        managed_thread_id=str(thread["conversation_thread_id"]),
+        expected_job_status="preparing",
+    )
+    assert attempt is not None
+    attempt_id = str(attempt["attempt_id"])
+
+    cancelled = await education_textbooks.cancel_book_pipeline_without_run_for_parent(
+        parent_user_id=parent_user_id,
+        generation_job_id=generation_job_id,
+    )
+    assert cancelled is not None
+    assert cancelled["cancel_mode"] == "cancelled"
+    assert cancelled["status"] == "cancelled"
+
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT status, completed_at
+            FROM education_generation_attempts
+            WHERE attempt_id = %s AND generation_job_id = %s
+            """,
+            (attempt_id, generation_job_id),
+        )
+        attempt_state = await cur.fetchone()
+    assert attempt_state is not None
+    assert attempt_state["status"] == "cancelled"
+    assert attempt_state["completed_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_cancel_book_pipeline_running_delegates_without_terminal_write(
+    cleanup_tables,
+    db_conn,
+    test_db_uri: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_user_id, version_id = await _seed_book_pipeline_parent(db_conn)
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_db_connection",
+        _test_connection(test_db_uri),
+    )
+
+    queued = await education_textbooks.queue_book_pipeline_job(
+        parent_user_id=parent_user_id,
+        content_version_id=str(version_id),
+        processing_profile_sha256="a" * 64,
+    )
+    assert queued is not None
+    generation_job_id = str(queued["generation_job_id"])
+    await education_textbooks.claim_book_pipeline_launch(
+        parent_user_id=parent_user_id,
+        generation_job_id=generation_job_id,
+    )
+    workspace = await create_workspace(
+        user_id=parent_user_id,
+        name=f"Running workspace {uuid4()}",
+        status="running",
+        conn=db_conn,
+    )
+    thread = await create_thread(
+        conversation_thread_id=str(uuid4()),
+        workspace_id=str(workspace["workspace_id"]),
+        current_status="completed",
+        msg_type="ptc",
+        conn=db_conn,
+    )
+    thread_id = str(thread["conversation_thread_id"])
+    attempt = await education_textbooks.claim_generation_job(
+        generation_job_id=generation_job_id,
+        managed_workspace_id=str(workspace["workspace_id"]),
+        managed_thread_id=thread_id,
+        expected_job_status="preparing",
+    )
+    assert attempt is not None
+    run_id = str(uuid4())
+    async with db_conn.transaction():
+        async with db_conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO conversation_responses (
+                    conversation_response_id, conversation_thread_id,
+                    turn_index, status, created_at
+                ) VALUES (%s, %s, 0, 'in_progress', NOW())
+                """,
+                (run_id, thread_id),
+            )
+    running = await education_textbooks.mark_generation_attempt_running(
+        generation_job_id=generation_job_id,
+        attempt_id=str(attempt["attempt_id"]),
+        root_run_id=run_id,
+    )
+    assert running is not None
+
+    decision = await education_textbooks.cancel_book_pipeline_without_run_for_parent(
+        parent_user_id=parent_user_id,
+        generation_job_id=generation_job_id,
+    )
+    assert decision is not None
+    assert decision["cancel_mode"] == "running"
+    assert str(decision["managed_thread_id"]) == thread_id
+    assert str(decision["root_run_id"]) == run_id
+
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT status
+            FROM education_generation_jobs
+            WHERE generation_job_id = %s
+            """,
+            (generation_job_id,),
+        )
+        assert (await cur.fetchone())["status"] == "running"

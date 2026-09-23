@@ -3,7 +3,7 @@ import { act, waitFor } from '@testing-library/react';
 import { createTestQueryClient, renderHookWithProviders } from '@/test/utils';
 import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from '../api';
-import { useBookPipelineProgress, useCompletedParseJobs, useEducationTaskCalendar, useEducationTaskDetail, useTextbookMutations } from '../queries';
+import { useBookPipelineMutations, useBookPipelineProgress, useCompletedParseJobs, useEducationTaskCalendar, useEducationTaskDetail, useTextbookMutations } from '../queries';
 
 vi.mock('../api', () => ({
   getEducationTaskCalendar: vi.fn(),
@@ -15,6 +15,7 @@ vi.mock('../api', () => ({
   runTextbookProcessing: vi.fn(),
   retryTextbookProcessing: vi.fn(),
   assignTextbookPublication: vi.fn(),
+  cancelBookPipelineJob: vi.fn(),
   getBookPipelineJobProgress: vi.fn(),
 }));
 
@@ -23,6 +24,7 @@ const getEducationTaskDetail = educationApi.getEducationTaskDetail as unknown as
 const listCompletedParseJobs = educationApi.listCompletedParseJobs as unknown as ReturnType<typeof vi.fn>;
 const startTextbookProcessingFromParseJobs = educationApi.startTextbookProcessingFromParseJobs as unknown as ReturnType<typeof vi.fn>;
 const getBookPipelineJobProgress = educationApi.getBookPipelineJobProgress as unknown as ReturnType<typeof vi.fn>;
+const cancelBookPipelineJob = educationApi.cancelBookPipelineJob as unknown as ReturnType<typeof vi.fn>;
 
 describe('education queries', () => {
   beforeEach(() => {
@@ -30,6 +32,7 @@ describe('education queries', () => {
     getEducationTaskDetail.mockReset();
     listCompletedParseJobs.mockReset();
     startTextbookProcessingFromParseJobs.mockReset();
+    cancelBookPipelineJob.mockReset();
     getBookPipelineJobProgress.mockReset();
   });
 
@@ -163,5 +166,35 @@ describe('education queries', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('cancels a book-pipeline job and invalidates its progress', async () => {
+    cancelBookPipelineJob.mockResolvedValue({
+      generation_job_id: 'job-1',
+      version_id: 'version-1',
+      scope: 'book_pipeline',
+      status: 'running',
+      attempt_count: 1,
+      pause_after_chapter_analysis: false,
+      reused_existing_job: false,
+    });
+    const queryClient = createTestQueryClient();
+    const invalidate = vi
+      .spyOn(queryClient, 'invalidateQueries')
+      .mockResolvedValue(undefined);
+    const { result } = renderHookWithProviders(
+      () => useBookPipelineMutations(),
+      { queryClient },
+    );
+
+    await result.current.cancel.mutateAsync('job-1');
+
+    expect(cancelBookPipelineJob).toHaveBeenCalledWith(
+      'job-1',
+      expect.anything(),
+    );
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.education.bookPipelineJobProgress('job-1'),
+    });
   });
 });

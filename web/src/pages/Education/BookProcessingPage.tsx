@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
@@ -6,6 +6,7 @@ import {
   Circle,
   Loader2,
   WandSparkles,
+  XCircle,
 } from 'lucide-react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -103,22 +104,50 @@ export default function BookProcessingPage() {
   const [open, setOpen] = useState(false);
   const [processingBrief, setProcessingBrief] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelRequested, setCancelRequested] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [job, setJob] = useState<BookPipelineJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const submitLock = useRef(false);
+  const cancelLock = useRef(false);
   const version = textbook.data?.versions.find(
     (candidate) => candidate.version_id === versionId,
   );
-  const pending = submitting || pipeline.create.isPending;
   const jobId = searchParams.get('job') ?? undefined;
   const progress = useBookPipelineProgress(jobId, Boolean(jobId));
   const jobStatus = progress.data?.status ?? job?.status;
+  const cancellationPending = cancelling || pipeline.cancel.isPending;
+  const pending =
+    submitting ||
+    pipeline.create.isPending ||
+    cancellationPending ||
+    cancelRequested;
+  const cancellationAvailable = Boolean(
+    jobId &&
+      jobStatus &&
+      [
+        'queued',
+        'preparing',
+        'running',
+        'validating',
+        'awaiting_review',
+      ].includes(jobStatus),
+  );
   const progressIsActive =
     progress.isPending ||
     jobStatus === 'queued' ||
     jobStatus === 'preparing' ||
     jobStatus === 'running' ||
     jobStatus === 'validating';
+
+  useEffect(() => {
+    setCancelOpen(false);
+    setCancelling(false);
+    setCancelRequested(false);
+    setCancelError(null);
+  }, [jobId]);
 
   const submit = async () => {
     if (submitLock.current || pending || !versionId) return;
@@ -153,6 +182,34 @@ export default function BookProcessingPage() {
     }
   };
 
+  const cancel = async () => {
+    if (
+      cancelLock.current ||
+      cancellationPending ||
+      cancelRequested ||
+      !jobId
+    ) {
+      return;
+    }
+    cancelLock.current = true;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await pipeline.cancel.mutateAsync(jobId);
+      setCancelRequested(true);
+      setCancelOpen(false);
+      toast({
+        title: '正在取消教材处理',
+        description: '取消请求已提交，系统会在安全边界停止任务。',
+      });
+    } catch (cancelFailure) {
+      setCancelError(messageOf(cancelFailure, '请稍后重试。'));
+    } finally {
+      cancelLock.current = false;
+      setCancelling(false);
+    }
+  };
+
   return (
     <main className="book-processing-page" data-testid="book-processing-page">
       <div className="book-processing-shell">
@@ -172,62 +229,131 @@ export default function BookProcessingPage() {
                 {version ? `版本 v${version.sequence}` : '等待读取教材版本'}
               </p>
             </div>
-            <Dialog
-              open={open}
-              onOpenChange={(nextOpen) => {
-                if (!pending) setOpen(nextOpen);
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button disabled={pending}>
-                  <WandSparkles className="mr-2 size-4" aria-hidden="true" />
-                  开始处理
-                </Button>
-              </DialogTrigger>
-              <DialogContent variant="centered" className="max-w-xl">
-                <DialogHeader>
-                  <DialogTitle>开始教材处理</DialogTitle>
-                </DialogHeader>
-                <div className="grid gap-4">
-                  <label
-                    htmlFor="book-processing-brief"
-                    className="grid gap-1.5 text-sm font-medium"
-                  >
-                    补充要求（可选）
-                    <Textarea
-                      id="book-processing-brief"
-                      value={processingBrief}
-                      onChange={(event) =>
-                        setProcessingBrief(event.target.value)
-                      }
-                      maxLength={4_000}
-                      placeholder={processingBriefPlaceholder}
-                      disabled={pending}
-                      className="min-h-32"
-                    />
-                  </label>
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    可说明教材语言、学科、包含或排除规则及特殊结构，不会改变系统处理契约。
-                  </p>
-                  {error && (
-                    <p role="alert" className="text-sm text-destructive">
-                      {error}
-                    </p>
-                  )}
-                  <DialogFooter>
-                    <Button onClick={() => void submit()} disabled={pending}>
-                      {pending && (
+            <div className="book-processing-actions">
+              {cancellationAvailable && (
+                <Dialog
+                  open={cancelOpen}
+                  onOpenChange={(nextOpen) => {
+                    if (!cancellationPending) setCancelOpen(nextOpen);
+                  }}
+                >
+                  <DialogTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={cancellationPending || cancelRequested}
+                    >
+                      {cancellationPending || cancelRequested ? (
                         <Loader2
                           className="mr-2 size-4 animate-spin"
                           aria-hidden="true"
                         />
+                      ) : (
+                        <XCircle className="mr-2 size-4" aria-hidden="true" />
                       )}
-                      {pending ? '正在创建' : '开始处理'}
+                      {cancellationPending || cancelRequested
+                        ? '正在取消'
+                        : '取消处理'}
                     </Button>
-                  </DialogFooter>
-                </div>
-              </DialogContent>
-            </Dialog>
+                  </DialogTrigger>
+                  <DialogContent variant="centered" className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>取消教材处理</DialogTitle>
+                    </DialogHeader>
+                    <div className="grid gap-4">
+                      <p className="text-sm leading-6 text-muted-foreground">
+                        取消后本次处理不会导入未完成结果，之后可以重新开始。
+                      </p>
+                      {cancelError && (
+                        <p role="alert" className="text-sm text-destructive">
+                          {cancelError}
+                        </p>
+                      )}
+                      <DialogFooter>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={cancellationPending}
+                          onClick={() => setCancelOpen(false)}
+                        >
+                          继续处理
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          disabled={cancellationPending || cancelRequested}
+                          onClick={() => void cancel()}
+                        >
+                          {cancellationPending ? (
+                            <Loader2
+                              className="mr-2 size-4 animate-spin"
+                              aria-hidden="true"
+                            />
+                          ) : null}
+                          {cancellationPending ? '正在取消' : '确认取消处理'}
+                        </Button>
+                      </DialogFooter>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              )}
+              <Dialog
+                open={open}
+                onOpenChange={(nextOpen) => {
+                  if (!pending) setOpen(nextOpen);
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button disabled={pending}>
+                    <WandSparkles className="mr-2 size-4" aria-hidden="true" />
+                    开始处理
+                  </Button>
+                </DialogTrigger>
+                <DialogContent variant="centered" className="max-w-xl">
+                  <DialogHeader>
+                    <DialogTitle>开始教材处理</DialogTitle>
+                  </DialogHeader>
+                  <div className="grid gap-4">
+                    <label
+                      htmlFor="book-processing-brief"
+                      className="grid gap-1.5 text-sm font-medium"
+                    >
+                      补充要求（可选）
+                      <Textarea
+                        id="book-processing-brief"
+                        value={processingBrief}
+                        onChange={(event) =>
+                          setProcessingBrief(event.target.value)
+                        }
+                        maxLength={4_000}
+                        placeholder={processingBriefPlaceholder}
+                        disabled={pending}
+                        className="min-h-32"
+                      />
+                    </label>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      可说明教材语言、学科、包含或排除规则及特殊结构，不会改变系统处理契约。
+                    </p>
+                    {error && (
+                      <p role="alert" className="text-sm text-destructive">
+                        {error}
+                      </p>
+                    )}
+                    <DialogFooter>
+                      <Button onClick={() => void submit()} disabled={pending}>
+                        {pending && (
+                          <Loader2
+                            className="mr-2 size-4 animate-spin"
+                            aria-hidden="true"
+                          />
+                        )}
+                        {pending ? '正在创建' : '开始处理'}
+                      </Button>
+                    </DialogFooter>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
         </header>
 

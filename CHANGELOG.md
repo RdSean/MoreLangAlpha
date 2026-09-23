@@ -2,6 +2,13 @@
 
 ## 2026-09-23
 
+### 新增：取消运行中的教材处理任务
+
+- 新增 `POST /api/v1/education/book-pipeline-jobs/{job_id}/cancel`。终态任务幂等返回当前投影；`queued`、`preparing` 和 `awaiting_review` 在无 root run 时由 PostgreSQL 事务原子取消 job 和正在准备的 attempt；`running`、`validating` 统一委托既有 `cancel_workflow(thread_id, run_id)`，终态仍由原 finalizer 收口。
+- 取消事务按 attempt-first 顺序加锁，并在事务内重新校验 parent membership、latest attempt 和 root run，避免与 launch、结算路径产生越权、锁顺序反转或前端重复提交。
+- 教材处理页在活动任务上显示“取消处理”和确认弹窗；提交期间冻结按钮，成功后显示“正在取消”，任务进入终态后隐藏取消入口。
+- 验证：service/API 聚焦 `73 passed`，真实 PostgreSQL 取消 ACL、queued、preparing、running delegation `11 passed`，Education Vitest、`pnpm typecheck`、`pnpm build`、Ruff 与 `git diff --check` 通过。
+
 ### 修复：managed 进度 helper 无法首次写入
 
 - staging `book-to-skill` 时预创建空的 `.langalpha/progress.jsonl`。该文件按容器用户 uid/gid 落盘，后续 helper 可以直接 append，不再因 root-owned `.langalpha` 目录而触发 `PermissionError`。

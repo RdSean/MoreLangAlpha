@@ -81,6 +81,7 @@ from src.server.services.education_book_asset_jobs import (
     queue_book_assets_for_parent,
 )
 from src.server.services.education_book_pipeline_jobs import (
+    cancel_book_pipeline_for_parent,
     get_book_pipeline_job_for_parent,
     queue_and_launch_book_pipeline_for_parent,
     resume_book_pipeline_for_parent,
@@ -214,6 +215,23 @@ async def get_family_book_pipeline_job(
 ):
     try:
         return await get_book_pipeline_job_for_parent(
+            parent_user_id=user_id,
+            generation_job_id=str(generation_job_id),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/book-pipeline-jobs/{generation_job_id}/cancel",
+    response_model=BookPipelineJobResponse,
+)
+async def cancel_family_book_pipeline_job(
+    generation_job_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await cancel_book_pipeline_for_parent(
             parent_user_id=user_id,
             generation_job_id=str(generation_job_id),
         )
