@@ -6,6 +6,7 @@
 
 - textbook library/detail projection 现在优先读取最新 `education_generation_jobs(scope='book_pipeline')`，不再只关联旧的 `education_processing_jobs`；因此离开加工页再进入教材时，失败、运行中、待审阅和已完成 job 的 ID、状态与错误信息不会丢失。
 - 教材列表使用最新 pipeline job 状态显示“加工中 / 加工失败 / 待审阅 / 已取消”；教材详情显示“查看处理状态”，并携带 `?job=<generation_job_id>` 返回原有处理进度页。legacy processing job 继续保留兼容。
+- progress API 现在返回 job 的 `error_code/error_message`；处理页将四个阶段完成与最终 job 失败分开显示，失败时明确显示“处理失败”及最终校验错误，不再用“处理任务已创建”掩盖终态失败。
 - 验证：数据库/API 服务单元 `57 passed`，真实 PostgreSQL `test_book_pipeline_jobs_db.py` `12 passed`，Education Vitest `89 passed`，`pnpm typecheck` 通过。
 
 ### 修复：education jobs 使用 compact replay stream

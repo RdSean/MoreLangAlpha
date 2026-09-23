@@ -658,6 +658,8 @@ class BookPipelineProgressStageResponse(BaseModel):
 class BookPipelineProgressResponse(BaseModel):
     job_id: UUID
     status: str
+    error_code: str | None = None
+    error_message: str | None = None
     stages: list[BookPipelineProgressStageResponse]
     last_sequence: int = 0
     truncated: bool = False

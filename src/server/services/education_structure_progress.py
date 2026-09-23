@@ -471,6 +471,8 @@ def build_book_pipeline_progress(
     return {
         "job_id": job.get("generation_job_id"),
         "status": job_status,
+        "error_code": job.get("error_code"),
+        "error_message": job.get("error_message"),
         "stages": stages,
         "last_sequence": last_sequence or 0,
         "truncated": truncated,

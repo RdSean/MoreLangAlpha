@@ -658,6 +658,8 @@ export interface BookPipelineProgressStage {
 export interface BookPipelineProgress {
   job_id: string;
   status: BookPipelineJobStatus;
+  error_code?: string | null;
+  error_message?: string | null;
   stages: BookPipelineProgressStage[];
   last_sequence: number;
   truncated: boolean;

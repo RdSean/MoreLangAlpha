@@ -282,6 +282,26 @@ describe('BookProcessingPage progress timeline', () => {
       screen.queryByRole('button', { name: '正在取消' }),
     ).not.toBeInTheDocument();
   });
+
+  it('shows the terminal job failure separately from completed stages', async () => {
+    state.progress = {
+      ...progress,
+      status: 'failed',
+      error_code: 'managed_book_pipeline_invalid',
+      error_message: '教材智能处理结果不完整、格式无效或资产校验失败，请重新运行。',
+    };
+    renderPage(
+      '/textbooks/textbook-1/versions/version-1/processing?job=job-from-url',
+    );
+
+    expect(await screen.findByText('处理失败')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        '教材智能处理结果不完整、格式无效或资产校验失败，请重新运行。',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('已完成')).toBeInTheDocument();
+  });
 });
 
 describe('BookProcessingPage processing brief', () => {
@@ -346,7 +366,7 @@ describe('BookProcessingPage processing brief', () => {
       reused_existing_job: false,
     });
 
-    expect(await screen.findByText('处理任务已创建')).toBeInTheDocument();
+    expect(await screen.findByText('正在处理')).toBeInTheDocument();
     await userEvent
       .setup()
       .click(screen.getByRole('button', { name: '开始处理' }));

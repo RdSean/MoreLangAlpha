@@ -178,6 +178,22 @@ def test_book_pipeline_projection_ignores_parser_rejected_completed_events():
     ]
 
 
+def test_book_pipeline_projection_exposes_terminal_error():
+    projected = education_structure_progress.build_book_pipeline_progress(
+        job={
+            "generation_job_id": "job-1",
+            "status": "failed",
+            "error_code": "managed_book_pipeline_invalid",
+            "error_message": "教材智能处理结果不完整、格式无效或资产校验失败，请重新运行。",
+        },
+        events=[],
+    )
+
+    assert projected["status"] == "failed"
+    assert projected["error_code"] == "managed_book_pipeline_invalid"
+    assert "资产校验失败" in projected["error_message"]
+
+
 def test_caps_projected_events_and_flags_truncation():
     events = [
         _call(f"c{index}", "Read", {"file_path": f"inputs/sources/{index}.md"})

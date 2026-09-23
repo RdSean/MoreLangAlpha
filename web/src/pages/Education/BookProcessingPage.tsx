@@ -141,6 +141,31 @@ export default function BookProcessingPage() {
     jobStatus === 'preparing' ||
     jobStatus === 'running' ||
     jobStatus === 'validating';
+  const progressHeading =
+    jobStatus === 'failed'
+      ? '处理失败'
+      : jobStatus === 'cancelled'
+        ? '处理已取消'
+        : jobStatus === 'awaiting_review'
+          ? '等待知识点确认'
+          : jobStatus === 'completed'
+            ? '处理已完成'
+            : jobStatus === 'queued' ||
+                jobStatus === 'preparing' ||
+                jobStatus === 'running' ||
+                jobStatus === 'validating'
+              ? '正在处理'
+              : '处理任务已创建';
+  const progressDescription =
+    jobStatus === 'failed'
+      ? '任务未通过最终校验，下面保留已完成的阶段供排查。'
+      : jobStatus === 'cancelled'
+        ? '任务已取消，未完成结果不会被导入。'
+        : jobStatus === 'awaiting_review'
+          ? '处理结果已保存，等待确认知识点候选。'
+          : jobStatus === 'completed'
+            ? '教材处理已完成。'
+            : '任务已进入处理队列。';
 
   useEffect(() => {
     setCancelOpen(false);
@@ -306,7 +331,9 @@ export default function BookProcessingPage() {
                 <DialogTrigger asChild>
                   <Button disabled={pending}>
                     <WandSparkles className="mr-2 size-4" aria-hidden="true" />
-                    开始处理
+                    {jobStatus === 'failed' || jobStatus === 'cancelled'
+                      ? '重新处理'
+                      : '开始处理'}
                   </Button>
                 </DialogTrigger>
                 <DialogContent variant="centered" className="max-w-xl">
@@ -380,15 +407,16 @@ export default function BookProcessingPage() {
                 )}
               </span>
               <div className="book-processing-progress-copy">
-                <h2>处理任务已创建</h2>
-                <p>
-                  {job?.reused_existing_job
-                    ? '已复用同一教材正在进行的处理任务。'
-                    : '任务已进入处理队列。'}
-                </p>
+                <h2>{progressHeading}</h2>
+                <p>{progressDescription}</p>
                 <p className="book-processing-job-id">任务编号 {jobId}</p>
               </div>
             </div>
+            {jobStatus === 'failed' && progress.data?.error_message && (
+              <p className="book-processing-progress-error" role="alert">
+                {progress.data.error_message}
+              </p>
+            )}
             {progress.isError && (
               <p className="book-processing-progress-error" role="alert">
                 暂时无法读取处理进度。
