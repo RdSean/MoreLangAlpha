@@ -95,6 +95,13 @@ def test_managed_structure_prompt_uses_one_output_and_forbids_forced_points() ->
     assert "reference/langalpha-managed.md" in prompt
     assert "非教学" in prompt
     assert "不得为了满足数量" in prompt
+    assert "Read/Glob/Grep" in prompt
+    assert "Write/Edit" in prompt and "work/ 和 outputs/" in prompt
+    assert "普通 sandbox Bash" in prompt
+    assert "ExecuteCode" in prompt
+    assert "Web" in prompt
+    assert "Preview/Widget" in prompt
+    assert "MCP/Vault" in prompt and "disabled" in prompt
 
 
 def test_managed_structure_prompt_requests_reading_level_line_ranges() -> None:
@@ -144,8 +151,10 @@ def test_managed_book_pipeline_prompt_declares_full_managed_contract() -> None:
     assert "每个来源" in prompt
     assert "冻结 source" in prompt
     assert "不得询问用户" in prompt
-    assert "不得访问网络" in prompt
-    assert "不得使用 MCP" in prompt
+    assert "Web：允许" in prompt
+    assert "MCP/Vault：disabled" in prompt
+    assert "probe/diagnostic" in prompt
+    assert "checkpoint_review" in prompt
     assert "不得写入" in prompt and "根目录" in prompt
 
 

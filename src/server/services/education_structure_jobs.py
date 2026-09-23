@@ -74,6 +74,11 @@ logger = logging.getLogger(__name__)
 _MANAGED_KIND = "education_structure"
 _HEARTBEAT_INTERVAL_SECONDS = 15.0
 _CHECKPOINT_STOP_TIMEOUT_SECONDS = 10.0
+_MANAGED_CAPABILITY_MATRIX = (
+    "工具权限矩阵：Read/Glob/Grep：只读检查；Write/Edit：仅限 work/ 和 outputs/；"
+    "普通 sandbox Bash：允许，工作目录固定为 managed root；ExecuteCode：允许；"
+    "Web：允许；Preview/Widget：允许；MCP/Vault：disabled。"
+)
 
 
 def _primary_source(frozen_input: Mapping[str, Any]) -> tuple[str, str]:
@@ -116,7 +121,8 @@ def managed_structure_prompt(
         "不要计算 position、slug、字符偏移、PDF 页码或坐标；这些由服务端根据行号区间推导。"
         f"只写 {root}/outputs/structure.json，输出格式必须是 "
         "langalpha-managed-textbook-structure/v2。不要生成课程、练习或教学包。"
-        "不要访问网络、MCP、Vault、普通工作区或发布任何资产。"
+        + _MANAGED_CAPABILITY_MATRIX
+        + "不要访问普通工作区或发布任何资产。"
         + ("\n\n" + processing_profile_prompt(profile) if profile else "")
     )
 
@@ -176,7 +182,11 @@ def managed_book_pipeline_prompt(
         "不得先启动后续阶段再补写章节完成事件。"
         "progress 不得写入思维链、prompt、原始工具参数或结果、凭据、"
         "完整 sandbox 路径或原始教材段落。"
-        "不得询问用户，不得访问网络，不得使用 MCP 或 Vault，不得访问普通 workspace，"
+        + _MANAGED_CAPABILITY_MATRIX
+        + "progress event_key 必须使用 "
+        "`<stage>:<substage-or-status>:<safe-id>`，禁止 probe/diagnostic/test/debug；"
+        "skipped 仅允许 checkpoint_review。"
+        "不得询问用户，不得访问普通 workspace，"
         "不得写入 managed job 根目录之外，也不得发布资产。"
     )
     profile_prompt = processing_profile_prompt(profile)
@@ -240,7 +250,12 @@ def managed_book_pipeline_continuation_prompt(
         "知识点保持待人工审核，绝不能自动接受。继续遵守来源范围、路径安全、"
         "静默非交互执行和进度安全契约。progress.jsonl 只允许 append，不得重写；"
         "不得泄漏思维链、prompt、原始工具参数或结果、凭据、完整 sandbox 路径"
-        "或原始教材段落。不得访问网络、MCP、Vault、普通 workspace，"
+        "或原始教材段落。"
+        + _MANAGED_CAPABILITY_MATRIX
+        + "progress event_key 必须使用 "
+        "`<stage>:<substage-or-status>:<safe-id>`，禁止 probe/diagnostic/test/debug；"
+        "skipped 仅允许 checkpoint_review。"
+        "不得访问普通 workspace，"
         "不得写入 managed job 根目录之外。"
     )
     profile_prompt = processing_profile_prompt(profile)

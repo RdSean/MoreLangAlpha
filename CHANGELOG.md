@@ -2,6 +2,14 @@
 
 ## 2026-09-23
 
+### 文档：同步 managed textbook 工具与写区契约
+
+- managed overlay 与 analyze/full/continuation prompt 明确列出 Read/Glob/Grep、Write/Edit、普通 sandbox Bash、ExecuteCode、Web、Preview/Widget 的可用范围；MCP/Vault 保持 disabled。
+- 写入说明改为 `work/` 与 `outputs/` 区域边界，声明 package schema、精确文件名、extension 与 manifest membership 由导入/finalization 校验；禁止直接 Write/Edit progress stream。
+- progress 文档补充稳定 event-key、`probe/diagnostic/test/debug` 禁止、`checkpoint_review` skip 及三个必选完成阶段。
+- 真实 Docker smoke 验证普通 `ls`/`wc`/`head`/`grep`、嵌套 outputs、progress helper append、`inputs/` 只读和 managed root 内真实路径。
+- 验证：文档/UAT 单测 `23 passed`，Docker provider 集成 `26 passed`，unified progress integration `2 passed`；Education Vitest `87 passed`，`pnpm typecheck` 与 `pnpm build`（critical path `355.9 kB gz`）通过。
+
 ### 修复：拒绝诊断进度并校验完整流水线完成阶段
 
 - `event_key` 现在要求稳定分段格式，并拒绝 `probe:*`、`diagnostic:*`、`test:*`、`debug:*`；服务端 parser、staged helper 和四阶段 projection 使用同一规则，历史污染事件也不会进入时间线。

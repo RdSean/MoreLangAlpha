@@ -7,6 +7,7 @@ Run: SANDBOX_TEST_PROVIDER=docker uv run pytest tests/integration/sandbox/test_d
 from __future__ import annotations
 
 import os
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -14,6 +15,7 @@ import pytest_asyncio
 from ptc_agent.config.core import DockerConfig
 from ptc_agent.core.sandbox.providers.docker import DockerProvider, DockerRuntime
 from ptc_agent.core.sandbox.runtime import RuntimeState
+from src.server.services.education_teaching_storage import progress_helper_source
 
 pytestmark = [
     pytest.mark.asyncio(loop_scope="class"),
@@ -116,6 +118,57 @@ class TestTarMode:
         assert before.stdout == after.stdout
         assert owner.exit_code == 0
         await runtime.exec(f"rm -rf {upload_root}")
+
+    async def test_managed_textbook_smoke_commands_and_progress(
+        self, runtime: DockerRuntime
+    ):
+        root = f"/managed/textbook-job/{uuid4()}"
+        for directory in (
+            f"{root}/work",
+            f"{root}/outputs/book-skill/chapters/unit-1",
+            f"{root}/.langalpha",
+        ):
+            await runtime.ensure_directory(directory)
+        await runtime.ensure_directory(f"{root}/inputs", mode=0o555)
+        await runtime.upload_file(b"# Frozen source\n", f"{root}/inputs/source.md")
+        await runtime.ensure_directory(f"{root}/inputs", mode=0o555)
+        await runtime.upload_file(
+            progress_helper_source(),
+            f"{root}/.langalpha/progress.py",
+        )
+        await runtime.upload_file(b"", f"{root}/.langalpha/progress.jsonl")
+
+        event = (
+            '{"event_key":"chapter_analysis:completed:smoke",'
+            '"stage":"chapter_analysis","status":"completed"}'
+        )
+        result = await runtime.exec(
+            f"cd {root} && "
+            "mkdir -p outputs/book-skill/chapters/unit-1 && "
+            "printf 'scratch\\n' > work/scratch.txt && "
+            "printf '# Reading A\\n' > "
+            "outputs/book-skill/chapters/unit-1/reading-a.md && "
+            f"python3 .langalpha/progress.py '{event}' && "
+            "ls outputs/book-skill/chapters/unit-1 && "
+            "wc -c work/scratch.txt && "
+            "head -n 1 outputs/book-skill/chapters/unit-1/reading-a.md && "
+            "grep -q scratch work/scratch.txt && "
+            "test ! -w inputs && "
+            f"realpath outputs/book-skill/chapters/unit-1/reading-a.md | "
+            f"grep -q '^{root}/'"
+        )
+        assert result.exit_code == 0, result.stderr or result.stdout
+
+        denied = await runtime.exec(
+            f"printf 'bad\\n' > {root}/inputs/forbidden.txt"
+        )
+        assert denied.exit_code != 0
+
+        progress = await runtime.exec(
+            f"tail -n 1 {root}/.langalpha/progress.jsonl"
+        )
+        assert progress.exit_code == 0
+        assert '"event_key":"chapter_analysis:completed:smoke"' in progress.stdout
 
     async def test_code_run_basic(self, runtime: DockerRuntime):
         """code_run should execute Python and return stdout."""

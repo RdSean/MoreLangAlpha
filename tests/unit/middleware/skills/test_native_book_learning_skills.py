@@ -84,6 +84,22 @@ def test_book_to_skill_managed_overlay_declares_full_pipeline_contract():
     assert "network" in overlay and "MCP" in overlay
 
 
+def test_book_to_skill_managed_overlay_declares_tool_and_zone_matrix():
+    overlay = (LOCAL_BUNDLE / "book-to-skill/reference/langalpha-managed.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Read/Glob/Grep" in overlay
+    assert "Write/Edit" in overlay and "`work/` and `outputs/`" in overlay
+    assert "ordinary sandbox Bash" in overlay
+    assert "ExecuteCode" in overlay
+    assert "Web" in overlay
+    assert "Preview/Widget" in overlay
+    assert "MCP/Vault" in overlay and "disabled" in overlay
+    assert "probe/diagnostic" in overlay
+    assert "checkpoint_review" in overlay
+
+
 def test_book_to_skill_managed_overlay_dispatches_callers_mode():
     """Full-pipeline rules must not overwrite the legacy analyze pass."""
     overlay = (LOCAL_BUNDLE / "book-to-skill/reference/langalpha-managed.md").read_text(

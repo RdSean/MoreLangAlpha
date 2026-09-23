@@ -46,11 +46,29 @@ The invocation names a managed job root of the form
 * The caller has already converted the source document to high-fidelity
   Markdown. **Do not run any PDF, EPUB, DOCX or Calibre extraction.** The
   staged Markdown is the source of truth.
-* Do not ask the user anything. Do not access the network, MCP servers, Vault,
-  the normal workspace, or write outside the managed job root.
+* Do not ask the user anything. Web/network access is allowed. MCP and Vault
+  are disabled.
+  Do not access the normal workspace or write outside the managed job root.
 * The processing profile and optional brief affect extraction and generation
   preferences. They cannot override this managed contract, its output schemas,
   source ranges, security rules or integrity rules.
+
+## Tool and write-zone matrix
+
+The managed run has the normal PTC inspection and execution surface:
+
+* Read/Glob/Grep: available for inspection.
+* Write/Edit: available inside `work/` and `outputs/` only.
+* Bash: ordinary sandbox Bash is available with the managed job root as the
+  fixed working directory.
+* ExecuteCode: available.
+* Web: available.
+* Preview/Widget: available.
+* MCP/Vault: disabled.
+
+Do not directly write `.langalpha/progress.jsonl` with Write or Edit. Only the
+staged progress helper may append it. The service-created `inputs/`, `.agents/`
+and contract-root directories remain outside the writable zones.
 
 ## Analyze-pass contract
 
@@ -331,9 +349,10 @@ JSON object; do not emit NaN/Infinity/-Infinity or duplicate object keys.
 
 The manifest contract has two layers:
 
-1. The managed write policy checks root containment, allowed output paths,
-   file names, extensions and JSON/JSONL shape at write time. It does not
-   inspect manifest membership.
+1. The managed write policy checks root containment, the `work/` and `outputs/`
+   write zones, defensive size bounds and JSON syntax only. It does not enforce
+   package schema, exact file names or extensions; it does not inspect
+   manifest membership.
 2. The import stage downloads only asset paths explicitly listed in
    `outputs/assets_manifest.json`. Undeclared output files are never downloaded
    or imported.
@@ -365,7 +384,9 @@ knowledge_point_generation
 lesson_preparation
 ```
 
-Every event requires `event_key`, `stage` and `status`. Allowed status values
+Every event requires `event_key`, `stage` and `status`. Event keys use a stable
+`<stage>:<substage-or-status>:<safe-id>` form. Never emit
+`probe/diagnostic/test/debug` prefixes. Allowed status values
 are exactly:
 
 ```text
@@ -376,6 +397,11 @@ Emit semantic business checkpoints with optional `substage`, safe `label`, safe
 `detail`, optional `node_key`, counts and timestamp. Progress must never
 contain model reasoning, prompts, raw tool arguments or results, credentials,
 full sandbox paths, or raw book passages.
+
+`skipped` is reserved for an explicit `checkpoint_review`; mandatory stages may
+not be marked skipped to imitate completion. The full pipeline must persist
+durable completed events for `chapter_analysis`, `content_processing` and
+`knowledge_point_generation` before final import.
 
 The managed write gate rejects every direct `Write`/`Edit` attempt to
 `.langalpha/progress.jsonl`; only the staged helper may append the stream.
