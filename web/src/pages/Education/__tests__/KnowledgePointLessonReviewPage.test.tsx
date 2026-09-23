@@ -21,6 +21,7 @@ let lessonGenerationStatus: Record<string, unknown> = {
   status: null,
   attempt_count: 0,
   auto_grading: false,
+  prompt: '',
   error_code: null,
   error_message: null,
   source_kind: 'legacy_reading',
@@ -87,6 +88,7 @@ describe('KnowledgePointLessonReviewPage', () => {
       status: null,
       attempt_count: 0,
       auto_grading: false,
+      prompt: '',
       error_code: null,
       error_message: null,
       source_kind: 'legacy_reading',
@@ -97,16 +99,19 @@ describe('KnowledgePointLessonReviewPage', () => {
     };
   });
 
-  it('generates a new lesson with the auto-grading option', async () => {
+  it('generates a new lesson with trimmed guidance and auto-grading', async () => {
     const user = userEvent.setup();
     renderPage();
 
+    const prompt = screen.getByRole('textbox', { name: '课程生成要求（可选）' });
+    await user.type(prompt, '  使用中文讲解，保留英文术语。  ');
     await user.click(screen.getByRole('checkbox', { name: '自动判题' }));
     await user.click(screen.getByRole('button', { name: '生成课程' }));
 
     await waitFor(() => expect(generateLesson).toHaveBeenCalledWith({
       knowledgePointId: 'kp-1',
       autoGrading: true,
+      prompt: '使用中文讲解，保留英文术语。',
     }));
   });
 
@@ -173,7 +178,35 @@ describe('KnowledgePointLessonReviewPage', () => {
     await waitFor(() => expect(generateLesson).toHaveBeenCalledWith({
       knowledgePointId: 'kp-1',
       autoGrading: false,
+      prompt: '',
     }));
+  });
+
+  it('restores persisted guidance when reopening the generation entry', () => {
+    lessonGenerationStatus = {
+      ...lessonGenerationStatus,
+      prompt: '使用中文讲解，保留英文术语。',
+    };
+    renderPage();
+
+    expect(
+      screen.getByRole('textbox', { name: '课程生成要求（可选）' }),
+    ).toHaveValue('使用中文讲解，保留英文术语。');
+  });
+
+  it('keeps entered guidance when generation conflicts with an active job', async () => {
+    generateLesson.mockRejectedValueOnce(
+      new Error('活动课程已使用其他生成要求，请先取消当前任务。'),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    const prompt = screen.getByRole('textbox', { name: '课程生成要求（可选）' });
+    await user.type(prompt, '改用英文讲解。');
+    await user.click(screen.getByRole('button', { name: '生成课程' }));
+
+    await waitFor(() => expect(generateLesson).toHaveBeenCalled());
+    expect(prompt).toHaveValue('改用英文讲解。');
   });
 
   it('shows active lesson generation status and prevents an accidental retry', async () => {
@@ -264,6 +297,9 @@ describe('KnowledgePointLessonReviewPage', () => {
     renderPage();
 
     expect(screen.getByTestId('education-markdown')).toHaveTextContent('# 世界运动');
+    expect(
+      screen.getByRole('textbox', { name: '课程生成要求（可选）' }),
+    ).toHaveValue('');
 
     await user.click(screen.getByRole('button', { name: '编辑 Markdown' }));
     const editor = screen.getByRole('textbox', { name: '课程 Markdown' });

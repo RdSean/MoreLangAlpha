@@ -334,6 +334,7 @@ export interface StructureGenerationJob {
   root_run_id?: string | null;
   started_at?: string | null;
   heartbeat_at?: string | null;
+  prompt?: string;
   structure_sequence?: number | null;
   structure_status?: string | null;
   structure_bundle_prefix?: string | null;
@@ -406,6 +407,7 @@ export interface LessonGenerationStatus {
   status?: StructureGenerationJob['status'] | null;
   attempt_count: number;
   auto_grading: boolean;
+  prompt: string;
   error_code?: string | null;
   error_message?: string | null;
   started_at?: string | null;

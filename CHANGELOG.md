@@ -2,6 +2,13 @@
 
 ## 2026-09-23
 
+### 新增：知识点课程生成要求输入与恢复
+
+- 结构审阅页的“生成课程”入口和课程审阅页的“重新生成”入口新增“课程生成要求（可选）”textarea，最多输入 4000 字；首次生成和重新生成共用相同的规范化提交逻辑。
+- 页面会从 lesson generation status 恢复活动或最近一次 job 的 prompt；用户开始编辑后，后台状态刷新不会覆盖当前输入，冲突或失败时也不会清空已填写内容。
+- 后端 status 在活动 job 结束后仍返回最近一次 lesson job 的 prompt，保证离开页面再进入时仍能恢复生成要求。
+- 验证：Education 定向 Vitest `31 passed`，后端请求、数据库、课程队列和 review 服务回归 `120 passed`，`pnpm typecheck` 通过。
+
 ### 新增：用户课程要求注入 managed lesson prompt
 
 - 知识点课程生成会把 job 中的规范化用户要求追加到固定 managed contract 之后，并限制为最多 4000 字符。

@@ -13,6 +13,7 @@ from src.server.database.education_textbooks import (
     get_kp_lesson_by_knowledge_point_for_parent,
     get_kp_lesson_for_parent,
     get_knowledge_point_for_parent,
+    get_latest_lesson_generation_for_parent,
     publish_textbook_structure,
 )
 from src.server.services.education_lesson_jobs import (
@@ -246,6 +247,10 @@ async def get_lesson_generation_status_for_parent(
         parent_user_id=parent_user_id,
         knowledge_point_id=knowledge_point_id,
     )
+    prompt_job = job or await get_latest_lesson_generation_for_parent(
+        parent_user_id=parent_user_id,
+        knowledge_point_id=knowledge_point_id,
+    )
     source_kind = (
         "content_node"
         if candidate
@@ -262,7 +267,9 @@ async def get_lesson_generation_status_for_parent(
         "status": str(job["status"]) if job else None,
         "attempt_count": int(job["attempt_count"] or 0) if job else 0,
         "auto_grading": bool(job["auto_grading"]) if job else False,
-        "prompt": str(job.get("processing_brief") or "") if job else "",
+        "prompt": (
+            str(prompt_job.get("processing_brief") or "") if prompt_job else ""
+        ),
         "error_code": job.get("error_code") if job else None,
         "error_message": job.get("error_message") if job else None,
         "started_at": job.get("started_at") if job else None,

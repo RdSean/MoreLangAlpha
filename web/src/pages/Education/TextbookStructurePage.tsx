@@ -204,6 +204,8 @@ function KnowledgePointWorkspace({
 }) {
   const [jobId, setJobId] = useState<string>();
   const [autoGrading, setAutoGrading] = useState(false);
+  const [prompt, setPrompt] = useState('');
+  const [promptTouched, setPromptTouched] = useState(false);
   const [activeTab, setActiveTab] = useState<'lesson' | 'source'>('lesson');
   const [tabTouched, setTabTouched] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -229,6 +231,11 @@ function KnowledgePointWorkspace({
     void lesson.refetch();
   }, [generation.data?.status, lesson]);
 
+  useEffect(() => {
+    if (promptTouched) return;
+    setPrompt(lessonGeneration.data?.prompt ?? '');
+  }, [lessonGeneration.data?.prompt, promptTouched]);
+
   const generate = async () => {
     if (!scopeReady) return;
     setRegenerating(true);
@@ -236,6 +243,7 @@ function KnowledgePointWorkspace({
       const job = await mutations.generateLesson.mutateAsync({
         knowledgePointId: point.knowledge_point_id,
         autoGrading,
+        prompt: prompt.trim(),
       });
       setJobId(job.generation_job_id);
     } catch (error) {
@@ -496,6 +504,20 @@ function KnowledgePointWorkspace({
                 <label className="mt-5 inline-flex items-center gap-2 text-sm text-muted-foreground">
                   <input type="checkbox" checked={autoGrading} onChange={(event) => setAutoGrading(event.target.checked)} />
                   同时生成自动判题练习
+                </label>
+                <label className="mx-auto mt-5 block max-w-md text-left text-sm">
+                  <span className="mb-2 block font-medium">课程生成要求（可选）</span>
+                  <textarea
+                    aria-label="课程生成要求（可选）"
+                    value={prompt}
+                    maxLength={4_000}
+                    rows={5}
+                    onChange={(event) => {
+                      setPromptTouched(true);
+                      setPrompt(event.target.value);
+                    }}
+                    className="w-full resize-y border bg-input px-3 py-2 leading-5"
+                  />
                 </label>
                 <div className="mt-5">
                   <Button onClick={() => void generate()} disabled={!scopeReady || generationInFlight || mutations.generateLesson.isPending}>

@@ -425,8 +425,8 @@ export function useStructureMutations() {
       onSuccess: invalidate,
     }),
     generateLesson: useMutation({
-      mutationFn: ({ knowledgePointId, autoGrading }: { knowledgePointId: string; autoGrading: boolean }) =>
-        educationApi.generateKnowledgePointLesson(knowledgePointId, autoGrading),
+      mutationFn: ({ knowledgePointId, autoGrading, prompt }: { knowledgePointId: string; autoGrading: boolean; prompt: string }) =>
+        educationApi.generateKnowledgePointLesson(knowledgePointId, autoGrading, prompt),
       onSuccess: invalidate,
     }),
     saveLessonRevision: useMutation({

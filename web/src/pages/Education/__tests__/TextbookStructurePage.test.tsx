@@ -7,11 +7,13 @@ import TextbookStructurePage from '../TextbookStructurePage';
 const structureState = vi.hoisted(() => ({
   data: undefined as Record<string, unknown> | undefined,
   statusOverride: undefined as string | undefined,
+  scopeVerifiedOverride: undefined as boolean | undefined,
 }));
 
 const save = vi.fn().mockResolvedValue({});
 const accept = vi.fn().mockResolvedValue({});
 const create = vi.fn().mockResolvedValue({ generation_job_id: 'generation-1' });
+const generateLesson = vi.fn().mockResolvedValue({ generation_job_id: 'lesson-1' });
 const refetch = vi.fn().mockResolvedValue({});
 let progressData: Record<string, unknown> | null = null;
 let lessonGenerationStatus: Record<string, unknown> = {
@@ -64,7 +66,7 @@ vi.mock('../queries', () => ({
               line_end: 40,
               char_start: 100,
               char_end: 900,
-              verified: false,
+              verified: structureState.scopeVerifiedOverride ?? false,
             },
             {
               scope_id: 'scope-2',
@@ -164,7 +166,7 @@ vi.mock('../queries', () => ({
     generateBookAssets: { mutateAsync: vi.fn().mockResolvedValue({ generation_job_id: 'assets-1' }), isPending: false },
     save: { mutateAsync: save, isPending: false },
     accept: { mutateAsync: accept, isPending: false },
-    generateLesson: { mutateAsync: vi.fn().mockResolvedValue({ generation_job_id: 'lesson-1' }), isPending: false },
+    generateLesson: { mutateAsync: generateLesson, isPending: false },
   }),
 }));
 
@@ -186,6 +188,7 @@ describe('TextbookStructurePage', () => {
     vi.clearAllMocks();
     structureState.data = undefined;
     structureState.statusOverride = undefined;
+    structureState.scopeVerifiedOverride = undefined;
     progressData = null;
     lessonGenerationStatus = {
       knowledge_point_id: 'kp-1',
@@ -349,6 +352,36 @@ describe('TextbookStructurePage', () => {
     expect(lessonProgress).toHaveTextContent('分析教材结构');
     expect(lessonProgress).toHaveTextContent('读取冻结输入清单');
     expect(screen.getByText(/任务已提交，上方会显示阶段进度和实时处理步骤/)).toBeInTheDocument();
+  });
+
+  it('submits trimmed lesson generation guidance', async () => {
+    structureState.statusOverride = 'accepted';
+    structureState.scopeVerifiedOverride = true;
+    const user = userEvent.setup();
+    renderPage();
+
+    const prompt = screen.getByRole('textbox', { name: '课程生成要求（可选）' });
+    await user.type(prompt, '  使用中文讲解，保留英文术语。  ');
+    await user.click(screen.getByRole('button', { name: '生成课程' }));
+
+    await waitFor(() => expect(generateLesson).toHaveBeenCalledWith({
+      knowledgePointId: 'kp-1',
+      autoGrading: false,
+      prompt: '使用中文讲解，保留英文术语。',
+    }));
+  });
+
+  it('restores persisted lesson guidance in the structure workspace', () => {
+    structureState.statusOverride = 'accepted';
+    lessonGenerationStatus = {
+      ...lessonGenerationStatus,
+      prompt: '使用中文讲解，保留英文术语。',
+    };
+    renderPage();
+
+    expect(
+      screen.getByRole('textbox', { name: '课程生成要求（可选）' }),
+    ).toHaveValue('使用中文讲解，保留英文术语。');
   });
 
   it('supports add, split, merge, and delete knowledge-point actions', async () => {

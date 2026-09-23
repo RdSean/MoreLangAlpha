@@ -14,6 +14,8 @@ export default function KnowledgePointLessonReviewPage() {
   const { textbookId, versionId, knowledgePointId } = useParams();
   const [jobId, setJobId] = useState<string>();
   const [autoGrading, setAutoGrading] = useState(false);
+  const [prompt, setPrompt] = useState('');
+  const [promptTouched, setPromptTouched] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const lesson = useKnowledgePointLessonByPoint(knowledgePointId, true);
@@ -74,16 +76,42 @@ export default function KnowledgePointLessonReviewPage() {
     if (activeJobId) setJobId(activeJobId);
   }, [lessonGeneration.data?.generation_job_id]);
 
+  useEffect(() => {
+    if (promptTouched) return;
+    setPrompt(lessonGeneration.data?.prompt ?? '');
+  }, [lessonGeneration.data?.prompt, promptTouched]);
+
   const generate = async () => {
     if (!knowledgePointId || !canGenerate) return;
     try {
-      const job = await mutations.generateLesson.mutateAsync({ knowledgePointId, autoGrading });
+      const job = await mutations.generateLesson.mutateAsync({
+        knowledgePointId,
+        autoGrading,
+        prompt: prompt.trim(),
+      });
       setJobId(job.generation_job_id);
       setEditing(false);
     } catch (error) {
       toast({ variant: 'destructive', title: '无法生成课程', description: messageOf(error, '请稍后重试。') });
     }
   };
+
+  const promptEditor = (
+    <label className="mt-5 block text-sm">
+      <span className="mb-2 block font-medium">课程生成要求（可选）</span>
+      <textarea
+        aria-label="课程生成要求（可选）"
+        value={prompt}
+        maxLength={4_000}
+        rows={5}
+        onChange={(event) => {
+          setPromptTouched(true);
+          setPrompt(event.target.value);
+        }}
+        className="w-full resize-y border bg-input px-3 py-2 leading-5"
+      />
+    </label>
+  );
 
   const saveRevision = async () => {
     if (!lesson.data) return;
@@ -151,6 +179,7 @@ export default function KnowledgePointLessonReviewPage() {
           <h1 className="title-font mt-6 text-2xl font-semibold">生成知识点课程</h1>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">课程将以 `lesson.md` 生成，只有需要自动判题时才额外生成结构化练习。</p>
           <label className="mt-5 flex items-center gap-3 text-sm"><input type="checkbox" checked={autoGrading} onChange={(event) => setAutoGrading(event.target.checked)} />自动判题</label>
+          {promptEditor}
           <Button className="mt-6" onClick={() => void generate()} disabled={!canGenerate || mutations.generateLesson.isPending || generationActive}>
             <WandSparkles className="mr-2 size-4" />{generationActive ? '正在生成课程' : '生成课程'}
           </Button>
@@ -186,7 +215,8 @@ export default function KnowledgePointLessonReviewPage() {
           )}
         </section>
         <aside className="border-t px-5 py-7 lg:min-h-[calc(100dvh-80px)] lg:border-l lg:border-t-0" style={{ borderColor: 'var(--color-border-muted)' }}>
-          <h2 className="text-sm font-semibold">Revision 历史</h2>
+          {promptEditor}
+          <h2 className="mt-8 border-t pt-6 text-sm font-semibold" style={{ borderColor: 'var(--color-border-muted)' }}>Revision 历史</h2>
           <div className="mt-4 grid gap-3">{lesson.data.revisions.map((revision) => <div key={revision.revision_id} className="border-l-2 pl-3 text-sm" style={{ borderColor: revision.revision_id === lesson.data?.latest_revision_id ? 'var(--color-accent-primary)' : 'var(--color-border-muted)' }}><p className="font-medium">v{revision.revision}</p><p className="mt-1 font-mono text-[11px] text-muted-foreground">{revision.size_bytes} bytes · {revision.content_sha256.slice(0, 12)}</p></div>)}</div>
           <div className="mt-8 grid gap-2">
             <Button onClick={() => void publish()} disabled={mutations.publish.isPending}><Send className="mr-2 size-4" />发布结构教材</Button>

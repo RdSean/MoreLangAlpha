@@ -223,8 +223,8 @@ export async function acceptTextbookStructure(structureId: string): Promise<Text
   return data;
 }
 
-export async function generateKnowledgePointLesson(knowledgePointId: string, autoGrading = false): Promise<StructureGenerationJob> {
-  const { data } = await api.post<StructureGenerationJob>(`/api/v1/education/knowledge-points/${knowledgePointId}/lessons`, { auto_grading: autoGrading });
+export async function generateKnowledgePointLesson(knowledgePointId: string, autoGrading = false, prompt = ''): Promise<StructureGenerationJob> {
+  const { data } = await api.post<StructureGenerationJob>(`/api/v1/education/knowledge-points/${knowledgePointId}/lessons`, { auto_grading: autoGrading, prompt });
   return data;
 }
 

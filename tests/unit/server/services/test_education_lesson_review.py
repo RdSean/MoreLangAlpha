@@ -316,3 +316,56 @@ async def test_lesson_generation_status_returns_persisted_prompt(monkeypatch):
     )
 
     assert status["prompt"] == "使用中文讲解。"
+
+
+@pytest.mark.asyncio
+async def test_lesson_generation_status_restores_latest_prompt_after_job_ends(
+    monkeypatch,
+):
+    async def household(_user_id):
+        return {"household_id": "household-1"}
+
+    async def candidate(**_kwargs):
+        return {"knowledge_point_id": "kp-1"}
+
+    async def no_active(**_kwargs):
+        return None
+
+    async def latest(**_kwargs):
+        return {
+            "generation_job_id": "generation-1",
+            "status": "completed",
+            "attempt_count": 1,
+            "auto_grading": False,
+            "processing_brief": "使用中文讲解，保留英文术语。",
+        }
+
+    monkeypatch.setattr(
+        education_lesson_review,
+        "get_household_context_for_parent",
+        household,
+    )
+    monkeypatch.setattr(
+        education_lesson_review,
+        "get_knowledge_point_for_parent",
+        candidate,
+    )
+    monkeypatch.setattr(
+        education_lesson_review,
+        "get_active_lesson_generation_for_parent",
+        no_active,
+    )
+    monkeypatch.setattr(
+        education_lesson_review,
+        "get_latest_lesson_generation_for_parent",
+        latest,
+    )
+
+    status = await education_lesson_review.get_lesson_generation_status_for_parent(
+        parent_user_id="parent-1",
+        knowledge_point_id="kp-1",
+    )
+
+    assert status["generating"] is False
+    assert status["generation_job_id"] is None
+    assert status["prompt"] == "使用中文讲解，保留英文术语。"
