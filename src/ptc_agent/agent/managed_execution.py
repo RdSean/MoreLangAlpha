@@ -252,31 +252,59 @@ def validate_managed_bash_command(
     return None
 
 
-def validate_managed_textbook_write(
-    path: str, content: str, policy: ManagedExecutionPolicy
-) -> str | None:
-    """Enforce managed write-zone and path safety before disk access."""
+def _validate_managed_textbook_path(
+    path: str,
+    policy: ManagedExecutionPolicy,
+) -> tuple[PurePosixPath | None, str | None]:
+    """Validate the managed write zone while preserving the raw path for safety checks."""
+    if (
+        not isinstance(path, str)
+        or _contains_c0_control(path)
+        or "\\" in path
+        or ".." in path.split("/")
+    ):
+        return None, "managed teaching candidate path is not allowed"
+
     candidate_path = PurePosixPath(path)
     root = PurePosixPath(policy.filesystem_root)
     if not candidate_path.is_absolute():
-        return "managed teaching candidate path is not allowed"
+        candidate_path = root / candidate_path
     try:
         relative = candidate_path.relative_to(root)
     except ValueError:
-        return "managed teaching candidate path is not allowed"
-    if (
-        _contains_c0_control(path)
-        or "\\" in path
-        or ".." in path.split("/")
-        or not isinstance(content, str)
-    ):
-        return "managed teaching candidate path is not allowed"
+        return None, "managed teaching candidate path is not allowed"
     if relative == PurePosixPath(".langalpha/progress.jsonl"):
         return (
+            None,
             "managed progress stream is append-only through the staged helper; "
-            "use python .langalpha/progress.py"
+            "use python .langalpha/progress.py",
         )
-    if not relative.parts or relative.parts[0] not in {"work", "outputs"}:
+    if (
+        len(relative.parts) < 2
+        or relative.parts[0] not in {"work", "outputs"}
+    ):
+        return None, "managed teaching candidate path is not allowed"
+    return relative, None
+
+
+def validate_managed_textbook_edit(
+    path: str,
+    policy: ManagedExecutionPolicy,
+) -> str | None:
+    """Enforce the managed write-zone boundary for an in-place edit."""
+    _relative, error = _validate_managed_textbook_path(path, policy)
+    return error
+
+
+def validate_managed_textbook_write(
+    path: str, content: str, policy: ManagedExecutionPolicy
+) -> str | None:
+    """Enforce managed write-zone and content safety before disk access."""
+    relative, error = _validate_managed_textbook_path(path, policy)
+    if error is not None:
+        return error
+    assert relative is not None
+    if not isinstance(content, str):
         return "managed teaching candidate path is not allowed"
     try:
         encoded = content.encode("utf-8")

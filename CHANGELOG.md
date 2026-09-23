@@ -6,6 +6,7 @@
 
 - 删除写时对 `book_package.json` 等精确文件名、章节路径、JSON object shape 和知识点交叉引用的约束；agent 可在 `work/` 与 `outputs/` 下创建任意安全 scratch 或规范输出文件。
 - 写校验继续强制 managed root containment、拒绝 `..`/反斜杠/C0 控制字符/根外绝对路径，只允许 `work/` 和 `outputs/`，并继续禁止 `inputs/`、`.agents/`、其他 `.langalpha/` 与直接写 progress stream。
+- `Edit` 与 `Write` 共用同一 managed zone gate，并在路径 normalize 之前检查原始输入，避免编辑绕过 frozen/progress 路径约束或尾部控制字符被静默 strip。
 - 保留 32 MiB 防御性大小上限和 `.json` UTF-8/严格 JSON 语法检查；package schema、候选归属、引用、asset manifest、大小和 hash 仍由导入/finalization 阶段验证。
 - 验证：managed policy 与 book pipeline importer/回归 `104 passed`，Ruff 通过。
 

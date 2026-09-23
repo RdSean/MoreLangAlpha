@@ -70,6 +70,7 @@ def create_filesystem_tools(
     operation_callback: OperationCallback | None = None,
     *,
     write_validator: Callable[[str, str], str | None] | None = None,
+    edit_validator: Callable[[str], str | None] | None = None,
 ) -> tuple:
     """Create the Read, Write, and Edit tools bound to ``backend``.
 
@@ -231,15 +232,13 @@ def create_filesystem_tools(
                 a file, Read it and write back the full text.
         """
         try:
-            normalized_path = backend.normalize_path(file_path)
-            logger.info("Writing file", file_path=file_path, normalized_path=normalized_path, size=len(content))
-
-            # Managed-execution policy hook: the education service refuses a
-            # write outside the frozen asset contract before it reaches storage.
             if write_validator:
-                error = write_validator(normalized_path, content)
+                error = write_validator(file_path, content)
                 if error:
                     return f"ERROR: {error}"
+
+            normalized_path = backend.normalize_path(file_path)
+            logger.info("Writing file", file_path=file_path, normalized_path=normalized_path, size=len(content))
 
             if backend.filesystem_config.enable_path_validation and not backend.validate_path(normalized_path):
                 error_msg = f"Access denied: {file_path} is not in allowed directories"
@@ -294,6 +293,11 @@ def create_filesystem_tools(
                 match. Default False.
         """
         try:
+            if edit_validator:
+                error = edit_validator(file_path)
+                if error:
+                    return f"ERROR: {error}"
+
             normalized_path = backend.normalize_path(file_path)
             logger.info(
                 "Editing file",

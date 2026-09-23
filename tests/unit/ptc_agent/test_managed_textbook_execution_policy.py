@@ -287,6 +287,8 @@ def test_book_pipeline_zone_based_write_validation():
         "inputs/source.md",
         ".agents/skills/book-to-skill/SKILL.md",
         ".langalpha/progress.jsonl",
+        "work",
+        "outputs",
         "/tmp/outside.txt",
     )
 
@@ -299,9 +301,17 @@ def test_book_pipeline_zone_based_write_validation():
             )
             is None
         )
+    assert (
+        managed_execution.validate_managed_textbook_write(
+            "work/scratch/relative.txt",
+            "scratch",
+            policy,
+        )
+        is None
+    )
     for relative_path in rejected:
         content = (
-            '{"event_key":"chapter:done","stage":"chapter_analysis",'
+            '{"event_key":"chapter_analysis:completed:chapter","stage":"chapter_analysis",'
             '"status":"completed"}'
             if relative_path.endswith("progress.jsonl")
             else "content"
@@ -332,6 +342,30 @@ def test_zone_based_write_keeps_defensive_size_bound(monkeypatch):
     )
 
     assert "too large" in str(error)
+
+
+def test_managed_edit_uses_the_same_zone_gate():
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_pipeline_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+
+    assert (
+        managed_execution.validate_managed_textbook_edit(
+            "outputs/book-skill/chapters/unit-1/support.json",
+            policy,
+        )
+        is None
+    )
+    for path in (
+        "inputs/source.md",
+        ".agents/skills/book-to-skill/SKILL.md",
+        ".langalpha/progress.jsonl",
+        "outputs\n",
+        "outputs",
+        "/tmp/outside.txt",
+    ):
+        assert managed_execution.validate_managed_textbook_edit(path, policy)
 
 
 @pytest.mark.parametrize(
@@ -1025,7 +1059,7 @@ def test_managed_bash_allows_only_the_staged_progress_helper(interpreter):
     )
     event = json.dumps(
         {
-            "event_key": "chapter:start",
+            "event_key": "chapter_analysis:running:chapter",
             "stage": "chapter_analysis",
             "status": "running",
         }
@@ -1073,7 +1107,7 @@ def test_all_managed_purposes_reject_direct_progress_stream_writes(
     )
     progress_path = f"{policy.filesystem_root}/.langalpha/progress.jsonl"
     valid = (
-        '{"event_key":"chapter:start","stage":"chapter_analysis",'
+        '{"event_key":"chapter_analysis:running:chapter","stage":"chapter_analysis",'
         '"status":"running"}\n'
     )
 
@@ -1081,7 +1115,7 @@ def test_all_managed_purposes_reject_direct_progress_stream_writes(
         valid,
         json.dumps(
             {
-                "event_key": "chapter:start",
+                "event_key": "chapter_analysis:running:chapter",
                 "stage": "chapter_analysis",
                 "status": "running",
                 "label": "已完成 1 / 3",
@@ -1105,24 +1139,24 @@ def test_all_managed_purposes_reject_direct_progress_stream_writes(
             "status": "running",
         },
         {
-            "event_key": "chapter:start",
+            "event_key": "chapter_analysis:running:chapter",
             "stage": "unknown",
             "status": "running",
         },
         {
-            "event_key": "chapter:start",
+            "event_key": "chapter_analysis:running:chapter",
             "stage": "chapter_analysis",
             "status": "running",
             "label": "zero\u200bwidth",
         },
         {
-            "event_key": "chapter:start",
+            "event_key": "chapter_analysis:running:chapter",
             "stage": "chapter_analysis",
             "status": "running",
             "label": "/home/parent/book.md",
         },
         {
-            "event_key": "chapter:start",
+            "event_key": "chapter_analysis:running:chapter",
             "stage": "chapter_analysis",
             "status": "running",
             "label": "api_key=opaque-value",
@@ -1149,7 +1183,7 @@ def test_all_managed_purposes_reject_direct_progress_stream_writes(
     [
         (
             {
-                "event_key": "chapter:start",
+                "event_key": "chapter_analysis:running:chapter",
                 "stage": "chapter_analysis",
                 "status": "running",
                 "label": "已完成 1 / 3",
@@ -1166,7 +1200,7 @@ def test_all_managed_purposes_reject_direct_progress_stream_writes(
         ),
         (
             {
-                "event_key": "chapter:start",
+                "event_key": "chapter_analysis:running:chapter",
                 "stage": "chapter_analysis",
                 "status": "running",
                 "label": "zero\u200bwidth",
@@ -1175,7 +1209,7 @@ def test_all_managed_purposes_reject_direct_progress_stream_writes(
         ),
         (
             {
-                "event_key": "chapter:start",
+                "event_key": "chapter_analysis:running:chapter",
                 "stage": "chapter_analysis",
                 "status": "running",
                 "label": "/home/parent/book.md",
@@ -1184,7 +1218,7 @@ def test_all_managed_purposes_reject_direct_progress_stream_writes(
         ),
         (
             {
-                "event_key": "chapter:start",
+                "event_key": "chapter_analysis:running:chapter",
                 "stage": "chapter_analysis",
                 "status": "running",
                 "label": "api_key=opaque-value",
