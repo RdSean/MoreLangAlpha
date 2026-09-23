@@ -123,6 +123,45 @@ describe('KnowledgePointReviewPage', () => {
     expect(acceptCandidates).not.toHaveBeenCalled();
   });
 
+  it('links back to the textbook detail for the generic candidate flow', () => {
+    renderPage();
+
+    expect(screen.getByRole('link', { name: '返回教材' })).toHaveAttribute(
+      'href',
+      '/textbooks/textbook-1',
+    );
+  });
+
+  it('links accepted candidates directly to lesson production', () => {
+    candidateReviewState.data = {
+      ...candidateReviewState.data,
+      nodes: [
+        {
+          ...(candidateReviewState.data?.nodes as Array<Record<string, unknown>>)[0],
+          candidates: [
+            {
+              ...(candidateReviewState.data?.nodes as Array<{ candidates: Array<Record<string, unknown>> }>)[0].candidates[0],
+              candidate_status: 'accepted',
+              status: 'accepted',
+            },
+            (candidateReviewState.data?.nodes as Array<{ candidates: Array<Record<string, unknown>> }>)[0].candidates[1],
+          ],
+        },
+      ],
+    };
+    renderPage();
+
+    expect(
+      screen.getByRole('link', { name: '制作课程 世界运动' }),
+    ).toHaveAttribute(
+      'href',
+      '/textbooks/textbook-1/versions/version-1/knowledge/kp-1',
+    );
+    expect(
+      screen.queryByRole('link', { name: '制作课程 前缀 uni-' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('accepts only explicitly selected candidates', async () => {
     const user = userEvent.setup();
     renderPage();

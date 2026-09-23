@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
+  BookOpen,
   Check,
   GitMerge,
   Loader2,
@@ -65,6 +66,7 @@ function CandidateNode({
   onToggle,
   onEdit,
   onSplit,
+  lessonBasePath,
 }: {
   node: KnowledgePointCandidateNode;
   depth: number;
@@ -74,6 +76,7 @@ function CandidateNode({
   onToggle: (candidateId: string) => void;
   onEdit: (candidate: KnowledgePointCandidate) => void;
   onSplit: (candidate: KnowledgePointCandidate) => void;
+  lessonBasePath: string;
 }) {
   const children = childrenByParent.get(node.node_id) ?? [];
   return (
@@ -147,6 +150,17 @@ function CandidateNode({
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                {candidate.candidate_status === 'accepted' && (
+                  <Link
+                    to={`${lessonBasePath}/${candidate.knowledge_point_id}`}
+                    aria-label={`制作课程 ${candidate.title}`}
+                    title="制作课程"
+                    className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs font-medium transition-colors hover:bg-[var(--color-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <BookOpen className="size-3.5" aria-hidden="true" />
+                    制作课程
+                  </Link>
+                )}
                 <Button
                   type="button"
                   size="icon"
@@ -189,6 +203,7 @@ function CandidateNode({
               onToggle={onToggle}
               onEdit={onEdit}
               onSplit={onSplit}
+              lessonBasePath={lessonBasePath}
             />
           ))}
         </div>
@@ -422,11 +437,11 @@ export default function KnowledgePointReviewPage() {
     <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="knowledge-point-review">
       <div className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-6 sm:pb-24 lg:px-8">
         <Link
-          to={`/textbooks/${textbookId}/versions/${versionId}/structure`}
+          to={`/textbooks/${textbookId}`}
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="size-4" />
-          返回结构审阅
+          返回教材
         </Link>
 
         <header className="mt-5 flex flex-wrap items-end justify-between gap-4 border-b pb-5" style={{ borderColor: 'var(--color-border-muted)' }}>
@@ -471,6 +486,7 @@ export default function KnowledgePointReviewPage() {
                 onToggle={toggleCandidate}
                 onEdit={openEdit}
                 onSplit={openSplit}
+                lessonBasePath={`/textbooks/${textbookId}/versions/${versionId}/knowledge`}
               />
             ))}
           </div>

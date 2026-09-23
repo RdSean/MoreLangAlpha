@@ -2,6 +2,12 @@
 
 ## 2026-09-23
 
+### 修复：连接知识点候选审阅与课程制作
+
+- 通用内容树候选审阅页的返回入口改为教材详情 `/textbooks/:textbookId`，不再进入只支持旧 Unit/Reading schema 的空结构页。
+- 已接受候选现在直接显示带图标的“制作课程”链接，进入对应知识点课程页；待确认、已拒绝、已合并和已拆分候选不显示该入口。
+- 验证：候选审阅页聚焦 Vitest `12 passed`，`pnpm typecheck`、`pnpm build` 与 `git diff --check` 通过。
+
 ### 验证：统一教材处理流水线完成 REX 3 端到端验收
 
 - 使用真实 `datalab-output-REX 3e SB3 Page1-50.pdf.md` 构建通用内容树：Unit 为根节点，Reading A/B 是普通 `reading` 子节点；节点与知识点只提交确定性行范围，服务端从冻结 Markdown 派生并校验 canonical quote。标准结构、节点和候选最终通过 `validate_book_package()`，非对称节点资产或知识点覆盖仅产生 warning，不阻断合法教材。
