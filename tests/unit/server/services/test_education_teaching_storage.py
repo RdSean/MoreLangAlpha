@@ -583,6 +583,7 @@ async def test_stage_managed_teaching_skills_stages_progress_helper():
     }
     root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d"
     assert f"{root}/.langalpha/progress.py" in uploaded
+    assert uploaded[f"{root}/.langalpha/progress.jsonl"] == b""
     assert str(education_generation_progress.MAX_METADATA_INTEGER).encode() in uploaded[
         f"{root}/.langalpha/progress.py"
     ]

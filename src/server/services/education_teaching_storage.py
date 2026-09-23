@@ -227,6 +227,7 @@ async def stage_managed_teaching_skills(
                 raise TeachingPackageStorageError("Managed teaching skill is unavailable") from exc
             relative_path = source.relative_to(source_root).as_posix()
             files.append((f"{root}/.agents/skills/{skill_name}/{relative_path}", content))
+    files.append((f"{root}/.langalpha/progress.jsonl", b""))
     files.append((f"{root}/.langalpha/progress.py", progress_helper_source()))
     await _upload_staged_files(sandbox, files)
 

@@ -2,6 +2,12 @@
 
 ## 2026-09-23
 
+### 修复：managed 进度 helper 无法首次写入
+
+- staging `book-to-skill` 时预创建空的 `.langalpha/progress.jsonl`。该文件按容器用户 uid/gid 落盘，后续 helper 可以直接 append，不再因 root-owned `.langalpha` 目录而触发 `PermissionError`。
+- 保持 append-only 和现有最小目录权限，不修改 provider 全局目录权限。
+- 验证：staging helper 聚焦单测按预期先失败、修复后通过；storage、progress、managed policy 聚焦回归通过。
+
 ### 修复：连接知识点候选审阅与课程制作
 
 - 通用内容树候选审阅页的返回入口改为教材详情 `/textbooks/:textbookId`，不再进入只支持旧 Unit/Reading schema 的空结构页。
