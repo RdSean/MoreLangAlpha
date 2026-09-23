@@ -459,6 +459,27 @@ class TestDockerRuntimeTarUpload:
         assert commands == ["bash -c id -u; id -g"]
 
     @pytest.mark.asyncio
+    async def test_ensure_directory_applies_requested_mode_only_to_leaf(
+        self, runtime, container
+    ):
+        container.exec = AsyncMock(
+            side_effect=lambda **kw: _make_exec_mock("1001\n1001\n")
+        )
+
+        await runtime.ensure_directory("/home/workspace/a/b", mode=0o700)
+
+        tar_data = container.put_archive.call_args[0][1]
+        with tarfile.open(fileobj=io.BytesIO(tar_data), mode="r") as tar:
+            modes = {member.name: member.mode for member in tar.getmembers()}
+
+        assert modes == {
+            "home": 0o755,
+            "home/workspace": 0o755,
+            "home/workspace/a": 0o755,
+            "home/workspace/a/b": 0o700,
+        }
+
+    @pytest.mark.asyncio
     async def test_uploads_are_owned_by_the_container_user(self, runtime, container):
         """A tar entry defaults to root, and put_archive extracts what it says.
 

@@ -666,10 +666,15 @@ class DockerRuntime(SandboxRuntime):
     ) -> bytes:
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w") as tar:
+            leaf_names = {path.strip("/") for path in directories if path.strip("/")}
             for name in self._directory_archive_names(directories):
                 info = tarfile.TarInfo(name=name)
                 info.type = tarfile.DIRTYPE
-                info.mode = directory_mode
+                info.mode = (
+                    directory_mode
+                    if name.rstrip("/") in leaf_names
+                    else 0o755
+                )
                 info.uid, info.gid = uid, gid
                 tar.addfile(info)
 

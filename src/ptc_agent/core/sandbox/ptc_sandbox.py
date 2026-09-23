@@ -60,6 +60,23 @@ class PTCSandbox:
     # Re-upload once the sandbox's copy is this far through the token's life.
     TOKEN_REFRESH_FRACTION = 0.6
 
+    @staticmethod
+    def managed_textbook_directories(root: str) -> tuple[str, ...]:
+        """Return the writable directory contract for one managed textbook job."""
+        return tuple(
+            f"{root}/{relative}"
+            for relative in (
+                "work",
+                "outputs",
+                "outputs/book-skill",
+                "outputs/book-skill/chapters",
+                "outputs/content",
+                "outputs/chapters",
+                "outputs/knowledge",
+                ".langalpha",
+            )
+        )
+
     def __init__(
         self, config: CoreConfig, mcp_registry: MCPRegistry | None = None
     ) -> None:
@@ -431,10 +448,25 @@ class PTCSandbox:
         assert self.runtime is not None
         self.sandbox_id = self.runtime.id
         self._work_dir = root
-        await self._runtime_call(
-            self.ensure_directories,
-            [root],
-            retry_policy=RetryPolicy.SAFE,
+        writable_directories = self.managed_textbook_directories(root)
+        inputs_directory = f"{root}/inputs"
+        await self.ensure_directories(list(writable_directories))
+        await self.ensure_directories([inputs_directory], mode=0o555)
+
+        checks = " && ".join(
+            f"test -d {shlex.quote(directory)} && "
+            f"test -w {shlex.quote(directory)}"
+            for directory in writable_directories
+        )
+        verification = await self.runtime.exec(checks, timeout=30)
+        if verification.exit_code != 0:
+            raise RuntimeError(
+                "Managed textbook writable directories are unavailable"
+            )
+
+        await self.runtime.upload_file(
+            b"",
+            f"{root}/.langalpha/progress.jsonl",
         )
         logger.info("Managed textbook sandbox ready", sandbox_id=self.sandbox_id)
 

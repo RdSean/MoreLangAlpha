@@ -87,6 +87,13 @@ class ManagedTeachingSandbox(Protocol):
 
     async def adownload_file_bytes(self, path: str) -> bytes | None: ...
 
+    async def ensure_directories(
+        self,
+        directories: list[str],
+        *,
+        mode: int = 0o755,
+    ) -> None: ...
+
 
 _MANAGED_SKILL_NAMES = ("book-to-skill",)
 _STATIC_SKILL_SUFFIXES = frozenset({".css", ".html", ".json", ".md", ".py", ".toml"})
@@ -190,6 +197,19 @@ async def _upload_staged_files(
     for path, content in files:
         if not await sandbox.aupload_file_bytes(path, content):
             raise TeachingPackageStorageError("Could not stage managed teaching input")
+
+
+async def _seal_managed_inputs(
+    sandbox: ManagedTeachingSandbox,
+    root: str,
+) -> None:
+    """Remove write permission after staging frozen inputs.
+
+    Docker tar extraction applies directory-entry modes, so every upload below
+    ``inputs/`` resets that directory to the provider's default. Seal it only
+    after all input files for the job have been staged.
+    """
+    await sandbox.ensure_directories([f"{root}/inputs"], mode=0o555)
 
 
 async def stage_managed_teaching_skills(
@@ -678,6 +698,7 @@ async def stage_teaching_inputs(
             for chapter in frozen["chapters"]
         )
     await _upload_staged_files(sandbox, files)
+    await _seal_managed_inputs(sandbox, root)
     return {key: staged[key] for key in ("manifest", "manifest_sha256", "chapters")}
 
 
@@ -905,6 +926,7 @@ async def stage_reading_asset_inputs(
             for relative_path, content in built["files"].items()
         ],
     )
+    await _seal_managed_inputs(sandbox, root)
     return built["manifest"]
 
 
@@ -996,6 +1018,7 @@ async def stage_kp_lesson_inputs(
         (f"{root}/outputs/.keep", b""),
     ]
     await _upload_staged_files(sandbox, files)
+    await _seal_managed_inputs(sandbox, root)
 
 
 async def read_content_node_asset(job: Mapping[str, Any]) -> str:

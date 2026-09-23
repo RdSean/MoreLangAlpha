@@ -49,6 +49,29 @@ def test_managed_textbook_policy_rejects_non_uuid_job_ids():
         education_teaching_policy("job-1")
 
 
+def test_managed_textbook_directories_contract():
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    root = "/managed/textbook-job/8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+
+    directories = managed_execution.managed_textbook_directories(root)
+
+    assert directories == tuple(
+        f"{root}/{relative}"
+        for relative in (
+            "work",
+            "outputs",
+            "outputs/book-skill",
+            "outputs/book-skill/chapters",
+            "outputs/content",
+            "outputs/chapters",
+            "outputs/knowledge",
+            ".langalpha",
+        )
+    )
+    assert f"{root}/inputs" not in directories
+    assert f"{root}/.langalpha/progress.jsonl" not in directories
+
+
 def test_structure_policy_allows_only_one_json_candidate_path():
     managed_execution = import_module("ptc_agent.agent.managed_execution")
     policy = managed_execution.education_structure_policy(
@@ -393,7 +416,7 @@ def test_managed_core_config_removes_mcp_secrets_and_other_filesystem_roots():
 
 
 @pytest.mark.asyncio
-async def test_managed_sandbox_initialization_creates_only_the_job_root(monkeypatch):
+async def test_managed_sandbox_initialization_precreates_writable_layout(monkeypatch):
     managed_execution = import_module("ptc_agent.agent.managed_execution")
     PTCSandbox = import_module("ptc_agent.core.sandbox.ptc_sandbox").PTCSandbox
     policy = managed_execution.education_teaching_policy(
@@ -403,15 +426,22 @@ async def test_managed_sandbox_initialization_creates_only_the_job_root(monkeypa
     class Runtime:
         id = "sandbox-1"
         working_dir = policy.filesystem_root
+        commands: list[str] = []
+        directories: list[tuple[str, int]] = []
+        uploads: list[tuple[bytes, str]] = []
 
         async def fetch_working_dir(self):
             return policy.filesystem_root
 
-        async def exec(self, *_args, **_kwargs):
-            return None
+        async def exec(self, command, *_args, **_kwargs):
+            self.commands.append(command)
+            return SimpleNamespace(exit_code=0, stdout="", stderr="")
 
-        async def ensure_directory(self, *_args, **_kwargs):
-            return None
+        async def ensure_directory(self, path, *, mode=0o755):
+            self.directories.append((path, mode))
+
+        async def upload_file(self, content, dest_path):
+            self.uploads.append((content, dest_path))
 
     runtime = Runtime()
     sandbox = object.__new__(PTCSandbox)
@@ -462,7 +492,21 @@ async def test_managed_sandbox_initialization_creates_only_the_job_root(monkeypa
     )
     assert sandbox.sandbox_id == "sandbox-1"
     assert sandbox._work_dir == policy.filesystem_root
-    assert sandbox._runtime_call.await_args.args[1] == [policy.filesystem_root]
+    assert {path for path, _mode in runtime.directories} == set(
+        managed_execution.managed_textbook_directories(policy.filesystem_root)
+    ) | {f"{policy.filesystem_root}/inputs"}
+    assert (
+        dict(runtime.directories)[f"{policy.filesystem_root}/inputs"] == 0o555
+    )
+    assert runtime.uploads == [
+        (b"", f"{policy.filesystem_root}/.langalpha/progress.jsonl")
+    ]
+    assert len(runtime.commands) == 1
+    for directory in managed_execution.managed_textbook_directories(
+        policy.filesystem_root
+    ):
+        assert f"test -w {directory}" in runtime.commands[0]
+    assert f"test -w {policy.filesystem_root}/inputs" not in runtime.commands[0]
 
 
 @pytest.mark.asyncio

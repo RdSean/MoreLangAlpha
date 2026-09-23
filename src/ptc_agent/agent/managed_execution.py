@@ -30,6 +30,15 @@ _BOOK_PIPELINE_CANONICAL_FILES = frozenset(
 _BOOK_PIPELINE_ASSET_EXTENSIONS = frozenset(
     {".md", ".json", ".txt", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".csv"}
 )
+
+
+def managed_textbook_directories(root: str) -> tuple[str, ...]:
+    """Return the sole writable directory layout for a managed textbook job."""
+    from ptc_agent.core.sandbox.ptc_sandbox import PTCSandbox
+
+    return PTCSandbox.managed_textbook_directories(root)
+
+
 class _StrictJsonError(ValueError):
     """A JSON value is valid syntax but violates the managed subset."""
 
