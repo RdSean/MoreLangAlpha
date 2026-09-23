@@ -949,6 +949,7 @@ class TextbookVersionResponse(BaseModel):
     extractor_version: str | None = None
     processing_error: str | None = None
     processing_job_id: str | None = None
+    processing_job_scope: str | None = None
     processing_job_status: str | None = None
     processing_attempt_count: int | None = None
     chapter_count: int

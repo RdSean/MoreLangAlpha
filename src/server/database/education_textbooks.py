@@ -5077,6 +5077,9 @@ async def list_textbooks_for_parent(user_id: str) -> list[dict[str, Any]]:
                        textbooks.created_by_user_id, textbooks.created_at,
                        latest.version_id AS latest_version_id, latest.sequence AS latest_version_sequence,
                        latest.status AS latest_version_status,
+                       book_job.job_id AS latest_processing_job_id,
+                       book_job.status AS latest_processing_job_status,
+                       book_job.error_message AS latest_processing_error,
                        COALESCE(latest.chapter_count, 0) AS chapter_count,
                        COALESCE(latest.assignment_count, 0) AS assignment_count
                 FROM education_textbooks AS textbooks
@@ -5092,6 +5095,15 @@ async def list_textbooks_for_parent(user_id: str) -> list[dict[str, Any]]:
                     ORDER BY versions.sequence DESC
                     LIMIT 1
                 ) AS latest ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT jobs.generation_job_id::text AS job_id,
+                           jobs.status, jobs.error_message
+                    FROM education_generation_jobs AS jobs
+                    WHERE jobs.version_id = latest.version_id
+                      AND jobs.scope = 'book_pipeline'
+                    ORDER BY jobs.created_at DESC
+                    LIMIT 1
+                ) AS book_job ON TRUE
                 WHERE memberships.user_id = %s AND memberships.role = 'parent'
                 ORDER BY textbooks.created_at DESC
                 """,
@@ -5122,16 +5134,41 @@ async def get_textbook_for_parent(
             await cur.execute(
                 """
                 SELECT versions.version_id, versions.sequence, versions.status, versions.extractor_name,
-                       versions.extractor_version, versions.processing_error, versions.created_at,
+                       versions.extractor_version,
+                       COALESCE(generation_jobs.error_message, versions.processing_error)
+                           AS processing_error,
+                       versions.created_at,
                        versions.reviewed_at, versions.published_at,
                        publications.publication_id,
-                       COALESCE(jobs.job_id::text, '') AS processing_job_id,
-                       jobs.status AS processing_job_status, jobs.attempt_count AS processing_attempt_count,
-                       jobs.error_message AS processing_error_message,
+                       COALESCE(
+                           generation_jobs.generation_job_id::text,
+                           legacy_jobs.job_id::text,
+                           ''
+                       ) AS processing_job_id,
+                       CASE
+                           WHEN generation_jobs.generation_job_id IS NOT NULL
+                               THEN 'book_pipeline'
+                           WHEN legacy_jobs.job_id IS NOT NULL THEN 'legacy'
+                           ELSE NULL
+                       END AS processing_job_scope,
+                       COALESCE(generation_jobs.status, legacy_jobs.status) AS processing_job_status,
+                       COALESCE(generation_jobs.attempt_count, legacy_jobs.attempt_count)
+                           AS processing_attempt_count,
+                       COALESCE(generation_jobs.error_message, legacy_jobs.error_message)
+                           AS processing_error_message,
                        COALESCE((SELECT COUNT(*) FROM education_textbook_chapters WHERE version_id = versions.version_id), 0) AS chapter_count,
                        publications.publication_id IS NOT NULL AS is_published
                 FROM education_textbook_versions AS versions
-                LEFT JOIN education_processing_jobs AS jobs ON jobs.version_id = versions.version_id
+                LEFT JOIN LATERAL (
+                    SELECT generation_job_id, status, attempt_count, error_message
+                    FROM education_generation_jobs
+                    WHERE version_id = versions.version_id
+                      AND scope = 'book_pipeline'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ) AS generation_jobs ON TRUE
+                LEFT JOIN education_processing_jobs AS legacy_jobs
+                  ON legacy_jobs.version_id = versions.version_id
                 LEFT JOIN education_textbook_publications AS publications ON publications.version_id = versions.version_id
                 WHERE versions.textbook_id = %s
                 ORDER BY versions.sequence DESC

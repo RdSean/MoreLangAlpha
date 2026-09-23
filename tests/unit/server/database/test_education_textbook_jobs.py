@@ -665,6 +665,90 @@ async def test_published_textbook_detail_reads_assignment_names_from_household_m
 
 
 @pytest.mark.asyncio
+async def test_textbook_detail_projects_latest_book_pipeline_job(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {
+        "textbook_id": "textbook-1",
+        "household_id": "household-1",
+        "title": "123",
+        "slug": "123",
+        "created_by_user_id": "parent-1",
+        "created_at": None,
+    }
+    mock_cursor.fetchall.side_effect = [
+        [
+            {
+                "version_id": "version-1",
+                "sequence": 1,
+                "status": "review",
+                "processing_job_id": "book-job-1",
+                "processing_job_scope": "book_pipeline",
+                "processing_job_status": "failed",
+                "processing_attempt_count": 1,
+                "processing_error_message": "invalid package",
+                "publication_id": None,
+                "is_published": False,
+                "chapter_count": 0,
+            }
+        ],
+        [],
+        [],
+    ]
+
+    detail = await education_textbooks.get_textbook_for_parent(
+        parent_user_id="parent-1", textbook_id="textbook-1"
+    )
+
+    version_sql = mock_cursor.execute.call_args_list[1].args[0]
+    assert "FROM education_generation_jobs" in version_sql
+    assert "scope = 'book_pipeline'" in version_sql
+    assert detail["versions"][0]["processing_job_id"] == "book-job-1"
+    assert detail["versions"][0]["processing_job_scope"] == "book_pipeline"
+    assert detail["versions"][0]["processing_job_status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_textbook_library_projects_latest_book_pipeline_job(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchall.return_value = [
+        {
+            "textbook_id": "textbook-1",
+            "household_id": "household-1",
+            "title": "123",
+            "slug": "123",
+            "latest_version_id": "version-1",
+            "latest_version_sequence": 1,
+            "latest_version_status": "review",
+            "latest_processing_job_id": "book-job-1",
+            "latest_processing_job_status": "failed",
+            "latest_processing_error": "invalid package",
+            "chapter_count": 0,
+            "assignment_count": 0,
+        }
+    ]
+
+    rows = await education_textbooks.list_textbooks_for_parent("parent-1")
+
+    library_sql = mock_cursor.execute.call_args.args[0]
+    assert "FROM education_generation_jobs AS jobs" in library_sql
+    assert "jobs.scope = 'book_pipeline'" in library_sql
+    assert rows[0]["latest_processing_job_id"] == "book-job-1"
+    assert rows[0]["latest_processing_job_status"] == "failed"
+
+
+@pytest.mark.asyncio
 async def test_completed_parse_job_candidates_are_safe_and_owner_scoped(
     mock_connection, mock_cursor, monkeypatch
 ):

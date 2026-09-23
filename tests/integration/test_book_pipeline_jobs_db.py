@@ -255,6 +255,7 @@ async def test_078_schema_uniqueness_and_fail_closed_downgrade(
                 assert "(version_id, request_id)" in index_definition
                 assert "WHERE (request_id IS NOT NULL)" in index_definition
 
+
             async with conn.transaction():
                 async with conn.cursor() as cur:
                     await cur.execute(
@@ -1531,3 +1532,61 @@ async def test_cancel_book_pipeline_running_delegates_without_terminal_write(
             (generation_job_id,),
         )
         assert (await cur.fetchone())["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_textbook_detail_projects_book_pipeline_job_status(
+    test_db_uri: str,
+    db_conn: psycopg.AsyncConnection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_user_id, version_id = await _seed_book_pipeline_parent(db_conn)
+    job_id = uuid4()
+    async with db_conn.transaction():
+        async with db_conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO education_generation_jobs (
+                    generation_job_id, version_id, scope, status,
+                    attempt_count, processing_profile_sha256,
+                    error_code, error_message, pause_after_chapter_analysis
+                ) VALUES (%s, %s, 'book_pipeline', 'failed', 1, %s, %s, %s, FALSE)
+                """,
+                (
+                    job_id,
+                    version_id,
+                    "b" * 64,
+                    "managed_book_pipeline_invalid",
+                    "invalid package",
+                ),
+            )
+            await cur.execute(
+                """
+                SELECT textbook_id
+                FROM education_textbook_versions
+                WHERE version_id = %s
+                """,
+                (version_id,),
+            )
+            textbook_id = (await cur.fetchone())["textbook_id"]
+
+    monkeypatch.setattr(
+        education_textbooks,
+        "get_db_connection",
+        _test_connection(test_db_uri),
+    )
+    detail = await education_textbooks.get_textbook_for_parent(
+        parent_user_id=parent_user_id,
+        textbook_id=str(textbook_id),
+    )
+    library = await education_textbooks.list_textbooks_for_parent(parent_user_id)
+
+    assert detail is not None
+    version = detail["versions"][0]
+    assert version["processing_job_id"] == str(job_id)
+    assert version["processing_job_scope"] == "book_pipeline"
+    assert version["processing_job_status"] == "failed"
+    assert version["processing_error"] == "invalid package"
+    assert library[0]["latest_processing_job_id"] == str(job_id)
+    assert library[0]["latest_processing_job_status"] == "failed"
+    assert library[0]["latest_processing_error"] == "invalid package"

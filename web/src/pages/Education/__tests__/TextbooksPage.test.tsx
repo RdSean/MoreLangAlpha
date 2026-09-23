@@ -72,4 +72,17 @@ describe('TextbooksPage', () => {
     expect(screen.getByText('待审阅')).toBeInTheDocument();
     expect(screen.getByText('1 章')).toBeInTheDocument();
   });
+
+  it('shows the latest book-pipeline job state instead of the review fallback', () => {
+    state.textbooks = [{
+      ...state.textbooks[0],
+      latest_processing_job_id: 'book-job-1',
+      latest_processing_job_status: 'failed',
+      latest_processing_error: 'invalid package',
+    }];
+    render(<MemoryRouter><TextbooksPage /></MemoryRouter>);
+
+    expect(screen.getByText('加工失败')).toBeInTheDocument();
+    expect(screen.queryByText('待审阅')).not.toBeInTheDocument();
+  });
 });

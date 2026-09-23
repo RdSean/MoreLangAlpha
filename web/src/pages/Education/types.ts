@@ -154,6 +154,9 @@ export interface TextbookLibraryItem {
   latest_version_id?: string | null;
   latest_version_sequence?: number | null;
   latest_version_status?: TextbookVersionStatus | null;
+  latest_processing_job_id?: string | null;
+  latest_processing_job_status?: BookPipelineJobStatus | null;
+  latest_processing_error?: string | null;
   chapter_count: number;
   assignment_count: number;
 }
@@ -557,6 +560,7 @@ export interface TextbookVersion {
   extractor_version?: string | null;
   processing_error?: string | null;
   processing_job_id?: string | null;
+  processing_job_scope?: 'book_pipeline' | 'legacy' | null;
   processing_job_status?: string | null;
   processing_attempt_count?: number | null;
   chapter_count: number;

@@ -49,6 +49,17 @@ const statusLabels: Record<TextbookVersionStatus, string> = {
   failed: '内容准备失败',
 };
 
+const processingStatusLabels: Record<string, string> = {
+  queued: '加工中',
+  preparing: '加工中',
+  running: '加工中',
+  validating: '加工中',
+  awaiting_review: '待审阅',
+  completed: '已完成',
+  failed: '加工失败',
+  cancelled: '已取消',
+};
+
 const GENERIC_STRUCTURE_SCHEMAS = new Set([
   'langalpha-book-content-tree/v1',
   'langalpha-managed-book-package/v1',
@@ -412,6 +423,13 @@ function VersionWorkflow({ textbookId, version }: { textbookId: string; version:
     structure.data
     && GENERIC_STRUCTURE_SCHEMAS.has(structure.data.schema_version),
   );
+  const bookPipelineJob =
+    version.processing_job_scope === 'book_pipeline' &&
+    Boolean(version.processing_job_id);
+  const displayedStatus = bookPipelineJob
+    ? processingStatusLabels[version.processing_job_status ?? ''] ??
+      statusLabels[version.status]
+    : statusLabels[version.status];
   const steps = useMemo(
     () =>
       workflowSteps(
@@ -480,7 +498,7 @@ function VersionWorkflow({ textbookId, version }: { textbookId: string; version:
             color: 'var(--color-text-secondary)',
           }}
         >
-          {statusLabels[version.status]}
+          {displayedStatus}
         </span>
       </div>
 
@@ -519,7 +537,8 @@ function VersionWorkflow({ textbookId, version }: { textbookId: string; version:
                 执行内容准备
               </Button>
             )}
-            {version.status === 'failed' &&
+            {!bookPipelineJob &&
+              version.status === 'failed' &&
               version.processing_job_status === 'failed' &&
               version.processing_job_id && (
                 <Button
@@ -537,7 +556,15 @@ function VersionWorkflow({ textbookId, version }: { textbookId: string; version:
                   重试内容准备
                 </Button>
               )}
-            {version.status === 'review' && (
+            {bookPipelineJob && version.processing_job_id ? (
+              <Link
+                to={`/textbooks/${textbookId}/versions/${version.version_id}/processing?job=${encodeURIComponent(version.processing_job_id)}`}
+                className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-[var(--color-bg-hover)]"
+              >
+                <WandSparkles className="mr-2 size-4" aria-hidden="true" />
+                查看处理状态
+              </Link>
+            ) : version.status === 'review' ? (
               <Link
                 to={`/textbooks/${textbookId}/versions/${version.version_id}/processing`}
                 className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-[var(--color-bg-hover)]"
@@ -545,7 +572,7 @@ function VersionWorkflow({ textbookId, version }: { textbookId: string; version:
                 <WandSparkles className="mr-2 size-4" aria-hidden="true" />
                 开始处理
               </Link>
-            )}
+            ) : null}
             {structure.data && !genericStructure && (
               <Link
                 to={`/textbooks/${textbookId}/versions/${version.version_id}/structure`}

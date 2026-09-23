@@ -2,6 +2,12 @@
 
 ## 2026-09-23
 
+### 修复：教材列表和详情恢复 book pipeline 状态入口
+
+- textbook library/detail projection 现在优先读取最新 `education_generation_jobs(scope='book_pipeline')`，不再只关联旧的 `education_processing_jobs`；因此离开加工页再进入教材时，失败、运行中、待审阅和已完成 job 的 ID、状态与错误信息不会丢失。
+- 教材列表使用最新 pipeline job 状态显示“加工中 / 加工失败 / 待审阅 / 已取消”；教材详情显示“查看处理状态”，并携带 `?job=<generation_job_id>` 返回原有处理进度页。legacy processing job 继续保留兼容。
+- 验证：数据库/API 服务单元 `57 passed`，真实 PostgreSQL `test_book_pipeline_jobs_db.py` `12 passed`，Education Vitest `89 passed`，`pnpm typecheck` 通过。
+
 ### 修复：education jobs 使用 compact replay stream
 
 - `RunSSEProducer` 新增 `replay_profile="full" | "education_compact"`；education compact 只保留 metadata、warning、error、interrupt、model retry/fallback，并在 sequence 分配和 accumulator 写入前过滤 message/tool delta、compaction、context window、provenance 与 steering 帧。

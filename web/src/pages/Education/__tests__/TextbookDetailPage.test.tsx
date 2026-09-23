@@ -182,6 +182,31 @@ describe('TextbookDetailPage', () => {
     );
   });
 
+  it('links an existing book pipeline job back to its status page', () => {
+    state.textbook = {
+      ...state.textbook,
+      versions: [
+        version({
+          processing_job_id: 'book-job-1',
+          processing_job_scope: 'book_pipeline',
+          processing_job_status: 'failed',
+          processing_error: 'invalid package',
+        }),
+      ],
+    };
+    renderPage();
+
+    expect(screen.getByText('加工失败')).toBeInTheDocument();
+    expect(screen.getByText('invalid package')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '查看处理状态' })).toHaveAttribute(
+      'href',
+      '/textbooks/textbook-1/versions/version-1/processing?job=book-job-1',
+    );
+    expect(
+      screen.queryByRole('link', { name: '开始处理' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows lesson progress from the latest structure', () => {
     state.textbook = {
       ...state.textbook,
