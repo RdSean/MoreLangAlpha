@@ -40,11 +40,13 @@ LESSON = {
 @pytest.mark.asyncio
 async def test_queue_lesson_requires_parent_and_launches(monkeypatch):
     launched: dict[str, object] = {}
+    queued: dict[str, object] = {}
 
     async def household(_user_id):
         return {"household_id": "household-1"}
 
     async def queue(**kwargs):
+        queued.update(kwargs)
         return {"generation_job_id": "generation-1", "scope": "lesson"}
 
     async def launch(**kwargs):
@@ -78,10 +80,12 @@ async def test_queue_lesson_requires_parent_and_launches(monkeypatch):
         parent_user_id="parent-1",
         knowledge_point_id="kp-1",
         auto_grading=False,
+        prompt="  使用中文讲解。  ",
     )
 
     assert result["status"] == "queued"
     assert launched["generation_job_id"] == "generation-1"
+    assert queued["prompt"] == "使用中文讲解。"
 
 
 @pytest.mark.asyncio
@@ -271,3 +275,44 @@ async def test_approve_lesson_rejects_missing_revision(monkeypatch):
             lesson_id="lesson-1",
             revision_id="missing",
         )
+
+
+@pytest.mark.asyncio
+async def test_lesson_generation_status_returns_persisted_prompt(monkeypatch):
+    async def household(_user_id):
+        return {"household_id": "household-1"}
+
+    async def candidate(**_kwargs):
+        return {"knowledge_point_id": "kp-1"}
+
+    async def active(**_kwargs):
+        return {
+            "generation_job_id": "generation-1",
+            "status": "running",
+            "attempt_count": 1,
+            "auto_grading": False,
+            "processing_brief": "使用中文讲解。",
+        }
+
+    monkeypatch.setattr(
+        education_lesson_review,
+        "get_household_context_for_parent",
+        household,
+    )
+    monkeypatch.setattr(
+        education_lesson_review,
+        "get_knowledge_point_for_parent",
+        candidate,
+    )
+    monkeypatch.setattr(
+        education_lesson_review,
+        "get_active_lesson_generation_for_parent",
+        active,
+    )
+
+    status = await education_lesson_review.get_lesson_generation_status_for_parent(
+        parent_user_id="parent-1",
+        knowledge_point_id="kp-1",
+    )
+
+    assert status["prompt"] == "使用中文讲解。"

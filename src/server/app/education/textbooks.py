@@ -631,6 +631,7 @@ async def generate_family_knowledge_point_lesson(
             parent_user_id=user_id,
             knowledge_point_id=str(knowledge_point_id),
             auto_grading=body.auto_grading,
+            prompt=body.prompt,
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc

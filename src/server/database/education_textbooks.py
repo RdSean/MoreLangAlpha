@@ -1618,6 +1618,7 @@ async def get_active_lesson_generation_for_parent(
                 SELECT jobs.generation_job_id, jobs.version_id, jobs.scope,
                        jobs.knowledge_point_id, jobs.status, jobs.attempt_count,
                        jobs.auto_grading, jobs.error_code, jobs.error_message,
+                       jobs.processing_brief,
                        jobs.created_at, jobs.updated_at,
                        attempts.root_run_id, attempts.started_at,
                        attempts.heartbeat_at
@@ -3350,12 +3351,14 @@ async def create_generation_job(
     knowledge_point_id: str | None,
     processing_profile_sha256: str,
     auto_grading: bool = False,
+    prompt: str = "",
 ) -> dict[str, Any]:
     """Queue one textbook generation job."""
     structure_target = str(structure_id) if structure_id is not None else None
     knowledge_point_target = (
         str(knowledge_point_id) if knowledge_point_id is not None else None
     )
+    normalized_prompt = prompt.strip()
     if scope in {"structure", "assets"}:
         valid_target = structure_target is not None and knowledge_point_target is None
     elif scope == "lesson":
@@ -3380,7 +3383,7 @@ async def create_generation_job(
                         """
                         SELECT generation_job_id, version_id, scope,
                                structure_id, knowledge_point_id, status,
-                               auto_grading, attempt_count
+                               auto_grading, processing_brief, attempt_count
                         FROM education_generation_jobs
                         WHERE version_id = %s
                           AND scope = 'lesson'
@@ -3399,16 +3402,21 @@ async def create_generation_job(
                             raise LessonGenerationConflictError(
                                 "Active lesson job uses different auto-grading settings"
                             )
+                        if str(existing.get("processing_brief") or "") != normalized_prompt:
+                            raise LessonGenerationConflictError(
+                                "Active lesson job uses different generation prompt"
+                            )
                         return {**dict(existing), "reused_existing_job": True}
                 await cur.execute(
                     """
                     INSERT INTO education_generation_jobs (
                         generation_job_id, version_id, scope, structure_id,
                         knowledge_point_id, status, auto_grading,
-                        processing_profile_sha256
-                    ) VALUES (%s, %s, %s, %s, %s, 'queued', %s, %s)
+                        processing_profile_sha256, processing_brief
+                    ) VALUES (%s, %s, %s, %s, %s, 'queued', %s, %s, %s)
                     RETURNING generation_job_id, version_id, scope, structure_id,
-                              knowledge_point_id, status, auto_grading
+                              knowledge_point_id, status, auto_grading,
+                              processing_brief
                     """,
                     (
                         generation_job_id,
@@ -3418,6 +3426,7 @@ async def create_generation_job(
                         knowledge_point_target,
                         auto_grading,
                         processing_profile_sha256,
+                        normalized_prompt,
                     ),
                 )
                 row = await cur.fetchone()

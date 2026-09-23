@@ -116,6 +116,24 @@ def test_managed_lesson_prompt_contains_only_target_contract() -> None:
     assert "evidence.json" in prompt
 
 
+def test_processing_profile_hash_tracks_normalized_lesson_prompt() -> None:
+    first = education_lesson_jobs._processing_profile_sha256(
+        auto_grading=False,
+        prompt=" 使用中文讲解。 ",
+    )
+    same = education_lesson_jobs._processing_profile_sha256(
+        auto_grading=False,
+        prompt="使用中文讲解。",
+    )
+    different = education_lesson_jobs._processing_profile_sha256(
+        auto_grading=False,
+        prompt="改用英文讲解。",
+    )
+
+    assert first == same
+    assert first != different
+
+
 def test_generic_managed_lesson_prompt_does_not_require_reading_scope() -> None:
     prompt = education_lesson_jobs.managed_lesson_prompt(
         GENERIC_LESSON_JOB,
@@ -369,11 +387,13 @@ async def test_queue_lesson_generation_creates_one_lesson_job(monkeypatch) -> No
         parent_user_id="parent-1",
         knowledge_point_id="kp-1",
         auto_grading=False,
+        prompt="  使用中文讲解。  ",
     )
 
     assert queued["scope"] == "lesson"
     assert captured["scope"] == "lesson"
     assert captured["knowledge_point_id"] == "kp-1"
+    assert captured["prompt"] == "使用中文讲解。"
 
 
 @pytest.mark.asyncio
@@ -549,11 +569,13 @@ async def test_queue_lesson_generation_accepts_generic_candidate(monkeypatch) ->
         parent_user_id="parent-1",
         knowledge_point_id="generic-kp-1",
         auto_grading=True,
+        prompt="  给出三个生活例子。  ",
     )
 
     assert queued["content_node_id"] == GENERIC_NODE_ID
     assert captured["knowledge_point_id"] == "generic-kp-1"
     assert captured["auto_grading"] is True
+    assert captured["prompt"] == "给出三个生活例子。"
     scopes.assert_not_awaited()
 
 

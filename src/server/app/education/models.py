@@ -740,6 +740,7 @@ class StructureGenerationJobResponse(BaseModel):
     root_run_id: UUID | None = None
     started_at: datetime | None = None
     heartbeat_at: datetime | None = None
+    prompt: str = ""
     structure_sequence: int | None = None
     structure_status: str | None = None
     structure_bundle_prefix: str | None = None
@@ -747,6 +748,18 @@ class StructureGenerationJobResponse(BaseModel):
 
 class GenerateKnowledgePointLessonRequest(BaseModel):
     auto_grading: bool = False
+    prompt: str = Field(default="", max_length=4_000)
+
+    @field_validator("prompt", mode="before")
+    @classmethod
+    def normalize_prompt(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return _reject_control_characters(
+            value,
+            allowed=_ALLOWED_BRIEF_CONTROL_CHARS,
+            field_name="prompt",
+        ).strip()
 
 
 class KnowledgePointLessonRevisionResponse(BaseModel):
@@ -816,6 +829,7 @@ class LessonGenerationStatusResponse(BaseModel):
     status: str | None = None
     attempt_count: int = 0
     auto_grading: bool = False
+    prompt: str = ""
     error_code: str | None = None
     error_message: str | None = None
     started_at: datetime | None = None

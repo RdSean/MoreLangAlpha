@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from src.server.app.education.textbooks import router
 from src.server.app.education.models import (
     CreateBookPipelineRequest,
+    GenerateKnowledgePointLessonRequest,
     StructureSourceRefResponse,
 )
 from src.server.services import education_structure_progress as progress_service
@@ -674,7 +675,10 @@ async def test_parent_generates_reviews_and_publishes_lesson(client):
     ):
         queued = await client.post(
             f"/api/v1/education/knowledge-points/{knowledge_point_id}/lessons",
-            json={"auto_grading": False},
+            json={
+                "auto_grading": False,
+                "prompt": "  使用中文讲解，保留英文术语。  ",
+            },
         )
         loaded = await client.get(
             f"/api/v1/education/knowledge-point-lessons/{lesson_id}"
@@ -698,6 +702,7 @@ async def test_parent_generates_reviews_and_publishes_lesson(client):
     assert approved.status_code == 200
     assert published.status_code == 201
     assert queue.await_args.kwargs["knowledge_point_id"] == str(knowledge_point_id)
+    assert queue.await_args.kwargs["prompt"] == "使用中文讲解，保留英文术语。"
     assert revise.await_args.kwargs["content_markdown"] == "# 修订版\n"
     assert approve.await_args.kwargs["revision_id"] == str(revision_id)
     assert publish.await_args.kwargs["structure_id"] == str(publication["structure_id"])
@@ -1433,6 +1438,22 @@ def test_book_pipeline_request_rejects_control_characters(brief: str) -> None:
 def test_book_pipeline_request_rejects_more_than_4000_characters() -> None:
     with pytest.raises(ValidationError):
         CreateBookPipelineRequest(processing_brief="a" * 4_001)
+
+
+def test_lesson_generation_request_normalizes_optional_prompt() -> None:
+    request = GenerateKnowledgePointLessonRequest(
+        auto_grading=True,
+        prompt="  使用中文讲解；\r\n保留英文术语。  ",
+    )
+
+    assert request.auto_grading is True
+    assert request.prompt == "使用中文讲解；\r\n保留英文术语。"
+    assert GenerateKnowledgePointLessonRequest().prompt == ""
+
+
+def test_lesson_generation_request_rejects_more_than_4000_characters() -> None:
+    with pytest.raises(ValidationError):
+        GenerateKnowledgePointLessonRequest(prompt="a" * 4_001)
 
 
 @pytest.mark.asyncio

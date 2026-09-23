@@ -42,7 +42,9 @@ async def queue_lesson_for_parent(
     parent_user_id: str,
     knowledge_point_id: str,
     auto_grading: bool = False,
+    prompt: str = "",
 ) -> dict[str, Any]:
+    normalized_prompt = prompt.strip()
     if not await get_household_context_for_parent(parent_user_id):
         raise TextbookPermissionError("Only a parent can generate lessons")
     try:
@@ -50,6 +52,7 @@ async def queue_lesson_for_parent(
             parent_user_id=parent_user_id,
             knowledge_point_id=knowledge_point_id,
             auto_grading=auto_grading,
+            prompt=normalized_prompt,
         )
     except LookupError as exc:
         raise TextbookNotFoundError("Accepted knowledge point not found") from exc
@@ -64,12 +67,19 @@ async def queue_lesson_for_parent(
             generation_job_id=str(queued["generation_job_id"]),
         )
         if projection and projection.get("status") in {"failed", "cancelled"}:
-            return projection
+            return {
+                **projection,
+                "prompt": str(projection.get("processing_brief") or ""),
+            }
         raise TextbookError("单知识点课程生成无法启动，请稍后重试。") from exc
-    return await get_generation_job_for_parent(
+    projection = await get_generation_job_for_parent(
         parent_user_id=parent_user_id,
         generation_job_id=str(queued["generation_job_id"]),
     ) or queued
+    return {
+        **projection,
+        "prompt": str(projection.get("processing_brief") or ""),
+    }
 
 
 async def get_lesson_for_parent(
@@ -252,6 +262,7 @@ async def get_lesson_generation_status_for_parent(
         "status": str(job["status"]) if job else None,
         "attempt_count": int(job["attempt_count"] or 0) if job else 0,
         "auto_grading": bool(job["auto_grading"]) if job else False,
+        "prompt": str(job.get("processing_brief") or "") if job else "",
         "error_code": job.get("error_code") if job else None,
         "error_message": job.get("error_message") if job else None,
         "started_at": job.get("started_at") if job else None,

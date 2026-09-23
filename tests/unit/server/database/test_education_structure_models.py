@@ -660,6 +660,7 @@ async def test_create_lesson_generation_job_persists_one_target(
             "scope": "lesson",
             "knowledge_point_id": "kp-1",
             "status": "queued",
+            "processing_brief": "使用中文讲解。",
         },
     ]
 
@@ -669,14 +670,18 @@ async def test_create_lesson_generation_job_persists_one_target(
         structure_id=None,
         knowledge_point_id="kp-1",
         processing_profile_sha256="a" * 64,
+        prompt="使用中文讲解。",
     )
 
     assert result["knowledge_point_id"] == "kp-1"
+    assert result["processing_brief"] == "使用中文讲解。"
     assert result["reused_existing_job"] is False
     insert_sql = mock_cursor.execute.call_args.args[0]
     assert "INSERT INTO education_generation_jobs" in insert_sql
     assert "scope" in insert_sql
+    assert "processing_brief" in insert_sql
     assert mock_cursor.execute.call_args.args[1][2] == "lesson"
+    assert "使用中文讲解。" in mock_cursor.execute.call_args.args[1]
 
 
 @pytest.mark.asyncio
@@ -695,6 +700,7 @@ async def test_create_lesson_generation_job_reuses_active_job(
         "knowledge_point_id": "kp-1",
         "status": "running",
         "auto_grading": False,
+        "processing_brief": "使用中文讲解。",
         "attempt_count": 1,
     }
 
@@ -704,6 +710,7 @@ async def test_create_lesson_generation_job_reuses_active_job(
         structure_id=None,
         knowledge_point_id="kp-1",
         processing_profile_sha256="a" * 64,
+        prompt="使用中文讲解。",
     )
 
     assert result == {
@@ -713,6 +720,7 @@ async def test_create_lesson_generation_job_reuses_active_job(
         "knowledge_point_id": "kp-1",
         "status": "running",
         "auto_grading": False,
+        "processing_brief": "使用中文讲解。",
         "attempt_count": 1,
         "reused_existing_job": True,
     }
@@ -738,6 +746,7 @@ async def test_create_lesson_generation_job_rejects_auto_grading_mismatch(
         "knowledge_point_id": "kp-1",
         "status": "running",
         "auto_grading": True,
+        "processing_brief": "使用中文讲解。",
         "attempt_count": 1,
     }
 
@@ -756,6 +765,49 @@ async def test_create_lesson_generation_job_rejects_auto_grading_mismatch(
 
     assert all(
         "INSERT INTO education_generation_jobs" not in call.args[0]
+        for call in mock_cursor.execute.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_lesson_generation_job_rejects_prompt_mismatch(
+    mock_connection, mock_cursor, monkeypatch
+):
+    @asynccontextmanager
+    async def fake_connection():
+        yield mock_connection
+
+    monkeypatch.setattr(education_textbooks, "get_db_connection", fake_connection)
+    mock_cursor.fetchone.return_value = {
+        "generation_job_id": "generation-lesson-active",
+        "version_id": "version-1",
+        "scope": "lesson",
+        "knowledge_point_id": "kp-1",
+        "status": "running",
+        "auto_grading": False,
+        "processing_brief": "使用中文讲解。",
+        "attempt_count": 1,
+    }
+
+    with pytest.raises(
+        education_textbooks.LessonGenerationConflictError,
+        match="different generation prompt",
+    ):
+        await education_textbooks.create_generation_job(
+            version_id="version-1",
+            scope="lesson",
+            structure_id=None,
+            knowledge_point_id="kp-1",
+            processing_profile_sha256="a" * 64,
+            prompt="改用英文讲解。",
+        )
+
+    assert all(
+        "INSERT INTO education_generation_jobs" not in call.args[0]
+        for call in mock_cursor.execute.call_args_list
+    )
+    assert all(
+        "UPDATE education_generation_jobs" not in call.args[0]
         for call in mock_cursor.execute.call_args_list
     )
 

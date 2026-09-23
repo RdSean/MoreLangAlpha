@@ -2,6 +2,13 @@
 
 ## 2026-09-23
 
+### 新增：知识点课程生成要求持久化与冲突保护
+
+- 知识点课程首次生成和重新生成现在接受最多 4000 字的可选 `prompt`，并在服务边界去除首尾空白后持久化到现有 `education_generation_jobs.processing_brief`，无需数据库迁移。
+- 同一知识点已有活动 job 时，只有 `auto_grading` 和规范化 prompt 都相同才复用；任一不同返回冲突且不改写正在运行的 job。
+- 课程 job 与 lesson status API 现在返回持久化的 `prompt`，生成 profile hash 也纳入规范化 prompt，便于页面刷新后恢复原要求。
+- 验证：请求、数据库、课程队列和 review 服务聚焦 `116 passed`，Ruff 通过。
+
 ### 修复：知识点候选接口因超长 quote 返回 500
 
 - `StructureSourceRefResponse` 在响应序列化边界将 `source_refs[].quote` 截断到 500 字符；数据库和 package 仍保留完整 canonical quote，不再因单个长引用让整个候选列表返回 500。

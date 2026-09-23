@@ -132,11 +132,16 @@ def _lesson_progress_prompt(
     return "\n".join(lines)
 
 
-def _processing_profile_sha256(*, auto_grading: bool) -> str:
+def _processing_profile_sha256(
+    *,
+    auto_grading: bool,
+    prompt: str = "",
+) -> str:
     payload = {
         "profile": _PROFILE_VERSION,
         "skills": ["book-to-skill"],
         "auto_grading": auto_grading,
+        "prompt": prompt.strip(),
     }
     return hashlib.sha256(
         json.dumps(
@@ -380,8 +385,10 @@ async def queue_kp_lesson_generation_for_parent(
     parent_user_id: str,
     knowledge_point_id: str,
     auto_grading: bool = False,
+    prompt: str = "",
 ) -> dict[str, Any]:
     """Create one lesson generation job for an accepted knowledge point."""
+    normalized_prompt = prompt.strip()
     knowledge_point = await get_knowledge_point_for_parent(
         parent_user_id=parent_user_id,
         knowledge_point_id=knowledge_point_id,
@@ -403,9 +410,11 @@ async def queue_kp_lesson_generation_for_parent(
                 structure_id=None,
                 knowledge_point_id=knowledge_point_id,
                 processing_profile_sha256=_processing_profile_sha256(
-                    auto_grading=auto_grading
+                    auto_grading=auto_grading,
+                    prompt=normalized_prompt,
                 ),
                 auto_grading=auto_grading,
+                prompt=normalized_prompt,
             )
         except LessonGenerationConflictError as exc:
             raise TextbookTransitionError(str(exc)) from exc
@@ -430,9 +439,11 @@ async def queue_kp_lesson_generation_for_parent(
             structure_id=None,
             knowledge_point_id=knowledge_point_id,
             processing_profile_sha256=_processing_profile_sha256(
-                auto_grading=auto_grading
+                auto_grading=auto_grading,
+                prompt=normalized_prompt,
             ),
             auto_grading=auto_grading,
+            prompt=normalized_prompt,
         )
     except LessonGenerationConflictError as exc:
         raise TextbookTransitionError(str(exc)) from exc
