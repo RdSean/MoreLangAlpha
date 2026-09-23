@@ -65,6 +65,27 @@ Triangles have three angles whose measures sum to 180 degrees.
 """
 
 
+def _completed_pipeline_progress_events() -> list[dict]:
+    return [
+        {
+            "generation_job_id": "4d0112f8-0e00-4f1f-990a-4bc1b1cc20f3",
+            "attempt_id": "attempt-1",
+            "sequence": sequence,
+            "event_key": f"{stage}:completed:attempt-1",
+            "stage": stage,
+            "status": "completed",
+        }
+        for sequence, stage in enumerate(
+            (
+                "chapter_analysis",
+                "content_processing",
+                "knowledge_point_generation",
+            ),
+            start=1,
+        )
+    ]
+
+
 def _book_package() -> dict:
     first_end = MARKDOWN.index("# Unit 2")
     return {
@@ -620,6 +641,11 @@ async def test_import_book_package_uses_explicit_current_attempt(
 @pytest.mark.asyncio
 async def test_finalize_book_pipeline_imports_and_completes(monkeypatch) -> None:
     imported: dict[str, object] = {}
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "list_generation_progress_events",
+        AsyncMock(return_value=_completed_pipeline_progress_events()),
+    )
 
     async def fake_import(job, sandbox, *, frozen_input=None):
         imported.update(
@@ -717,6 +743,11 @@ async def test_finalize_book_pipeline_invalid_package_settles_invalid(
     )
     monkeypatch.setattr(
         education_book_pipeline_jobs,
+        "list_generation_progress_events",
+        AsyncMock(return_value=_completed_pipeline_progress_events()),
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
         "settle_generation_job",
         fake_settle,
     )
@@ -733,6 +764,52 @@ async def test_finalize_book_pipeline_invalid_package_settles_invalid(
 
     assert result["status"] == "failed"
     assert settled["error_code"] == "managed_book_pipeline_invalid"
+
+
+@pytest.mark.asyncio
+async def test_finalize_book_pipeline_requires_durable_completed_stages(
+    monkeypatch,
+) -> None:
+    settled: dict[str, object] = {}
+    events = _completed_pipeline_progress_events()
+    events = [
+        event
+        for event in events
+        if event["stage"] != "chapter_analysis"
+    ]
+
+    async def fake_settle(**kwargs):
+        settled.update(kwargs)
+        return {"status": kwargs["status"]}
+
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "list_generation_progress_events",
+        AsyncMock(return_value=events),
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "settle_generation_job",
+        fake_settle,
+    )
+    monkeypatch.setattr(
+        education_book_pipeline_jobs,
+        "import_book_package",
+        AsyncMock(side_effect=AssertionError("must not import missing stages")),
+    )
+
+    result = await education_book_pipeline_jobs.finalize_book_pipeline_generation(
+        job=_job(status="running"),
+        frozen_input={"sources": []},
+        attempt_id="attempt-1",
+        root_run_id="run-1",
+        sandbox=object(),
+        terminal_status="completed",
+        terminal_error=None,
+    )
+
+    assert result["status"] == "failed"
+    assert settled["error_code"] == "managed_book_pipeline_incomplete_progress"
 
 
 @pytest.mark.asyncio

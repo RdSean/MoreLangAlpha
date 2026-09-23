@@ -126,11 +126,11 @@ async def test_collector_persists_growing_events_before_managed_run_finishes(
     monkeypatch,
 ) -> None:
     first = (
-        b'{"event_key":"chapter:start","stage":"chapter_analysis","status":"running"}\n'
+        b'{"event_key":"chapter_analysis:running:chapter","stage":"chapter_analysis","status":"running"}\n'
     )
     second = (
         first
-        + b'{"event_key":"content:start","stage":"content_processing","status":"running"}\n'
+        + b'{"event_key":"content_processing:running:content","stage":"content_processing","status":"running"}\n'
     )
     sandbox = _GrowingSandbox([first, second])
     store = _Store()
@@ -153,11 +153,11 @@ async def test_collector_keeps_incomplete_final_line_for_the_next_poll(
     monkeypatch,
 ) -> None:
     first = (
-        b'{"event_key":"chapter:start","stage":"chapter_analysis","status":"running"}\n'
+        b'{"event_key":"chapter_analysis:running:chapter","stage":"chapter_analysis","status":"running"}\n'
     )
     partial = (
         first
-        + b'{"event_key":"content:start","stage":"content_processing",'
+        + b'{"event_key":"content_processing:running:content","stage":"content_processing",'
         + b'"status":"running"}'
     )
     sandbox = _GrowingSandbox([partial, partial + b"\n"])
@@ -178,7 +178,7 @@ async def test_collector_replay_is_idempotent_by_attempt_sequence(
     monkeypatch,
 ) -> None:
     payload = (
-        b'{"event_key":"chapter:start","stage":"chapter_analysis","status":"running"}\n'
+        b'{"event_key":"chapter_analysis:running:chapter","stage":"chapter_analysis","status":"running"}\n'
     )
     sandbox = _GrowingSandbox([payload, payload])
     store = _Store()
@@ -191,7 +191,7 @@ async def test_collector_replay_is_idempotent_by_attempt_sequence(
 
     assert len(store.rows) == 1
     assert [call["sequence"] for call in store.calls] == [1, 1]
-    assert restarted.latest_event_by_key["chapter:start"]["sequence"] == 1
+    assert restarted.latest_event_by_key["chapter_analysis:running:chapter"]["sequence"] == 1
 
 
 @pytest.mark.asyncio
@@ -199,7 +199,7 @@ async def test_transient_persistence_failure_retries_same_offset_and_sequence(
     monkeypatch,
 ) -> None:
     payload = (
-        b'{"event_key":"chapter:start","stage":"chapter_analysis","status":"running"}\n'
+        b'{"event_key":"chapter_analysis:running:chapter","stage":"chapter_analysis","status":"running"}\n'
     )
     sandbox = _GrowingSandbox([payload])
     store = _Store(fail_times=1)
@@ -214,7 +214,7 @@ async def test_transient_persistence_failure_retries_same_offset_and_sequence(
 
     assert len(store.rows) == 1
     assert [call["sequence"] for call in store.calls] == [1, 1]
-    assert store.rows[(ATTEMPT_ID, 1)]["event_key"] == "chapter:start"
+    assert store.rows[(ATTEMPT_ID, 1)]["event_key"] == "chapter_analysis:running:chapter"
 
 
 @pytest.mark.asyncio
@@ -243,11 +243,11 @@ async def test_collector_bounds_lines_and_file_reads(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_stop_flushes_the_final_appended_event(monkeypatch) -> None:
     first = (
-        b'{"event_key":"chapter:start","stage":"chapter_analysis","status":"running"}\n'
+        b'{"event_key":"chapter_analysis:running:chapter","stage":"chapter_analysis","status":"running"}\n'
     )
     final = (
         first
-        + b'{"event_key":"chapter:done","stage":"chapter_analysis","status":"completed"}\n'
+        + b'{"event_key":"chapter_analysis:completed:chapter","stage":"chapter_analysis","status":"completed"}\n'
     )
     sandbox = _GrowingSandbox([first, final])
     store = _Store()
@@ -258,8 +258,8 @@ async def test_stop_flushes_the_final_appended_event(monkeypatch) -> None:
     await collector.stop()
 
     assert [row["event_key"] for row in store.rows.values()] == [
-        "chapter:start",
-        "chapter:done",
+        "chapter_analysis:running:chapter",
+        "chapter_analysis:completed:chapter",
     ]
 
 
@@ -267,7 +267,7 @@ async def test_stop_flushes_the_final_appended_event(monkeypatch) -> None:
 async def test_fallback_emits_only_after_idle_sanitized_activity(monkeypatch) -> None:
     clock = _Clock()
     payload = (
-        b'{"event_key":"chapter:start","stage":"chapter_analysis","status":"running"}\n'
+        b'{"event_key":"chapter_analysis:running:chapter","stage":"chapter_analysis","status":"running"}\n'
     )
     sandbox = _GrowingSandbox([payload])
     store = _Store()
@@ -294,8 +294,8 @@ async def test_fallback_emits_only_after_idle_sanitized_activity(monkeypatch) ->
 async def test_fallback_does_not_regress_a_completed_stage(monkeypatch) -> None:
     clock = _Clock()
     payload = (
-        b'{"event_key":"chapter:start","stage":"chapter_analysis","status":"running"}\n'
-        b'{"event_key":"chapter:start","stage":"chapter_analysis","status":"completed"}\n'
+        b'{"event_key":"chapter_analysis:running:chapter","stage":"chapter_analysis","status":"running"}\n'
+        b'{"event_key":"chapter_analysis:running:chapter","stage":"chapter_analysis","status":"completed"}\n'
     )
     sandbox = _GrowingSandbox([payload])
     store = _Store()
@@ -318,8 +318,10 @@ async def test_fallback_does_not_regress_a_completed_stage(monkeypatch) -> None:
 async def test_fallback_only_targets_the_current_unfinished_stage(monkeypatch) -> None:
     clock = _Clock()
     payload = (
-        b'{"event_key":"chapter","stage":"chapter_analysis","status":"completed"}\n'
-        b'{"event_key":"content","stage":"content_processing","status":"running"}\n'
+        b'{"event_key":"chapter_analysis:completed:chapter",'
+        b'"stage":"chapter_analysis","status":"completed"}\n'
+        b'{"event_key":"content_processing:running:content",'
+        b'"stage":"content_processing","status":"running"}\n'
     )
     sandbox = _GrowingSandbox([payload])
     store = _Store()
@@ -340,7 +342,7 @@ async def test_fallback_only_targets_the_current_unfinished_stage(monkeypatch) -
 async def test_completed_chapter_event_sets_stop_signal_once(
     monkeypatch,
 ) -> None:
-    payload = b'{"event_key":"chapter:done","stage":"chapter_analysis","status":"completed"}\n'
+    payload = b'{"event_key":"chapter_analysis:completed:chapter","stage":"chapter_analysis","status":"completed"}\n'
     sandbox = _GrowingSandbox([payload, payload])
     store = _Store()
     stop_event = asyncio.Event()
@@ -364,7 +366,7 @@ async def test_already_existing_matching_event_can_set_missing_stop_signal(
     monkeypatch,
 ) -> None:
     event = {
-        "event_key": "chapter:done",
+        "event_key": "chapter_analysis:completed:chapter",
         "stage": "chapter_analysis",
         "status": "completed",
         "label": "chapter_analysis completed",
@@ -381,7 +383,7 @@ async def test_already_existing_matching_event_can_set_missing_stop_signal(
     }
     sandbox = _GrowingSandbox(
         [
-            b'{"event_key":"chapter:done","stage":"chapter_analysis",'
+            b'{"event_key":"chapter_analysis:completed:chapter","stage":"chapter_analysis",'
             b'"status":"completed"}\n'
         ]
     )
@@ -411,7 +413,7 @@ async def test_rejected_sequence_payload_mismatch_never_triggers_checkpoint(
         "attempt_id": ATTEMPT_ID,
         "run_id": RUN_ID,
         "sequence": 1,
-        "event_key": "chapter:done",
+        "event_key": "chapter_analysis:completed:chapter",
         "stage": "chapter_analysis",
         "status": "completed",
         "label": "different durable payload",
@@ -419,7 +421,7 @@ async def test_rejected_sequence_payload_mismatch_never_triggers_checkpoint(
     }
     sandbox = _GrowingSandbox(
         [
-            b'{"event_key":"chapter:done","stage":"chapter_analysis",'
+            b'{"event_key":"chapter_analysis:completed:chapter","stage":"chapter_analysis",'
             b'"status":"completed","label":"replacement"}\n'
         ]
     )

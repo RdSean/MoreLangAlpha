@@ -190,16 +190,16 @@ async def test_live_pipeline_progress_is_durable_before_run_completion(
         test_connection,
     )
     chapter_running = (
-        b'{"event_key":"chapter:running","stage":"chapter_analysis",'
+        b'{"event_key":"chapter_analysis:running:chapter","stage":"chapter_analysis",'
         b'"status":"running","label":"chapter structure identified"}\n'
     )
     remaining = (
         chapter_running
-        + b'{"event_key":"chapter:completed","stage":"chapter_analysis",'
+        + b'{"event_key":"chapter_analysis:completed:chapter","stage":"chapter_analysis",'
         b'"status":"completed","label":"chapter analysis complete"}\n'
-        + b'{"event_key":"content:running","stage":"content_processing",'
+        + b'{"event_key":"content_processing:running:content","stage":"content_processing",'
         b'"status":"running","label":"processing content tree"}\n'
-        + b'{"event_key":"knowledge:completed",'
+        + b'{"event_key":"knowledge_point_generation:completed:knowledge",'
         b'"stage":"knowledge_point_generation","status":"completed",'
         b'"label":"knowledge candidates complete","total_value":22}\n'
     )
@@ -230,7 +230,7 @@ async def test_live_pipeline_progress_is_durable_before_run_completion(
             )
             assert await cur.fetchall() == [
                 {
-                    "event_key": "chapter:running",
+                    "event_key": "chapter_analysis:running:chapter",
                     "stage": "chapter_analysis",
                     "status": "running",
                 }
@@ -300,7 +300,7 @@ async def test_checkpoint_stops_before_archive_and_continuation_prompt_contract(
         test_connection,
     )
     payload = (
-        b'{"event_key":"chapter:completed","stage":"chapter_analysis",'
+        b'{"event_key":"chapter_analysis:completed:chapter","stage":"chapter_analysis",'
         b'"status":"completed","label":"chapter analysis complete"}\n'
     )
     sandbox = _GrowingSandbox([payload])
@@ -385,7 +385,7 @@ async def test_checkpoint_stops_before_archive_and_continuation_prompt_contract(
         )
         assert await cur.fetchall() == [
             {
-                "event_key": "chapter:completed",
+                "event_key": "chapter_analysis:completed:chapter",
                 "stage": "chapter_analysis",
                 "status": "completed",
             }

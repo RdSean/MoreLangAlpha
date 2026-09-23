@@ -19,16 +19,18 @@ def test_parse_progress_event_accepts_the_stable_stage_status_matrix(
     stage: str,
     status: str,
 ) -> None:
+    metadata = {"reason": "checkpoint_review"} if status == "skipped" else None
     parsed = education_generation_progress.parse_progress_event(
         {
-            "event_key": f"{stage}:{status}",
+            "event_key": f"{stage}:{status}:job-1",
             "stage": stage,
             "status": status,
             "label": "处理进度",
+            **({"metadata": metadata} if metadata else {}),
         }
     )
 
-    assert parsed["event_key"] == f"{stage}:{status}"
+    assert parsed["event_key"] == f"{stage}:{status}:job-1"
     assert parsed["stage"] == stage
     assert parsed["status"] == status
     assert parsed["label"] == "处理进度"
@@ -37,7 +39,7 @@ def test_parse_progress_event_accepts_the_stable_stage_status_matrix(
 def test_parse_progress_event_normalizes_safe_optional_fields() -> None:
     parsed = education_generation_progress.parse_progress_event(
         {
-            "event_key": "chapter-1:complete",
+            "event_key": "chapter_analysis:completed:chapter-1",
             "stage": "chapter_analysis",
             "substage": " Chapter Boundary ",
             "status": "completed",
@@ -52,7 +54,7 @@ def test_parse_progress_event_normalizes_safe_optional_fields() -> None:
     )
 
     assert parsed == {
-        "event_key": "chapter-1:complete",
+        "event_key": "chapter_analysis:completed:chapter-1",
         "stage": "chapter_analysis",
         "substage": "chapter_boundary",
         "status": "completed",
@@ -69,7 +71,7 @@ def test_parse_progress_event_normalizes_safe_optional_fields() -> None:
 def test_parse_progress_event_derives_a_safe_label_and_accepts_stdin_shape() -> None:
     parsed = education_generation_progress.parse_progress_event(
         {
-            "event_key": "content:start",
+            "event_key": "content_processing:running:content",
             "stage": "content_processing",
             "status": "running",
         }
@@ -81,7 +83,7 @@ def test_parse_progress_event_derives_a_safe_label_and_accepts_stdin_shape() -> 
 def test_parse_progress_event_truncates_text_after_normalization() -> None:
     parsed = education_generation_progress.parse_progress_event(
         {
-            "event_key": "knowledge:start",
+            "event_key": "knowledge_point_generation:running:knowledge",
             "stage": "knowledge_point_generation",
             "status": "running",
             "label": "题" * (education_generation_progress.MAX_LABEL_LENGTH + 20),
@@ -107,7 +109,7 @@ def test_parse_progress_event_rejects_invalid_required_or_enum_fields(
     value: object,
 ) -> None:
     raw = {
-        "event_key": "valid:key",
+        "event_key": "chapter_analysis:running:valid",
         "stage": "chapter_analysis",
         "status": "running",
         "label": "Valid",
@@ -116,6 +118,46 @@ def test_parse_progress_event_rejects_invalid_required_or_enum_fields(
 
     with pytest.raises(education_generation_progress.ProgressEventValidationError):
         education_generation_progress.parse_progress_event(raw)
+
+
+@pytest.mark.parametrize(
+    "event_key",
+    (
+        "probe:noop:job-1",
+        "diagnostic:test:job-1",
+        "test:run:job-1",
+        "debug:trace:job-1",
+    ),
+)
+def test_parse_progress_event_rejects_diagnostic_event_keys(event_key: str) -> None:
+    with pytest.raises(education_generation_progress.ProgressEventValidationError):
+        education_generation_progress.parse_progress_event(
+            {
+                "event_key": event_key,
+                "stage": "chapter_analysis",
+                "status": "running",
+            }
+        )
+
+
+def test_skipped_events_require_checkpoint_review_reason() -> None:
+    raw = {
+        "event_key": "chapter_analysis:skipped:job-1",
+        "stage": "chapter_analysis",
+        "status": "skipped",
+    }
+    with pytest.raises(education_generation_progress.ProgressEventValidationError):
+        education_generation_progress.parse_progress_event(raw)
+
+    parsed = education_generation_progress.parse_progress_event(
+        {
+            **raw,
+            "metadata": {"reason": "checkpoint_review"},
+        }
+    )
+
+    assert parsed["status"] == "skipped"
+    assert parsed["metadata"] == {"reason": "checkpoint_review"}
 
 
 @pytest.mark.parametrize(
@@ -188,7 +230,7 @@ def test_parse_progress_event_rejects_paths_and_secret_like_text(
     value: str,
 ) -> None:
     raw = {
-        "event_key": "safe:key",
+        "event_key": "chapter_analysis:running:safe",
         "stage": "chapter_analysis",
         "status": "running",
         "label": "Safe",
@@ -206,7 +248,7 @@ def test_parse_progress_event_accepts_safe_domain_text(
     value: str,
 ) -> None:
     raw = {
-        "event_key": "safe:key",
+        "event_key": "chapter_analysis:running:safe",
         "stage": "chapter_analysis",
         "status": "running",
         "label": "Safe",
@@ -222,19 +264,19 @@ def test_parse_progress_event_accepts_safe_domain_text(
     "raw",
     [
         {
-            "event_key": "safe:key",
+            "event_key": "chapter_analysis:running:safe",
             "stage": "chapter_analysis",
             "status": "running",
             "reasoning": "hidden",
         },
         {
-            "event_key": "safe:key",
+            "event_key": "chapter_analysis:running:safe",
             "stage": "chapter_analysis",
             "status": "running",
             "metadata": {"outer": {"tool_args": {"query": "hidden"}}},
         },
         {
-            "event_key": "safe:key",
+            "event_key": "chapter_analysis:running:safe",
             "stage": "chapter_analysis",
             "status": "running",
             "metadata": {"sandbox_path": "/managed/root"},
@@ -258,7 +300,7 @@ def test_parse_progress_event_rejects_non_json_numbers(metadata: dict) -> None:
     with pytest.raises(education_generation_progress.ProgressEventValidationError):
         education_generation_progress.parse_progress_event(
             {
-                "event_key": "safe:key",
+                "event_key": "chapter_analysis:running:safe",
                 "stage": "chapter_analysis",
                 "status": "running",
                 "metadata": metadata,
@@ -280,7 +322,7 @@ def test_parse_progress_event_rejects_invalid_counts(
     value: int,
 ) -> None:
     raw = {
-        "event_key": "safe:key",
+        "event_key": "chapter_analysis:running:safe",
         "stage": "chapter_analysis",
         "status": "running",
         "total": 4,
@@ -295,11 +337,12 @@ def test_parse_progress_event_rejects_invalid_counts(
 def test_parse_progress_event_preserves_zero_total_counts() -> None:
     parsed = education_generation_progress.parse_progress_event(
         {
-            "event_key": "safe:key",
+            "event_key": "chapter_analysis:running:safe",
             "stage": "chapter_analysis",
             "status": "skipped",
             "current_value": 0,
             "total_value": 0,
+            "metadata": {"reason": "checkpoint_review"},
         }
     )
 
@@ -311,7 +354,7 @@ def test_parse_progress_event_preserves_zero_total_counts() -> None:
 def test_parse_progress_event_accepts_individual_optional_counts(field: str) -> None:
     parsed = education_generation_progress.parse_progress_event(
         {
-            "event_key": "safe:key",
+            "event_key": "chapter_analysis:running:safe",
             "stage": "chapter_analysis",
             "status": "running",
             field: 7,
@@ -333,7 +376,7 @@ def test_parse_progress_event_rejects_unicode_format_controls(value: str) -> Non
     with pytest.raises(education_generation_progress.ProgressEventValidationError):
         education_generation_progress.parse_progress_event(
             {
-                "event_key": "safe:key",
+                "event_key": "chapter_analysis:running:safe",
                 "stage": "chapter_analysis",
                 "status": "running",
                 "label": value,
@@ -345,7 +388,7 @@ def test_parse_progress_event_rejects_oversized_string_before_regex() -> None:
     with pytest.raises(education_generation_progress.ProgressEventValidationError):
         education_generation_progress.parse_progress_event(
             {
-                "event_key": "safe:key",
+                "event_key": "chapter_analysis:running:safe",
                 "stage": "chapter_analysis",
                 "status": "running",
                 "label": "x"
@@ -358,7 +401,7 @@ def test_parse_progress_json_line_rejects_oversized_raw_line() -> None:
     payload = " " * (education_generation_progress.MAX_PROGRESS_EVENT_BYTES + 1)
     payload += json.dumps(
         {
-            "event_key": "safe:key",
+            "event_key": "chapter_analysis:running:safe",
             "stage": "chapter_analysis",
             "status": "running",
         }

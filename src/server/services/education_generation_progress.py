@@ -82,7 +82,14 @@ _FORBIDDEN_FIELD_KEYS = frozenset(
 _LINE_BREAK_RE = re.compile(r"\r\n|[\t\n\r\v\f\x1c-\x1e\x85\u2028\u2029]")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _SUBSTAGE_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
-_EVENT_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}$")
+_EVENT_KEY_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}:"
+    r"(?:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}:){1,4}"
+    r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,126}$"
+)
+_REJECTED_EVENT_KEY_PREFIXES = frozenset(
+    {"probe", "diagnostic", "test", "debug"}
+)
 _NODE_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}$")
 _UNSAFE_TEXT_PATTERN_STRINGS = (
     r"^/(?!/)[^\s]+",
@@ -314,6 +321,8 @@ def parse_progress_event(raw: object) -> dict[str, Any]:
         label="progress event_key",
         pattern=_EVENT_KEY_RE,
     )
+    if event_key.split(":", 1)[0].lower() in _REJECTED_EVENT_KEY_PREFIXES:
+        raise ProgressEventValidationError("progress event_key prefix is reserved")
     stage_raw = raw.get("stage")
     if not isinstance(stage_raw, str):
         raise ProgressEventValidationError("progress stage must be a string")
@@ -327,6 +336,19 @@ def parse_progress_event(raw: object) -> dict[str, Any]:
     status = status_raw.strip().lower()
     if status not in PROGRESS_STATUSES:
         raise ProgressEventValidationError("progress status is invalid")
+
+    metadata = None
+    if raw.get("metadata") is not None:
+        metadata = _normalize_metadata_value(raw["metadata"], depth=0)
+        if not isinstance(metadata, dict):
+            raise ProgressEventValidationError("progress metadata must be an object")
+    if status == "skipped" and (
+        not isinstance(metadata, dict)
+        or metadata.get("reason") != "checkpoint_review"
+    ):
+        raise ProgressEventValidationError(
+            "progress skipped status requires checkpoint_review reason"
+        )
 
     substage = (
         _normalize_substage(raw["substage"])
@@ -393,10 +415,7 @@ def parse_progress_event(raw: object) -> dict[str, Any]:
     timestamp = _normalize_timestamp(raw.get("timestamp"))
     if timestamp is not None:
         normalized["timestamp"] = timestamp
-    if raw.get("metadata") is not None:
-        metadata = _normalize_metadata_value(raw["metadata"], depth=0)
-        if not isinstance(metadata, dict):
-            raise ProgressEventValidationError("progress metadata must be an object")
+    if metadata is not None:
         normalized["metadata"] = metadata
     return normalized
 
@@ -483,7 +502,12 @@ MAX_PROGRESS_STRING_BYTES = __MAX_PROGRESS_STRING_BYTES__
 LINE_BREAK_RE = re.compile(r"\\r\\n|[\\t\\n\\r\\v\\f\\x1c-\\x1e\\x85\\u2028\\u2029]")
 CONTROL_RE = re.compile(r"[\\x00-\\x1f\\x7f-\\x9f]")
 SUBSTAGE_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
-EVENT_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}$")
+EVENT_KEY_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}:"
+    r"(?:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}:){1,4}"
+    r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,126}$"
+)
+REJECTED_EVENT_KEY_PREFIXES = __REJECTED_EVENT_KEY_PREFIXES__
 NODE_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}$")
 UNSAFE_TEXT_PATTERNS = tuple(
     re.compile(pattern) for pattern in __UNSAFE_TEXT_PATTERNS__
@@ -624,6 +648,8 @@ def parse_event(raw: object) -> dict:
     if not isinstance(event_key, str) or not EVENT_KEY_RE.fullmatch(event_key.strip()):
         raise InvalidProgress("event_key")
     event_key = event_key.strip()
+    if event_key.split(":", 1)[0].lower() in REJECTED_EVENT_KEY_PREFIXES:
+        raise InvalidProgress("event_key prefix")
     reject_unsafe_text(event_key)
     stage = raw.get("stage")
     status = raw.get("status")
@@ -633,6 +659,16 @@ def parse_event(raw: object) -> dict:
         raise InvalidProgress("status")
     stage = stage.strip().lower()
     status = status.strip().lower()
+    metadata = None
+    if raw.get("metadata") is not None:
+        metadata = metadata_value(raw["metadata"], 0)
+        if not isinstance(metadata, dict):
+            raise InvalidProgress("metadata object")
+    if status == "skipped" and (
+        not isinstance(metadata, dict)
+        or metadata.get("reason") != "checkpoint_review"
+    ):
+        raise InvalidProgress("skipped reason")
     output = {"event_key": event_key, "stage": stage, "status": status}
 
     substage = raw.get("substage")
@@ -675,12 +711,8 @@ def parse_event(raw: object) -> dict:
     timestamp = timestamp_value(raw.get("timestamp"))
     if timestamp is not None:
         output["timestamp"] = timestamp
-    metadata = raw.get("metadata")
     if metadata is not None:
-        normalized = metadata_value(metadata, 0)
-        if not isinstance(normalized, dict):
-            raise InvalidProgress("metadata object")
-        output["metadata"] = normalized
+        output["metadata"] = metadata
     return output
 
 
@@ -723,6 +755,10 @@ def progress_helper_source() -> bytes:
         .replace("__STATUSES__", repr(sorted(PROGRESS_STATUSES)))
         .replace("__FORBIDDEN_FIELDS__", repr(sorted(_FORBIDDEN_FIELD_KEYS)))
         .replace("__ALLOWED_FIELDS__", repr(sorted(_ALLOWED_FIELDS)))
+        .replace(
+            "__REJECTED_EVENT_KEY_PREFIXES__",
+            repr(sorted(_REJECTED_EVENT_KEY_PREFIXES)),
+        )
         .replace(
             "__UNSAFE_TEXT_PATTERNS__",
             repr(_UNSAFE_TEXT_PATTERN_STRINGS),

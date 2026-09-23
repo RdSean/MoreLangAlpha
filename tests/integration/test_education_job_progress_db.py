@@ -287,7 +287,7 @@ async def test_progress_event_ownership_constraints_and_indexes_are_enforced(
                         stage, substage, status, label, detail, node_key,
                         current_value, total_value, metadata
                     ) VALUES (
-                        %s, %s, 1, 'chapter:start', 'chapter_analysis',
+                        %s, %s, 1, 'chapter_analysis:running:chapter', 'chapter_analysis',
                         'inventory', 'running', 'Analyze chapters', 'Safe detail',
                         'unit-1', 1, 4, '{"safe":true}'::jsonb
                     )
@@ -605,7 +605,7 @@ async def test_progress_writer_is_idempotent_and_rejects_wrong_run_ownership(
         root_run_id = (await cur.fetchone())["root_run_id"]
 
     running_event = {
-        "event_key": "chapter:start",
+        "event_key": "chapter_analysis:running:chapter",
         "stage": "chapter_analysis",
         "status": "running",
         "label": "Analyze",
@@ -636,14 +636,14 @@ async def test_progress_writer_is_idempotent_and_rejects_wrong_run_ownership(
         attempt_id=attempt_id,
         run_id=f"00000000-0000-0000-0000-{uuid4().hex[:12]}",
         sequence=3,
-        event={**running_event, "event_key": "wrong:run"},
+        event={**running_event, "event_key": "chapter_analysis:running:wrong-run"},
     )
     cross_attempt = await education_textbooks.persist_generation_progress_event(
         generation_job_id=other_generation_job_id,
         attempt_id=attempt_id,
         run_id=root_run_id,
         sequence=4,
-        event={**running_event, "event_key": "cross:attempt"},
+        event={**running_event, "event_key": "chapter_analysis:running:cross-attempt"},
     )
     sequence_mismatch = await education_textbooks.persist_generation_progress_event(
         generation_job_id=generation_job_id,
@@ -655,7 +655,7 @@ async def test_progress_writer_is_idempotent_and_rejects_wrong_run_ownership(
 
     assert first.outcome is ProgressEventPersistenceOutcome.INSERTED
     assert duplicate.outcome is ProgressEventPersistenceOutcome.ALREADY_EXISTS
-    assert duplicate.event["event_key"] == "chapter:start"
+    assert duplicate.event["event_key"] == "chapter_analysis:running:chapter"
     assert same_key_completed.outcome is ProgressEventPersistenceOutcome.INSERTED
     assert wrong_run.outcome is ProgressEventPersistenceOutcome.REJECTED
     assert cross_attempt.outcome is ProgressEventPersistenceOutcome.REJECTED
@@ -666,8 +666,8 @@ async def test_progress_writer_is_idempotent_and_rejects_wrong_run_ownership(
         attempt_id=attempt_id,
     )
     assert [(row["sequence"], row["event_key"], row["status"]) for row in rows] == [
-        (1, "chapter:start", "running"),
-        (2, "chapter:start", "completed"),
+        (1, "chapter_analysis:running:chapter", "running"),
+        (2, "chapter_analysis:running:chapter", "completed"),
     ]
     assert other_attempt_id != attempt_id
 
@@ -781,7 +781,7 @@ async def test_progress_query_is_bounded_and_orders_attempts_by_attempt_start(
                     generation_job_id, attempt_id, sequence, event_key,
                     stage, status, label
                 ) VALUES (
-                    %s, %s, 2003, 'knowledge:completed',
+                    %s, %s, 2003, 'knowledge_point_generation:completed:knowledge',
                     'knowledge_point_generation', 'completed',
                     'Knowledge completed'
                 )

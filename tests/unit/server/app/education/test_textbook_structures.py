@@ -793,7 +793,7 @@ def test_build_book_pipeline_progress_keeps_fixed_order_and_completed_state():
         {
             "attempt_id": "attempt-1",
             "sequence": 1,
-            "event_key": "chapter:done",
+            "event_key": "chapter_analysis:completed:chapter",
             "stage": "chapter_analysis",
             "status": "completed",
             "label": "章节解析已完成",
@@ -806,7 +806,7 @@ def test_build_book_pipeline_progress_keeps_fixed_order_and_completed_state():
         {
             "attempt_id": "attempt-1",
             "sequence": 2,
-            "event_key": "content:unit-2",
+            "event_key": "content_processing:completed:unit-2",
             "stage": "content_processing",
             "status": "running",
             "label": "正在生成 Reading A 知识稿",
@@ -819,7 +819,7 @@ def test_build_book_pipeline_progress_keeps_fixed_order_and_completed_state():
         {
             "attempt_id": "attempt-1",
             "sequence": 3,
-            "event_key": "knowledge:done",
+            "event_key": "knowledge_point_generation:completed:knowledge",
             "stage": "knowledge_point_generation",
             "status": "completed",
             "label": "知识点候选已完成",
@@ -832,7 +832,7 @@ def test_build_book_pipeline_progress_keeps_fixed_order_and_completed_state():
         {
             "attempt_id": "attempt-1",
             "sequence": 4,
-            "event_key": "chapter:fallback",
+            "event_key": "chapter_analysis:running:fallback",
             "stage": "chapter_analysis",
             "status": "running",
             "label": "执行环境步骤",

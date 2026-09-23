@@ -25,6 +25,7 @@ from src.server.database.education_textbooks import (
     fail_claimed_book_pipeline_launch,
     get_generation_job_for_parent,
     get_teaching_input_for_parent,
+    list_generation_progress_events,
     mark_generation_attempt_running,
     pause_book_pipeline_for_chapter_review,
     queue_book_pipeline_job,
@@ -73,6 +74,11 @@ from src.server.utils.error_sanitization import sanitize_error_text
 logger = logging.getLogger(__name__)
 
 _MANAGED_KIND = "education_book_pipeline"
+_REQUIRED_BOOK_PIPELINE_STAGES = (
+    "chapter_analysis",
+    "content_processing",
+    "knowledge_point_generation",
+)
 
 
 def _processing_profile_sha256(processing_brief: str) -> str:
@@ -259,6 +265,23 @@ async def finalize_book_pipeline_generation(
                 None if status == "cancelled" else "教材智能处理未能完成，请重新运行。"
             ),
         )
+    if not bool(job.get("pause_after_chapter_analysis")):
+        events = await list_generation_progress_events(
+            generation_job_id=str(job["generation_job_id"])
+        )
+        completed_stages = {
+            str(event.get("stage") or "")
+            for event in events
+            if str(event.get("status") or "") == "completed"
+        }
+        if not set(_REQUIRED_BOOK_PIPELINE_STAGES).issubset(completed_stages):
+            return await _fail_book_pipeline_attempt(
+                job=job,
+                attempt_id=attempt_id,
+                status="failed",
+                error_code="managed_book_pipeline_incomplete_progress",
+                error_message="教材处理缺少必需的完成阶段，请重新运行。",
+            )
     try:
         imported = await import_book_package(
             {**dict(job), "attempt_id": attempt_id},

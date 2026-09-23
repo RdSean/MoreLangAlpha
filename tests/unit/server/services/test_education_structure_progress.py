@@ -104,6 +104,43 @@ def test_merges_repeated_steps_and_marks_policy_rejections_skipped():
     assert by_label["执行环境命令"]["status"] == "skipped"
 
 
+def test_book_pipeline_projection_ignores_non_checkpoint_skip_events():
+    projected = education_structure_progress.build_book_pipeline_progress(
+        job={
+            "generation_job_id": "job-1",
+            "status": "completed",
+        },
+        events=[
+            {
+                "generation_job_id": "job-1",
+                "attempt_id": "attempt-1",
+                "sequence": 1,
+                "event_key": "probe:noop:job-1",
+                "stage": "chapter_analysis",
+                "status": "skipped",
+                "metadata": {},
+            },
+            {
+                "generation_job_id": "job-1",
+                "attempt_id": "attempt-1",
+                "sequence": 2,
+                "event_key": "chapter_analysis:completed:job-1",
+                "stage": "chapter_analysis",
+                "status": "completed",
+            },
+        ],
+    )
+
+    chapter_analysis = next(
+        stage
+        for stage in projected["stages"]
+        if stage["name"] == "chapter_analysis"
+    )
+    assert [event["status"] for event in chapter_analysis["events"]] == [
+        "completed"
+    ]
+
+
 def test_caps_projected_events_and_flags_truncation():
     events = [
         _call(f"c{index}", "Read", {"file_path": f"inputs/sources/{index}.md"})

@@ -611,7 +611,7 @@ def test_staged_progress_helper_appends_valid_events_and_never_rewrites(tmp_path
     helper = tmp_path / "progress.py"
     helper.write_bytes(education_teaching_storage.progress_helper_source())
     first = {
-        "event_key": "chapter:start",
+        "event_key": "chapter_analysis:running:chapter",
         "stage": "chapter_analysis",
         "status": "running",
         "label": "Chapter analysis",
@@ -621,7 +621,7 @@ def test_staged_progress_helper_appends_valid_events_and_never_rewrites(tmp_path
         json.dumps(first, ensure_ascii=False),
         json.dumps(
             {
-                "event_key": "chapter:done",
+                "event_key": "chapter_analysis:completed:chapter",
                 "stage": "chapter_analysis",
                 "status": "completed",
                 "label": "x" * 250,
@@ -639,8 +639,8 @@ def test_staged_progress_helper_appends_valid_events_and_never_rewrites(tmp_path
 
     lines = (tmp_path / "progress.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
-    assert json.loads(lines[0])["event_key"] == "chapter:start"
-    assert json.loads(lines[1])["event_key"] == "chapter:done"
+    assert json.loads(lines[0])["event_key"] == "chapter_analysis:running:chapter"
+    assert json.loads(lines[1])["event_key"] == "chapter_analysis:completed:chapter"
     assert len(json.loads(lines[1])["label"]) == (
         education_generation_progress.MAX_LABEL_LENGTH
     )
@@ -654,7 +654,7 @@ def test_staged_progress_helper_accepts_stdin_and_rejects_unsafe_input(tmp_path:
         [sys.executable, str(helper)],
         input=json.dumps(
             {
-                "event_key": "content:start",
+                "event_key": "content_processing:running:content",
                 "stage": "content_processing",
                 "status": "running",
             }
@@ -784,7 +784,7 @@ def test_staged_progress_helper_enforces_input_size_limits(tmp_path: Path):
     output = tmp_path / "progress.jsonl"
     valid = json.dumps(
         {
-            "event_key": "safe:key",
+            "event_key": "chapter_analysis:running:safe",
             "stage": "chapter_analysis",
             "status": "running",
         }
@@ -795,7 +795,7 @@ def test_staged_progress_helper_enforces_input_size_limits(tmp_path: Path):
     )
     oversized_string = json.dumps(
         {
-            "event_key": "safe:key",
+            "event_key": "chapter_analysis:running:safe",
             "stage": "chapter_analysis",
             "status": "running",
             "label": "x"
