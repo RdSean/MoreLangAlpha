@@ -290,9 +290,10 @@ class DockerRuntime(SandboxRuntime):
             return
 
         uid, gid = await self._owner_ids()
+        directories = await self._missing_directories(parent_dirs)
         archive = self._build_tar_archive(
             prepared,
-            directories=parent_dirs,
+            directories=directories,
             uid=uid,
             gid=gid,
         )
@@ -304,14 +305,29 @@ class DockerRuntime(SandboxRuntime):
             return
 
         uid, gid = await self._owner_ids()
+        directory_names = self._directory_archive_names({path})
+        missing = await self._missing_directories(directory_names)
+        path_name = path.strip("/")
+        if path_name and path_name not in missing:
+            result = await self.exec(
+                f"chmod {mode:o} {shlex.quote(path)}",
+                timeout=10,
+            )
+            if result.exit_code != 0:
+                raise RuntimeError(
+                    f"Failed to set sandbox directory mode for {path}: "
+                    f"{result.stderr or result.stdout}"
+                )
         archive = self._build_tar_archive(
             [],
-            directories={path},
+            directories=missing,
             directory_mode=mode,
+            leaf_path=path,
             uid=uid,
             gid=gid,
         )
-        await self._container.put_archive("/", archive)
+        if missing:
+            await self._container.put_archive("/", archive)
 
     async def download_file(self, path: str) -> bytes:
         if self._dev_mode and self._host_work_dir:
@@ -632,9 +648,10 @@ class DockerRuntime(SandboxRuntime):
         """
         parent = os.path.dirname(dest_path)
         uid, gid = await self._owner_ids()
+        directories = await self._missing_directories({parent} if parent else set())
         archive = self._build_tar_archive(
             [(content, dest_path)],
-            directories={parent} if parent else set(),
+            directories=directories,
             uid=uid,
             gid=gid,
         )
@@ -663,16 +680,21 @@ class DockerRuntime(SandboxRuntime):
         uid: int,
         gid: int,
         directory_mode: int = 0o755,
+        leaf_path: str | None = None,
     ) -> bytes:
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w") as tar:
-            leaf_names = {path.strip("/") for path in directories if path.strip("/")}
-            for name in self._directory_archive_names(directories):
-                info = tarfile.TarInfo(name=name)
+            leaf_name = leaf_path.strip("/") if leaf_path else None
+            for name in sorted(
+                directories,
+                key=lambda value: (value.count("/"), value),
+            ):
+                normalized = name.rstrip("/")
+                info = tarfile.TarInfo(name=normalized)
                 info.type = tarfile.DIRTYPE
                 info.mode = (
                     directory_mode
-                    if name.rstrip("/") in leaf_names
+                    if leaf_name is not None and normalized == leaf_name
                     else 0o755
                 )
                 info.uid, info.gid = uid, gid
@@ -686,6 +708,27 @@ class DockerRuntime(SandboxRuntime):
                 tar.addfile(info, io.BytesIO(data))
 
         return buf.getvalue()
+
+    async def _missing_directories(self, paths: set[str]) -> set[str]:
+        candidates = set(self._directory_archive_names(paths))
+        if not candidates:
+            return set()
+
+        checks = "; ".join(
+            f"test -d /{shlex.quote(name.rstrip('/'))} || "
+            f"printf '%s\\n' {shlex.quote(name.rstrip('/'))}"
+            for name in sorted(candidates)
+        )
+        result = await self.exec(checks, timeout=30)
+        if result.exit_code != 0:
+            raise RuntimeError(
+                f"Failed to inspect sandbox directories: "
+                f"{result.stderr or result.stdout}"
+            )
+        missing = set(result.stdout.splitlines())
+        if not missing.issubset({name.rstrip("/") for name in candidates}):
+            raise RuntimeError("Sandbox directory inspection returned invalid paths")
+        return missing
 
     async def _exec_download(self, path: str) -> bytes:
         """Download a file via exec + base64 (avoids Docker archive API issues)."""

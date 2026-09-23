@@ -11,7 +11,7 @@
 
 ### 修复：sandbox 上传目录统一归 runtime 用户所有
 
-- Docker tar 上传现在显式为每个父目录写入带 runtime uid/gid 的目录 entry，不再依赖 root 权限的 `mkdir` 或 Docker 隐式创建；普通 PTC、managed textbook 与批量上传共用同一归档构造。
+- Docker tar 上传现在只为本就不存在的父目录写入带 runtime uid/gid 的目录 entry，不再依赖 root 权限的 `mkdir` 或 Docker 隐式创建，也不会覆盖 `/tmp` 等既有祖先目录的 mode、sticky bit 或 ownership；普通 PTC、managed textbook 与批量上传共用同一归档构造。
 - 新增 runtime 级 `ensure_directory()` 契约：Docker tar/bind、Daytona 和默认 shell runtime 都以 sandbox runtime 用户创建目录，`PTCSandbox` 的普通 workspace 与 managed job 初始化统一经该能力完成。
 - 验证：聚焦 sandbox 单元 `152 passed`，managed setup 联合回归 `212 passed`；真实 Docker provider 集成 `24 passed`，包含嵌套上传父目录与文件的 uid/gid 校验；Ruff 通过。
 

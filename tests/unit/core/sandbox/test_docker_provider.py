@@ -19,6 +19,7 @@ Covers:
 from __future__ import annotations
 
 import io
+import re
 import tarfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -87,6 +88,30 @@ def _make_exec_mock(output: str = "", exit_code: int = 0) -> MagicMock:
     exec_obj.inspect = AsyncMock(return_value={"ExitCode": exit_code})
 
     return exec_obj
+
+
+def _make_docker_exec_side_effect(
+    *,
+    owner: str = "",
+    existing_directories: set[str] | None = None,
+):
+    existing = existing_directories or set()
+
+    def execute(**kwargs):
+        command = " ".join(kwargs["cmd"])
+        if command.endswith("id -u; id -g"):
+            return _make_exec_mock(owner)
+        candidates = [
+            match.strip("'")
+            for match in re.findall(r"printf '%s\\n' ([^ ;]+)", command)
+        ]
+        missing = [
+            candidate for candidate in candidates if candidate not in existing
+        ]
+        output = "".join(f"{candidate}\n" for candidate in missing)
+        return _make_exec_mock(output)
+
+    return execute
 
 
 # ---------------------------------------------------------------------------
@@ -388,9 +413,7 @@ class TestDockerRuntimeTarUpload:
     @pytest.fixture
     def container(self):
         c = _make_mock_container()
-        # exec is needed for mkdir -p in _tar_upload
-        exec_mock = _make_exec_mock("", exit_code=0)
-        c.exec = AsyncMock(return_value=exec_mock)
+        c.exec = AsyncMock(side_effect=_make_docker_exec_side_effect())
         return c
 
     @pytest.fixture
@@ -430,7 +453,7 @@ class TestDockerRuntimeTarUpload:
         self, runtime, container
     ):
         container.exec = AsyncMock(
-            side_effect=lambda **kw: _make_exec_mock("1001\n1001\n")
+            side_effect=_make_docker_exec_side_effect(owner="1001\n1001\n")
         )
 
         await runtime.upload_file(b"data", "/home/workspace/a/b/file.txt")
@@ -456,14 +479,15 @@ class TestDockerRuntimeTarUpload:
         commands = [
             " ".join(call.kwargs["cmd"]) for call in container.exec.call_args_list
         ]
-        assert commands == ["bash -c id -u; id -g"]
+        assert sum("id -u" in command for command in commands) == 1
+        assert sum("test -d" in command for command in commands) == 1
 
     @pytest.mark.asyncio
     async def test_ensure_directory_applies_requested_mode_only_to_leaf(
         self, runtime, container
     ):
         container.exec = AsyncMock(
-            side_effect=lambda **kw: _make_exec_mock("1001\n1001\n")
+            side_effect=_make_docker_exec_side_effect(owner="1001\n1001\n")
         )
 
         await runtime.ensure_directory("/home/workspace/a/b", mode=0o700)
@@ -480,13 +504,57 @@ class TestDockerRuntimeTarUpload:
         }
 
     @pytest.mark.asyncio
+    async def test_upload_does_not_rewrite_existing_ancestor_directories(
+        self, runtime, container
+    ):
+        container.exec = AsyncMock(
+            side_effect=_make_docker_exec_side_effect(
+                owner="1001\n1001\n",
+                existing_directories={"tmp"},
+            )
+        )
+
+        await runtime.upload_file(b"data", "/tmp/managed/book/file.txt")
+
+        tar_data = container.put_archive.call_args[0][1]
+        with tarfile.open(fileobj=io.BytesIO(tar_data), mode="r") as tar:
+            members = tar.getmembers()
+
+        assert [member.name for member in members] == [
+            "tmp/managed",
+            "tmp/managed/book",
+            "tmp/managed/book/file.txt",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_ensure_directory_chmods_existing_leaf_without_tar_entry(
+        self, runtime, container
+    ):
+        container.exec = AsyncMock(
+            side_effect=_make_docker_exec_side_effect(
+                owner="1001\n1001\n",
+                existing_directories={"tmp"},
+            )
+        )
+
+        await runtime.ensure_directory("/tmp", mode=0o1777)
+
+        container.put_archive.assert_not_awaited()
+        commands = [
+            " ".join(call.kwargs["cmd"]) for call in container.exec.call_args_list
+        ]
+        assert any("chmod 1777 /tmp" in command for command in commands)
+
+    @pytest.mark.asyncio
     async def test_uploads_are_owned_by_the_container_user(self, runtime, container):
         """A tar entry defaults to root, and put_archive extracts what it says.
 
         The container runs as its own non-root user, and a file that user does
         not own can be read but never chmod'd or utime'd — which is what
         placing a restored workspace file has to do."""
-        container.exec = AsyncMock(side_effect=lambda **kw: _make_exec_mock("1001\n1001\n"))
+        container.exec = AsyncMock(
+            side_effect=_make_docker_exec_side_effect(owner="1001\n1001\n")
+        )
         await runtime.upload_file(b"x", "/home/workspace/a.txt")
         await runtime.upload_files([(b"y", "/home/workspace/b.txt")])
         for call in container.put_archive.call_args_list:
@@ -500,7 +568,7 @@ class TestDockerRuntimeTarUpload:
     @pytest.mark.asyncio
     async def test_an_unreadable_uid_falls_back_to_root(self, runtime, container):
         """Losing the lookup must not lose the upload; root is what it was before."""
-        container.exec = AsyncMock(side_effect=lambda **kw: _make_exec_mock(""))
+        container.exec = AsyncMock(side_effect=_make_docker_exec_side_effect())
         await runtime.upload_file(b"x", "/home/workspace/a.txt")
         tar_data = container.put_archive.call_args[0][1]
         with tarfile.open(fileobj=io.BytesIO(tar_data), mode="r") as tar:

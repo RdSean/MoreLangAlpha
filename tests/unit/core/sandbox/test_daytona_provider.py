@@ -44,6 +44,7 @@ class TestDaytonaRuntime:
         )
         sandbox.fs.upload_file = AsyncMock()
         sandbox.fs.upload_files = AsyncMock()
+        sandbox.fs.create_folder = AsyncMock()
         sandbox.fs.download_file = AsyncMock(return_value=b"content")
         sandbox.fs.list_files = AsyncMock(return_value=[])
         sandbox.start = AsyncMock()
@@ -98,6 +99,36 @@ class TestDaytonaRuntime:
             mock_sdk_sandbox.fs.upload_files.call_args.kwargs["timeout"]
             == _FS_TIMEOUT_S
         )
+
+    @pytest.mark.asyncio
+    async def test_ensure_directory_delegates_mode(self, runtime, mock_sdk_sandbox):
+        await runtime.ensure_directory("/work/a", mode=0o750)
+
+        mock_sdk_sandbox.fs.create_folder.assert_awaited_once_with(
+            "/work/a",
+            "750",
+        )
+
+    @pytest.mark.asyncio
+    async def test_ensure_directory_ignores_explicit_already_exists(
+        self, runtime, mock_sdk_sandbox
+    ):
+        mock_sdk_sandbox.fs.create_folder.side_effect = RuntimeError(
+            "folder already exists"
+        )
+
+        await runtime.ensure_directory("/work/a")
+
+    @pytest.mark.asyncio
+    async def test_ensure_directory_does_not_swallow_missing_error(
+        self, runtime, mock_sdk_sandbox
+    ):
+        mock_sdk_sandbox.fs.create_folder.side_effect = RuntimeError(
+            "sandbox does not exist"
+        )
+
+        with pytest.raises(RuntimeError, match="does not exist"):
+            await runtime.ensure_directory("/work/a")
 
     @pytest.mark.asyncio
     async def test_download_file_delegates(self, runtime, mock_sdk_sandbox):

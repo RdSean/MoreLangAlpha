@@ -236,7 +236,8 @@ class DaytonaRuntime(SandboxRuntime):
         try:
             await self._sandbox.fs.create_folder(path, f"{mode:o}")
         except Exception as exc:
-            if "exist" not in str(exc).lower():
+            message = str(exc).lower()
+            if "already exists" not in message and "file exists" not in message:
                 raise
 
     async def download_file(self, path: str) -> bytes:

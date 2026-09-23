@@ -100,6 +100,23 @@ class TestTarMode:
         )
         assert result.exit_code == 0
 
+    async def test_upload_preserves_existing_global_parent_metadata(
+        self, runtime: DockerRuntime
+    ):
+        before = await runtime.exec("stat -c '%a %u %g' /tmp")
+        assert before.exit_code == 0
+
+        upload_root = f"/tmp/langalpha-{runtime.id}"
+        await runtime.upload_file(b"x", f"{upload_root}/nested/file.txt")
+
+        after = await runtime.exec("stat -c '%a %u %g' /tmp")
+        owner = await runtime.exec(
+            f"stat -c '%u %g' {upload_root}/nested"
+        )
+        assert before.stdout == after.stdout
+        assert owner.exit_code == 0
+        await runtime.exec(f"rm -rf {upload_root}")
+
     async def test_code_run_basic(self, runtime: DockerRuntime):
         """code_run should execute Python and return stdout."""
         result = await runtime.code_run("print('hello from docker')")
