@@ -2,6 +2,13 @@
 
 ## 2026-09-23
 
+### 重构：managed write gate 改为区域边界校验
+
+- 删除写时对 `book_package.json` 等精确文件名、章节路径、JSON object shape 和知识点交叉引用的约束；agent 可在 `work/` 与 `outputs/` 下创建任意安全 scratch 或规范输出文件。
+- 写校验继续强制 managed root containment、拒绝 `..`/反斜杠/C0 控制字符/根外绝对路径，只允许 `work/` 和 `outputs/`，并继续禁止 `inputs/`、`.agents/`、其他 `.langalpha/` 与直接写 progress stream。
+- 保留 32 MiB 防御性大小上限和 `.json` UTF-8/严格 JSON 语法检查；package schema、候选归属、引用、asset manifest、大小和 hash 仍由导入/finalization 阶段验证。
+- 验证：managed policy 与 book pipeline importer/回归 `104 passed`，Ruff 通过。
+
 ### 新增：managed textbook 使用完整 PTC 工具能力
 
 - `ManagedExecutionPolicy` 新增 code execution、Bash、preview、widgets 能力开关；structure、lesson、book asset、book pipeline 和 teaching 五个 textbook policy 统一开启 web、ExecuteCode、普通 sandbox Bash、Preview、Widget、Read/Glob/Grep/Write/Edit，同时继续关闭 MCP 与 Vault。

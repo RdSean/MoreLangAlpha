@@ -151,7 +151,7 @@ def test_managed_policy_tool_surface_uses_capability_flags(monkeypatch):
     assert bash_call[2]["fixed_working_dir"] == policy.filesystem_root
 
 
-def test_structure_policy_allows_only_one_json_candidate_path():
+def test_structure_policy_uses_zone_based_write_gate():
     managed_execution = import_module("ptc_agent.agent.managed_execution")
     policy = managed_execution.education_structure_policy(
         "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
@@ -167,15 +167,28 @@ def test_structure_policy_allows_only_one_json_candidate_path():
         )
         is None
     )
-    assert managed_execution.validate_managed_textbook_write(
-        f"{policy.filesystem_root}/outputs/teaching-package.json",
-        "{}",
-        policy,
+    assert (
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/outputs/teaching-package.json",
+            "{}",
+            policy,
+        )
+        is None
     )
-    assert managed_execution.validate_managed_textbook_write(
-        f"{policy.filesystem_root}/outputs/structure.json",
-        "[]",
-        policy,
+    assert (
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/outputs/structure.json",
+            "[]",
+            policy,
+        )
+        is None
+    )
+    assert "valid JSON" in str(
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/outputs/structure.json",
+            "not json",
+            policy,
+        )
     )
 
 
@@ -238,10 +251,92 @@ def test_book_pipeline_policy_allows_package_skill_and_manifest_asset_paths():
         )
 
 
+def test_book_pipeline_zone_based_write_validation():
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_pipeline_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+    accepted = (
+        ("work/scratch/plan.txt", "scratch"),
+        (
+            "outputs/book-skill/chapters/unit-1/reading-a.md",
+            "# Reading A",
+        ),
+        (
+            "outputs/book-skill/chapters/unit-1/support.json",
+            '{"support":true}',
+        ),
+        (
+            "outputs/content/unit-1/knowledge.md",
+            "# Knowledge",
+        ),
+        (
+            "outputs/chapters/unit-1/transcript.txt",
+            "Transcript",
+        ),
+        (
+            "outputs/knowledge/unit-1/concepts.json",
+            '["concept"]',
+        ),
+        ("outputs/temporary.json", '{"scratch":true}'),
+        ("outputs/archive.bin", "binary"),
+        ("outputs/book_package.json", "[]"),
+    )
+    rejected = (
+        "../outside.txt",
+        "inputs/source.md",
+        ".agents/skills/book-to-skill/SKILL.md",
+        ".langalpha/progress.jsonl",
+        "/tmp/outside.txt",
+    )
+
+    for relative_path, content in accepted:
+        assert (
+            managed_execution.validate_managed_textbook_write(
+                f"{policy.filesystem_root}/{relative_path}",
+                content,
+                policy,
+            )
+            is None
+        )
+    for relative_path in rejected:
+        content = (
+            '{"event_key":"chapter:done","stage":"chapter_analysis",'
+            '"status":"completed"}'
+            if relative_path.endswith("progress.jsonl")
+            else "content"
+        )
+        candidate = (
+            relative_path
+            if relative_path.startswith("/")
+            else f"{policy.filesystem_root}/{relative_path}"
+        )
+        assert managed_execution.validate_managed_textbook_write(
+            candidate,
+            content,
+            policy,
+        )
+
+
+def test_zone_based_write_keeps_defensive_size_bound(monkeypatch):
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_pipeline_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+    monkeypatch.setattr(managed_execution, "_MAX_MANAGED_WRITE_BYTES", 4)
+
+    error = managed_execution.validate_managed_textbook_write(
+        f"{policy.filesystem_root}/work/scratch.txt",
+        "12345",
+        policy,
+    )
+
+    assert "too large" in str(error)
+
+
 @pytest.mark.parametrize(
     ("relative_path", "content", "expected"),
     (
-        ("outputs/book_package.json", "[]", "JSON object"),
         ("outputs/content_tree.json", "not json", "valid JSON"),
         (
             ".langalpha/progress.jsonl",
@@ -352,7 +447,6 @@ def test_book_pipeline_policy_rejects_unsafe_progress_events(content):
     (
         "../outside.json",
         "inputs/manifest.json",
-        "outputs/archive.bin",
         "outputs/book-skill/chapters/../../escape.md",
         ".langalpha/progress.jsonl.bak",
         "outputs/content/unit-1/bad\x00name.md",
@@ -400,7 +494,7 @@ def test_progress_write_gate_defers_semantic_parsing_to_task_6():
     assert "Task 6 progress parser is mandatory and authoritative" in plan
 
 
-def test_lesson_policy_allows_markdown_and_optional_practice_only():
+def test_lesson_policy_uses_zone_based_write_gate():
     managed_execution = import_module("ptc_agent.agent.managed_execution")
     policy = managed_execution.education_lesson_policy(
         "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
@@ -424,14 +518,32 @@ def test_lesson_policy_allows_markdown_and_optional_practice_only():
         )
         is None
     )
-    assert managed_execution.validate_managed_textbook_write(
-        f"{policy.filesystem_root}/outputs/lesson.json",
-        "{}",
-        policy,
+    assert (
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/outputs/lesson.json",
+            "{}",
+            policy,
+        )
+        is None
+    )
+    assert (
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/work/notes.txt",
+            "scratch",
+            policy,
+        )
+        is None
+    )
+    assert "valid JSON" in str(
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/outputs/practice.json",
+            "not json",
+            policy,
+        )
     )
 
 
-def test_book_asset_policy_allows_manifest_chapters_and_support_files_only():
+def test_book_asset_policy_uses_zone_based_write_gate():
     managed_execution = import_module("ptc_agent.agent.managed_execution")
     policy = managed_execution.education_book_asset_policy(
         "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
@@ -455,10 +567,21 @@ def test_book_asset_policy_allows_manifest_chapters_and_support_files_only():
             )
             is None
         )
-    assert managed_execution.validate_managed_textbook_write(
-        f"{policy.filesystem_root}/outputs/structure.json",
-        "{}",
-        policy,
+    assert (
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/outputs/structure.json",
+            "{}",
+            policy,
+        )
+        is None
+    )
+    assert (
+        managed_execution.validate_managed_textbook_write(
+            f"{policy.filesystem_root}/work/scratch.json",
+            '["scratch"]',
+            policy,
+        )
+        is None
     )
 
 
@@ -1113,7 +1236,7 @@ def test_progress_validators_agree_on_the_same_input(
     assert helper_accepted == accepted
 
 
-def test_managed_candidate_write_requires_strict_json_before_saving():
+def test_managed_teaching_write_defers_schema_and_cross_reference_checks():
     managed_execution = import_module("ptc_agent.agent.managed_execution")
     policy = managed_execution.education_teaching_policy(
         "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
@@ -1133,24 +1256,16 @@ def test_managed_candidate_write_requires_strict_json_before_saving():
         )
         is None
     )
-    assert "knowledge point" in str(
+    assert (
         managed_execution.validate_managed_textbook_write(
             candidate,
             '{"chapters":[{"knowledge_points":["核心概念"],'
             '"questions":[{"knowledge_point":"扩展概念"}]}]}',
             policy,
         )
-    )
-    assert (
-        managed_execution.validate_managed_textbook_write(
-            candidate,
-            '{"chapters":[{"knowledge_points":["核心概念"],'
-            '"questions":[{"knowledge_point":"核心概念"}]}]}',
-            policy,
-        )
         is None
     )
-    assert "not allowed" in str(
+    assert "valid JSON" in str(
         managed_execution.validate_managed_textbook_write(
             f"{policy.filesystem_root}/work/knowledge-skill/chapter.json",
             "not JSON",
