@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from src.server.services.runs import stream_writer
 from src.server.services.runs.sse_producer import RunSSEProducer
 
 
@@ -78,25 +79,45 @@ async def test_stream_workflow_filters_compact_empty_sentinel():
         replay_profile="education_compact",
     )
 
+    closed = False
+
     async def fake_stream(*_args, **_kwargs):
-        yield ""
-        yield "id: 1\nevent: metadata\ndata: {}\n\n"
+        nonlocal closed
+        try:
+            yield ""
+            yield "id: 1\nevent: metadata\ndata: {}\n\n"
+        finally:
+            closed = True
 
     producer._stream_workflow_unfiltered = fake_stream
 
-    frames = [
-        frame
-        async for frame in producer.stream_workflow(
-            graph=object(),
-            input_state={},
-            config={},
-        )
-    ]
+    stream = producer.stream_workflow(
+        graph=object(),
+        input_state={},
+        config={},
+    )
+    frame = await anext(stream)
+    assert frame == "id: 1\nevent: metadata\ndata: {}\n\n"
 
-    assert frames == ["id: 1\nevent: metadata\ndata: {}\n\n"]
+    await stream.aclose()
+    assert closed is True
 
 
-def test_education_compact_finishes_far_below_redis_quota_under_raw_delta_pressure():
+@pytest.mark.asyncio
+async def test_education_compact_finishes_far_below_redis_quota_under_raw_delta_pressure(
+    monkeypatch,
+):
+    class FakeCache:
+        enabled = True
+
+        def __init__(self):
+            self.event_ids: list[int] = []
+
+        async def pipelined_event_buffer(self, _key, **kwargs):
+            self.event_ids.append(kwargs["event_id"])
+
+    cache = FakeCache()
+    monkeypatch.setattr(stream_writer, "get_cache_client", lambda: cache)
     producer = RunSSEProducer(
         thread_id="thread-1",
         run_id="run-1",
@@ -104,23 +125,39 @@ def test_education_compact_finishes_far_below_redis_quota_under_raw_delta_pressu
     )
 
     emitted_replay_events = 0
+    replay_frames: list[str] = []
     for index in range(150_001):
-        emitted_replay_events += bool(
-            producer._format_sse_event(
-                "message_chunk",
-                {
-                    "thread_id": "thread-1",
-                    "agent": "main",
-                    "id": "message-1",
-                    "content": str(index),
-                },
-            )
+        frame = producer._format_sse_event(
+            "message_chunk",
+            {
+                "thread_id": "thread-1",
+                "agent": "main",
+                "id": "message-1",
+                "content": str(index),
+            },
         )
+        emitted_replay_events += bool(frame)
+        if frame:
+            replay_frames.append(frame)
     emitted_replay_events += bool(
-        producer._format_sse_event("metadata", {"thread_id": "thread-1"})
+        frame := producer._format_sse_event(
+            "metadata",
+            {"thread_id": "thread-1"},
+        )
     )
+    if frame:
+        replay_frames.append(frame)
+
+    for frame in replay_frames:
+        await stream_writer.buffer_event(
+            "thread-1",
+            "run-1",
+            frame,
+            max_stored_messages=1_000,
+        )
 
     stored_sse_events = len(producer.get_sse_events() or [])
 
     assert emitted_replay_events < 1_000
     assert stored_sse_events < 1_000
+    assert len(cache.event_ids) < 1_000

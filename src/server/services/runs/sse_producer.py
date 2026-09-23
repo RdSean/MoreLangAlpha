@@ -7,6 +7,7 @@ handles timeouts. Keepalives are emitted by the SSE consumer (stream_from_log).
 
 import asyncio
 import copy
+from contextlib import aclosing
 import json
 import logging
 import re
@@ -548,13 +549,16 @@ class RunSSEProducer:
         config: dict,
     ) -> AsyncGenerator[str, None]:
         """Yield only non-empty frames from the selected replay profile."""
-        async for event in self._stream_workflow_unfiltered(
-            graph,
-            input_state,
-            config,
-        ):
-            if event:
-                yield event
+        async with aclosing(
+            self._stream_workflow_unfiltered(
+                graph,
+                input_state,
+                config,
+            )
+        ) as stream:
+            async for event in stream:
+                if event:
+                    yield event
 
     async def _stream_workflow_unfiltered(
         self,

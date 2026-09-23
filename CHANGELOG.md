@@ -5,6 +5,7 @@
 ### 修复：education jobs 使用 compact replay stream
 
 - `RunSSEProducer` 新增 `replay_profile="full" | "education_compact"`；education compact 只保留 metadata、warning、error、interrupt、model retry/fallback，并在 sequence 分配和 accumulator 写入前过滤 message/tool delta、compaction、context window、provenance 与 steering 帧。
+- compact wrapper 使用 `aclosing` 同步传播 generator close，保持 full profile 原有图流、compaction guard 与 tracing 的取消清理语义。
 - structure、lesson、book asset、book pipeline 四个 managed education 调用点显式 opt in；普通 PTC 与 Flash 继续使用默认 full profile，原有 stream 形状不变。
 - education 前端继续以 PostgreSQL progress API 为四阶段事实源，不依赖被过滤的 token/tool delta。
 - 验证：producer 与 education dispatch 聚焦 `89 passed`；unified progress integration `3 passed`，其中 150,001 个 raw delta 的压力场景下 replay 与 stored events 均小于 1,000，semantic progress row 正常持久化且 job 可完成。
