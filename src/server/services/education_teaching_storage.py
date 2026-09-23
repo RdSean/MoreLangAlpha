@@ -108,6 +108,12 @@ _BOOK_PACKAGE_FILES = (
     "outputs/assets_manifest.json",
 )
 _ASSETS_MANIFEST_FORMAT = "langalpha-assets-manifest/v1"
+_CONTENT_TREE_FORMAT = "langalpha-content-tree/v1"
+_KNOWLEDGE_POINTS_FORMAT = "langalpha-knowledge-points/v1"
+_PROJECTION_FORMATS = {
+    "content_nodes": {None, BOOK_PACKAGE_FORMAT, _CONTENT_TREE_FORMAT},
+    "knowledge_points": {None, BOOK_PACKAGE_FORMAT, _KNOWLEDGE_POINTS_FORMAT},
+}
 
 
 def _strict_json_object(content: bytes, *, label: str) -> dict[str, Any]:
@@ -160,7 +166,7 @@ def _package_projection(
     projected = value.get(key)
     if not isinstance(projected, list):
         raise TeachingPackageStorageError(f"Managed book package {key} is invalid")
-    if value.get("format") not in {None, BOOK_PACKAGE_FORMAT}:
+    if value.get("format") not in _PROJECTION_FORMATS[key]:
         raise TeachingPackageStorageError(f"Managed book package {key} is invalid")
     return projected
 
@@ -819,7 +825,13 @@ async def download_book_package_outputs(
         )
     except BookPackageValidationError as exc:
         raise TeachingPackageStorageError("Managed asset manifest is invalid") from exc
-    if normalized_manifest["assets"] != package["assets"]:
+    manifest_assets_by_path = {
+        str(asset["path"]): asset for asset in normalized_manifest["assets"]
+    }
+    if any(
+        manifest_assets_by_path.get(str(asset["path"])) != asset
+        for asset in package["assets"]
+    ):
         raise TeachingPackageStorageError(
             "Managed asset manifest contradicts book_package.json"
         )

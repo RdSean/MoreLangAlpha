@@ -2,6 +2,12 @@
 
 ## 2026-09-23
 
+### 修复：教材 projection 格式与 asset manifest 过度校验
+
+- importer 现在承认规范 projection 格式：`content_tree.json` 的 `langalpha-content-tree/v1`、`knowledge_points.json` 的 `langalpha-knowledge-points/v1`，以及既有 assets manifest 格式；这些文件的内容、引用、投影一致性、asset size/hash 仍继续校验。
+- assets manifest 允许额外列出 `book_package.json` 等输出说明；package 中声明的每个 asset 仍必须在 manifest 中以完全相同的 path、node、kind、size 和 hash 出现，实际导入下载集合仍只来自 package 声明。
+- 用失败任务 `9a8a1313...` 的真实 outputs 离线复核：修复前依次报 `content_nodes is invalid`、`assets manifest contradicts`；修复后成功校验 21 个 content nodes、24 个 knowledge points 和 30 个 declared asset files。
+
 ### 修复：教材列表和详情恢复 book pipeline 状态入口
 
 - textbook library/detail projection 现在优先读取最新 `education_generation_jobs(scope='book_pipeline')`，不再只关联旧的 `education_processing_jobs`；因此离开加工页再进入教材时，失败、运行中、待审阅和已完成 job 的 ID、状态与错误信息不会丢失。

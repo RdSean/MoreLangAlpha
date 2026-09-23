@@ -157,26 +157,38 @@ async def test_download_book_package_outputs_uses_manifest_declared_assets_only(
     package = _book_package()
     asset_path = package["assets"][0]["path"]
     asset_bytes = b"# Knowledge\n\nFootball and media.\n"
+    package_bytes = json.dumps(package).encode()
     root = education_teaching_storage.managed_job_root(_job()["generation_job_id"])
     sandbox = _PackageSandbox(
         {
-            f"{root}/outputs/book_package.json": json.dumps(package).encode(),
+            f"{root}/outputs/book_package.json": package_bytes,
             f"{root}/outputs/content_tree.json": json.dumps(
                 {
-                    "format": package["format"],
+                    "format": "langalpha-content-tree/v1",
                     "content_nodes": package["content_nodes"],
                 }
             ).encode(),
             f"{root}/outputs/knowledge_points.json": json.dumps(
                 {
-                    "format": package["format"],
+                    "format": "langalpha-knowledge-points/v1",
                     "knowledge_points": package["knowledge_points"],
                 }
             ).encode(),
             f"{root}/outputs/assets_manifest.json": json.dumps(
                 {
                     "format": "langalpha-assets-manifest/v1",
-                    "assets": package["assets"],
+                    "assets": [
+                        *package["assets"],
+                        {
+                            "node_key": "node-01",
+                            "kind": "package",
+                            "path": "outputs/book_package.json",
+                            "content_sha256": hashlib.sha256(
+                                package_bytes
+                            ).hexdigest(),
+                            "size_bytes": len(package_bytes),
+                        },
+                    ],
                 }
             ).encode(),
             f"{root}/{asset_path}": asset_bytes,
