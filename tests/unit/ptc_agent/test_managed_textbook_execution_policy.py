@@ -32,9 +32,12 @@ def test_managed_textbook_policy_allows_only_staged_files_and_one_builtin_skill(
         == "/managed/textbook-job/8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
     )
     assert policy.enable_mcp is False
-    assert policy.enable_web is False
+    assert policy.enable_web is True
     assert policy.enable_vault is False
-    assert policy.enable_preview is False
+    assert policy.enable_code_execution is True
+    assert policy.enable_bash is True
+    assert policy.enable_preview is True
+    assert policy.enable_widgets is True
     # The root can fan out only service-defined workers that inherit the same
     # sandbox boundary; user definitions are never registered for this mode.
     assert policy.allow_subagents is True
@@ -70,6 +73,82 @@ def test_managed_textbook_directories_contract():
     )
     assert f"{root}/inputs" not in directories
     assert f"{root}/.langalpha/progress.jsonl" not in directories
+
+
+@pytest.mark.parametrize(
+    "factory_name",
+    (
+        "education_structure_policy",
+        "education_lesson_policy",
+        "education_book_asset_policy",
+        "education_book_pipeline_policy",
+        "education_teaching_policy",
+    ),
+)
+def test_full_ptc_capabilities_for_every_textbook_policy(factory_name):
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    factory = getattr(managed_execution, factory_name)
+
+    policy = factory("8a77d086-0b23-4a1e-89d0-f163fa23d5d1")
+
+    assert policy.enable_web is True
+    assert policy.enable_code_execution is True
+    assert policy.enable_bash is True
+    assert policy.enable_preview is True
+    assert policy.enable_widgets is True
+    assert policy.enable_mcp is False
+    assert policy.enable_vault is False
+
+
+def test_managed_policy_tool_surface_uses_capability_flags(monkeypatch):
+    agent_module = import_module("ptc_agent.agent.agent")
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    policy = managed_execution.education_book_pipeline_policy(
+        "8a77d086-0b23-4a1e-89d0-f163fa23d5d1"
+    )
+    created: list[tuple[str, tuple, dict]] = []
+
+    def factory(name):
+        def create(*args, **kwargs):
+            created.append((name, args, kwargs))
+            return SimpleNamespace(tool_name=name)
+
+        return create
+
+    for name in (
+        "create_execute_code_tool",
+        "create_execute_bash_tool",
+        "create_bash_output_tool",
+        "create_preview_url_tool",
+        "create_show_widget_tool",
+    ):
+        monkeypatch.setattr(agent_module, name, factory(name))
+
+    tools, execute_code_tool, bash_tool = agent_module._build_managed_policy_tools(
+        policy,
+        backend=object(),
+        mcp_registry=object(),
+        thread_id="thread-1",
+        workspace_id="workspace-1",
+        on_signed_url=None,
+    )
+
+    assert [
+        getattr(tool, "tool_name", getattr(tool, "name", None))
+        for tool in tools
+    ] == [
+        "TodoWrite",
+        "create_execute_code_tool",
+        "create_execute_bash_tool",
+        "create_bash_output_tool",
+        "create_preview_url_tool",
+        "create_show_widget_tool",
+    ]
+    assert execute_code_tool.tool_name == "create_execute_code_tool"
+    assert bash_tool.tool_name == "create_execute_bash_tool"
+    bash_call = next(call for call in created if call[0] == "create_execute_bash_tool")
+    assert bash_call[2]["command_validator"] is None
+    assert bash_call[2]["fixed_working_dir"] == policy.filesystem_root
 
 
 def test_structure_policy_allows_only_one_json_candidate_path():
@@ -113,9 +192,12 @@ def test_book_pipeline_policy_matches_managed_execution_boundaries():
     )
     assert policy.purpose == "book_pipeline"
     assert policy.enable_mcp is False
-    assert policy.enable_web is False
+    assert policy.enable_web is True
     assert policy.enable_vault is False
-    assert policy.enable_preview is False
+    assert policy.enable_code_execution is True
+    assert policy.enable_bash is True
+    assert policy.enable_preview is True
+    assert policy.enable_widgets is True
     assert policy.allow_subagents is True
 
 
@@ -748,17 +830,24 @@ def test_managed_agent_uses_a_rooted_backend_and_removes_ambient_tools(monkeypat
     )
 
     tool_names = {tool.name for tool in captured["tools"]}
-    assert {"Bash", "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite"} <= tool_names
-    # A managed job is scoped to one chapter's materials, so it reaches no
-    # ambient surface at all — including the household homework tool, which
-    # would otherwise let it read outside that scope.
+    assert {
+        "Bash",
+        "BashOutput",
+        "ExecuteCode",
+        "GetPreviewUrl",
+        "ShowWidget",
+        "WebSearch",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "TodoWrite",
+    } <= tool_names
+    # A managed job still excludes interactive and household tools that reach
+    # identity or data outside the service-owned textbook root.
     assert (
         not {
-            "ExecuteCode",
-            "BashOutput",
-            "PreviewURL",
-            "ShowWidget",
-            "WebSearch",
             "AskUserQuestion",
             "get_homework_schedule",
         }

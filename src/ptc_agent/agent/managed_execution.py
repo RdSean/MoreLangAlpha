@@ -30,6 +30,9 @@ _BOOK_PIPELINE_CANONICAL_FILES = frozenset(
 _BOOK_PIPELINE_ASSET_EXTENSIONS = frozenset(
     {".md", ".json", ".txt", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".csv"}
 )
+TEXTBOOK_PURPOSES = frozenset(
+    {"teaching", "structure", "lesson", "assets", "book_pipeline"}
+)
 
 
 def managed_textbook_directories(root: str) -> tuple[str, ...]:
@@ -130,7 +133,10 @@ class ManagedExecutionPolicy:
     enable_mcp: bool = False
     enable_web: bool = False
     enable_vault: bool = False
+    enable_code_execution: bool = False
+    enable_bash: bool = True
     enable_preview: bool = False
+    enable_widgets: bool = False
     allow_subagents: bool = False
 
 
@@ -140,6 +146,11 @@ def education_teaching_policy(job_id: str) -> ManagedExecutionPolicy:
     return ManagedExecutionPolicy(
         allowed_skill_names=frozenset({"book-to-skill"}),
         filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
+        enable_web=True,
+        enable_code_execution=True,
+        enable_bash=True,
+        enable_preview=True,
+        enable_widgets=True,
         allow_subagents=True,
     )
 
@@ -151,6 +162,11 @@ def education_structure_policy(job_id: str) -> ManagedExecutionPolicy:
         allowed_skill_names=frozenset({"book-to-skill"}),
         filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
         purpose="structure",
+        enable_web=True,
+        enable_code_execution=True,
+        enable_bash=True,
+        enable_preview=True,
+        enable_widgets=True,
         allow_subagents=True,
     )
 
@@ -162,6 +178,11 @@ def education_lesson_policy(job_id: str) -> ManagedExecutionPolicy:
         allowed_skill_names=frozenset({"book-to-skill"}),
         filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
         purpose="lesson",
+        enable_web=True,
+        enable_code_execution=True,
+        enable_bash=True,
+        enable_preview=True,
+        enable_widgets=True,
         allow_subagents=True,
     )
 
@@ -173,6 +194,11 @@ def education_book_asset_policy(job_id: str) -> ManagedExecutionPolicy:
         allowed_skill_names=frozenset({"book-to-skill"}),
         filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
         purpose="assets",
+        enable_web=True,
+        enable_code_execution=True,
+        enable_bash=True,
+        enable_preview=True,
+        enable_widgets=True,
         allow_subagents=True,
     )
 
@@ -184,6 +210,11 @@ def education_book_pipeline_policy(job_id: str) -> ManagedExecutionPolicy:
         allowed_skill_names=frozenset({"book-to-skill"}),
         filesystem_root=f"/managed/textbook-job/{normalized_job_id}",
         purpose="book_pipeline",
+        enable_web=True,
+        enable_code_execution=True,
+        enable_bash=True,
+        enable_preview=True,
+        enable_widgets=True,
         allow_subagents=True,
     )
 

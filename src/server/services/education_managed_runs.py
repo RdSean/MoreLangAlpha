@@ -43,6 +43,7 @@ async def build_managed_education_graph(
         thread_id=thread_id,
         store=None,
         on_signed_url=None,
+        direct_mcp=None,
         managed_policy=policy,
     )
     graph_config: dict[str, Any] = {

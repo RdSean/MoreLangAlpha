@@ -183,6 +183,73 @@ _MANAGED_TEXTBOOK_SUBAGENTS = {
 }
 
 
+def _build_managed_policy_tools(
+    policy: "ManagedExecutionPolicy",
+    *,
+    backend: Any,
+    mcp_registry: MCPRegistry,
+    thread_id: str,
+    workspace_id: str,
+    on_signed_url: Any,
+) -> tuple[list[Any], Any | None, Any | None]:
+    """Build the managed tool surface declared by one execution policy."""
+    from ptc_agent.agent.managed_execution import TEXTBOOK_PURPOSES
+
+    execute_code_tool = None
+    if policy.enable_code_execution:
+        execute_code_tool = create_execute_code_tool(
+            backend,
+            mcp_registry,
+            thread_id=thread_id,
+        )
+
+    bash_tool = None
+    bash_output_tool = None
+    if policy.enable_bash:
+        bash_validator = None
+        if policy.purpose not in TEXTBOOK_PURPOSES:
+            from ptc_agent.agent.managed_execution import (
+                validate_managed_bash_command,
+            )
+
+            def bash_validator(command: str) -> str | None:
+                return validate_managed_bash_command(command, policy)
+
+        bash_tool = create_execute_bash_tool(
+            backend,
+            thread_id=thread_id,
+            command_validator=bash_validator,
+            fixed_working_dir=policy.filesystem_root,
+        )
+        bash_output_tool = create_bash_output_tool(backend)
+
+    preview_url_tool = None
+    if policy.enable_preview:
+        preview_url_tool = create_preview_url_tool(
+            backend,
+            workspace_id=workspace_id,
+            on_signed_url=on_signed_url,
+        )
+
+    show_widget_tool = None
+    if policy.enable_widgets:
+        show_widget_tool = create_show_widget_tool(backend)
+
+    tools = [TodoWrite]
+    tools.extend(
+        tool
+        for tool in (
+            execute_code_tool,
+            bash_tool,
+            bash_output_tool,
+            preview_url_tool,
+            show_widget_tool,
+        )
+        if tool is not None
+    )
+    return tools, execute_code_tool, bash_tool
+
+
 def build_finance_tools(config: AgentConfig) -> list[Any]:
     """The market and filing tools.
 
@@ -637,19 +704,17 @@ class PTCAgent:
                 education_create_homework,
             ]
         else:
-            # A managed teaching job gets a confined Bash and TodoWrite and
-            # nothing else: no code execution, no preview URLs, no widgets.
-            from ptc_agent.agent.managed_execution import validate_managed_bash_command
-
-            bash_tool = create_execute_bash_tool(
-                backend,
-                thread_id=short_thread_id,
-                command_validator=lambda command: validate_managed_bash_command(
-                    command, managed_policy
-                ),
-                fixed_working_dir=managed_policy.filesystem_root,
+            workspace_id = (
+                getattr(session, "conversation_id", "") if session else ""
             )
-            tools = [bash_tool, TodoWrite]
+            tools, execute_code_tool, bash_tool = _build_managed_policy_tools(
+                managed_policy,
+                backend=backend,
+                mcp_registry=mcp_registry,
+                thread_id=short_thread_id,
+                workspace_id=workspace_id,
+                on_signed_url=on_signed_url,
+            )
 
         # Create custom filesystem tools (override deepagents middleware tools).
         # `filesystem_backend` is the composite when a store is wired; otherwise
@@ -860,8 +925,8 @@ class PTCAgent:
         # A managed job builds no ambient tools, so each set degrades to empty
         # rather than naming a local that was never bound.
         subagent_tool_sets: dict[str, list[Any]] = {
-            "execute_code": [execute_code_tool] if managed_policy is None else [],
-            "bash": [bash_tool],
+            "execute_code": [execute_code_tool] if execute_code_tool is not None else [],
+            "bash": [bash_tool] if bash_tool is not None else [],
             "filesystem": list(filesystem_tools) if filesystem_tools else [],
             "web_search": (
                 [web_search_tool, web_fetch_tool] if web_search_tool is not None else []

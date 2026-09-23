@@ -2,6 +2,13 @@
 
 ## 2026-09-23
 
+### 新增：managed textbook 使用完整 PTC 工具能力
+
+- `ManagedExecutionPolicy` 新增 code execution、Bash、preview、widgets 能力开关；structure、lesson、book asset、book pipeline 和 teaching 五个 textbook policy 统一开启 web、ExecuteCode、普通 sandbox Bash、Preview、Widget、Read/Glob/Grep/Write/Edit，同时继续关闭 MCP 与 Vault。
+- managed 工具构造改为按 policy 组装，textbook purpose 不再传 command-text whitelist；Bash 仍在固定 managed root 中运行，MCP/Vault secrets 与 interactive/household tools 继续隔离。
+- textbook subagent 只继承 policy 实际启用的 code execution 与 Bash 工具集合；managed graph 显式不挂载 direct MCP。
+- 验证：managed policy 与真实 agent 工具集合聚焦 `67 passed`，`tests/unit/ptc_agent` 全量 `816 passed, 1 xfailed`，Ruff 通过。
+
 ### 修复：managed textbook 预创建完整工作目录契约
 
 - 新增统一的 managed textbook 目录契约，预创建 `work/`、`outputs/`、`outputs/book-skill/chapters/`、`outputs/content/`、`outputs/chapters/`、`outputs/knowledge/` 与 `.langalpha/`；`inputs/` 单独以只读权限创建，不进入可写目录列表。
