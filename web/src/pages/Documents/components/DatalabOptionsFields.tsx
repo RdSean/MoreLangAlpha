@@ -156,6 +156,53 @@ export default function DatalabOptionsFields({
         />
 
         <ToggleTile
+          id={`${baseId}-merge-cross-page`}
+          label={t('documents.wizard.datalab.mergeCrossPage')}
+          checked={value.merge_cross_page ?? false}
+          onChange={(checked) => patch('merge_cross_page', checked ? true : undefined)}
+          tip={t('documents.wizard.datalab.mergeCrossPageTip')}
+        />
+
+        <ToggleTile
+          id={`${baseId}-keep-pageheader`}
+          label={t('documents.wizard.datalab.keepPageHeader')}
+          checked={value.keep_pageheader_in_output ?? true}
+          onChange={(checked) =>
+            patch('keep_pageheader_in_output', checked ? undefined : false)
+          }
+        />
+
+        <ToggleTile
+          id={`${baseId}-keep-pagefooter`}
+          label={t('documents.wizard.datalab.keepPageFooter')}
+          checked={value.keep_pagefooter_in_output ?? false}
+          onChange={(checked) =>
+            patch('keep_pagefooter_in_output', checked ? true : undefined)
+          }
+        />
+
+        <ToggleTile
+          id={`${baseId}-extract-links`}
+          label={t('documents.wizard.datalab.extractLinks')}
+          checked={value.extract_links ?? false}
+          onChange={(checked) => patch('extract_links', checked ? true : undefined)}
+        />
+
+        <ToggleTile
+          id={`${baseId}-new-block-types`}
+          label={t('documents.wizard.datalab.newBlockTypes')}
+          checked={value.new_block_types ?? false}
+          onChange={(checked) => patch('new_block_types', checked ? true : undefined)}
+        />
+
+        <ToggleTile
+          id={`${baseId}-add-block-ids`}
+          label={t('documents.wizard.datalab.addBlockIds')}
+          checked={value.add_block_ids ?? false}
+          onChange={(checked) => patch('add_block_ids', checked ? true : undefined)}
+        />
+
+        <ToggleTile
           id={`${baseId}-token-efficient`}
           label={t('documents.wizard.datalab.tokenEfficient')}
           checked={value.token_efficient_markdown ?? false}

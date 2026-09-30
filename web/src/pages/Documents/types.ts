@@ -119,12 +119,18 @@ export type DatalabMode = 'fast' | 'balanced' | 'accurate';
 export interface DatalabOptions {
   mode?: DatalabMode;
   paginate?: boolean;
+  merge_cross_page?: boolean;
+  keep_pageheader_in_output?: boolean;
+  keep_pagefooter_in_output?: boolean;
   page_range?: string;
   max_pages?: number;
   skip_cache?: boolean;
   disable_image_extraction?: boolean;
   disable_image_captions?: boolean;
   token_efficient_markdown?: boolean;
+  extract_links?: boolean;
+  new_block_types?: boolean;
+  add_block_ids?: boolean;
   extras?: string;
 }
 

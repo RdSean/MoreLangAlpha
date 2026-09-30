@@ -90,6 +90,14 @@ def _client(config: DatalabConfig) -> Any:
 def _convert_options(options: DatalabConversionOptions) -> Any:
     from datalab_sdk import ConvertOptions
 
+    extras = [
+        item.strip() for item in (options.extras or "").split(",") if item.strip()
+    ]
+    if options.extract_links and "extract_links" not in extras:
+        extras.append("extract_links")
+    if options.new_block_types and "new_block_types" not in extras:
+        extras.append("new_block_types")
+
     fields: dict[str, Any] = {
         "output_format": options.output_format,
         "mode": options.mode,
@@ -98,14 +106,24 @@ def _convert_options(options: DatalabConversionOptions) -> Any:
         "disable_image_extraction": options.disable_image_extraction,
         "disable_image_captions": options.disable_image_captions,
         "token_efficient_markdown": options.token_efficient_markdown,
+        "add_block_ids": options.add_block_ids,
+        "additional_config": {
+            "keep_pageheader_in_output": options.keep_pageheader_in_output,
+            "keep_pagefooter_in_output": options.keep_pagefooter_in_output,
+        },
     }
+    if extras:
+        fields["extras"] = ",".join(extras)
     if options.page_range is not None:
         fields["page_range"] = options.page_range
     if options.max_pages is not None:
         fields["max_pages"] = options.max_pages
-    if options.extras is not None:
-        fields["extras"] = options.extras
-    return ConvertOptions(**fields)
+    converted = ConvertOptions(**fields)
+    # datalab-python-sdk 0.5.0 predates the API's merge_cross_page field, but
+    # its form serializer includes dynamically attached attributes. Keep the
+    # pinned SDK usable while forwarding the current API parameter.
+    converted.merge_cross_page = options.merge_cross_page
+    return converted
 
 
 def _as_int(value: Any) -> int | None:

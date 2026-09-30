@@ -34,6 +34,8 @@ describe('Datalab options panel', () => {
   it('starts with nothing set', () => {
     render(<Harness />);
     expect(screen.getByTestId('payload')).toHaveTextContent('{}');
+    expect(screen.getByRole('checkbox', { name: /Add page markers|添加分页标记/i })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Keep page header|保留页眉/i })).toBeChecked();
   });
 
   it('sends only what the user changed', () => {
@@ -109,7 +111,7 @@ describe('Datalab options panel', () => {
     expect(within(fields).getByLabelText(/Page range|解析范围/i)).toBeInTheDocument();
     expect(within(fields).queryAllByRole('checkbox')).toHaveLength(0);
 
-    expect(within(toggles).getAllByRole('checkbox')).toHaveLength(4);
+    expect(within(toggles).getAllByRole('checkbox')).toHaveLength(10);
     expect(within(toggles).queryByRole('textbox')).not.toBeInTheDocument();
   });
 
@@ -142,6 +144,20 @@ describe('Datalab options panel', () => {
     // The reason matters more than the flag: without it, "skip captions"
     // reads like a lost feature rather than a deliberate default.
     expect(tip).toHaveAccessibleName(/accuracy|精度/i);
+  });
+
+  it('sends structure and content feature toggles using their Datalab wire fields', () => {
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Merge cross-page|合并跨页/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Keep page footer|保留页脚/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Extract links|提取链接/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /New block types|新的块类型/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Add block IDs|添加块 ID/i }));
+
+    expect(screen.getByTestId('payload')).toHaveTextContent(
+      '{"merge_cross_page":true,"keep_pagefooter_in_output":true,"extract_links":true,"new_block_types":true,"add_block_ids":true}',
+    );
   });
 });
 

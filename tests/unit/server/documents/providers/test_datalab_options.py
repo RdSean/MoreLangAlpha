@@ -45,6 +45,17 @@ class TestDefaults:
         """
         assert DatalabConversionOptions().disable_image_captions is True
 
+    def test_structure_and_content_defaults_match_library_preferences(self) -> None:
+        options = DatalabConversionOptions()
+
+        assert options.paginate is True
+        assert options.keep_pageheader_in_output is True
+        assert options.keep_pagefooter_in_output is False
+        assert options.merge_cross_page is False
+        assert options.extract_links is False
+        assert options.new_block_types is False
+        assert options.add_block_ids is False
+
 
 class TestValidation:
     def test_accepts_a_page_range(self) -> None:

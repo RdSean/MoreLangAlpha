@@ -42,6 +42,10 @@ class DatalabConversionOptions(BaseModel):
     mode: DatalabMode = "balanced"
     paginate: bool = True
 
+    merge_cross_page: bool = False
+    keep_pageheader_in_output: bool = True
+    keep_pagefooter_in_output: bool = False
+
     page_range: str | None = None
     max_pages: int | None = Field(default=None, gt=0)
     skip_cache: bool = False
@@ -67,6 +71,9 @@ class DatalabConversionOptions(BaseModel):
     """
 
     token_efficient_markdown: bool = False
+    extract_links: bool = False
+    new_block_types: bool = False
+    add_block_ids: bool = False
     extras: str | None = None
 
     @model_validator(mode="after")

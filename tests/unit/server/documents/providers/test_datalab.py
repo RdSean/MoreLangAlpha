@@ -230,6 +230,39 @@ class TestSdkOptionMapping:
         assert options.disable_image_captions is False
         assert options.page_range == "0-5"
 
+    def test_maps_structure_and_content_options_to_the_sdk_request(self) -> None:
+        options = datalab._convert_options(
+            DatalabConversionOptions(
+                merge_cross_page=True,
+                keep_pageheader_in_output=True,
+                keep_pagefooter_in_output=True,
+                extract_links=True,
+                new_block_types=True,
+                add_block_ids=True,
+            )
+        )
+
+        assert options.merge_cross_page is True
+        assert options.additional_config == {
+            "keep_pageheader_in_output": True,
+            "keep_pagefooter_in_output": True,
+        }
+        assert options.to_form_data()["merge_cross_page"] == (None, True)
+        assert options.add_block_ids is True
+        assert set(options.extras.split(",")) == {"extract_links", "new_block_types"}
+
+    def test_preserves_legacy_extra_features_when_new_content_flags_are_set(
+        self,
+    ) -> None:
+        options = datalab._convert_options(
+            DatalabConversionOptions(extras="chart_understanding", extract_links=True)
+        )
+
+        assert set(options.extras.split(",")) == {
+            "chart_understanding",
+            "extract_links",
+        }
+
 
 class TestFailureHandling:
     def test_a_completed_but_failed_request_raises(

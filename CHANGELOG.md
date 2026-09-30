@@ -1,5 +1,14 @@
 # 变更日志
 
+## 2026-09-30
+
+### 新增：图书馆 Datalab 高级解析选项
+
+- 高级选项新增 Datalab STRUCTURE 与 CONTENT 参数：跨页合并、页眉/页脚保留、链接提取、新块类型、块 ID，以及已有的分页、图片提取和图片标题控制。
+- 分页和输出页眉默认开启；页脚、跨页合并和新增内容特性保持关闭，只有用户主动调整的选项才写入前端请求。
+- 后端将页眉/页脚映射到 `additional_config`，链接与新块类型合并进 `extras`，并兼容当前固定版本 SDK 缺少的 `merge_cross_page` 字段。
+- 验证：Datalab provider 回归 `90 passed`，前端选项/API/本地化测试 `28 passed`，`pnpm typecheck` 与 `pnpm build` 通过。
+
 ## 2026-09-23
 
 ### 修复：课程生成 prompt 的跨知识点状态与冲突提示
