@@ -2,131 +2,192 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 用 more-to-skills 原生产物实现结构入库、知识点导航、原文定位和按需讲义，移除旧教材加工协议与冗余配置。
+**Goal:** 在清理旧教材模型和页面后，用 more-to-skills 原生结构及材料建立一个可浏览、可按需加工、可恢复的教材工作台。
 
-**Architecture:** 沿用 PTC、Docker、任务 attempt 和现有 SSE 基础设施。教育服务直接导入固定 schema 的 book-structure.json，章节树存 JSONB，知识点和讲义保存最小查询记录；运行事件在 Redis 写入前精简。旧教材数据无需兼容，图书馆源资产及其他产品模块保留。
+**Architecture:** 新教材模型不经过旧 package/candidate/publication 协议。保留正常 PTC/Flash、Docker、runtime ledger/checkpoint；教育模块持久记录业务任务、每项产物及精简活动，家长只使用列表与工作台两层。图书馆和学生功能改接新引用。
 
 **Tech Stack:** Python 3.13、FastAPI、async psycopg、Alembic raw SQL、jsonschema、PostgreSQL、Redis、React 19、TypeScript、Vite、pnpm。
 
 ---
 
-## 执行约束
+## 0. 执行规则与依赖
 
-- 设计依据：`docs/plans/2026-09-30-more-to-skills-design.md` 和用户 2026-09-30 的确认。
-- 此文档仅为计划；用户当前要求先讨论和计划，不在本轮执行下面的代码或数据库操作。
-- 工作目录：`/Users/seanlee/.config/superpowers/worktrees/langalpha/library-textbook-assets`；保留已有 Datalab 高级选项提交。
-- 开始前读相关 AGENTS.md、检查 dirty 状态及最新迁移 head。新文件名为计划目标，遇到后续同名实现先检查再调整。
-- 先验证真实行为，随后用精简的合成 fixture 固化契约。不提交私人教材、生成讲义、密码或本地运行文件。
-- 每项实质变更通过对应检查后，更新中文 CHANGELOG，精确 git add 本项文件并原子提交。
-- 不生成数据库依赖黑箱兼容层；删除范围由明确表、字段、接口和调用点列表限定。切换前确认受影响任务没有正在写入，必要时仅停止相应教材任务。
+依据：[设计](2026-09-30-more-to-skills-design.md)、[清理清单](2026-09-30-more-to-skills-cleanup-audit.md)。本回合仅完善文档；下列代码、迁移、模型调用和清理等待进入实施阶段。
 
-## Task 1：固定 skill、验收契约与删除范围
+Worktree：/Users/seanlee/.config/superpowers/worktrees/langalpha/library-textbook-assets，分支 codex/library-textbook-assets。保留已有 Datalab 高级选项变更。开始实施时检查 dirty 状态、AGENTS.md、迁移 head、实际服务目录/端口。
 
-**Files**
-- Create: `plugins/langalpha_local/skills/more-to-skills/`（复制用户技能所需文件，保留 LICENSE.md，排除缓存与生成物）。
-- Create: `src/server/services/education_book_structure.py`。
-- Create: `tests/unit/server/services/test_education_book_structure.py`。
-- Inspect: `migrations/versions/066_add_textbook_structure_models.py`、`067_add_kp_lessons.py`、`068_add_structure_publications.py`、`069_add_learning_items_and_profiles.py`、`075_reset_textbook_pipeline.py`、`079_book_pipeline_package_import.py`、`080_education_job_progress.py`、`081_book_pipeline_checkpoint.py`。
+顺序：任务 1 定义契约 → 任务 2 建立数据与导入 → 任务 3/4 接运行和活动 → 任务 5/6 接工作台和所有消费者 → 任务 7 一次切换清理 → 任务 8 完整验收。新模块可在隔离数据库测试；不在一半消费者仍依赖旧表时把迁移应用到当前运行数据库。
 
-1. 重新读取用户 skill 的 SKILL.md、README.md、SPEC.md、schema，核对用户本轮修改已纳入；记录固定内容摘要。
-2. 对本地真实样例做只读 schema 校验及锚点/引用检查。若仍有两处 null，保留准确错误，测试在临时副本上按 schema 删除可选空字段，不动源文件，不静默放宽生产验收。
-3. 梳理旧表的所有引用，输出精确的保留/替换/删除清单到设计文档；检查学生学习、作业和通用任务引用，不用 CASCADE 跨模块删除。
-4. 用合成 fixture 覆盖递归节点、多节点 KP、一个节点对应多个 KP、空 chapters、扩展字段保留；失败用例覆盖 null 枚举、重复 ID、失效引用、越界行号和不安全输出路径。
-5. 实现纯解析/校验函数，返回原始结构及确定性 KP 投影；结构任务显式要求 knowledge_points，字段语义遵从 skill，不添加旧 point_type/confidence 等要求。服务固定 schema，不信任任务改写的校验器。
-6. 执行 `uv run pytest tests/unit/server/services/test_education_book_structure.py -q`，预期全部通过；提交技能和契约变更。
+每项经过相应行为检查后补最小回归、中文 CHANGELOG 和原子提交。实现新模块时不添加旧 schema 兼容读取，不留下永久 feature flag。删除范围必须满足清理清单，而不是“最少改几行能跑”。
 
-## Task 2：最小数据模型及直接导入
+## Task 1：固定新契约和对外 API
 
 **Files**
-- Create: `migrations/versions/082_more_to_skills_textbooks.py`（实施时确认 082 未占用，并从实际 head 接续）。
-- Create: `src/server/database/education_books.py`。
-- Create: `tests/integration/test_education_books_db.py`。
-- Modify: `src/server/services/education_book_structure.py`。
-- Inspect/reuse: `src/server/database/education_textbooks.py`、`src/server/services/education_textbook_source_snapshots.py`。
+- Create: plugins/langalpha_local/skills/more-to-skills/（仅技能代码/文档/必要资源，保留许可）。
+- Create: src/server/services/education_book_structure.py、src/server/app/education/book_models.py。
+- Create: tests/unit/server/services/test_education_book_structure.py。
+- Modify: plugins/README.md；核对 pyproject.toml/uv.lock 与实际 Docker 依赖构建文件。
 
-1. 在独立测试数据库验证新建库及当前 head 升级路径。DDL 使用 raw SQL，建立设计中的 structure、KP、material 三类记录和必要索引/FK，不为每个目录节点额外建表。
-2. 结构导入事务写入完整 JSONB 和 KP 投影，绑定现有图书馆源快照；KP 的 unit/nodes/blocks 原样保留。存储技术 ID 不改写 skill 的 ID。
-3. 增加 attempt 条件更新与相同请求幂等检查；失败必须无半套结构和 KP。不迁移旧教材数据，不误删仍由其他模块使用的记录。
-4. 实现讲义文件归档后原子更新 material 与目标 KP content_file；验证不会覆盖别的 KP，旧 attempt 返回不能覆盖当前结果。
-5. 用真实样例临时副本验证导入及计数；fixture 和教材内容不提交到仓库。
-6. 执行 `uv run pytest tests/integration/test_education_books_db.py -q`，预期事务、唯一性、引用及旧 attempt 拒绝测试全部通过；提交数据模型和导入变更。
+1. 固定更新后的 SKILL.md、README、SPEC、schema 与摘要，确保正式 schema 校验可用，不在运行时读取个人技能目录。
+2. 对本地真实样例做只读检查。曾有的 title_source:null 必须给出 JSON 路径错误；不得放宽 schema 或改用户源样例。自动化用合成合法 fixture，真实全链验收使用届时实际通过固定 schema 的产物。
+3. 明确解析函数的输入为可信源描述、原始 JSON、受控输出清单；返回完整 JSONB、KP 查询投影与告警。不需要模型生成数据库字段/manifest/hash。
+4. 覆盖递归/未知扩展字段、多 nodes 引用、单节点多个 KP、无 unit、空 chapters、空 KP、1-based inclusive、line_offset 不重复转换、非法引用/重复 ID/重复 JSON 键/非有限数值/不支持的 schema major/越界/路径逃逸/缺失材料。
+5. 冻结新的 API/DTO。下表路径均相对 /api/v1/education；kpId 使用新查询记录 UUID，返回的 skill_kp_id 用于工作台 URL。两者禁止混用。
 
-## Task 3：统一任务、目录和图书馆资产接入
+| 方法/资源 | 契约 |
+|---|---|
+| GET/POST /textbooks | 列表；以 parse_job_id/primary_artifact_id/title 创建并排队分析，返回 textbook_id/job_id |
+| GET /textbook-sources | 当前用户可读且已完成的主 Markdown 解析产物，单选 |
+| GET /textbooks/:id | 工作台快照：来源、结构状态、材料计数、当前/最近任务，不返回全书讲义正文 |
+| GET /textbooks/:id/structure | schema 结构及当前 content_file 投影、KP UUID 映射 |
+| GET /textbooks/:id/source | 可信冻结原文，支持行范围；source_lines 的起止均包含 |
+| GET /textbooks/:id/assets/:assetId | 授权源/材料图片，不暴露任意存储路径读取 |
+| GET /textbooks/:id/knowledge-points/:kpId/material | 当前成功 Markdown 与生成元数据；无材料有明确空状态 |
+| POST /textbooks/:id/jobs | structure 或 materials；冻结目标集合/深度/要求/请求幂等键 |
+| GET /book-jobs/:jobId | job/item 状态、准确完成计数及高水位游标 |
+| POST /book-jobs/:jobId/cancel | 停止真实运行和未启动 item，不回滚成功产物 |
+| POST /book-jobs/:jobId/retry | 为失败/未执行项建立新任务；不重跑成功项 |
+| GET /book-jobs/:jobId/events | after_seq SSE 回放/跟随，过期游标触发快照重取 |
+| POST/DELETE /textbooks/:id/assignments | 家长显式分配/撤销学生访问，不创建发布快照 |
 
-**Files**
-- Create: `src/server/services/education_book_jobs.py`、`src/server/services/education_book_storage.py`。
-- Create: `tests/unit/server/services/test_education_book_jobs.py`、`tests/unit/server/services/test_education_book_storage.py`。
-- Modify: `src/server/services/education_managed_runs.py`、`src/ptc_agent/agent/managed_execution.py`、`src/ptc_agent/core/sandbox/ptc_sandbox.py`。
-- Inspect/reuse: `src/server/services/education_textbook_source_snapshots.py`、`src/server/services/education_textbook_snapshot_reads.py`、`src/ptc_agent/agent/agent.py`。
-- Existing regression: `tests/unit/ptc_agent/test_managed_textbook_execution_policy.py`。
+6. 学生既有 reading/items/progress/summary/chat API 保留能力但更新 DTO；细节由 Task 6 接线。旧 API 退役清单以审计文档为准。
+7. 运行 uv run pytest tests/unit/server/services/test_education_book_structure.py -q；记录结果，提交。
 
-1. 定义一种教材执行配置、两种业务操作：structure、materials；保留现有 root run/checkpointer/attempt 运行机制，取消各类教材 Agent 人格和 processing profile 分支。
-2. 统一输入根、work、outputs 和技能根；不要把最终 JSON schema 验收误用为辅助脚本/中间文件的写入限制。
-3. 保留正常 Bash、ExecuteCode、Read/Write/Edit 能力。Agent 可在 work 内新建脚本或修改技能脚本副本；固定源文档和服务验收 schema 不被更改。
-4. 暂存图书馆 Markdown 和必要图片，保持字节/行号及相对路径，利用已有清单读取相关对象，不枚举其他对象。安装 jsonschema，禁止校验静默跳过。
-5. 结构操作调用更新后的 Structure Only，完成后由 Task 1/2 的代码导入，不再要求四套 JSON、章节知识材料或进度日志。
-6. 材料操作输入已保存结构、KP IDs、原文/图片及技能要求的邻近上下文。调用 Reading Material Only，直接归档 chapters 文件；选中多条时顺序处理，某条失败不清除其他条。
-7. 从当前输出目录发现并归档技能产生的可选附加文件，清单由服务生成；不让可选附加材料缺失阻止结构任务完成。
-8. 执行 `uv run pytest tests/unit/server/services/test_education_book_jobs.py tests/unit/server/services/test_education_book_storage.py tests/unit/ptc_agent/test_managed_textbook_execution_policy.py -q`；再做 Docker smoke：自编 Python 脚本、图片读取、任意起点讲义、取消与迟到结果。
-9. 提交统一运行和产物接入变更。
-
-## Task 4：精简 Timeline 和有界持久事件
+## Task 2：新数据模型、来源和确定性导入
 
 **Files**
-- Create: `src/server/services/education_book_activity.py`。
-- Create: `tests/unit/server/services/test_education_book_activity.py`、`tests/integration/test_education_book_activity_stream.py`。
-- Modify: `src/server/services/runs/sse_producer.py`、`src/server/services/education_book_jobs.py`。
-- Inspect/reuse: `src/server/services/education_generation_progress.py`、`src/server/database/education_textbooks.py` 现有事件与 attempt 逻辑。
+- Create: migrations/versions/082_more_to_skills_textbooks.py（若 082 已占用，从实际 head 选择新的顺序号，不覆盖）。
+- Create: src/server/database/education_books.py、education_book_jobs.py、education_learning.py。
+- Create: src/server/services/education_book_storage.py。
+- Modify: education_textbook_source_snapshots.py、education_textbook_snapshot_reads.py、education_book_structure.py。
+- Create tests: tests/integration/test_education_books_db.py、tests/unit/server/services/test_education_book_storage.py、tests/unit/migrations/test_more_to_skills_textbooks.py。
 
-1. 找到运行消息、工具调用和工具结果的既有流入口；添加可选通用事件投影接点，教材含义留在 education_book_activity，不改变普通 PTC/Flash full profile。
-2. 在 accumulator、Redis writer 之前过滤原始 token/delta、大段参数/结果和内部推理，只生成精简 activity。不能通过关闭 education_compact 恢复全量流。
-3. 持久事件使用 job/attempt、单调 seq、稳定活动 ID、类型、时间、短说明及必要目标 ID；复用一份 ledger，避免与旧进度表并行双写同一业务事实。
-4. 添加合并、长度限制、速率和总预算；保留错误/业务终态及工具活动汇总。重连按 seq 补齐去重；心跳不逐条持久化。
-5. 工具结束不触发业务完成；结构入库和讲义归档后由服务发成功事件。可选 report_progress 仅补充公开说明，禁止以其缺失阻止导入。
-6. 压力验证：150001 raw delta 不产生线性持久行/字节增长；大量短工具活动也受预算约束；跨 worker 重连、cancel、过期 attempt、重复事件不产生重复完成或错误状态。
-7. 执行 `uv run pytest tests/unit/server/services/test_education_book_activity.py tests/integration/test_education_book_activity_stream.py -q`，保留既有 producer/full-profile 回归并提交。
+1. 按清理清单建立完整目标 DDL：重建教材身份/授权等保留表的相关字段，建立 structures/KPs/materials/jobs/items/activity 六张新表，删除明确的旧教材表/约束。开发期间仅在隔离数据库执行此完整迁移。
+2. 单来源冻结复用图书馆 bundle，改掉旧 version/position 前缀和旧 DB import；持久保存源 Markdown/图片清单及摘要、blocks、报告。保持原文行号及图片相对路径。
+3. 教材创建与初始 job 入队在同一事务；重复请求/相同来源返回既有明确对象，不能因网络重试创建多本空教材。
+4. 结构原子导入所有 nodes/KPs；空 chapters 合法，已有目标材料按同一存储流程导入。未知 schema 字段保留，KP 的 nodes 仍为多引用。
+5. material 是当前可变指针的唯一真值；结构 API/导出确定性覆盖 content_file，不三处双写。通过事务与行锁/CAS防止重复提交。
+6. 上传前记录候选键清单，写本 attempt 不可变对象，最后提交 material、item 状态和完成事件。注入上传失败、PG 提交失败、重复 finalise，确认旧材料可读且没有假成功。
+7. 旧教材表/字段删除的最终应用留 Task 7；但迁移本身必须完整测试空库到新 head、081 到新 head 结果一致。
+8. 运行 uv run pytest tests/unit/server/services/test_education_book_storage.py tests/unit/migrations/test_more_to_skills_textbooks.py tests/integration/test_education_books_db.py -q，预期引用、幂等、事务和 catalog 检查通过；提交。
 
-## Task 5：API、知识点导航和原文阅读
+## Task 3：正常 PTC 执行与逐项恢复
 
 **Files**
-- Modify: `src/server/app/education/textbooks.py`、`src/server/services/education_textbooks.py`。
-- Modify: `web/src/pages/Education/TextbookStructurePage.tsx`、`BookProcessingPage.tsx`、`StudentTextbookLearningPage.tsx`、`queries.ts`、`types.ts`。
-- Modify: `web/src/pages/Education/components/EducationMarkdown.tsx`。
-- Create: `web/src/pages/Education/__tests__/MoreToSkillsTextbook.test.tsx`。
-- Modify: `web/src/pages/Education/__tests__/BookProcessingPage.test.tsx`。
-- Modify: `tests/unit/server/app/education/test_textbooks.py`。
+- Create: src/server/services/education_book_jobs.py、education_book_recovery.py。
+- Modify: education_managed_runs.py、src/ptc_agent/agent/managed_execution.py、agent.py、src/ptc_agent/core/session.py、core/sandbox/ptc_sandbox.py。
+- Modify: src/server/services/runs/executor.py、src/server/app/setup.py、src/config/models.py、src/config/settings.py、config.yaml。
+- Create tests: tests/unit/server/services/test_education_book_jobs.py、tests/integration/test_education_book_jobs_db.py。
+- Rewrite: tests/unit/ptc_agent/test_managed_textbook_execution_policy.py、tests/unit/server/services/runs/test_education_teaching_timeout.py。
 
-1. API 暴露结构、KP/材料状态、原文范围、图书馆资产和任务活动；创建结构/材料任务保留家长授权，学生只读其授权教材及讲义。
-2. 默认左栏按 unit 分组呈现 KP，支持切换原书递归目录；unit 缺省时按 schema 允许的情况提供未分组区，不臆造节点。
-3. 未生成讲义仍能看结构/原文；点击任意 KP 可以生成，支持深度与用户要求、选中全部。无需前文讲义或人工接受候选点。
-4. Markdown 渲染关联源行范围以支持全文跳转及片段展示；保留授权图片解析，不在浏览器读取 source.path 的宿主机路径。
-5. Timeline 使用 SSE 和持久游标，刷新可恢复；有真实计数则展示计数，否则展示状态与耗时，不虚构百分比。
-6. 删除拆分/合并/候选审阅/旧阶段按钮和多余 profile 配置；讲义重做期间仍可读取已成功材料，失败不清空材料。
-7. 执行 `uv run pytest tests/unit/server/app/education/test_textbooks.py -q`；在 web 目录执行 `pnpm test src/pages/Education/__tests__/MoreToSkillsTextbook.test.tsx src/pages/Education/__tests__/BookProcessingPage.test.tsx`、`pnpm typecheck`；提交。
+1. 一份教材 managed policy、统一 education_book managed kind，两种用户操作；保留父用户模型解析和正常图构建。移除旧五个 purpose、旧 fixed v2 textbook-chapter-worker 注册和 prompt，不影响普通 subagent。
+2. 显式传 textbook/job/item/execution/run/attempt IDs；root 只使用 execution-id。统一 inputs、技能、work、outputs，不从路径推测 job_id。
+3. Docker 实测自编/修改 Python 脚本、普通 Bash/ExecuteCode、图片多模态读取、只读来源与固定服务 schema。不能以能列出图片路径代替模型能读图。
+4. 结构 item 使用 Structure Only；成功后调用 Task 2 原子导入。已成功结构不可由材料任务改写。
+5. 每材料 item 只生成指定 KP，按 skill 读取块、脚注、图片、邻近答案和替代上下文；归档后一份即可被 UI 读取。缺前一讲义不阻断。
+6. 同一本书仅一活动 job；批量持久化 target items 后顺序执行。全书请求的结构→材料后续意图必须持久化，结构提交后只创建一次后续任务，不靠前端在线或内存回调。明确要求“全部文件”时追加一次附加材料 item；“全部讲义”不强制 glossary 等。
+7. item 含当前 attempt token、run/thread/workspace IDs、租约和结果。使用正常 RunCoordinator 终态，业务 finalise 只在匹配 attempt 下提交。
+8. cancel 必须终止当前真实 run、终止待执行队列；已提交材料不回滚。重试创建失败/未执行集合的新任务。普通内容失败继续下一项，基础设施/凭据/全局来源失败停止余项。
+9. recovery 服务接入已有维护周期：从 PG 待启动项和 runtime ledger 恢复；运行结束但 callback 未完成时幂等收尾，不能安全恢复的中断明确标为可重试。不要用进程内注册表作为事实源，也不要新增独立 Agent 引擎。
+10. 故障注入排队后进程退出、上传后退出、提交后回调前退出、跨 worker cancel、重复请求及旧 attempt 返回。确认成功项不二次生成，下一项不永久卡住。
+11. 运行 uv run pytest tests/unit/server/services/test_education_book_jobs.py tests/integration/test_education_book_jobs_db.py tests/unit/ptc_agent/test_managed_textbook_execution_policy.py tests/unit/server/services/runs/test_education_teaching_timeout.py -q，真实 Docker smoke 完成后提交。
 
-## Task 6：删除旧流程与冗余表
+## Task 4：有界公开活动与浏览器恢复
 
-**Files（先核实调用引用，再精确删除/重写）**
-- Remove: `plugins/langalpha_local/skills/book-to-skill/`。
-- Remove/replace: `src/server/services/education_lesson_jobs.py`、`education_book_pipeline_jobs.py`、`education_book_package.py`、`education_book_asset_jobs.py`、`education_progress_collector.py`。
-- Remove obsolete paths: `education_structure_jobs.py`、`education_teaching_storage.py`、候选审阅/结构拆分服务及专用模型、路由、测试。
-- Modify: `src/server/database/education_textbooks.py`、相关前端 API 与类型、`plugins/README.md`。
-- Create: 清理迁移（按 Task 1 的精确表/列/FK 清单，选择实施时可用的下一个 Alembic revision）。
+**Files**
+- Create: src/server/services/education_book_activity.py。
+- Modify: src/server/services/runs/sse_producer.py、新 book job/recovery 服务、book activity 数据库查询。
+- Create tests: tests/unit/server/services/test_education_book_activity.py、tests/integration/test_education_book_activity_stream.py。
+- Inspect/update when relevant: src/server/services/history 的事件分类及 tests/unit/server/services/history/test_event_ledger.py。
 
-1. 新入口打通后切换所有教材生产/消费调用；不保留旧 skill 与新 skill 双通道。
-2. 逐项解除旧表引用，执行明确的教材数据删除和 DDL 清理。保留或改接仍被学生学习入口需要的最小关系，不删除普通作业、家庭或图书馆数据。
-3. 删除 progress helper 的暂存、JSONL reader、日志事件必达门禁，以及旧 package 四份投影与章节 checkpoint 业务协议。保留通用 PTC checkpoint。
-4. 搜索运行代码 `book-to-skill|progress.jsonl|book_package.json|candidate_review`，逐项说明剩余命中；新 skill 的许可署名和历史变更日志允许保留，不做无差别字符串替换。
-5. 将旧测试删除或替换为新行为测试，不留下仅为废弃接口继续过测的兼容代码。
-6. 验证新建库、已有库升级、API 导入、学生授权、取消和失败恢复；提交精确清理。
+1. 在可 await 的流消费边界加入可选通用观察回调；教材投影在 education 模块。教育原始 delta 仍在 accumulator/Redis 之前被过滤，普通聊天 full profile 不变。
+2. 映射公开说明、工具开始/结束短摘要、服务验收结果；不保存思维链/完整工具参数/输出。没有 report_progress 不影响业务成功。
+3. 实现设计预算（1000 普通活动/1 MiB、单条 2 KiB/512 字符、同活动至少合并 1 秒）和唯一终态豁免；前端列表同样有界。超预算仅丢详细活动，不丢业务状态。
+4. 完成事件随教材提交同事务，Redis 通知丢失从 PG 补齐。快照高水位/after_seq/去重、游标过期、断线重连、后台标签恢复、活动写入故障明确处理。
+5. 专用教育 SSE 使用表为 durable home；如果引入任何通用 chat-wire 类型，则同步登记历史 replay 来源，不能跳过现有 ledger 约束。
+6. 压测 150001 raw delta、大量短工具结果、很长文本、Redis 不可用、跨 worker 重连；同时测 PG 行/字节、Redis 条数/字节与浏览器渲染规模，不只测 DTO。
+7. 运行 uv run pytest tests/unit/server/services/test_education_book_activity.py tests/integration/test_education_book_activity_stream.py -q，并执行 producer compact/full 与 event ledger 对应回归；提交。
 
-## Task 7：端到端验收与交付
+## Task 5：新工作台及图书馆直达
 
-1. 检查准确的进程、端口和 worktree；已有 8000/5177 服务时确认其代码目录后按需要更新，不启动冲突实例。
-2. 通过真实图书馆产物跑结构分析：含图片的 Markdown → 标准 JSON → 可浏览目录和 KP；不生成讲义时 chapters 为空不报错。
-3. 直接选择中间 KP 生成讲义，验证前文未生成也成功；检查图片、邻近引用、跳回原文位置和 content_file 更新。
-4. 选择多条或全部时，验证顺序执行、已完成材料可读、失败/取消只影响未完成项；刷新重连后不丢失、不重复显示完成事件。
-5. 验证 Agent 在真实 Docker 内编写/调整辅助脚本，且最终服务 schema 无法被任务内修改绕过。记录真实模型执行结果，不以模拟测试替代。
-6. 在依赖就绪的环境运行 `uv run pytest tests/unit -q`、相关 integration suites、`make lint`；web 运行 `pnpm test`、`pnpm typecheck`、`pnpm build`。区分已有基线问题与本次回归，不宣称未运行检查已通过。
-7. 保证前端监听 `0.0.0.0:5177`；检查 `http://192.168.3.240:5177/education` 和后端 health，并在浏览器实测教材页面、图片、原文跳转、Timeline。
-8. 更新中文 CHANGELOG、记录检查结果并原子提交；列出确实删除的旧教材数据范围、不可恢复性及仍保留的源资产。不得将任何文档计划描述为已实施。
+**Files**
+- Create: web/src/pages/Education/TextbookWorkbenchPage.tsx、TextbookWorkbenchPage.css。
+- Create: web/src/pages/Education/components/BookNavigator.tsx、BookReader.tsx、BookActivityPanel.tsx、BookGenerationForm.tsx。
+- Rewrite: TextbooksPage.tsx、Education/{api,queries,types,errorMessage}.ts。
+- Modify: components/EducationMarkdown.tsx、web/src/lib/queryKeys.ts、Main/Main.tsx、Main/routeChunks.ts、Sidebar/AppSidebar.tsx、涉及的 locales。
+- Modify: Documents/DocumentDetailPage.tsx、Documents/components/TeachingUsagePanel.tsx、Documents/{api,hooks,types}.ts。
+- Create tests: web/src/pages/Education/__tests__/TextbookWorkbenchPage.test.tsx、BookNavigator.test.tsx、BookActivityPanel.test.tsx。
+- Update: Documents/__tests__/DocumentDetailPage.test.tsx 及 TeachingUsagePanel 对应测试。
+
+1. 按设计线框构建一个工作台；不基于旧候选/结构页保留大量条件分支。复用现有 UI/theme/Markdown 基础组件。
+2. 新建教材使用共享单选来源面板与“添加并分析”；图书馆直接带入选中的成功解析产物，去空教材/版本/多来源步骤。
+3. 左栏切换 KP/原书目录，搜索和折叠；主内容讲义/原文两个视图，生成表单原位展开；活动按需展示，不占第三层导航。
+4. URL 维护 skill KP ID/node ID/view，转换为后端 UUID 时使用当前结构映射。返回/前进、深链、搜索/展开及正文滚动符合设计，异步事件不劫持当前阅读位置。
+5. AST 源行映射做范围跳转/高亮；图片经授权 resolver；同书相对讲义链接未生成时打开目标原文。禁止任意 source.path 或任意 MinIO key 读取。
+6. 批量显式进入选择模式，默认跳过已有讲义；重做列明数量。运行中可浏览、可取消；失败仅重试未完成；已有材料不会因错误消失。
+7. 无 KP/无讲义/正在生成/部分失败/已取消/重连/无权限均有明确状态；切换 KP 不串 prompt。键盘导航、焦点管理、可读字体与窄屏抽屉可操作。
+8. 删除审计中五个旧页面及其专用组件、CSS、路由 chunk 和 polling/query keys；旧路径只返回静态重置说明，不能 fallback 旧页。
+9. 在 web 运行 pnpm test src/pages/Education/__tests__/TextbookWorkbenchPage.test.tsx src/pages/Education/__tests__/BookNavigator.test.tsx src/pages/Education/__tests__/BookActivityPanel.test.tsx、pnpm typecheck、pnpm build；真实浏览器检查导航不跳页，提交。
+
+## Task 6：学生功能、授权和图书馆使用查询闭环
+
+**Files**
+- Rewrite: src/server/app/education/textbooks.py、src/server/services/education_textbooks.py 的新门面；同步 setup.py router。
+- Modify: src/server/services/document_teaching_usage.py、src/server/app/documents.py 相关 DTO/服务调用。
+- Modify: education_learning_assets.py、education_learning_chat.py、education_learning_transcript.py、src/server/app/threads/messaging.py。
+- Modify: web/src/pages/Education/StudentTextbookLearningPage.tsx、PersonalizedSummaryPage.tsx、components/PersonalNotebook.tsx、StudentLessonFollowUp.tsx。
+- Create/update tests: tests/integration/test_education_book_learning_db.py、tests/unit/server/app/test_education_learning_thread_protection.py、tests/unit/server/services/test_education_learning_chat.py、tests/unit/server/app/education/test_learning_items.py、图书馆 teaching-usage 测试。
+
+1. 工作台“给学生使用”只建立最小教材授权；清除 publication/revision/approval 流程。明确已分配学生读取最新成功材料，失败重做仍读旧材料。
+2. 授权同时覆盖结构、原文、图片、材料和 Flash 上下文；撤销后全部入口拒绝，学生不能调用家长生成/配置/活动控制。
+3. 进度、笔记、总结从新节点 ID/KP UUID 读取，不制造旧 Unit adapter；学生原有功能继续可用。
+4. Flash 每轮由服务读授权材料并冻结当时内容依据，保持私人 Flash workspace 和既有 thread 保护。旧学习映射移除不能解除旧会话限制。
+5. 重写 document_teaching_usage 的 JOIN/DTO，图书馆使用情况直达工作台；删除 content_version/publication 的 UI 和 TS 字段。
+6. 从新 DB/API 跑通家长分配→学生阅读/笔记/追问→家长更新讲义→学生读取新内容→撤销访问；并检查其他家庭、猜测 KP UUID/图片 ID 被拒绝。
+7. 跑所列聚焦测试及学生前端回归，提交。此任务未完成不得删旧表并宣称重构成功。
+
+## Task 7：一次切换、旧代码和旧资源清理
+
+**Files**
+- Remove: 审计 A/B/D 明确删除的页面、服务、旧 skill 和专用组件/测试。
+- Rewrite/remove: src/server/database/education_textbooks.py；旧查询全部转到新数据库模块后删除，不保留薄 wrapper 维持旧 API。
+- Update: src/server/app/education/models.py、相关 OpenAPI/路由导出、配置、README、scripts/education_purge_prefix.py。
+- Finalise migration: Task 2 的完整切换迁移。
+- Test: 新迁移 integration/catalog、import layering、失效路由与消费者回归。
+
+1. 在隔离数据库演练完整切换：记录旧依赖→处理 FK 循环→清理旧数据/表/字段→建立新表/授权引用。检查 pg_constraint 和最终 catalog；不改历史迁移、不复制 075 的 TRUNCATE CASCADE。
+2. 列出并复核本次旧教材的准确 job/run/thread/workspace/sandbox/object key 清单。区分图书馆输入、家庭作业资产、普通 Flash/PTC 数据和教材派生产物。
+3. 切换窗口只停旧教材入口，取消准确活动 run，终止/归档准确学习线程，收尾托管资源。不能先删 mapping 让受限线程变普通会话。
+4. 应用新 schema 并同时切换完整后端/前端。不得留下新旧引擎选择开关、旧版本分支或 profile fallback。
+5. 旧 SQL、API/query keys、五种 managed purpose/kind、fixed v2 worker、进度 helper/JSONL、package 多投影、候选审核、章节 checkpoint continuation 全部按清单逐项验收。
+6. 按已知键清理旧教材派生对象与 run 缓存，保留源图书馆资产；异常归属单独列明。既有维护/恢复只引用新任务，不复活旧 job。
+7. 运行生产路径残留检索，许可/历史迁移/历史文档只作为显式豁免；检查没有被删文件的 import 和旧路由懒加载。
+8. 精确记录实际删除的数据和不可恢复性，按用户已授权的教材范围执行；提交清理与接线结果。
+
+## Task 8：端到端验收矩阵
+
+每行都需要自动化或真实行为证据；只读代码审查不算完成。
+
+| 场景 | 必须观察的结果 |
+|---|---|
+| 图书馆一键添加 | 一个教材、一个初始任务，无额外版本/候选页 |
+| 结构-only | schema/来源有效，树/KP 可读，chapters 空不失败 |
+| 中间 KP 首次生成 | 前面没有讲义仍可生成，图片/脚注/邻近上下文可用 |
+| 已有讲义重做失败 | 旧讲义仍可读，错误与重试准确 |
+| 批量第 3 项失败 | 前两份立即可读，其他独立项按规则继续，计数来自已提交项 |
+| 取消与迟到回调 | 当前 run 停止，后续未启动，迟到结果不覆盖 |
+| 双击/两个标签页 | 幂等或明确冲突，不双跑、不重复记完成 |
+| 上传/PG finalise 崩溃 | 无假成功，已提交不再生成，候选对象可准确收尾 |
+| 关闭浏览器/换 worker | 任务继续；回来快照+游标补齐，不自动重做 |
+| Redis 故障/150001 delta | 不写全量流，容量有界，PG 事实可恢复 |
+| 任意节点/长文/图片 | 行号不偏移，relative link 合法，深链/返回保持阅读位置 |
+| 学生与图书馆反查 | 新 DTO 正常，进度/笔记/追问继续，旧表无查询 |
+| 权限撤销/跨家庭 | 原文、材料、图片、聊天上下文均拒绝未授权访问 |
+| 旧路由与 catalog | 无旧页面/chunk/query，旧表和约束已退役 |
+| 普通产品回归 | PTC/Flash/MCP/subagent/checkpoint、图书馆 Datalab、家庭作业不受损 |
+
+执行基础检查：uv run pytest tests/unit -q、相关 DB/Docker/integration suites、make lint；web 执行 pnpm test、pnpm typecheck、pnpm build。多 worker 使用现有 scripts/multiworker_gate/ 中适用项及教材专用故障用例。记录已有基线失败，不把未运行的检查写成通过。
+
+检查 8000/5177 的精确 PID/工作目录后再决定重启，前端必须监听 0.0.0.0:5177。实测 LAN health、/education、/textbooks、新工作台以及学生页面。真实 UI 验收用 375px 与桌面宽度、键盘、图片和活动重连；确认从列表打开后整段加工无需离开工作台。
+
+交付包含：清理清单逐项结果、迁移/删除范围、真实生成与压力证据、未完成项（若有）和最终中文 CHANGELOG/原子提交。不能把“设计已写好”或“新路径跑通”当成整个重构完成。
