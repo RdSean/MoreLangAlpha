@@ -1,0 +1,304 @@
+{
+  "unit": "u01",
+  "knowledge_points": [
+    {
+      "title": "The World's Game: Soccer History and Popularity",
+      "blocks": [
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117
+      ],
+      "nodes": [
+        "u01-reada-before",
+        "u01-reada-passage"
+      ]
+    },
+    {
+      "title": "A Love for Soccer: Soccer in Africa",
+      "blocks": [
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127
+      ],
+      "nodes": [
+        "u01-reada-passage"
+      ]
+    },
+    {
+      "title": "Soccer Without Borders: 2018 World Cup Infographic",
+      "blocks": [
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152,
+        153,
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161
+      ],
+      "nodes": [
+        "u01-reada-infographic"
+      ]
+    },
+    {
+      "title": "Analyzing Infographics (Reading Skill)",
+      "blocks": [
+        163,
+        164,
+        165,
+        166,
+        167,
+        168,
+        169,
+        170,
+        171,
+        172,
+        173,
+        174,
+        175,
+        176,
+        177
+      ],
+      "nodes": [
+        "u01-reada-skill",
+        "u01-reada-critical"
+      ]
+    },
+    {
+      "title": "Unit 1A Vocabulary and the uni- Prefix",
+      "blocks": [
+        179,
+        180,
+        181,
+        182,
+        183,
+        184,
+        185,
+        186,
+        187,
+        188,
+        189,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196
+      ],
+      "nodes": [
+        "u01-reada-vocab"
+      ]
+    },
+    {
+      "title": "What Makes an Olympic Champion? Genetic and Environmental Factors",
+      "blocks": [
+        198,
+        199,
+        200,
+        201,
+        202,
+        203,
+        205,
+        206,
+        207,
+        208,
+        209,
+        211,
+        212,
+        213,
+        214
+      ],
+      "nodes": [
+        "u01-readb"
+      ]
+    },
+    {
+      "title": "Environmental and Cultural Factors in Athletic Success",
+      "blocks": [
+        215,
+        216
+      ],
+      "nodes": [
+        "u01-readb"
+      ]
+    },
+    {
+      "title": "Training and Psychological Factors in Elite Athletics",
+      "blocks": [
+        217,
+        218,
+        219,
+        220,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227,
+        228,
+        229,
+        230,
+        231,
+        232,
+        233,
+        234,
+        235,
+        236,
+        237,
+        238
+      ],
+      "nodes": [
+        "u01-readb"
+      ]
+    },
+    {
+      "title": "Scanning for Specific Information (Reading Skill)",
+      "blocks": [
+        240,
+        241,
+        242,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249,
+        250,
+        251,
+        252
+      ],
+      "nodes": [
+        "u01-readb"
+      ]
+    },
+    {
+      "title": "Unit 1B Vocabulary and the -ology Suffix",
+      "blocks": [
+        254,
+        255,
+        256,
+        257,
+        258,
+        259,
+        260,
+        261,
+        262
+      ],
+      "nodes": [
+        "u01-readb"
+      ]
+    },
+    {
+      "title": "Sport Climbing: Vocabulary and Video Content",
+      "blocks": [
+        264,
+        265,
+        266,
+        267,
+        268,
+        269,
+        271,
+        272,
+        273,
+        274,
+        275,
+        276,
+        277,
+        278,
+        279,
+        280,
+        281,
+        282,
+        283,
+        284,
+        285,
+        286,
+        287
+      ],
+      "nodes": [
+        "u01-video"
+      ]
+    }
+  ],
+  "unassigned": [
+    {
+      "blocks": [
+        95,
+        96,
+        97,
+        98,
+        99
+      ],
+      "reason": "单元扉页与配图，非知识点"
+    },
+    {
+      "blocks": [
+        100,
+        101,
+        102
+      ],
+      "reason": "WARM UP 属热身活动，被吸收进相邻知识点或整体跳过"
+    },
+    {
+      "blocks": [
+        128,
+        129
+      ],
+      "reason": "图注与配图，被相邻知识点的正文覆盖但自身无独立知识价值"
+    },
+    {
+      "blocks": [
+        178,
+        197,
+        204,
+        210,
+        221,
+        239,
+        253,
+        263,
+        270
+      ],
+      "reason": "页码分隔行与页内空块"
+    }
+  ]
+}

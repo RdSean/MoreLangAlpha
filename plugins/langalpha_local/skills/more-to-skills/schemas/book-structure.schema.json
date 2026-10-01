@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://more-to-skills.local/schemas/book-structure.schema.json",
+  "title": "more-to-skills Book Structure",
+  "description": "单源书籍/教材的章节结构树。递归、深度不限；每个节点带源文件行号锚点，供下游建树与按锚点切片回读原文。字段语义与校验规则见同目录 SPEC.md。",
+  "type": "object",
+  "required": ["schema_version", "book", "source", "nodes", "coverage"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "本文件的格式版本。MAJOR 不同表示不兼容。"
+    },
+    "generator": {
+      "type": "object",
+      "required": ["name", "version", "generated_at"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "generated_at": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}:[0-9]{2}|Z)$" }
+      },
+      "description": "可选。谁生成的、什么时候。"
+    },
+    "book": {
+      "type": "object",
+      "required": ["title"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "title_source": {
+          "enum": ["original", "normalized", "generated"],
+          "description": "书名是原书的、清洗过的、还是生成的。"
+        },
+        "language": { "type": "string", "minLength": 2, "description": "BCP-47，例如 en / zh-CN。" }
+      },
+      "description": "书籍元信息。除 title 外都是可选的；authors / publisher / edition / extent 等按需自由添加，本 schema 不列也不校验。"
+    },
+    "source": {
+      "$ref": "#/$defs/source",
+      "description": "锚点坐标系的唯一来源。本格式假定一本书对应一个源文件。"
+    },
+    "level_names": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "第 1..N 级的典型名称（教材是 unit/lesson/section，专著是 part/chapter/section）。缺省时下游按「第 N 级」显示。"
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/node" },
+      "description": "顶层节点（第 1 级）。子层级通过 node.children 递归表达。"
+    },
+    "knowledge_points": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/knowledgePoint" },
+      "description": "知识单元（可选）。与 nodes 是两层平行视图：nodes 是穷尽登记的导航树，knowledge_points 是可独立学习的知识块。缺省表示本次不产出知识单元。见 SPEC.md §6.6。"
+    },
+    "coverage": { "$ref": "#/$defs/coverage" }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "required": ["path", "total_lines"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "源文件绝对路径。下游回读原文以它为准。" },
+        "filename": { "type": "string", "minLength": 1 },
+        "format": {
+          "enum": ["markdown", "text", "rst", "adoc", "html", "pdf", "epub", "docx", "rtf", "mobi", "azw", "azw3", "other"]
+        },
+        "total_lines": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "锚点所指向文件的总行数，按 splitlines() 计数（与 sed -n '<N>p' 的行号口径一致）。"
+        },
+        "source_total_lines": {
+          "type": ["integer", "null"],
+          "description": "抽取前原始文件的物理行数。与 total_lines 不一致说明抽取时清洗改变了行结构，锚点可能与原文件错位。"
+        },
+        "anchor_mode": {
+          "enum": ["source_lines", "workdir_lines"],
+          "description": "source_lines：锚点行号指向 path 本身（文本类格式，逐行原样抽取）。workdir_lines：指向 workdir_text，因该格式没有稳定的原文行号。"
+        },
+        "line_offset": {
+          "type": ["integer", "null"],
+          "description": "原文件行号 = full_text 行号 − line_offset。anchor_mode=source_lines 时必填。"
+        },
+        "workdir_text": { "type": ["string", "null"], "description": "anchor_mode=workdir_lines 时必填。" },
+        "page_label": { "type": ["string", "null"], "description": "页码单位，如 pages / sections / spine_items。" }
+      }
+    },
+    "anchor": {
+      "type": "object",
+      "required": ["start_line", "end_line"],
+      "properties": {
+        "start_line": { "type": "integer", "minimum": 1, "description": "首行行号（含），1 起。" },
+        "end_line": { "type": "integer", "minimum": 1, "description": "末行行号（含）。" }
+      },
+      "description": "指向 source.path 的行号闭区间。下游可直接 sed -n '<start_line>,<end_line>p' <source.path>。"
+    },
+    "pageRange": {
+      "type": "object",
+      "required": ["start", "end", "label", "source"],
+      "properties": {
+        "start": { "type": ["integer", "null"], "minimum": 1 },
+        "end": { "type": ["integer", "null"], "minimum": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "source": { "enum": ["toc", "printed", "derived", "unknown"] }
+      },
+      "description": "原书印刷范围，仅供展示。锚点才是主定位手段。"
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "title", "anchor"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "maxLength": 64,
+          "description": "全书唯一、跨文件引用的稳定键。不承载位置语义：删除或省略节点后，其余节点的 id 不需要改动，允许跳号。"
+        },
+        "title": { "type": "string", "minLength": 1, "description": "节点标题。原文标题，或清洗/生成的标题。" },
+        "title_source": { "enum": ["original", "normalized", "generated"] },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "内容性质，推荐取值见 SPEC.md §6.1。只作推荐清单：不校验，允许按书种自制。"
+        },
+        "level": { "type": "integer", "minimum": 1, "description": "层级深度。缺省时按 children 的嵌套深度推导。" },
+        "order": { "type": "integer", "minimum": 1, "description": "同一父节点下的次序号。缺省时按数组顺序推导。允许跳号，不要求 1..n 连续。" },
+        "number": { "type": ["string", "null"], "description": "原书印刷编号（如 1 / 1B / IV）。原样保存，不做数值解析。" },
+        "anchor": { "$ref": "#/$defs/anchor" },
+        "page_range": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/pageRange" }] },
+        "summary": { "type": ["string", "null"], "description": "一句话概要，不得整段摘抄原文。" },
+        "keywords": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "processed": { "type": "boolean", "description": "本次是否处理了该节点正文（生成精读材料）。结构登记与内容处理是两件事。" },
+        "content_file": { "type": ["string", "null"], "description": "相对输出根的附加材料路径。" },
+        "notes": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "解析异常、层级可疑等人工说明。" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/node" }, "description": "子层级，递归。缺省等同空数组。" }
+      },
+      "description": "除 id / title / anchor 外均为可选。书种特有信息直接加键即可，本 schema 不限制未知键。"
+    },
+    "knowledgePoint": {
+      "type": "object",
+      "required": ["id", "title", "anchor"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "maxLength": 64,
+          "description": "全书唯一。约定形如 <unit-id>-k<序号>，序号允许跳号。"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "知识点标题，通常是生成的（模板「主题 : 侧重点」），不是书上的原标题。"
+        },
+        "anchor": { "$ref": "#/$defs/anchor" },
+        "unit": {
+          "type": ["string", "null"],
+          "description": "所属顶级节点的 id，供分组与计数。不改动 nodes 即可重组视图。"
+        },
+        "nodes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "本知识点覆盖的结构节点 id（反向引用，供 UI 跳转与 DB 外键）。可列多个：合并成立一条时列全部被合并的节点。"
+        },
+        "blocks": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "description": "本知识点消费的 blocks.json 块编号（由 tools/split_blocks.py 产出）。锚点即这批块的包络。"
+        },
+        "content_file": {
+          "type": ["string", "null"],
+          "description": "生成后的材料路径，相对输出根。null = 尚未生成。"
+        },
+        "notes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      },
+      "description": "一个可独立学习的知识块，粒度不由层级决定：同一个 unit 内允许拆分（一条落进某节点内部）、合并（列多个 nodes）、丢弃（不建，另记 coverage.omitted）。除 id / title / anchor 外均为可选。"
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["scope"],
+      "properties": {
+        "scope": { "type": "string", "minLength": 1, "description": "本次处理范围，一句话说明。" },
+        "excluded": {
+          "type": "array",
+          "description": "被排除的非正文材料：书名页、目录、序、致谢、索引、版权清单。",
+          "items": {
+            "type": "object",
+            "required": ["label", "reason"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1 },
+              "reason": { "type": "string", "minLength": 1 },
+              "anchor": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/anchor" }] }
+            }
+          }
+        },
+        "omitted": {
+          "type": "array",
+          "description": "正文中被人有意跳过、未纳入结构树的内容。与 excluded 的区别是它属于正文，UI 可能需要显示为「已跳过」占位。",
+          "items": {
+            "type": "object",
+            "required": ["label", "reason"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1 },
+              "reason": { "type": "string", "minLength": 1 },
+              "origin": {
+                "enum": ["low_value", "model_dropped", "manual_removal", "user_scope", "unknown"],
+                "description": "谁决定跳过的：内容无价值 / 模型丢弃 / 人工删除 / 用户限定范围 / 不明。"
+              },
+              "anchor": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/anchor" }] }
+            }
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "description": "没人主动决定、纯因解析质量而缺失的内容。",
+          "items": {
+            "type": "object",
+            "required": ["label", "reason"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1 },
+              "node_id": { "type": ["string", "null"] },
+              "reason": { "type": "string", "minLength": 1 },
+              "severity": { "enum": ["high", "medium", "low"] }
+            }
+          }
+        },
+        "notes": { "type": ["string", "null"] }
+      },
+      "description": "excluded / omitted / gaps 三者的分界见 SPEC.md §7。"
+    }
+  }
+}

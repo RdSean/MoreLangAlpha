@@ -440,6 +440,17 @@ SKILL_REGISTRY: dict[str, SkillDefinition] = {
         exposure="ptc",
         command="book-to-skill",
     ),
+    "more-to-skills": SkillDefinition(
+        name="more-to-skills",
+        description=(
+            "Convert a book into a recursive source-anchored structure and "
+            "independently generated knowledge-point materials."
+        ),
+        tools=[],
+        skill_md_path="skills/more-to-skills/SKILL.md",
+        exposure="ptc",
+        command="more-to-skills",
+    ),
 }
 
 
@@ -649,5 +660,7 @@ def list_skills(mode: SkillMode | None = None) -> list[dict[str, Any]]:
             "command": skill.command,
         }
         for skill in SKILL_REGISTRY.values()
-        if _is_enabled(skill) and _matches_mode(skill, mode) and skill.exposure != "hidden"
+        if _is_enabled(skill)
+        and _matches_mode(skill, mode)
+        and skill.exposure != "hidden"
     ]

@@ -1,0 +1,1016 @@
+{
+  "schema_version": "2.0.0",
+  "generator": {
+    "name": "more-to-skills",
+    "version": "2.0.0",
+    "generated_at": "2026-09-29T18:54:03+09:00"
+  },
+  "book": {
+    "title": "Reading Explorer 3",
+    "title_source": "normalized",
+    "language": "en",
+    "original_title": "Reading Explorer 3 Third Edition",
+    "edition": "Third Edition",
+    "series": "Reading Explorer",
+    "publisher": "National Geographic Learning"
+  },
+  "source": {
+    "path": "/Users/seanlee/Downloads/document (3).md",
+    "filename": "document (3).md",
+    "format": "markdown",
+    "total_lines": 6384,
+    "source_total_lines": 6384,
+    "anchor_mode": "source_lines",
+    "line_offset": 4
+  },
+  "level_names": [
+    "unit",
+    "lesson",
+    "section"
+  ],
+  "nodes": [
+    {
+      "id": "u01",
+      "title": "Sports and Fitness",
+      "original_title": "SPORTS AND FITNESS",
+      "title_source": "normalized",
+      "type": "body",
+      "level": 1,
+      "order": 1,
+      "number": "1",
+      "anchor": {
+        "start_line": 318,
+        "end_line": 793
+      },
+      "page_range": {
+        "start": 7,
+        "end": 22,
+        "label": "pages",
+        "source": "toc"
+      },
+      "processed": true,
+      "content_file": null,
+      "summary": "运动与健身主题单元：足球的全球传播与奥运冠军的养成条件。",
+      "keywords": [
+        "sports",
+        "fitness",
+        "soccer",
+        "Olympic"
+      ],
+      "children": [
+        {
+          "id": "u01-warmup",
+          "title": "WARM UP",
+          "original_title": "WARM UP",
+          "title_source": "original",
+          "type": "body",
+          "level": 2,
+          "order": 1,
+          "number": null,
+          "anchor": {
+            "start_line": 328,
+            "end_line": 336
+          },
+          "page_range": null,
+          "processed": true,
+          "children": []
+        },
+        {
+          "id": "u01-reada",
+          "title": "Reading A · The World's Game",
+          "original_title": "THE WORLD'S GAME",
+          "title_source": "generated",
+          "type": "body",
+          "level": 2,
+          "order": 2,
+          "number": "1A",
+          "anchor": {
+            "start_line": 337,
+            "end_line": 569
+          },
+          "page_range": null,
+          "processed": true,
+          "content_file": null,
+          "notes": [
+            "源文件没有 “Reading A” 这样的课时标题行；该节点是按 BEFORE YOU READ 与下一课时的起始边界合成的分组。"
+          ],
+          "children": [
+            {
+              "id": "u01-reada-before",
+              "title": "BEFORE YOU READ",
+              "original_title": "BEFORE YOU READ",
+              "title_source": "original",
+              "type": "body",
+              "level": 3,
+              "order": 1,
+              "number": null,
+              "anchor": {
+                "start_line": 337,
+                "end_line": 355
+              },
+              "page_range": null,
+              "processed": true,
+              "children": []
+            },
+            {
+              "id": "u01-reada-passage",
+              "title": "THE WORLD'S GAME",
+              "original_title": "THE WORLD'S GAME",
+              "title_source": "original",
+              "type": "body",
+              "level": 3,
+              "order": 2,
+              "number": null,
+              "anchor": {
+                "start_line": 356,
+                "end_line": 393
+              },
+              "page_range": null,
+              "processed": true,
+              "children": []
+            },
+            {
+              "id": "u01-reada-infographic",
+              "title": "SOCCER WITHOUT BORDERS（信息图与阅读理解）",
+              "original_title": "SOCCER WITHOUT BORDERS",
+              "title_source": "generated",
+              "type": "body",
+              "level": 3,
+              "order": 3,
+              "number": null,
+              "anchor": {
+                "start_line": 394,
+                "end_line": 484
+              },
+              "page_range": null,
+              "processed": true,
+              "children": []
+            },
+            {
+              "id": "u01-reada-skill",
+              "title": "Analyzing Infographics (1)",
+              "original_title": "Analyzing Infographics (1)",
+              "title_source": "original",
+              "type": "body",
+              "level": 3,
+              "order": 4,
+              "number": null,
+              "anchor": {
+                "start_line": 485,
+                "end_line": 515
+              },
+              "page_range": null,
+              "processed": true,
+              "children": []
+            },
+            {
+              "id": "u01-reada-critical",
+              "title": "CRITICAL THINKING: Evaluating Evidence",
+              "original_title": "CRITICAL THINKING Evaluating Evidence",
+              "title_source": "normalized",
+              "type": "body",
+              "level": 3,
+              "order": 5,
+              "number": null,
+              "anchor": {
+                "start_line": 516,
+                "end_line": 524
+              },
+              "page_range": null,
+              "processed": true,
+              "children": []
+            },
+            {
+              "id": "u01-reada-vocab",
+              "title": "VOCABULARY PRACTICE",
+              "original_title": "VOCABULARY PRACTICE",
+              "title_source": "original",
+              "type": "exercise",
+              "level": 3,
+              "order": 6,
+              "number": null,
+              "anchor": {
+                "start_line": 525,
+                "end_line": 569
+              },
+              "page_range": null,
+              "processed": true,
+              "children": []
+            }
+          ],
+          "reading_skill": "Analyzing Infographics (1)",
+          "critical_thinking": "Evaluating Evidence",
+          "vocabulary_building": "Prefix uni-"
+        },
+        {
+          "id": "u01-readb",
+          "title": "Reading B · What Makes an Olympic Champion?",
+          "original_title": "WHAT MAKES AN OLYMPIC CHAMPION?",
+          "title_source": "generated",
+          "type": "body",
+          "level": 2,
+          "order": 3,
+          "number": "1B",
+          "anchor": {
+            "start_line": 570,
+            "end_line": 725
+          },
+          "page_range": null,
+          "processed": true,
+          "children": []
+        },
+        {
+          "id": "u01-video",
+          "title": "Video · Sport Climbing",
+          "original_title": "SPORT CLIMBING",
+          "title_source": "generated",
+          "type": "body",
+          "level": 2,
+          "order": 4,
+          "number": null,
+          "anchor": {
+            "start_line": 726,
+            "end_line": 793
+          },
+          "page_range": null,
+          "processed": true,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "u02",
+      "title": "Skin Deep",
+      "original_title": "SKIN DEEP",
+      "title_source": "normalized",
+      "type": "body",
+      "level": 1,
+      "order": 2,
+      "number": "2",
+      "anchor": {
+        "start_line": 794,
+        "end_line": 1309
+      },
+      "page_range": {
+        "start": 23,
+        "end": 38,
+        "label": "pages",
+        "source": "toc"
+      },
+      "processed": true,
+      "children": [
+        {
+          "id": "u02-warmup",
+          "title": "WARM UP",
+          "original_title": "WARM UP",
+          "title_source": "original",
+          "type": "body",
+          "level": 2,
+          "order": 1,
+          "number": null,
+          "anchor": {
+            "start_line": 796,
+            "end_line": 810
+          },
+          "processed": true,
+          "children": []
+        },
+        {
+          "id": "u02-reada",
+          "title": "Reading A · What Is Beauty?",
+          "original_title": "WHAT IS BEAUTY?",
+          "title_source": "generated",
+          "type": "body",
+          "level": 2,
+          "order": 2,
+          "number": "2A",
+          "anchor": {
+            "start_line": 811,
+            "end_line": 1042
+          },
+          "processed": true,
+          "children": []
+        },
+        {
+          "id": "u02-readb",
+          "title": "Reading B · Skin: The Body's Canvas",
+          "original_title": "SKIN: THE BODY'S CANVAS",
+          "title_source": "generated",
+          "type": "body",
+          "level": 2,
+          "order": 3,
+          "number": "2B",
+          "anchor": {
+            "start_line": 1043,
+            "end_line": 1230
+          },
+          "processed": true,
+          "children": []
+        },
+        {
+          "id": "u02-video",
+          "title": "Video · The Beauty of Ugly Food",
+          "original_title": "THE BEAUTY OF UGLY FOOD",
+          "title_source": "generated",
+          "type": "body",
+          "level": 2,
+          "order": 4,
+          "number": null,
+          "anchor": {
+            "start_line": 1231,
+            "end_line": 1309
+          },
+          "processed": true,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "u03",
+      "title": "Animals in Danger",
+      "original_title": "ANIMALS IN DANGER",
+      "title_source": "normalized",
+      "type": "body",
+      "level": 1,
+      "order": 3,
+      "number": "3",
+      "anchor": {
+        "start_line": 1310,
+        "end_line": 1847
+      },
+      "page_range": {
+        "start": 39,
+        "end": 56,
+        "label": "pages",
+        "source": "toc"
+      },
+      "processed": true,
+      "notes": [
+        "正文 Reading A 的标题为 LOSING THEIR EUCALYPTUS，与目录中登记的 Racing to Rescue Koalas 不一致，此处以正文为准。"
+      ],
+      "children": [
+        {
+          "id": "u03-warmup",
+          "title": "WARM UP",
+          "original_title": "WARM UP",
+          "title_source": "original",
+          "type": "body",
+          "level": 2,
+          "order": 1,
+          "number": null,
+          "anchor": {
+            "start_line": 1314,
+            "end_line": 1324
+          },
+          "processed": true,
+          "children": []
+        },
+        {
+          "id": "u03-reada",
+          "title": "Reading A · Losing Their Eucalyptus",
+          "original_title": "LOSING THEIR EUCALYPTUS",
+          "title_source": "generated",
+          "type": "body",
+          "level": 2,
+          "order": 2,
+          "number": "3A",
+          "anchor": {
+            "start_line": 1325,
+            "end_line": 1545
+          },
+          "processed": true,
+          "children": []
+        },
+        {
+          "id": "u03-readb",
+          "title": "Reading B · Tracking the Snow Leopard",
+          "original_title": "TRACKING THE SNOW LEOPARD",
+          "title_source": "generated",
+          "type": "body",
+          "level": 2,
+          "order": 3,
+          "number": "3B",
+          "anchor": {
+            "start_line": 1546,
+            "end_line": 1757
+          },
+          "processed": true,
+          "children": []
+        },
+        {
+          "id": "u03-video",
+          "title": "Video · Protecting Pandas",
+          "original_title": "PROTECTING PANDAS",
+          "title_source": "generated",
+          "type": "body",
+          "level": 2,
+          "order": 4,
+          "number": null,
+          "anchor": {
+            "start_line": 1758,
+            "end_line": 1847
+          },
+          "processed": true,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "u04",
+      "title": "Violent Earth",
+      "original_title": "VIOLENT EARTH",
+      "title_source": "normalized",
+      "type": "body",
+      "level": 1,
+      "order": 4,
+      "number": "4",
+      "anchor": {
+        "start_line": 1848,
+        "end_line": 2371
+      },
+      "page_range": {
+        "start": 57,
+        "end": 72,
+        "label": "pages",
+        "source": "toc"
+      },
+      "processed": true,
+      "children": []
+    },
+    {
+      "id": "u05",
+      "title": "Islands and Beaches",
+      "original_title": "ISLANDS AND BEACHES",
+      "title_source": "normalized",
+      "type": "body",
+      "level": 1,
+      "order": 5,
+      "number": "5",
+      "anchor": {
+        "start_line": 2372,
+        "end_line": 2846
+      },
+      "page_range": {
+        "start": 73,
+        "end": 88,
+        "label": "pages",
+        "source": "toc"
+      },
+      "processed": true,
+      "children": []
+    },
+    {
+      "id": "u06",
+      "title": "Global Addictions",
+      "original_title": "GLOBAL ADDICTIONS",
+      "title_source": "normalized",
+      "type": "body",
+      "level": 1,
+      "order": 6,
+      "number": "6",
+      "anchor": {
+        "start_line": 2847,
+        "end_line": 3337
+      },
+      "page_range": {
+        "start": 89,
+        "end": 104,
+        "label": "pages",
+        "source": "toc"
+      },
+      "processed": true,
+      "children": []
+    },
+    {
+      "id": "u07",
+      "title": "Energy Solutions",
+      "original_title": "ENERGY SOLUTIONS",
+      "title_source": "normalized",
+      "type": "body",
+      "level": 1,
+      "order": 7,
+      "number": "7",
+      "anchor": {
+        "start_line": 3338,
+        "end_line": 3801
+      },
+      "page_range": {
+        "start": 105,
+        "end": 120,
+        "label": "pages",
+        "source": "toc"
+      },
+      "processed": true,
+      "children": []
+    },
+    {
+      "id": "u08",
+      "title": "Epic Engineering",
+      "original_title": "EPIC ENGINEERING",
+      "title_source": "normalized",
+      "type": "body",
+      "level": 1,
+      "order": 8,
+      "number": "8",
+      "anchor": {
+        "start_line": 3802,
+        "end_line": 4291
+      },
+      "page_range": {
+        "start": 121,
+        "end": 136,
+        "label": "pages",
+        "source": "toc"
+      },
+      "processed": true,
+      "notes": [
+        "单元内部 L3982 的 `## ▸ Aerial view of the Panama Canal` 是 WARM UP 练习短文标题被误析为二级标题，未作为单元或章节计入，已记入 coverage.gaps。"
+      ],
+      "children": []
+    },
+    {
+      "id": "u09",
+      "title": "High-Tech Solutions",
+      "original_title": "HIGH-TECH SOLUTIONS",
+      "title_source": "normalized",
+      "type": "body",
+      "level": 1,
+      "order": 9,
+      "number": "9",
+      "anchor": {
+        "start_line": 4292,
+        "end_line": 4803
+      },
+      "page_range": {
+        "start": 137,
+        "end": 152,
+        "label": "pages",
+        "source": "toc"
+      },
+      "processed": true,
+      "children": []
+    },
+    {
+      "id": "u10",
+      "title": "All in the Mind",
+      "original_title": "ALL IN THE MIND",
+      "title_source": "normalized",
+      "type": "body",
+      "level": 1,
+      "order": 10,
+      "number": "10",
+      "anchor": {
+        "start_line": 4804,
+        "end_line": 5236
+      },
+      "page_range": {
+        "start": 153,
+        "end": 168,
+        "label": "pages",
+        "source": "toc"
+      },
+      "processed": true,
+      "children": []
+    },
+    {
+      "id": "u11",
+      "title": "Visual Pioneers",
+      "original_title": "VISUAL PIONEERS",
+      "title_source": "normalized",
+      "type": "body",
+      "level": 1,
+      "order": 11,
+      "number": "11",
+      "anchor": {
+        "start_line": 5237,
+        "end_line": 5784
+      },
+      "page_range": {
+        "start": 169,
+        "end": 186,
+        "label": "pages",
+        "source": "toc"
+      },
+      "processed": true,
+      "children": []
+    },
+    {
+      "id": "u12",
+      "title": "Far Out",
+      "original_title": "FAR OUT",
+      "title_source": "normalized",
+      "type": "body",
+      "level": 1,
+      "order": 12,
+      "number": "12",
+      "anchor": {
+        "start_line": 5785,
+        "end_line": 6280
+      },
+      "page_range": {
+        "start": 187,
+        "end": 202,
+        "label": "pages",
+        "source": "toc"
+      },
+      "processed": true,
+      "children": []
+    }
+  ],
+  "knowledge_points": [
+    {
+      "id": "u01-k01",
+      "unit": "u01",
+      "title": "The World's Game: Soccer History and Popularity",
+      "anchor": {
+        "start_line": 337,
+        "end_line": 365
+      },
+      "nodes": [
+        "u01-reada-before",
+        "u01-reada-passage"
+      ],
+      "blocks": [
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117
+      ],
+      "content_file": null
+    },
+    {
+      "id": "u01-k02",
+      "unit": "u01",
+      "title": "A Love for Soccer: Soccer in Africa",
+      "anchor": {
+        "start_line": 369,
+        "end_line": 385
+      },
+      "nodes": [
+        "u01-reada-passage"
+      ],
+      "blocks": [
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127
+      ],
+      "content_file": null
+    },
+    {
+      "id": "u01-k03",
+      "unit": "u01",
+      "title": "Soccer Without Borders: 2018 World Cup Infographic",
+      "anchor": {
+        "start_line": 394,
+        "end_line": 480
+      },
+      "nodes": [
+        "u01-reada-infographic"
+      ],
+      "blocks": [
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152,
+        153,
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161
+      ],
+      "content_file": null
+    },
+    {
+      "id": "u01-k04",
+      "unit": "u01",
+      "title": "Analyzing Infographics (Reading Skill)",
+      "anchor": {
+        "start_line": 485,
+        "end_line": 520
+      },
+      "nodes": [
+        "u01-reada-skill",
+        "u01-reada-critical"
+      ],
+      "blocks": [
+        163,
+        164,
+        165,
+        166,
+        167,
+        168,
+        169,
+        170,
+        171,
+        172,
+        173,
+        174,
+        175,
+        176,
+        177
+      ],
+      "content_file": null
+    },
+    {
+      "id": "u01-k05",
+      "unit": "u01",
+      "title": "Unit 1A Vocabulary and the uni- Prefix",
+      "anchor": {
+        "start_line": 525,
+        "end_line": 566
+      },
+      "nodes": [
+        "u01-reada-vocab"
+      ],
+      "blocks": [
+        179,
+        180,
+        181,
+        182,
+        183,
+        184,
+        185,
+        186,
+        187,
+        188,
+        189,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196
+      ],
+      "content_file": null
+    },
+    {
+      "id": "u01-k06",
+      "unit": "u01",
+      "title": "What Makes an Olympic Champion? Genetic and Environmental Factors",
+      "anchor": {
+        "start_line": 570,
+        "end_line": 603
+      },
+      "nodes": [
+        "u01-readb"
+      ],
+      "blocks": [
+        198,
+        199,
+        200,
+        201,
+        202,
+        203,
+        205,
+        206,
+        207,
+        208,
+        209,
+        211,
+        212,
+        213,
+        214
+      ],
+      "content_file": null
+    },
+    {
+      "id": "u01-k07",
+      "unit": "u01",
+      "title": "Environmental and Cultural Factors in Athletic Success",
+      "anchor": {
+        "start_line": 604,
+        "end_line": 606
+      },
+      "nodes": [
+        "u01-readb"
+      ],
+      "blocks": [
+        215,
+        216
+      ],
+      "content_file": null
+    },
+    {
+      "id": "u01-k08",
+      "unit": "u01",
+      "title": "Training and Psychological Factors in Elite Athletics",
+      "anchor": {
+        "start_line": 608,
+        "end_line": 654
+      },
+      "nodes": [
+        "u01-readb"
+      ],
+      "blocks": [
+        217,
+        218,
+        219,
+        220,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227,
+        228,
+        229,
+        230,
+        231,
+        232,
+        233,
+        234,
+        235,
+        236,
+        237,
+        238
+      ],
+      "content_file": null
+    },
+    {
+      "id": "u01-k09",
+      "unit": "u01",
+      "title": "Scanning for Specific Information (Reading Skill)",
+      "anchor": {
+        "start_line": 658,
+        "end_line": 688
+      },
+      "nodes": [
+        "u01-readb"
+      ],
+      "blocks": [
+        240,
+        241,
+        242,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249,
+        250,
+        251,
+        252
+      ],
+      "content_file": null
+    },
+    {
+      "id": "u01-k10",
+      "unit": "u01",
+      "title": "Unit 1B Vocabulary and the -ology Suffix",
+      "anchor": {
+        "start_line": 692,
+        "end_line": 722
+      },
+      "nodes": [
+        "u01-readb"
+      ],
+      "blocks": [
+        254,
+        255,
+        256,
+        257,
+        258,
+        259,
+        260,
+        261,
+        262
+      ],
+      "content_file": null
+    },
+    {
+      "id": "u01-k11",
+      "unit": "u01",
+      "title": "Sport Climbing: Vocabulary and Video Content",
+      "anchor": {
+        "start_line": 726,
+        "end_line": 790
+      },
+      "nodes": [
+        "u01-video"
+      ],
+      "blocks": [
+        264,
+        265,
+        266,
+        267,
+        268,
+        269,
+        271,
+        272,
+        273,
+        274,
+        275,
+        276,
+        277,
+        278,
+        279,
+        280,
+        281,
+        282,
+        283,
+        284,
+        285,
+        286,
+        287
+      ],
+      "content_file": null
+    }
+  ],
+  "coverage": {
+    "scope": "Unit 1–12 正文（单元与课时的结构登记；Unit 1–3 展开到第三级）",
+    "excluded": [
+      {
+        "label": "前置材料（书名页、CONTENTS、SCOPE AND SEQUENCE、Introduction）",
+        "reason": "非单元正文，仅登记其存在、未纳入结构树",
+        "anchor": {
+          "start_line": 1,
+          "end_line": 317
+        }
+      },
+      {
+        "label": "后置材料（Photo and Illustration Credits、Acknowledgments、INDEX OF EXAM QUESTION TYPES）",
+        "reason": "按要求跳过附加部分，且无章节语义",
+        "anchor": {
+          "start_line": 6281,
+          "end_line": 6384
+        }
+      }
+    ],
+    "omitted": [
+      {
+        "label": "各单元内的图片版权行、页码分隔行与图注",
+        "reason": "属页面装饰而非正文内容，不构成章节节点，故有意未纳入结构树",
+        "origin": "low_value",
+        "anchor": null
+      },
+      {
+        "label": "Unit 8 WARM UP 的练习短文（Panama Canal）",
+        "reason": "被误析为二级标题，实际是 WARM UP 下的练习短文；判定不值得单独建节点，仅登记于此",
+        "origin": "model_dropped",
+        "anchor": {
+          "start_line": 3978,
+          "end_line": 3990
+        }
+      }
+    ],
+    "gaps": [
+      {
+        "label": "正文标题中没有 UNIT 编号",
+        "node_id": null,
+        "reason": "单元编号只存在于 CONTENTS 与 SCOPE AND SEQUENCE，正文 H2 仅是主题名，number 由目录顺序推导",
+        "severity": "low"
+      },
+      {
+        "label": "目录与正文的篇目标题不一致",
+        "node_id": "u03",
+        "reason": "目录登记为 Racing to Rescue Koalas，正文标题为 LOSING THEIR EUCALYPTUS，此处以正文为准",
+        "severity": "low"
+      },
+      {
+        "label": "页码分隔行与内联标签残留",
+        "node_id": null,
+        "reason": "文件含 `{120}----` 形式的页码分隔行与 <b>/<sup> 残留标签，标题与正文入库前需清洗",
+        "severity": "low"
+      }
+    ],
+    "notes": "本文件是用真实源文件的真实行号构造的格式压测实例，不是格式定义本身；格式定义见 schemas/SPEC.md 与 schemas/book-structure.schema.json。 本实例为 schema 2.0.0 版压测数据；book 下的 original_title / edition / series / publisher 与节点上的 reading_skill 等键都是自由补充字段，schema 不列也不校验。 knowledge_points 是 Unit 1 的真实切分样本（11 条，对齐人工对照组的粒度），行号与 nodes 同一坐标系。"
+  }
+}

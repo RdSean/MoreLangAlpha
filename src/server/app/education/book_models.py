@@ -1,0 +1,243 @@
+"""API contracts for the more-to-skills textbook workbench."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Literal
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+BookJobKind = Literal["structure", "materials"]
+BookMaterialDepth = Literal["summary", "lesson", "deep"]
+BookJobStatus = Literal[
+    "queued",
+    "running",
+    "succeeded",
+    "partially_succeeded",
+    "failed",
+    "cancelled",
+]
+BookJobItemStatus = Literal[
+    "queued",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "not_run",
+]
+BookStructureStatus = Literal["queued", "running", "ready", "failed"]
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class CreateBookRequest(_StrictModel):
+    parse_job_id: str = Field(min_length=1, max_length=128)
+    primary_artifact_id: str = Field(min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=240)
+    idempotency_key: str = Field(min_length=1, max_length=160)
+
+
+class CreateBookResponse(_StrictModel):
+    textbook_id: str
+    job_id: str
+
+
+class BookSourceCandidateResponse(_StrictModel):
+    document_id: str
+    parse_job_id: str
+    primary_artifact_id: str
+    filename: str
+    media_type: str
+    parser_id: str
+    parser_name: str
+    completed_at: datetime
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(ge=0)
+    image_count: int = Field(ge=0)
+
+
+class FrozenBookSourceResponse(BookSourceCandidateResponse):
+    frozen_at: datetime
+
+
+class BookJobSummaryResponse(_StrictModel):
+    job_id: str
+    kind: BookJobKind
+    status: BookJobStatus
+    total_items: int = Field(ge=0)
+    succeeded_items: int = Field(ge=0)
+    failed_items: int = Field(ge=0)
+    cancelled_items: int = Field(ge=0)
+    not_run_items: int = Field(ge=0)
+    high_water_seq: int = Field(ge=0)
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    safe_error: str | None = None
+
+
+class BookMaterialCountsResponse(_StrictModel):
+    total: int = Field(ge=0)
+    ready: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _ready_does_not_exceed_total(self) -> BookMaterialCountsResponse:
+        if self.ready > self.total:
+            raise ValueError("ready material count cannot exceed total")
+        return self
+
+
+class TextbookSummaryResponse(_StrictModel):
+    textbook_id: str
+    title: str
+    structure_status: BookStructureStatus
+    materials: BookMaterialCountsResponse
+    current_job: BookJobSummaryResponse | None = None
+    updated_at: datetime
+
+
+class TextbookWorkbenchResponse(TextbookSummaryResponse):
+    source: FrozenBookSourceResponse
+    current_structure_id: UUID | None = None
+    recent_job: BookJobSummaryResponse | None = None
+    assigned_student_count: int = Field(default=0, ge=0)
+
+
+class KnowledgePointProjectionResponse(_StrictModel):
+    knowledge_point_id: UUID
+    skill_kp_id: str = Field(min_length=1, max_length=64)
+    position: int = Field(ge=1)
+    title: str = Field(min_length=1)
+    unit_skill_node_id: str | None = None
+    node_skill_ids: list[str] = Field(default_factory=list)
+    start_line: int = Field(ge=1)
+    end_line: int = Field(ge=1)
+    content_file: str | None = None
+    material_available: bool
+
+    @model_validator(mode="after")
+    def _range_is_inclusive(self) -> KnowledgePointProjectionResponse:
+        if self.end_line < self.start_line:
+            raise ValueError("end_line must be greater than or equal to start_line")
+        return self
+
+
+class BookStructureResponse(_StrictModel):
+    textbook_id: str
+    structure_id: UUID
+    schema_version: str
+    structure: dict[str, Any]
+    knowledge_points: list[KnowledgePointProjectionResponse]
+    warnings: list[str] = Field(default_factory=list)
+
+
+class BookSourceSliceResponse(_StrictModel):
+    textbook_id: str
+    start_line: int = Field(ge=1)
+    end_line: int = Field(ge=1)
+    total_lines: int = Field(ge=1)
+    markdown: str
+
+    @model_validator(mode="after")
+    def _range_is_one_based_inclusive(self) -> BookSourceSliceResponse:
+        if self.end_line < self.start_line:
+            raise ValueError("end_line must be greater than or equal to start_line")
+        if self.end_line > self.total_lines:
+            raise ValueError("end_line cannot exceed total_lines")
+        return self
+
+
+class KnowledgePointMaterialResponse(_StrictModel):
+    textbook_id: str
+    knowledge_point_id: UUID
+    skill_kp_id: str
+    material_available: bool
+    markdown: str | None = None
+    generated_at: datetime | None = None
+    depth: BookMaterialDepth | None = None
+    requirements: str | None = None
+    content_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _material_state_is_explicit(self) -> KnowledgePointMaterialResponse:
+        if self.material_available != (self.markdown is not None):
+            raise ValueError("material_available must match markdown presence")
+        return self
+
+
+class BookJobCreateRequest(_StrictModel):
+    kind: BookJobKind
+    knowledge_point_ids: list[UUID] = Field(default_factory=list, max_length=1000)
+    depth: BookMaterialDepth = "lesson"
+    requirements: str | None = Field(default=None, max_length=8000)
+    replace_existing: bool = False
+    include_supplementary: bool = False
+    idempotency_key: str = Field(min_length=1, max_length=160)
+
+    @model_validator(mode="after")
+    def _targets_match_kind(self) -> BookJobCreateRequest:
+        if self.kind == "structure" and self.knowledge_point_ids:
+            raise ValueError("structure job must not include material targets")
+        if self.kind == "materials" and not self.knowledge_point_ids:
+            raise ValueError("material job must include at least one target")
+        if len(set(self.knowledge_point_ids)) != len(self.knowledge_point_ids):
+            raise ValueError("knowledge_point_ids must be unique")
+        return self
+
+
+class BookJobItemResponse(_StrictModel):
+    item_id: UUID
+    position: int = Field(ge=1)
+    knowledge_point_id: UUID | None = None
+    skill_kp_id: str | None = None
+    status: BookJobItemStatus
+    attempt: int = Field(ge=0)
+    safe_error: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class BookJobResponse(BookJobSummaryResponse):
+    textbook_id: str
+    depth: BookMaterialDepth | None = None
+    requirements: str | None = None
+    replace_existing: bool = False
+    include_supplementary: bool = False
+    items: list[BookJobItemResponse] = Field(default_factory=list)
+
+
+class BookActivityEventResponse(_StrictModel):
+    seq: int = Field(ge=1)
+    job_id: str
+    item_id: UUID | None = None
+    kind: str
+    status: str
+    message: str = Field(max_length=512)
+    created_at: datetime
+
+
+class BookActivityPageResponse(_StrictModel):
+    job_id: str
+    events: list[BookActivityEventResponse]
+    high_water_seq: int = Field(ge=0)
+    cursor_expired: bool = False
+
+
+class BookAssignmentRequest(_StrictModel):
+    student_user_ids: list[str] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def _student_ids_are_unique(self) -> BookAssignmentRequest:
+        if len(set(self.student_user_ids)) != len(self.student_user_ids):
+            raise ValueError("student_user_ids must be unique")
+        return self
+
+
+class BookAssignmentResponse(_StrictModel):
+    textbook_id: str
+    student_user_id: str
+    assigned_at: datetime

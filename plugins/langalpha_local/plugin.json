@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "langalpha-local",
   "version": "1.0.0",
-  "description": "Skills this deployment ships on top of the platform bundles: turning a book into a reusable skill, and the router that walks a library of them with the reader.",
+  "description": "Skills this deployment ships on top of the platform bundles: reusable book skills and source-anchored textbook structures with on-demand learning materials.",
   "author": {
     "name": "LangAlpha"
   },

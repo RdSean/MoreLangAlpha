@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-10-02
+
+### 新增：固定 more-to-skills 教材结构契约
+
+- 将本机实际使用的 `more-to-skills` 2.1.0 以 MIT fork 署名固定到 `langalpha_local` 插件，规范 Skill frontmatter，并记录 Skill 与正式 schema 的内容摘要；运行不再依赖宿主机个人技能目录。
+- 新增严格结构导入器：以服务端可信来源替换模型路径，拒绝重复 JSON 键、非有限数值、不支持的 schema major、非法引用、越界锚点、路径逃逸和缺失材料，同时保留递归结构与未知扩展字段。
+- 冻结单来源建书、教材工作台、结构/KP 映射、原文闭区间切片、材料、任务活动及学生授权 DTO；数据库 KP UUID 与 `skill_kp_id` 明确分离。
+- 只读复核真实 REX2 样例，正式 schema 精确报告 `$.nodes[6].children[0].children[4].title_source` 的 `null` 错误，未修改样例或放宽 schema。
+- 验证：Skill 标准校验通过；结构、DTO、技能发现与插件组合聚焦回归 `42 passed`，Ruff 检查通过。本次未执行数据库迁移、未修改或删除 Docker 挂载数据。
+
 ## 2026-09-30
 
 ### 文档：补全教材重构清理范围与工作台交互
