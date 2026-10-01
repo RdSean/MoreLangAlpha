@@ -242,6 +242,10 @@ def _validate_nodes(
                 allowed=allowed_outputs,
                 where=f"{where}.content_file",
             )
+            raise BookStructureValidationError(
+                f"{where}.content_file: node-level content_file is not supported; "
+                "attach managed materials to knowledge_points"
+            )
         children = node.get("children", [])
         stack.extend(
             (child, f"{where}.children[{index}]")
@@ -351,3 +355,52 @@ def parse_book_structure(
         knowledge_points=knowledge_points,
         warnings=warnings,
     )
+
+
+def project_material_content_files(
+    document: Mapping[str, Any],
+    content_files_by_skill_kp_id: Mapping[str, str],
+) -> dict[str, Any]:
+    """Overlay current material pointers without mutating stored semantics."""
+
+    projected = copy.deepcopy(dict(document))
+    stack = list(projected.get("nodes") or [])
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        node.pop("content_file", None)
+        stack.extend(node.get("children") or [])
+    for knowledge_point in projected.get("knowledge_points") or []:
+        if not isinstance(knowledge_point, dict):
+            continue
+        skill_kp_id = knowledge_point.get("id")
+        current = content_files_by_skill_kp_id.get(str(skill_kp_id))
+        if current is None:
+            knowledge_point.pop("content_file", None)
+        else:
+            knowledge_point["content_file"] = current
+    return projected
+
+
+async def get_projected_current_structure(
+    *,
+    textbook_id: str,
+) -> dict[str, Any] | None:
+    """Load current semantics and derive API material paths from DB pointers."""
+
+    from src.server.database.education_books import get_current_structure
+
+    result = await get_current_structure(textbook_id=textbook_id)
+    if result is None:
+        return None
+    points = result["knowledge_points"]
+    content_files = {
+        str(point["skill_kp_id"]): f"materials/{point['knowledge_point_id']}.md"
+        for point in points
+        if point["content_key"] is not None
+    }
+    result["structure_json"] = project_material_content_files(
+        result["structure_json"], content_files
+    )
+    return result

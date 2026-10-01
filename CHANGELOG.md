@@ -2,6 +2,16 @@
 
 ## 2026-10-02
 
+### 重构：建立 more-to-skills 教材数据与存储模型
+
+- 新增不可逆的 `082_more_to_skills_textbooks` 完整切换迁移：重建单来源教材、学生授权与学习引用，建立结构、知识点、当前材料、任务、任务项和有界活动六张新表，并删除旧 version/package/candidate/publication/lesson/generation schema。
+- 教材 UUID 在来源冻结前预留，数据库校验来源前缀与教材身份一致；教材与初始结构任务在同一事务创建，相同家庭与解析来源的网络重试返回原对象，冲突回读仍须通过家长授权。
+- 结构及全部 KP 原子导入，数据库 KP UUID 与技能 KP ID 分离；结构和材料提交只读取 job 冻结的 skill、深度及要求，学生 assignment 与 KP 以复合外键约束为同一本教材。
+- 新增任务 attempt fencing、材料 job 原子幂等创建与完整请求语义校验、候选对象预登记和当前 material CAS；item 保存稳定结果快照，重复或迟到 finalize 在后续重做覆盖当前材料后仍可幂等收尾，结构完成事件按活动高水位追加。
+- 已有 `content_file` 讲义通过独立 materials job 走同一登记、上传、校验和提交路径；结构 API 的 `content_file` 只由当前 material 记录确定性投影，不写回不可变结构 JSON。
+- 源快照使用按 `textbook_id` 的单来源目录与安全来源 DTO，移除新路径对 version/position 的依赖；组合服务先预检来源再冻结，竞态或失败只清理本次明确记录且未被数据库引用的教材对象键，提交结果不明时保留对象等待恢复确认。
+- 验证：全量单元测试 `8407 passed, 8 deselected, 1 xpassed`；Task 2 聚焦单元/迁移测试 `36 passed`，真实 PostgreSQL 教材集成测试 `9 passed`，包含空库到 head、`081` 到 `082` catalog 等价、权限隔离、并发与语义幂等、跨教材拒绝、已有讲义归档、活动序号、迟到回调及 PG 故障保留旧材料。迁移仅在 `langalpha_test` 和一次性临时测试库执行，未应用到当前开发数据库，未改动 Docker 挂载数据。
+
 ### 新增：固定 more-to-skills 教材结构契约
 
 - 将本机实际使用的 `more-to-skills` 2.1.0 以 MIT fork 署名固定到 `langalpha_local` 插件，规范 Skill frontmatter，并记录 Skill 与正式 schema 的内容摘要；运行不再依赖宿主机个人技能目录。

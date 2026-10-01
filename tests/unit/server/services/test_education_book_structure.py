@@ -9,6 +9,7 @@ from src.server.services.education_book_structure import (
     TrustedBookSource,
     get_more_to_skills_identity,
     parse_book_structure,
+    project_material_content_files,
 )
 
 
@@ -247,6 +248,24 @@ def test_allows_nodes_without_units_or_materials_and_an_empty_kp_list() -> None:
     assert result.warnings == ("knowledge_points_empty",)
 
 
+def test_rejects_node_materials_that_cannot_be_persisted() -> None:
+    candidate = _candidate()
+    candidate["nodes"][0]["content_file"] = "chapters/unit-1.md"  # type: ignore[index]
+
+    with pytest.raises(
+        BookStructureValidationError,
+        match="node-level content_file is not supported",
+    ):
+        parse_book_structure(
+            trusted_source=_source(),
+            raw_json=json.dumps(candidate),
+            allowed_output_paths={
+                "chapters/unit-1.md",
+                "chapters/unit-1-k1.md",
+            },
+        )
+
+
 def test_rejects_duplicate_recursive_node_ids() -> None:
     candidate = _candidate()
     candidate["nodes"][0]["children"][1]["id"] = "unit-1-reading-a"  # type: ignore[index]
@@ -352,3 +371,23 @@ def test_rejects_coverage_ranges_outside_the_trusted_source() -> None:
             raw_json=json.dumps(candidate),
             allowed_output_paths={"chapters/unit-1-k1.md"},
         )
+
+
+def test_material_content_files_are_projected_from_current_materials() -> None:
+    document = _candidate()
+    document["nodes"][0]["content_file"] = "outputs/stale-node.md"  # type: ignore[index]
+
+    projected = project_material_content_files(
+        document,
+        {"unit-1-k1": "materials/2a5f.md"},
+    )
+
+    assert document["nodes"][0]["content_file"] == "outputs/stale-node.md"  # type: ignore[index]
+    assert document["knowledge_points"][0]["content_file"] == (  # type: ignore[index]
+        "chapters/unit-1-k1.md"
+    )
+    assert "content_file" not in projected["nodes"][0]
+    assert projected["knowledge_points"][0]["content_file"] == "materials/2a5f.md"
+
+    without_material = project_material_content_files(document, {})
+    assert "content_file" not in without_material["knowledge_points"][0]

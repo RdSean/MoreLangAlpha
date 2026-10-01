@@ -10,17 +10,24 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
+from uuid import UUID, uuid4
 
 from src.config.settings import get_document_parsing_config
 from src.server.database.documents import list_artifacts
-from src.server.database.education_textbooks import get_owned_parse_job
+from src.server.database.education_books import (
+    create_textbook_with_initial_job,
+    get_existing_textbook_for_source,
+    get_owned_parse_job,
+)
 from src.server.database.session_lock import await_settled
 from src.utils.storage import delete_object, get_bytes, upload_bytes
 
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from src.server.services.education_book_structure import MoreToSkillsIdentity
 
 _SAFE_COMPONENT = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,254}$")
 _MARKDOWN_MEDIA_TYPE = "text/markdown"
@@ -55,20 +62,23 @@ def _safe_component(value: str, label: str) -> str:
 def build_snapshot_prefix(
     *,
     household_id: str,
-    textbook_slug: str,
-    version_id: str,
-    position: int,
+    textbook_id: str | None = None,
+    textbook_slug: str | None = None,
+    version_id: str | None = None,
+    position: int | None = None,
 ) -> str:
-    """Derive the only valid immutable prefix for one selected source bundle."""
+    """Derive a private source prefix, preferring the single-source book layout."""
     household = _uuid_component(household_id, "household_id")
+    if textbook_id is not None:
+        textbook = _uuid_component(textbook_id, "textbook_id")
+        return f"education/{household}/textbooks/{textbook}/source/"
+    if textbook_slug is None or version_id is None or position is None:
+        raise ValueError("textbook_id is required")
     version = _uuid_component(version_id, "version_id")
     slug = _safe_component(textbook_slug, "textbook_slug")
     if position < 1 or position > 99:
         raise ValueError("position must be between 1 and 99")
-    return (
-        f"education/{household}/{slug}/source-bundles/"
-        f"{version}/{position:02d}/"
-    )
+    return f"education/{household}/{slug}/source-bundles/{version}/{position:02d}/"
 
 
 def _validated_relative_path(value: str) -> str:
@@ -138,13 +148,15 @@ async def freeze_parse_job_source(
     document_id: str,
     producer_job_id: str,
     household_id: str,
-    textbook_slug: str,
-    version_id: str,
-    position: int,
+    textbook_id: str | None = None,
+    textbook_slug: str | None = None,
+    version_id: str | None = None,
+    position: int | None = None,
 ) -> FrozenTextbookSource:
     """Copy one completed parse bundle and return only safe queueing metadata."""
     prefix = build_snapshot_prefix(
         household_id=household_id,
+        textbook_id=textbook_id,
         textbook_slug=textbook_slug,
         version_id=version_id,
         position=position,
@@ -180,9 +192,7 @@ async def freeze_parse_job_source(
         )
     primary_media_type = str(primary.get("media_type") or "").split(";", 1)[0].lower()
     if primary_media_type != _MARKDOWN_MEDIA_TYPE:
-        raise TextbookSourceSnapshotError(
-            "The primary parse artifact must be Markdown"
-        )
+        raise TextbookSourceSnapshotError("The primary parse artifact must be Markdown")
     primary_format = str(primary.get("format") or "").strip().lower()
     if primary_format not in _MARKDOWN_FORMATS:
         raise TextbookSourceSnapshotError(
@@ -192,7 +202,9 @@ async def freeze_parse_job_source(
     validated_artifacts: list[dict[str, Any]] = []
     relative_paths: set[str] = set()
     for artifact in artifacts:
-        relative_path = _validated_relative_path(str(artifact.get("relative_path") or ""))
+        relative_path = _validated_relative_path(
+            str(artifact.get("relative_path") or "")
+        )
         if relative_path in relative_paths:
             raise TextbookSourceSnapshotError(
                 "A parse bundle contains duplicate artifact paths"
@@ -331,9 +343,7 @@ async def freeze_parse_job_source(
         None,
     )
     if primary_manifest is None:
-        raise TextbookSourceSnapshotError(
-            "The primary parse artifact was not copied"
-        )
+        raise TextbookSourceSnapshotError("The primary parse artifact was not copied")
     asset_manifest = [
         {
             "artifact_id": artifact["artifact_id"],
@@ -362,3 +372,186 @@ async def freeze_parse_job_source(
         },
         written_keys=tuple(written_keys),
     )
+
+
+async def _normalize_book_source(
+    *,
+    frozen: FrozenTextbookSource,
+    document_id: str,
+    parse_job_id: str,
+    primary_artifact_id: str,
+    prefix: str,
+) -> FrozenTextbookSource:
+    source = frozen.source
+    manifest = list(source.get("asset_manifest") or [])
+    primary = next(
+        (
+            entry
+            for entry in manifest
+            if str(entry.get("artifact_id") or "") == primary_artifact_id
+        ),
+        None,
+    )
+    if primary is None:
+        raise TextbookSourceSnapshotError("The frozen primary artifact was not found")
+    markdown_key = f"{prefix}artifacts/{primary['relative_path']}"
+    markdown = await _read_object(markdown_key)
+    if not markdown:
+        raise TextbookSourceSnapshotError("The frozen primary artifact is unavailable")
+    digest = hashlib.sha256(markdown).hexdigest()
+    if digest != str(primary.get("sha256") or ""):
+        raise TextbookSourceSnapshotError(
+            "The frozen primary artifact failed verification"
+        )
+
+    def artifact_key(*names: str) -> str | None:
+        for entry in manifest:
+            relative = str(entry.get("relative_path") or "")
+            if PurePosixPath(relative).name in names:
+                return f"{prefix}artifacts/{relative}"
+        return None
+
+    normalized = {
+        "document_id": document_id,
+        "parse_job_id": parse_job_id,
+        "primary_artifact_id": primary_artifact_id,
+        "filename": source["filename"],
+        "media_type": source["media_type"],
+        "format": source["format"],
+        "parser_id": source["parser_id"],
+        "parser_name": source["parser_name"],
+        "parser_version": source.get("parser_version"),
+        "parse_completed_at": source["completed_at"],
+        "content_sha256": digest,
+        "size_bytes": len(markdown),
+        "snapshot_prefix": prefix,
+        "markdown_key": markdown_key,
+        "blocks_key": artifact_key("blocks.json", "layout.json"),
+        "report_key": artifact_key("report.json", "parse-report.json"),
+        "asset_manifest": manifest,
+        "snapshot": {
+            "format": "langalpha-textbook-source-snapshot/v2",
+            "manifest_key": f"{prefix}manifest.json",
+        },
+    }
+    return FrozenTextbookSource(
+        source=normalized,
+        written_keys=frozen.written_keys,
+    )
+
+
+async def freeze_book_source(
+    *,
+    owner_user_id: str,
+    parse_job_id: str,
+    primary_artifact_id: str,
+    household_id: str,
+    textbook_id: str,
+) -> FrozenTextbookSource:
+    """Freeze one library bundle into the new single-source textbook layout."""
+
+    job = await get_owned_parse_job(
+        owner_user_id=owner_user_id,
+        producer_job_id=parse_job_id,
+    )
+    if not job or str(job.get("status") or "") != "completed":
+        raise TextbookSourceSnapshotError("The parse job source is not completed")
+    if str(job.get("primary_artifact_id") or "") != primary_artifact_id:
+        raise TextbookSourceSnapshotError(
+            "The selected primary artifact does not belong to the parse job"
+        )
+    document_id = str(job.get("document_id") or "")
+    if not document_id:
+        raise TextbookSourceSnapshotError("The parse job source was not found")
+    frozen = await freeze_parse_job_source(
+        owner_user_id=owner_user_id,
+        document_id=document_id,
+        producer_job_id=parse_job_id,
+        household_id=household_id,
+        textbook_id=textbook_id,
+    )
+    prefix = build_snapshot_prefix(
+        household_id=household_id,
+        textbook_id=textbook_id,
+    )
+    try:
+        return await _normalize_book_source(
+            frozen=frozen,
+            document_id=document_id,
+            parse_job_id=parse_job_id,
+            primary_artifact_id=primary_artifact_id,
+            prefix=prefix,
+        )
+    except BaseException as exc:
+        await cleanup_snapshot_objects(frozen.written_keys)
+        if isinstance(exc, (TextbookSourceSnapshotError, asyncio.CancelledError)):
+            raise
+        if isinstance(exc, Exception):
+            raise TextbookSourceSnapshotError(
+                "The textbook source snapshot could not be normalized"
+            ) from exc
+        raise
+
+
+async def create_textbook_from_library_source(
+    *,
+    parent_user_id: str,
+    household_id: str,
+    title: str,
+    slug: str,
+    parse_job_id: str,
+    primary_artifact_id: str,
+    idempotency_key: str,
+    identity: MoreToSkillsIdentity,
+) -> dict[str, Any]:
+    """Preflight, freeze, and atomically create one source-bound textbook."""
+
+    existing = await get_existing_textbook_for_source(
+        parent_user_id=parent_user_id,
+        household_id=household_id,
+        source_parse_job_id=parse_job_id,
+        source_primary_artifact_id=primary_artifact_id,
+    )
+    if existing is not None:
+        return existing
+
+    textbook_id = uuid4()
+    frozen = await freeze_book_source(
+        owner_user_id=parent_user_id,
+        parse_job_id=parse_job_id,
+        primary_artifact_id=primary_artifact_id,
+        household_id=household_id,
+        textbook_id=str(textbook_id),
+    )
+    try:
+        created = await create_textbook_with_initial_job(
+            textbook_id=textbook_id,
+            parent_user_id=parent_user_id,
+            household_id=household_id,
+            title=title,
+            slug=slug,
+            source=frozen.source,
+            idempotency_key=idempotency_key,
+            identity=identity,
+        )
+    except BaseException as create_error:
+        try:
+            recovered = await get_existing_textbook_for_source(
+                parent_user_id=parent_user_id,
+                household_id=household_id,
+                source_parse_job_id=parse_job_id,
+                source_primary_artifact_id=primary_artifact_id,
+            )
+        except BaseException:
+            raise create_error
+        if recovered is None:
+            await cleanup_snapshot_objects(frozen.written_keys)
+            raise
+        if UUID(str(recovered["textbook_id"])) != textbook_id:
+            await cleanup_snapshot_objects(frozen.written_keys)
+        if isinstance(create_error, asyncio.CancelledError):
+            raise
+        return recovered
+    if UUID(str(created["textbook_id"])) != textbook_id:
+        await cleanup_snapshot_objects(frozen.written_keys)
+    return created
