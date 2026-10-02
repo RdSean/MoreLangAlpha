@@ -44,8 +44,10 @@ Files: `src/server/database/education_book_activity.py`、`src/server/services/e
 
 Files: `web/src/pages/Education/components/bookActivityProjection.ts`、`web/src/pages/Education/components/BookActivityPanel.tsx`、`web/src/pages/Education/queries.ts`、`web/src/pages/Education/__tests__/BookActivityPanel.test.tsx`、`web/src/pages/Education/__tests__/BookActivityQueries.test.tsx`、`web/e2e/education-textbook-workbench.spec.js`。
 
+知识点标题接线另涉及 `src/server/database/education_book_jobs.py` 的 `get_book_job_for_parent`、`src/server/app/education/book_models.py` 的 `BookJobItemResponse`、`web/src/pages/Education/types.ts` 的 `BookJobItem`；测试补在 `tests/integration/test_education_book_jobs_db.py`、`tests/unit/server/app/education/test_book_models.py` 和上述前端测试。
+
 1. 红测试：完成后仍可读实际语义动作，进入动作不是成功；重复相邻动作合并，回退/不同 item 不合并；工具只在手动打开诊断后存在；大量工具不会挤掉语义历史。
-2. 实现 seq 排序与业务历史投影，保留数据库 item 决定当前动作；默认隐藏诊断，键盘可打开；依照 DESIGN.md 使用共享 Loader。
+2. 在任务快照补充服务端知识点标题，按细则 D 实现知识点分组及当前对象标注；保持 seq 顺序与数据库 item 决定当前动作。默认隐藏诊断，键盘可打开；依照 DESIGN.md 使用共享 Loader。
 3. 聚焦 Vitest、Playwright、build/typecheck 和改动文件 ESLint。桌面/375px 验证终态历史、诊断开关、刷新回放和宽度。
 
 ## Task 4：Skill 行为与收口
@@ -162,6 +164,31 @@ report_progress(stage="material_writing", action="explaining_source_examples")
 
 `projectBookActivity` 输出业务时间线，保留服务事实和通过现有 item/stage 检查的 progress，按 seq 排序。action 文案直接来自受控 API `message`，不再建立一份前端翻译表。旧的 stage-only 事件同样能成为历史，不因扩展 action 消失。
 
+### 知识点对象与标题分组
+
+“位值”是被处理的知识点，不是新增 stage/action，也不由 Agent 上报。当前已具备 `event.item_id → job.items[].knowledge_point_id` 关联，但任务快照没有知识点标题，活动面板也尚未按标题展示；本补充明确将这部分接线纳入 Task 3。
+
+- **标题来源：** 在已授权的 `get_book_job_for_parent` 查询中，复用现有知识点 LEFT JOIN，将 `points.title` 投影为 item 的 `knowledge_point_title: string | null`，同步后端 DTO 与前端类型。非 material item 返回 null。使用已入库教材结构的标题，不另让模型生成，不从事件正文、文件名或当前阅读选中项猜测；不新增数据库列或迁移。
+- **事件归属：** observer 继续绑定可信 item 身份，`report_progress` 参数不增加知识点 ID、标题或序号。前端用事件 `item_id` 查该 job 的 item，再取标题；标题只在快照中提供，不复制进每条进度 metadata，也不新增“知识点标题”事件。
+- **历史分组：** 先按 seq 排序并按原规则合并重复动作，再将相邻同 item 的业务行放进带标题的组。分组身份是 item_id，不能用标题；同名知识点保持独立。不同 item 或 job 级事件打断组；同 item 之后再次出现则重复组标题，不为凑成整组而重排事件。工具行不影响业务分组。
+- **显示标签：** 材料组标题为“知识点：位值”。若显示顺序，使用“本次任务第 N 项”（来自 item.position），不能把批量选中的第一项写成全书“知识点一”。structure/supplementary 分别显示“教材结构分析”“全书附加材料”；`item_id=null` 的任务级事实或省略摘要单独显示，不归到最近一个知识点下。
+- **当前对象：** 正在执行时在当前动作旁显示数据库 running item 的对象名称，例如“位值 · 正在整理原文示例”。尚无动作时可显示“位值 · 正在生成讲义”；无 running item 时只展示任务级等待/处理说明，不将最近成功项或当前阅读页当作正在加工对象。历史中同一当前动作避免重复播报。
+- **完成与回放：** item 状态与计数仍来自服务端快照，提交行来自既有可靠服务事件；组标题本身不表示已开始或已完成，也不生成成功事件。无 Agent 进度也可显示已收到的服务事实。终态与刷新后仍通过任务快照和事件回放恢复标题及分组，不依赖当前章节选择。
+- **缺失与文本安全：** material 标题为 null/空白时显示“讲义任务（本次第 N 项）”；事件 item_id 暂无法匹配快照时显示“教材处理项”，保留事件和顺序，不借用其他项标题。标题按普通文本渲染，不解析 HTML/Markdown，长标题换行。标题来自当前已入库结构，本轮不承诺独立的历史标题版本快照。
+
+预期展示示例（动作是否出现以真实报告为准）：
+
+```text
+知识点：位值
+  正在澄清概念与术语      ← Agent 进度，中性标记
+  正在整理原文示例        ← Agent 进度，中性标记
+  讲义已提交              ← 服务端提交事实
+知识点：小数比较
+  正在澄清概念与术语      ← 属于另一 item，不与上一组合并
+```
+
+### 业务行与诊断规则
+
 业务行规则：
 
 - 忽略穿插的工具行后，相邻相同 item/stage/action 的进度合并为一行，保留最后 seq/时间；阶段回退 `A → B → A` 保留三次，跨 item 不合并，服务事实打断合并。只是显示合并，游标必须消费每条事件。
@@ -189,17 +216,21 @@ report_progress(stage="material_writing", action="explaining_source_examples")
 |---|---|
 | tool | stage-only 形状不变；合法 action 发出；无效 action 格式/超长不发送；stream 不可用不抛出业务失败；公开 payload 无自由文本/身份 |
 | contract | 八项 action 覆盖上述条件；非 material 空 action；返回副本可修改不污染目录；清晰区分原文示例与辅助示例；不以学科作为必选流程 |
+| item title/API | 授权快照中的 material 标题与关联知识点一致，非 material 为 null；DTO 可接收缺失标题；跨家庭不能读取标题；Agent 事件不能覆盖快照标题或身份 |
 | observer | stage/action 同秒不同动作保留；同动作一秒内节流；未知、跨 item/stage action 拒绝；模型 message/status 不生效；原有 stage-only 仍可接收 |
 | budget unit | 工具封顶后仍接收语义；工具批次剩余项和结果正确计省略；report_progress 自身噪声不计；总预算耗尽/unavailable/final flush 沿用 |
 | PostgreSQL | 行数先达工具上限、字节先达工具上限两种场景；新的 observer 不能绕过；并发连接不超总额；保留语义与同事务终态；迟到 token 不写入 |
 | projection | 完成后仍有业务历史；动作进入无完成勾；相邻重复合并但回退和不同 item 保留；不出现工具正文；stage-only 历史能读 |
+| item grouping | 两知识点的同一动作分别展示；同名不同 item 不合并；A→B→A 保持顺序并重复组标题；任务级事件/摘要独立；标题缺失安全回退；子集任务序号不冒充全书顺序；无语义报告仍可展示服务事实 |
 | query hook | 超过 1000 混合事件后语义保留；最新事件被淘汰后重连仍用已消费游标；后台恢复、旧响应、cursor_expired、终态分页均不退化；预算摘要移动不会累积多份 |
 | component/browser | 诊断关闭时 Bash/Edit 不在 DOM；键盘打开/关闭；375px 无溢出；reader scroll/URL 不变；成功后刷新仍有业务历史；unavailable 不假装任务失败 |
+| title rendering/browser | 当前对象与 running item 一致，切换阅读章节不改变加工对象；任务完成/刷新后仍能恢复标题分组；长标题与含 HTML 字符标题以纯文本安全换行 |
 
 后端聚焦命令（worktree 根目录）：
 
 ```bash
 uv run pytest tests/unit/ptc_agent/agent/tools/test_report_progress.py tests/unit/server/services/test_education_book_progress.py tests/unit/server/services/test_education_book_activity.py tests/unit/server/services/test_education_book_jobs.py tests/unit/server/services/test_education_book_structure.py -q
+uv run pytest tests/unit/server/app/education/test_book_models.py -q
 TEST_DB_NAME=langalpha_test uv run pytest -m integration tests/integration/test_education_books_db.py tests/integration/test_education_book_jobs_db.py tests/integration/test_education_book_activity_stream.py -q
 ```
 
@@ -250,3 +281,5 @@ pnpm exec eslint src/pages/Education/components/BookActivityPanel.tsx src/pages/
 ## 当前检查点
 
 2026-10-03：开发计划细则已补写，待用户审阅后开发。本轮只创建/修改计划与索引文档；产品代码、Skill、数据库和运行服务均未修改。已完成只读代码依赖检查和一次提示应用基线，未执行本计划中的红绿测试、真实模型加工或浏览器验收。
+
+同日补充：明确知识点标题由授权任务快照提供，前端按 item 身份分组并标注当前对象；补齐 API/类型接线位置、缺失标题回退、同名/子集/回放规则与验收。仍仅修改文档，未实施。
