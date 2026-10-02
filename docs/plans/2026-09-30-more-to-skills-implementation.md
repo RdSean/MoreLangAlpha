@@ -24,11 +24,13 @@ Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skill
 
 ### 当前检查点（2026-10-02）
 
-Task 1–7 与 Task 4A 已交付。Task 7 已向开发库应用 `082_more_to_skills_textbooks`，并按升级前导出的私人资源清单清理旧教材；详细范围、保护计数、检查证据和未验收项见[切换记录](2026-10-02-more-to-skills-cutover-results.md)。Task 8 已开始但仍有故障注入、多 worker、组合容量及完整普通产品 live 链路未覆盖，不能将清理或局部真实加工成功等同于整个重构验收通过。
+Task 1–7 与 Task 4A 已交付。Task 7 已向开发库应用 `082_more_to_skills_textbooks`，并按升级前导出的私人资源清单清理旧教材；详细范围、保护计数、检查证据和未验收项见[切换记录](2026-10-02-more-to-skills-cutover-results.md)。Task 8 已开始但仍有真实存储/提交 ACK 故障、模型已完成结果的跨进程恢复提交及完整普通产品 live 链路未覆盖，不能将清理或局部真实加工成功等同于整个重构验收通过。
 
 Task 8 已开始：真实模型结构和中间知识点讲义提交成功，语义阶段可回放，实际批量默认跳过已有讲义与 runtime 取消已验证；补齐 PostgreSQL 四项部分失败、独立连接 reconcile、事务回滚恢复与浏览器分页/静默/前台/关闭活动恢复测试。真实验收发现的服务收尾、UUID 投影和客户端缓存/终态分页问题已修正。详细证据及未完成边界见 [Task 8 记录](2026-10-02-more-to-skills-task8-results.md)，仍不得标记完整验收完成。
 
-本批补齐专用学生普通 cookie 的原文/图片/讲义、进度/笔记/总结、真实 Flash 追问和跨家庭/撤销链；浏览器登录、笔记/总结保存及 375px 已实测。修复学生列表 UUID 响应 500 与教材 directive 未进入聊天 metadata；后端全量 `7918 passed, 8 deselected, 1 xpassed`，教材 PG `42 passed`。仅撤销新增验收学生的教材授权，既有学生数据未改；后续继续故障与容量矩阵。
+本批继续补验：普通 runtime 真实多进程 gate 分批 5/5、4/4；教材真实写锁 owner 被 SIGKILL 后由另一进程收敛失败，不双跑、不改变 attempt。150001 合成 delta 经真实 PG/Redis/浏览器过滤和回放保持有界，专用 Redis 断连后 HTTP SSE 由 PG 补齐终态。教材集成复跑 42 passed。临时进程/Redis 已收尾，共享数据和 5177/8000 不变；隔离库 schema 重建与活 worker 验收必须串行。真实 MinIO/COMMIT ACK、模型完成后跨进程恢复提交、家长 cookie 添加与完整普通产品 live 链仍待补，不将本批成功写为 Task 8 完成。
+
+上一批补齐专用学生普通 cookie 的原文/图片/讲义、进度/笔记/总结、真实 Flash 追问和跨家庭/撤销链；浏览器登录、笔记/总结保存及 375px 已实测。修复学生列表 UUID 响应 500 与教材 directive 未进入聊天 metadata；后端全量 `7918 passed, 8 deselected, 1 xpassed`，教材 PG `42 passed`。仅撤销新增验收学生的教材授权，既有学生数据未改；未完成矩阵继续验收。
 
 本机依赖继续沿用 `codex/library-textbook-assets` 的 `.env`/`agent_config.yaml`，对象存储以 `.env` 的 `localhost:9000` 为准，不使用可能变化的办公室 LAN 地址。5177/8000 由本 worktree 启动，基础设施原挂载与 volumes 保留。
 

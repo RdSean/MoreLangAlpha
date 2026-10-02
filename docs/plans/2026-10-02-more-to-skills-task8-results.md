@@ -4,9 +4,9 @@
 
 ## 结论与范围
 
-Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验收通过声明。已完成真实模型结构提交、中间知识点首次讲义、真实语义阶段回放、批量默认跳过与真实取消、一组 PostgreSQL 故障边界和浏览器恢复验证，以及专用学生普通 cookie 的学习与撤销链。
+Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验收通过声明。已完成真实模型结构提交、中间知识点首次讲义、真实语义阶段回放、批量默认跳过与真实取消、PostgreSQL 故障边界和浏览器恢复验证，以及专用学生普通 cookie 的学习与撤销链。本批补齐普通 runtime 的真实多进程故障、教材账本的 OS owner-loss 恢复，以及真实 PostgreSQL/Redis/浏览器组合容量与 Redis 断连回放。
 
-继续沿用原分支 `.env` / `agent_config.yaml`，两份配置字节一致；S3 使用 `localhost:9000`。本轮没有重复迁移 082、清理旧教材、删除基础设施容器或改动 volumes。真实加工只操作新增的专用验收教材，家长账号由用户指定，服务解析其已有模型配置，未复制凭据或修改账号设置。
+继续沿用原分支 `.env` / `agent_config.yaml`，两份配置字节一致；S3 使用 `localhost:9000`。本轮没有重复迁移 082、清理旧教材、删除共享基础设施容器或改动持久 volumes。真实加工只操作新增的专用验收教材，家长账号由用户指定，服务解析其已有模型配置，未复制凭据或修改账号设置。
 
 上一批家长浏览器与 HTTP 教材加工验收使用现有 OSS 可信后台身份入口，不是家长普通 cookie 登录的证据。本批学生使用正常登录端点与浏览器登录表单，不携带后台身份请求头；家长分配与撤销仍使用已获授权的 OSS 入口。账号状态、模型凭据、测试登录态、生成夹具和私人日志均不入库到 Git。
 
@@ -50,6 +50,26 @@ Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验�
 
 本批两处产品修复的独立审查均无发现。以上是新增学生的实际链路证据，不替代家长 cookie 一键添加、完整普通产品 live 回归或故障压力矩阵。
 
+## 多进程故障与组合容量补验
+
+本批未改产品代码或 more-to-skills。普通 runtime gate 复用 `scripts/multiworker_gate/gate.py` 的既有 cell，只将 Docker backend 控制替换为精确持有的本机进程句柄；临时 backend 使用 8841/8842，指定家长的已有模型配置仍由正常服务解析。请求使用 OSS 后台身份入口，不计为普通 cookie 登录证据。
+
+- 首批 `5/5`：并发 START 返回 200/503 且只有一个 open run；另一 worker 取消及重复取消成功；同 request key 返回 409 与同一 run 身份；SIGSTOP 后 SIGKILL owner，另一 scanner 收为 `error`、`recovery=scanner`；SIGTERM owner 由自身收为 `cancelled`，无 scanner 来源且不是用户取消。
+- 次批 `4/4`：Redis 在 START 前不可用时返回 503，request key 无 run 行；运行中断 Redis 后收为 `error`，持久化 `terminal_error_type=src.server.services.runs.stream_writer.TransportLostError`；另一 worker 活跃运行期间 compact/delete 均返回 409。首次验收脚本误查字面量 `transport_lost`，核对实际字段后修正脚本并重跑四项，未改生产异常协议。
+
+容量与教材 owner-loss 使用 `langalpha_test`，未向开发库注入合成教材。Redis 使用本批创建的 127.0.0.1:6389 专用容器，`/data` 为 tmpfs、无持久卷、禁用持久化；从未停止或清空共享 6379。临时验收 backend/frontend 使用 8843/5188，5177/8000 保持运行。
+
+- 全新夹具经真实 producer compact 过滤、活动 observer、PostgreSQL 写入及 Redis stream writer，逐条送入 `150001` 个约 8 KiB 原始 delta、2000 个工具开始、2000 个工具结果和一个受限阶段。输入为合成事件，不冒充真实模型生成或 1 GiB 网络传输。
+- PostgreSQL 保留 1000 条明细，共 `293280` 字节，最大单条 `295` 字节、说明最长 `56` 字符；另有一条可更新省略摘要，`dropped_count=3001`。原始 delta 不计为公开活动，未发现私有正文 sentinel。
+- Redis stream 与 producer accumulator 各保留一条 metadata，未缓冲全部原始流。脚本对 Redis 字段和值的计量为 `148` 字节，不等同 Redis 总内存占用。本次顺序处理耗时 `4.72` 秒，不作为吞吐量承诺。
+- 实际浏览器回放后，活动 DOM 有界为 1000 行：终态前为 999 条工具明细加摘要，终态加入后为 997 条工具明细加三个里程碑。展开明细可读；375px 下 `scrollWidth == innerWidth == 375`，无私有正文 sentinel，私人桌面/移动截图已核对。合成源没有真实存储对象，空原文不计为读者内容验收。
+- 实际 HTTP 教材 SSE 已订阅时停止专用 Redis，再经正常数据库失败接口提交终态。订阅收到两个页面，最终 `failed`、`has_more=false`，补齐两条终态事件，游标为 1004，耗时 `0.933` 秒；浏览器也更新为失败。证明 PostgreSQL 轮询能脱离 Redis wake 恢复事实，不代表 runtime 可以无 Redis 继续执行。
+- 教材专属 owner 进程使用真实 `WriterGuard` 持有教材 thread 的 PG 写锁，创建并绑定正常 runtime 与 item 账本。另一 backend 的 scanner 存活时只续租，run/item/job 仍活跃，attempt=1；精确 SIGKILL owner 后，另一进程 scanner 收 run 为 `error`，教育 reconcile 收 item/job 为 `failed`。attempt token 和 execution ID 不变，只存在一个 run、两条终态活动，迟到失败回调被 fence 拒绝。此项是合成教材账本的真实 OS 退出证据，不是模型/沙箱生成中断后恢复提交或自动断点续跑。
+
+验收脚本的 Redis 初始化/收尾接口已按真实客户端修正，容量结论来自之后的全新夹具。隔离库集成 suite 会重建 schema，首次与 owner-loss 并行运行清掉了验收夹具；该次不计为通过。随后停止临时 backend，集成 `42 passed`，再单独重建 owner 并完整复验成功。今后这两类验收必须串行执行，不可让后台队列扫描与隔离库重建争用。
+
+最终临时 worker/frontend 和命名浏览器均已停止，8841/8842/8843/5188/6389 无监听。已删除本批专用 tmpfs Redis 容器及其一次性测试缓存，未删除任何持久卷或共享容器；普通 gate 的测试线程保留。隔离库容量夹具随集成 schema 重建清除，最后的 owner-loss 夹具仍留在隔离库。私人脚本、日志、身份和截图不提交。
+
 ## 验收矩阵
 
 | 场景 | 已有证据 | 尚未覆盖的边界 |
@@ -62,13 +82,13 @@ Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验�
 | 取消与迟到回调 | 真实 UI/run 取消、后续 attempt=0；PG 当前 fence 拒绝迟到 token | 真实模型取消后迟到结果 |
 | 双击/两标签页 | 真实创建复用及材料 409；PG 并发 idempotency | 两个真实 cookie 标签页 |
 | 上传/PG finalize 崩溃 | 真 PG 事务回滚及同 attempt 恢复，无重复 material/generation/终态事件；上传为 fake storage | 真实 MinIO 中断、COMMIT ACK 丢失 |
-| 关闭浏览器/换 worker | 两个独立 PG 连接，过期 lease/live ledger 经另一 worker 身份 reconcile 不重领；浏览器重连 | OS 进程终止/真正跨进程接管 |
-| Redis/150001 delta | PG 活动行数/字节预算与省略摘要；既有 compact projector 单元回归 | 实际 Redis 网络故障、150001 delta 的 PG/Redis/浏览器组合压力 |
+| 关闭浏览器/换 worker | PG 双连接 reconcile 不重领；浏览器重连；普通 runtime SIGSTOP/SIGKILL/SIGTERM；教材真实写锁 owner-loss 后另一进程收敛失败，无重复 run | 真实模型/沙箱已完成但业务未提交时的跨进程恢复提交 |
+| Redis/150001 delta | 全新夹具真实 PG/Redis/浏览器组合压力；1000 明细/293280 字节、单摘要/3001 省略；Redis 断连后 HTTP SSE 由 PG 补齐终态；普通 runtime START 前拒绝/运行中明确失败 | 长期真实模型负载，不将合成事件当模型或网络吞吐证据 |
 | 节点/长文/图片/深链 | 真实原文图像与中间 KP；375px/长标题/512字符/读者滚动/相对链接 E2E | 更多真实节点及长文阅读位置回程 |
 | 学生与图书馆反查 | PG assignment/progress/note/chat-space/document-usage；真实学生 cookie 进度/笔记/总结/模型追问及家长转录；浏览器保存笔记/总结 | 家长正常 cookie 的图书馆一键添加 |
 | 撤销/跨家庭 | PG ACL；真实学生 cookie 原文/讲义/图片/笔记/chat-space 跨家庭拒绝，撤销后读取/写入/追问拒绝，旧 thread 无上下文复用拒绝；浏览器旧页不可用 | 授权撤销与在途模型提交同时竞态的 live 故障注入 |
 | 旧路由/catalog | Task 7 切换清单、PG head catalog、退役路由单元回归 | 无新增清理；沿用 Task 7 证据 |
-| 普通产品回归 | 全量后端 unit、前端 unit、真实 managed Docker capability smoke、普通文档 E2E | 普通 PTC/Flash/MCP/subagent/checkpoint/家庭作业完整 live 回归 |
+| 普通产品回归 | 全量后端 unit、前端 unit、真实 managed Docker capability smoke、普通文档 E2E；真实模型普通 runtime 多进程 gate 9 项 | 普通 PTC/MCP/subagent/checkpoint/家庭作业完整 live 回归 |
 
 ## 验证结果
 
@@ -85,4 +105,8 @@ Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验�
 - 重新运行 `TEST_DB_NAME=langalpha_test` 教材三套 PostgreSQL 集成：`42 passed`。首次漏指定 `-m integration` 的命令仅 `13 deselected`，未计为通过；之后显式运行全部三套。
 - 两处改动文件 Ruff/格式、独立审查与 `git diff --check` 通过；本批没有改前端代码，既有前端全量失败仍按上面的原始记录保留。配置字节一致，localhost/LAN 5177 与 8000 再次 HTTP 200。
 
-下一批优先补真实多 worker/断流故障，再补组合容量测试和普通产品 live 回归。未完成矩阵行不得在总计划或语义计划标记完成。
+- 本批普通 runtime 多进程真实模型 gate 分批 `5/5` 与 `4/4`；全新容量夹具及 live HTTP Redis 断连检查通过，教材真实写锁 owner-loss 在隔离库集成结束后独立复验通过。仅补验收证据，无产品代码修改。
+- 本批重新执行教材三套 PostgreSQL 集成：`42 passed in 65.33s`。此前后端/前端全量记录保持原日期和原结果，不冒充本批重新运行；既有 Plugins 失败仍未消除。
+- `.env` 与 `agent_config.yaml` 再次与原分支字节一致，5177/8000 本机及当前 LAN HTTP 200，共享 PostgreSQL/Redis/MinIO 均仍运行。
+
+下一批优先补真实 MinIO 中断/提交 ACK 丢失、已完成模型结果的跨进程恢复提交、家长 cookie 图书馆添加及普通 PTC/MCP/subagent/checkpoint/家庭作业 live 回归。未完成矩阵行不得在总计划或语义计划标记完成。

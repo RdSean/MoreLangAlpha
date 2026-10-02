@@ -2,6 +2,13 @@
 
 ## 2026-10-02
 
+### 验收：多进程恢复与教材活动组合压力
+
+- 普通 runtime 使用真实模型补验多进程 START、重复 request key、跨 worker 取消、SIGSTOP/SIGKILL、SIGTERM、Redis 前置拒绝/运行中明确失败及活跃运行期间 compact/delete 保护，分批 5/5、4/4。教材专属真实 WriterGuard owner 被精确 SIGKILL 后，另一进程 scanner/reconcile 收敛 runtime 与业务失败，attempt/execution 不变，无第二个 run，迟到回调被拒绝；不冒充真实模型断点续跑。
+- 全新隔离夹具的 150001 合成 delta 与 4000 工具事件经真实 PG/Redis/浏览器链保持有界：1000 明细/293280 字节、一个省略摘要/3001 次省略，Redis 与内存回放各一个 metadata。375px 展开明细无横向溢出或私有正文泄漏；停止专用 Redis 后，实际 HTTP SSE 在约 0.93 秒内由 PG 补齐终态。
+- 教材 PostgreSQL 三套复跑 42 passed；隔离库 schema 重建与活 worker 验收改为串行，受夹具清理影响的首次 owner 检查不计为通过。临时 backend/frontend/浏览器已停止，专用 tmpfs Redis 及一次性缓存已删除，未删除持久卷、共享容器或开发数据；原配置字节一致，5177/8000 本机及 LAN HTTP 200。
+- 本批仅更新验收记录、总计划与语义计划，不改产品代码或技能。Task 8/语义 Task 6 仍进行中，真实 MinIO/COMMIT ACK、模型已完成结果的跨进程提交恢复、家长 cookie 添加与普通产品完整 live 链尚待验收。
+
 ### 验收：学生 Cookie 学习与教材撤销链
 
 - 新增两名专用验收学生，以正常登录 cookie 验证原文/授权图片/讲义、进度、批注/重点/追问、确定性节点总结、真实 Flash 追问与家长转录；浏览器登录、笔记和总结保存、桌面及 375px 图片/布局均已核对。
