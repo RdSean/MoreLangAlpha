@@ -15,6 +15,8 @@ from src.server.database.pool import get_db_connection
 
 MAX_DETAIL_EVENTS = 1_000
 MAX_DETAIL_BYTES = 1024 * 1024
+MAX_TOOL_EVENTS = 800
+MAX_TOOL_BYTES = 768 * 1024
 MAX_EVENT_BYTES = 2 * 1024
 MAX_MESSAGE_CHARS = 512
 _BUDGET_SUMMARY_KEY = "activity-detail-budget"
@@ -274,7 +276,10 @@ async def append_book_activity_event(
                 SELECT
                     count(*)::int AS event_count,
                     coalesce(sum((metadata->>'activity_bytes')::int), 0)::bigint
-                        AS byte_count
+                        AS byte_count,
+                    count(*) FILTER (WHERE kind = 'tool')::int AS tool_count,
+                    coalesce(sum((metadata->>'activity_bytes')::int)
+                        FILTER (WHERE kind = 'tool'), 0)::bigint AS tool_bytes
                 FROM education_book_activity_events
                 WHERE job_id = %s
                   AND metadata->>'budget_class' = 'detail'
@@ -282,10 +287,18 @@ async def append_book_activity_event(
                 (job_id,),
             )
             budget = await cur.fetchone()
-            if (
+            outcome = None
+            if kind == "tool" and (
+                budget["tool_count"] >= MAX_TOOL_EVENTS
+                or budget["tool_bytes"] + activity_bytes > MAX_TOOL_BYTES
+            ):
+                outcome = "tool_budget_exhausted"
+            elif (
                 budget["event_count"] >= MAX_DETAIL_EVENTS
                 or budget["byte_count"] + activity_bytes > MAX_DETAIL_BYTES
             ):
+                outcome = "budget_exhausted"
+            if outcome is not None:
                 summary_seq = await _record_budget_exhaustion(
                     cur,
                     job_id=job_id,
@@ -293,7 +306,7 @@ async def append_book_activity_event(
                     dropped_count=1,
                 )
                 return {
-                    "outcome": "budget_exhausted",
+                    "outcome": outcome,
                     "high_water_seq": summary_seq,
                 }
             await cur.execute(

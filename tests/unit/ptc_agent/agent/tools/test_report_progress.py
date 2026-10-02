@@ -6,6 +6,47 @@ import pytest
 
 
 @pytest.mark.asyncio
+async def test_report_progress_emits_optional_action_without_changing_identity(
+    monkeypatch,
+):
+    from ptc_agent.agent.tools.report_progress import create_report_progress_tool
+
+    emitted = []
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: emitted.append)
+    result = await create_report_progress_tool().ainvoke(
+        {"stage": "material_writing", "action": "explaining_source_examples"}
+    )
+    assert result == "Progress reported."
+    assert emitted == [
+        {
+            "artifact_type": "report_progress",
+            "artifact_id": "material_writing",
+            "status": "running",
+            "payload": {
+                "stage": "material_writing",
+                "action": "explaining_source_examples",
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ("", "private/path", "free text", "A", "a" * 65))
+async def test_report_progress_rejects_invalid_action_without_emitting(
+    monkeypatch, action
+):
+    from ptc_agent.agent.tools.report_progress import create_report_progress_tool
+
+    emitted = []
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: emitted.append)
+    result = await create_report_progress_tool().ainvoke(
+        {"stage": "material_writing", "action": action}
+    )
+    assert result == "Invalid progress action; continue the task."
+    assert emitted == []
+
+
+@pytest.mark.asyncio
 async def test_report_progress_emits_only_the_bounded_stage(monkeypatch):
     from ptc_agent.agent.tools.report_progress import create_report_progress_tool
 
@@ -69,8 +110,6 @@ async def test_report_progress_writer_failure_does_not_fail_the_agent(
     else:
         monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: fail)
 
-    result = await create_report_progress_tool().ainvoke(
-        {"stage": "material_writing"}
-    )
+    result = await create_report_progress_tool().ainvoke({"stage": "material_writing"})
 
     assert result == "Progress reporting unavailable; continue the task."

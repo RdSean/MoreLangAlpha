@@ -221,6 +221,7 @@ class BookJobItemResponse(_StrictModel):
     position: int = Field(ge=1)
     knowledge_point_id: UUID | None = None
     skill_kp_id: str | None = None
+    knowledge_point_title: str | None = None
     status: BookJobItemStatus
     attempt: int = Field(ge=0)
     safe_error: str | None = None

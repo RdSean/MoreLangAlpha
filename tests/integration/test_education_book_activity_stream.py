@@ -297,6 +297,81 @@ async def test_detail_budget_bounds_rows_bytes_and_keeps_terminal_events(
     ]
 
 
+@pytest.mark.parametrize("message", ("Reading source", "Reading source " + "界" * 480))
+async def test_tool_sub_budget_preserves_semantics_across_observers(
+    patched_get_db_connection,
+    seed_user,
+    message,
+):
+    from src.server.database.education_book_activity import (
+        append_book_activity_event,
+        get_book_activity_page,
+    )
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    item = await _seed_running_item(
+        patched_get_db_connection, parent_user_id=seed_user["user_id"]
+    )
+
+    async def append(index):
+        return await append_book_activity_event(
+            job_id=item["job_id"],
+            item_id=item["item_id"],
+            attempt_token=item["attempt_token"],
+            dedupe_key=f"tool:{index}",
+            kind="tool",
+            status="running",
+            message=message,
+            metadata={"tool_name": "Read", "tool_call_id": str(index)},
+        )
+
+    results = []
+    for start in range(0, 810, 10):
+        results.extend(
+            await asyncio.gather(*(append(index) for index in range(start, start + 10)))
+        )
+    assert any(result["outcome"] == "tool_budget_exhausted" for result in results)
+    assert all(
+        result["outcome"] in {"stored", "tool_budget_exhausted"} for result in results
+    )
+    for _ in range(2):
+        observer = BookActivityObserver(
+            job_id=item["job_id"],
+            item_id=item["item_id"],
+            attempt_token=item["attempt_token"],
+            item_kind="structure",
+            publish=AsyncMock(),
+        )
+        await observer(
+            "tool_calls", {"tool_calls": [{"id": f"late-{uuid4()}", "name": "Bash"}]}
+        )
+        await observer(
+            "artifact",
+            {
+                "artifact_type": "report_progress",
+                "artifact_id": "structure_reading",
+                "payload": {"stage": "structure_reading"},
+            },
+        )
+    page = await get_book_activity_page(
+        job_id=item["job_id"],
+        parent_user_id=seed_user["user_id"],
+        after_seq=0,
+        limit=2100,
+    )
+    tools = [event for event in page["events"] if event["kind"] == "tool"]
+    progress = [event for event in page["events"] if event["kind"] == "progress"]
+    assert len(tools) <= 800
+    async with patched_get_db_connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT sum((metadata->>'activity_bytes')::int) AS bytes FROM education_book_activity_events WHERE job_id = %s AND kind = 'tool'",
+            (item["job_id"],),
+        )
+        assert (await cur.fetchone())["bytes"] <= 768 * 1024
+    assert len(progress) >= 1
+    assert len([event for event in page["events"] if event["kind"] == "summary"]) == 1
+
+
 async def test_activity_page_detects_future_cursor_and_parent_scope(
     patched_get_db_connection,
     seed_user,

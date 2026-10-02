@@ -86,17 +86,21 @@ class BookActivityObserver:
         self._monotonic = monotonic
         self._tool_names: dict[str, str] = {}
         self._suppressed_tool_ids: dict[str, None] = {}
-        self._progress_at: dict[str, float] = {}
+        self._progress_at: dict[tuple[str, str | None], float] = {}
         self._details_disabled = False
         self._unavailable_report_pending = False
         self._budget_exhausted = False
+        self._tool_budget_exhausted = False
         self._pending_drops = 0
         self._last_drop_flush_at: float | None = None
 
     async def __call__(self, event_type: str, data: Mapping[str, Any]) -> None:
         if self._details_disabled:
             return
-        if self._budget_exhausted:
+        if self._budget_exhausted or (
+            self._tool_budget_exhausted
+            and event_type in {"tool_calls", "tool_call_result"}
+        ):
             await self._record_omitted(event_type, data)
             return
         if event_type == "tool_calls":
@@ -128,7 +132,7 @@ class BookActivityObserver:
                 message=f"Running {name}"[:512],
                 metadata={"tool_call_id": call_id, "tool_name": name},
             )
-            if self._budget_exhausted:
+            if self._budget_exhausted or self._tool_budget_exhausted:
                 remaining = self._observe_omitted_tool_calls(calls[index + 1 :])
                 await self._queue_drops(remaining)
                 break
@@ -154,20 +158,23 @@ class BookActivityObserver:
         progress = self._accept_progress(data)
         if progress is None:
             return
-        stage, message, now = progress
+        stage, action, message, now = progress
         await self._store(
             dedupe_key=(
-                f"progress:{self.item_id}:{self.attempt_token}:{stage}:{int(now)}"
+                f"progress:{self.item_id}:{self.attempt_token}:{stage}:{action or ''}:{int(now)}"
             ),
             kind="progress",
             status="running",
             message=message,
-            metadata={"stage": stage},
+            metadata={
+                "stage": stage,
+                **({"action": action} if action is not None else {}),
+            },
         )
 
     def _accept_progress(
         self, data: Mapping[str, Any]
-    ) -> tuple[str, str, float] | None:
+    ) -> tuple[str, str | None, str, float] | None:
         if data.get("artifact_type") != "report_progress":
             return None
         payload = data.get("payload")
@@ -176,15 +183,19 @@ class BookActivityObserver:
         stage = payload.get("stage")
         if not isinstance(stage, str) or data.get("artifact_id") != stage:
             return None
-        message = progress_message(stage, item_kind=self.item_kind)
+        action = payload.get("action")
+        if action is not None and not isinstance(action, str):
+            return None
+        message = progress_message(stage, item_kind=self.item_kind, action=action)
         if message is None:
             return None
         now = self._monotonic()
-        previous = self._progress_at.get(stage)
+        key = (stage, action)
+        previous = self._progress_at.get(key)
         if previous is not None and now - previous < 1.0:
             return None
-        self._progress_at[stage] = now
-        return stage, message, now
+        self._progress_at[key] = now
+        return stage, action, message, now
 
     @staticmethod
     def _remember_bounded(mapping: dict[str, Any], key: str, value: Any) -> None:
@@ -220,8 +231,11 @@ class BookActivityObserver:
         except Exception:
             await self._disable_details()
             raise
-        if result.get("outcome") == "budget_exhausted":
-            self._budget_exhausted = True
+        if result.get("outcome") in {"budget_exhausted", "tool_budget_exhausted"}:
+            if result["outcome"] == "tool_budget_exhausted":
+                self._tool_budget_exhausted = True
+            else:
+                self._budget_exhausted = True
             self._last_drop_flush_at = self._monotonic()
             high_water_seq = result.get("high_water_seq")
             if high_water_seq is not None:
@@ -242,9 +256,7 @@ class BookActivityObserver:
         if self._last_drop_flush_at is None or now - self._last_drop_flush_at >= 1.0:
             await self._flush_drops(now=now)
 
-    def _projected_event_count(
-        self, event_type: str, data: Mapping[str, Any]
-    ) -> int:
+    def _projected_event_count(self, event_type: str, data: Mapping[str, Any]) -> int:
         if event_type == "tool_calls":
             return self._observe_omitted_tool_calls(data.get("tool_calls"))
         if event_type == "tool_call_result":

@@ -217,6 +217,39 @@ async def test_claim_next_item_persists_attempt_execution_and_lease(
     assert await claim_next_book_item(worker_id="worker-b", lease_seconds=60) is None
 
 
+async def test_authorized_material_job_snapshot_projects_knowledge_point_titles(
+    patched_get_db_connection,
+    seed_user,
+):
+    from src.server.database.education_book_jobs import get_book_job_for_parent
+    from src.server.app.education.book_models import BookJobResponse
+
+    _, job, _ = await _seed_claimed_material_job(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+        include_supplementary=True,
+        target_count=2,
+    )
+    snapshot = await get_book_job_for_parent(
+        job_id=job["job_id"], parent_user_id=seed_user["user_id"]
+    )
+    assert [item["knowledge_point_title"] for item in snapshot["items"]] == [
+        "Point 1",
+        "Point 2",
+        None,
+    ]
+    assert (
+        BookJobResponse.model_validate(snapshot).items[0].knowledge_point_title
+        == "Point 1"
+    )
+    assert (
+        await get_book_job_for_parent(
+            job_id=job["job_id"], parent_user_id="other-parent"
+        )
+        is None
+    )
+
+
 async def test_expired_live_attempt_is_reconciled_by_another_worker_without_reclaim(
     patched_get_db_connection,
     seed_user,

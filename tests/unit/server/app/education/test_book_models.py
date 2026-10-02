@@ -117,6 +117,23 @@ def test_job_item_kind_distinguishes_supplementary_from_material() -> None:
     assert supplementary.kind == "supplementary"
 
 
+def test_job_item_projects_knowledge_point_title_and_allows_missing_title() -> None:
+    common = {
+        "item_id": UUID("86f03a73-7604-4097-905b-768e6ad0f644"),
+        "kind": "material",
+        "position": 1,
+        "status": "running",
+        "attempt": 1,
+    }
+    assert BookJobItemResponse(**common).knowledge_point_title is None
+    assert (
+        BookJobItemResponse(
+            **common, knowledge_point_title="位值"
+        ).knowledge_point_title
+        == "位值"
+    )
+
+
 def test_create_book_request_freezes_one_completed_parse_artifact() -> None:
     request = CreateBookRequest(
         parse_job_id="job-A1b2C3d4E5f6",

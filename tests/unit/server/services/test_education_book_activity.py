@@ -12,6 +12,53 @@ import pytest
 
 
 @pytest.mark.asyncio
+async def test_actions_are_scoped_rate_limited_and_ignore_model_messages():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock(return_value={"outcome": "stored", "high_water_seq": 1})
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        item_kind="material",
+        append=append,
+        publish=AsyncMock(),
+        monotonic=lambda: 10.0,
+    )
+    for action in (
+        "clarifying_concepts",
+        "clarifying_concepts",
+        "explaining_source_examples",
+        "unknown",
+        "reading_context",
+        "",
+    ):
+        await observer(
+            "artifact",
+            {
+                "artifact_type": "report_progress",
+                "artifact_id": "material_writing",
+                "status": "succeeded",
+                "payload": {
+                    "stage": "material_writing",
+                    "action": action,
+                    "message": "private",
+                    "status": "failed",
+                },
+            },
+        )
+    assert [call.kwargs["message"] for call in append.await_args_list] == [
+        "正在澄清概念与术语",
+        "正在整理原文示例",
+    ]
+    assert [call.kwargs["metadata"] for call in append.await_args_list] == [
+        {"stage": "material_writing", "action": "clarifying_concepts"},
+        {"stage": "material_writing", "action": "explaining_source_examples"},
+    ]
+    assert all(call.kwargs["status"] == "running" for call in append.await_args_list)
+
+
+@pytest.mark.asyncio
 async def test_activity_hint_is_compact_and_contains_no_event_body(monkeypatch):
     from src.server.services import education_book_activity
 
@@ -447,6 +494,59 @@ async def test_budget_exhaustion_filters_progress_noise_and_invalid_stages():
         attempt_token=observer.attempt_token,
         dropped_count=1,
     )
+
+
+@pytest.mark.asyncio
+async def test_tool_budget_only_disables_tools_and_preserves_actions():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock(
+        side_effect=[
+            {"outcome": "tool_budget_exhausted", "high_water_seq": 1},
+            {"outcome": "stored", "high_water_seq": 2},
+        ]
+    )
+    record_drops = AsyncMock(return_value={"outcome": "stored", "high_water_seq": 3})
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        item_kind="material",
+        append=append,
+        record_drops=record_drops,
+        publish=AsyncMock(),
+        monotonic=lambda: 10.0,
+    )
+    await observer(
+        "tool_calls",
+        {
+            "tool_calls": [
+                {"id": "read", "name": "Read"},
+                {"id": "bash", "name": "Bash"},
+                {"id": "progress", "name": "report_progress"},
+            ]
+        },
+    )
+    for call_id in ("read", "bash", "progress"):
+        await observer(
+            "tool_call_result", {"tool_call_id": call_id, "status": "success"}
+        )
+    await observer(
+        "artifact",
+        {
+            "artifact_type": "report_progress",
+            "artifact_id": "material_writing",
+            "payload": {"stage": "material_writing", "action": "clarifying_concepts"},
+        },
+    )
+    await observer.flush()
+    assert [call.kwargs["kind"] for call in append.await_args_list] == [
+        "tool",
+        "progress",
+    ]
+    assert record_drops.await_args.kwargs["dropped_count"] == 3
+    assert observer._tool_names == {}
+    assert observer._suppressed_tool_ids == {}
 
 
 class _PageRepository:

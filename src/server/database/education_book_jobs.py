@@ -832,6 +832,9 @@ async def get_book_job_for_parent(
                                    'position', items.position,
                                    'knowledge_point_id', items.knowledge_point_id,
                                    'skill_kp_id', points.skill_kp_id,
+                                   'knowledge_point_title', CASE
+                                       WHEN items.kind = 'material' THEN points.title
+                                       ELSE NULL END,
                                    'status', items.status,
                                    'attempt', items.attempt,
                                    'safe_error', items.safe_error,

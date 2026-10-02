@@ -16,17 +16,27 @@ def create_report_progress_tool() -> BaseTool:
     """Create a tool that emits a bounded semantic stage to the custom stream."""
 
     @tool("report_progress")
-    async def report_progress(stage: str) -> str:
-        """Report entry into an allowed stage from the managed task contract.
+    async def report_progress(stage: str, action: str | None = None) -> str:
+        """Report entry into a stage or optional action you are actually performing.
 
-        Call this only with a stage listed in ``task.json.progress.allowed_stages``.
-        Progress is explanatory and does not complete or validate the task.
+        Use the managed task's progress catalog; it is not a required checklist.
 
         Args:
             stage: One exact allowed stage identifier from the managed task.
+            action: Optional allowed action identifier matching this stage.
+
+        Returns:
+            Stream delivery acknowledgement, not confirmation of persistence or completion.
+
+        If reporting is unavailable, stop reporting and continue the task.
         """
         if not _STAGE_PATTERN.fullmatch(stage):
             return "Invalid progress stage; continue the task."
+        if action is not None and not _STAGE_PATTERN.fullmatch(action):
+            return "Invalid progress action; continue the task."
+        payload = {"stage": stage}
+        if action is not None:
+            payload["action"] = action
 
         try:
             from langgraph.config import get_stream_writer
@@ -37,7 +47,7 @@ def create_report_progress_tool() -> BaseTool:
                     "artifact_type": "report_progress",
                     "artifact_id": stage,
                     "status": "running",
-                    "payload": {"stage": stage},
+                    "payload": payload,
                 }
             )
         except Exception:

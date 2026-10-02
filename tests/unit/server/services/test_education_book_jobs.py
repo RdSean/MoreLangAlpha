@@ -133,6 +133,7 @@ def test_structure_execution_task_uses_structure_only_and_explicit_ids():
     assert task["attempt_token"] == str(CLAIMED["attempt_token"])
     assert task["progress"] == {
         "tool": "report_progress",
+        "allowed_actions": {},
         "allowed_stages": [
             "structure_reading",
             "structure_organizing",
