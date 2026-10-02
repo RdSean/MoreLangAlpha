@@ -34,6 +34,36 @@ class BookStorageError(RuntimeError):
 logger = logging.getLogger(__name__)
 
 
+async def read_material_bytes(
+    *,
+    household_id: UUID,
+    textbook_id: UUID,
+    knowledge_point_id: UUID,
+    content_key: str,
+    expected_sha256: str,
+    expected_size: int,
+) -> bytes:
+    """Read one authorized current material and verify its immutable pointer."""
+
+    prefix = (
+        f"education/{household_id}/textbooks/{textbook_id}/materials/"
+        f"{knowledge_point_id}/attempts/"
+    )
+    path = PurePosixPath(content_key)
+    if (
+        not content_key.startswith(prefix)
+        or path.is_absolute()
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise BookStorageError("A textbook material pointer is invalid")
+    content = await _read(content_key)
+    if content is None or len(content) != expected_size:
+        raise BookStorageError("A textbook material is unavailable")
+    if hashlib.sha256(content).hexdigest() != expected_sha256:
+        raise BookStorageError("A textbook material failed storage verification")
+    return content
+
+
 async def _upload(
     key: str, content: bytes, content_type: str, *, max_size: int
 ) -> bool:

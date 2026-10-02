@@ -580,3 +580,309 @@ async def get_current_structure(*, textbook_id: str | UUID) -> dict[str, Any] | 
     result = dict(structure)
     result["knowledge_points"] = points
     return result
+
+
+async def list_book_source_candidates_for_parent(
+    *, parent_user_id: str
+) -> list[dict[str, Any]]:
+    """List completed Markdown parse bundles owned by a household parent."""
+
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT documents.document_id,
+                       jobs.job_id AS parse_job_id,
+                       jobs.primary_artifact_id,
+                       documents.original_filename AS filename,
+                       documents.media_type,
+                       jobs.parser_id,
+                       jobs.parser_name,
+                       jobs.completed_at,
+                       documents.source_sha256 AS content_sha256,
+                       documents.source_size_bytes AS size_bytes,
+                       COALESCE(images.image_count, 0)::int AS image_count
+                FROM document_parse_jobs AS jobs
+                JOIN documents ON documents.document_id = jobs.document_id
+                JOIN document_artifacts AS primary_artifacts
+                  ON primary_artifacts.artifact_id = jobs.primary_artifact_id
+                 AND primary_artifacts.producer_job_id = jobs.job_id
+                 AND primary_artifacts.artifact_kind = 'primary_document'
+                 AND LOWER(SPLIT_PART(primary_artifacts.media_type, ';', 1))
+                     = 'text/markdown'
+                 AND LOWER(primary_artifacts.format) IN ('gfm', 'markdown')
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS image_count
+                    FROM document_artifacts AS artifacts
+                    WHERE artifacts.producer_job_id = jobs.job_id
+                      AND artifacts.artifact_kind = 'embedded_image'
+                ) AS images ON TRUE
+                WHERE jobs.status = 'completed'
+                  AND jobs.primary_artifact_id IS NOT NULL
+                  AND documents.owner_user_id = %s
+                  AND EXISTS (
+                      SELECT 1 FROM education_memberships AS memberships
+                      WHERE memberships.user_id = %s
+                        AND memberships.role = 'parent'
+                  )
+                ORDER BY jobs.completed_at DESC NULLS LAST, jobs.job_id DESC
+                """,
+                (parent_user_id, parent_user_id),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+
+
+_MANAGED_JOB_SUMMARY_SQL = """
+    jsonb_build_object(
+        'job_id', jobs.job_id,
+        'kind', jobs.kind,
+        'status', jobs.status,
+        'total_items', jobs.total_items,
+        'succeeded_items', jobs.succeeded_items,
+        'failed_items', jobs.failed_items,
+        'cancelled_items', jobs.cancelled_items,
+        'not_run_items', jobs.not_run_items,
+        'high_water_seq', jobs.high_water_seq,
+        'activity_status', jobs.activity_status,
+        'created_at', jobs.created_at,
+        'started_at', jobs.started_at,
+        'finished_at', jobs.finished_at,
+        'safe_error', jobs.safe_error
+    )
+"""
+
+
+async def _managed_textbook_rows(
+    *, parent_user_id: str, textbook_id: UUID | None = None
+) -> list[dict[str, Any]]:
+    textbook_filter = "AND textbooks.textbook_id = %s" if textbook_id else ""
+    query = f"""
+        SELECT textbooks.textbook_id, textbooks.title,
+               CASE
+                   WHEN textbooks.current_structure_id IS NOT NULL THEN 'ready'
+                   WHEN recent_structure.status IN ('queued', 'running')
+                       THEN recent_structure.status
+                   WHEN recent_structure.status IS NULL THEN 'queued'
+                   ELSE 'failed'
+               END AS structure_status,
+               COALESCE(material_counts.total, 0)::int AS material_total,
+               COALESCE(material_counts.ready, 0)::int AS material_ready,
+               current_job.summary AS current_job,
+               recent_job.summary AS recent_job,
+               textbooks.updated_at,
+               textbooks.current_structure_id,
+               textbooks.source_document_id AS document_id,
+               textbooks.source_parse_job_id AS parse_job_id,
+               textbooks.source_primary_artifact_id AS primary_artifact_id,
+               textbooks.source_filename AS filename,
+               textbooks.source_media_type AS media_type,
+               textbooks.source_parser_id AS parser_id,
+               textbooks.source_parser_name AS parser_name,
+               textbooks.source_parse_completed_at AS completed_at,
+               textbooks.source_content_sha256 AS content_sha256,
+               textbooks.source_size_bytes AS size_bytes,
+               textbooks.created_at AS frozen_at,
+               COALESCE(source_counts.image_count, 0)::int AS image_count,
+               COALESCE(assignments.assigned_student_count, 0)::int
+                   AS assigned_student_count
+        FROM education_textbooks AS textbooks
+        JOIN education_memberships AS memberships
+          ON memberships.household_id = textbooks.household_id
+         AND memberships.user_id = %s
+         AND memberships.role = 'parent'
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) AS total,
+                   COUNT(materials.material_id) AS ready
+            FROM education_book_knowledge_points AS points
+            LEFT JOIN education_book_materials AS materials
+              ON materials.knowledge_point_id = points.knowledge_point_id
+            WHERE points.structure_id = textbooks.current_structure_id
+        ) AS material_counts ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT {_MANAGED_JOB_SUMMARY_SQL} AS summary
+            FROM education_book_jobs AS jobs
+            WHERE jobs.textbook_id = textbooks.textbook_id
+              AND jobs.status IN ('queued', 'running')
+            ORDER BY jobs.created_at DESC, jobs.job_id DESC
+            LIMIT 1
+        ) AS current_job ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT {_MANAGED_JOB_SUMMARY_SQL} AS summary
+            FROM education_book_jobs AS jobs
+            WHERE jobs.textbook_id = textbooks.textbook_id
+            ORDER BY jobs.created_at DESC, jobs.job_id DESC
+            LIMIT 1
+        ) AS recent_job ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT jobs.status
+            FROM education_book_jobs AS jobs
+            WHERE jobs.textbook_id = textbooks.textbook_id
+              AND jobs.kind = 'structure'
+            ORDER BY jobs.created_at DESC, jobs.job_id DESC
+            LIMIT 1
+        ) AS recent_structure ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) AS image_count
+            FROM jsonb_array_elements(textbooks.source_asset_manifest) AS asset
+            WHERE asset->>'artifact_kind' = 'embedded_image'
+        ) AS source_counts ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) AS assigned_student_count
+            FROM education_textbook_assignments AS assignment
+            WHERE assignment.textbook_id = textbooks.textbook_id
+        ) AS assignments ON TRUE
+        WHERE TRUE {textbook_filter}
+        ORDER BY textbooks.updated_at DESC, textbooks.textbook_id
+    """
+    params: tuple[Any, ...] = (
+        (parent_user_id, textbook_id) if textbook_id is not None else (parent_user_id,)
+    )
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(query, params)
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def list_managed_textbooks_for_parent(
+    *, parent_user_id: str
+) -> list[dict[str, Any]]:
+    return await _managed_textbook_rows(parent_user_id=parent_user_id)
+
+
+async def get_managed_textbook_for_parent(
+    *, parent_user_id: str, textbook_id: str | UUID
+) -> dict[str, Any] | None:
+    rows = await _managed_textbook_rows(
+        parent_user_id=parent_user_id,
+        textbook_id=UUID(str(textbook_id)),
+    )
+    return rows[0] if rows else None
+
+
+async def get_managed_structure_for_parent(
+    *, parent_user_id: str, textbook_id: str | UUID
+) -> dict[str, Any] | None:
+    """Read the current structure only through a parent household ACL."""
+
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT structures.*
+                FROM education_textbooks AS textbooks
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                 AND memberships.user_id = %s
+                 AND memberships.role = 'parent'
+                JOIN education_book_structures AS structures
+                  ON structures.structure_id = textbooks.current_structure_id
+                WHERE textbooks.textbook_id = %s
+                """,
+                (parent_user_id, textbook_id),
+            )
+            structure = await cur.fetchone()
+            if structure is None:
+                return None
+            await cur.execute(
+                """
+                SELECT points.knowledge_point_id, points.skill_kp_id,
+                       points.position, points.title, points.unit_skill_node_id,
+                       points.node_skill_ids, points.start_line, points.end_line,
+                       materials.content_key
+                FROM education_book_knowledge_points AS points
+                LEFT JOIN education_book_materials AS materials
+                  ON materials.knowledge_point_id = points.knowledge_point_id
+                WHERE points.structure_id = %s
+                ORDER BY points.position
+                """,
+                (structure["structure_id"],),
+            )
+            points = [dict(row) for row in await cur.fetchall()]
+    result = dict(structure)
+    result["knowledge_points"] = points
+    return result
+
+
+async def get_managed_source_for_parent(
+    *, parent_user_id: str, textbook_id: str | UUID
+) -> dict[str, Any] | None:
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT textbooks.textbook_id, textbooks.source_snapshot_prefix,
+                       textbooks.source_markdown_key,
+                       textbooks.source_content_sha256,
+                       textbooks.source_size_bytes,
+                       textbooks.source_asset_manifest
+                FROM education_textbooks AS textbooks
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                 AND memberships.user_id = %s
+                 AND memberships.role = 'parent'
+                WHERE textbooks.textbook_id = %s
+                """,
+                (parent_user_id, textbook_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_managed_material_for_parent(
+    *,
+    parent_user_id: str,
+    textbook_id: str | UUID,
+    knowledge_point_id: str | UUID,
+) -> dict[str, Any] | None:
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT textbooks.textbook_id, textbooks.household_id,
+                       textbooks.source_asset_manifest,
+                       points.knowledge_point_id, points.skill_kp_id,
+                       materials.content_key, materials.content_sha256,
+                       materials.size_bytes, materials.depth,
+                       materials.requirements, materials.updated_at
+                FROM education_textbooks AS textbooks
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                 AND memberships.user_id = %s
+                 AND memberships.role = 'parent'
+                JOIN education_book_knowledge_points AS points
+                  ON points.structure_id = textbooks.current_structure_id
+                 AND points.knowledge_point_id = %s
+                LEFT JOIN education_book_materials AS materials
+                  ON materials.knowledge_point_id = points.knowledge_point_id
+                WHERE textbooks.textbook_id = %s
+                """,
+                (parent_user_id, knowledge_point_id, textbook_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_managed_asset_for_parent(
+    *, parent_user_id: str, textbook_id: str | UUID, asset_id: str
+) -> dict[str, Any] | None:
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT textbooks.textbook_id, textbooks.source_snapshot_prefix,
+                       asset AS manifest_entry
+                FROM education_textbooks AS textbooks
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                 AND memberships.user_id = %s
+                 AND memberships.role = 'parent'
+                CROSS JOIN LATERAL
+                    jsonb_array_elements(textbooks.source_asset_manifest) AS asset
+                WHERE textbooks.textbook_id = %s
+                  AND asset->>'artifact_id' = %s
+                LIMIT 1
+                """,
+                (parent_user_id, textbook_id, asset_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None

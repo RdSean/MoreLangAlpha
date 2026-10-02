@@ -9,6 +9,58 @@ from uuid import uuid4
 import pytest
 
 
+@pytest.mark.asyncio
+async def test_read_material_bytes_verifies_owned_pointer_and_digest(
+    monkeypatch,
+) -> None:
+    from src.server.services import education_book_storage as storage
+
+    household_id = uuid4()
+    textbook_id = uuid4()
+    knowledge_point_id = uuid4()
+    attempt_token = uuid4()
+    content = b"# Lesson\n"
+    digest = sha256(content).hexdigest()
+    content_key = (
+        f"education/{household_id}/textbooks/{textbook_id}/materials/"
+        f"{knowledge_point_id}/attempts/{attempt_token}/{digest}.md"
+    )
+    read = AsyncMock(return_value=content)
+    monkeypatch.setattr(storage, "_read", read)
+
+    result = await storage.read_material_bytes(
+        household_id=household_id,
+        textbook_id=textbook_id,
+        knowledge_point_id=knowledge_point_id,
+        content_key=content_key,
+        expected_sha256=digest,
+        expected_size=len(content),
+    )
+
+    assert result == content
+    read.assert_awaited_once_with(content_key)
+
+
+@pytest.mark.asyncio
+async def test_read_material_bytes_rejects_an_unowned_storage_key(monkeypatch) -> None:
+    from src.server.services import education_book_storage as storage
+
+    read = AsyncMock(return_value=b"# Lesson\n")
+    monkeypatch.setattr(storage, "_read", read)
+
+    with pytest.raises(storage.BookStorageError, match="pointer is invalid"):
+        await storage.read_material_bytes(
+            household_id=uuid4(),
+            textbook_id=uuid4(),
+            knowledge_point_id=uuid4(),
+            content_key="education/another-household/textbooks/other/materials/file.md",
+            expected_sha256="a" * 64,
+            expected_size=9,
+        )
+
+    read.assert_not_awaited()
+
+
 def test_source_snapshot_prefix_uses_textbook_identity_only() -> None:
     from src.server.services.education_textbook_source_snapshots import (
         build_snapshot_prefix,

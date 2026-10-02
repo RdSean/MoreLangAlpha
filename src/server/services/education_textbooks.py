@@ -1,13 +1,16 @@
 """Versioning, explicit local processing, and authorization for family textbooks."""
 
 import asyncio
+import hashlib
 import json
 import logging
+import re
 from collections.abc import Mapping
 from io import BytesIO
 from pathlib import PurePosixPath
 from typing import Any
-from uuid import uuid4
+from urllib.parse import unquote
+from uuid import UUID, uuid4
 
 from src.config.settings import get_document_parsing_config
 from src.server.database.education_tasks import get_household_context_for_parent
@@ -31,15 +34,31 @@ from src.server.database.education_textbooks import (
     TextbookQueueValidationError,
 )
 from src.server.database.education_members import get_membership_for_user
+from src.server.database.education_books import (
+    get_managed_asset_for_parent,
+    get_managed_material_for_parent,
+    get_managed_source_for_parent,
+    get_managed_structure_for_parent,
+    get_managed_textbook_for_parent,
+    list_book_source_candidates_for_parent,
+    list_managed_textbooks_for_parent,
+)
 from src.server.database.session_lock import await_settled
 from src.server.services.education_textbook_source_snapshots import (
     TextbookSourceSnapshotError,
     cleanup_snapshot_objects,
+    create_textbook_from_library_source,
     freeze_parse_job_source,
 )
 from src.server.services.education_textbook_snapshot_reads import (
     TextbookSnapshotReadError,
     read_snapshot_artifact_bytes,
+    safe_asset_manifest_entry,
+)
+from src.server.services.education_book_storage import read_material_bytes
+from src.server.services.education_book_structure import (
+    get_more_to_skills_identity,
+    project_material_content_files,
 )
 from src.server.services.education_textbook_storage import write_textbook_content_bundle
 from src.server.services.education_teaching_storage import (
@@ -53,6 +72,11 @@ logger = logging.getLogger(__name__)
 _SOURCE_SNAPSHOT_FORMAT = "langalpha-textbook-source-snapshot/v1"
 _MARKDOWN_MEDIA_TYPE = "text/markdown"
 _MARKDOWN_FORMATS = frozenset({"gfm", "markdown"})
+_MARKDOWN_IMAGE_RE = re.compile(
+    r"""!\[[^\]]*\]\(\s*(?P<target><[^>\n]+>|[^\s)]+)"""
+    r"""(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)""",
+    re.DOTALL,
+)
 
 _VALID_VERSION_TRANSITIONS = {
     ("draft", "processing"),
@@ -81,6 +105,332 @@ class TextbookNotFoundError(TextbookError, LookupError):
 
 class TextbookProcessingError(TextbookError):
     """The durable local processing job failed after it was claimed."""
+
+
+def _managed_source_candidate(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "document_id": str(row["document_id"]),
+        "parse_job_id": str(row["parse_job_id"]),
+        "primary_artifact_id": str(row["primary_artifact_id"]),
+        "filename": str(row["filename"]),
+        "media_type": str(row["media_type"]),
+        "parser_id": str(row["parser_id"]),
+        "parser_name": str(row["parser_name"]),
+        "completed_at": row["completed_at"],
+        "content_sha256": str(row["content_sha256"]),
+        "size_bytes": int(row["size_bytes"]),
+        "image_count": int(row["image_count"]),
+    }
+
+
+def _managed_summary(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "textbook_id": str(row["textbook_id"]),
+        "title": str(row["title"]),
+        "structure_status": str(row["structure_status"]),
+        "materials": {
+            "total": int(row["material_total"]),
+            "ready": int(row["material_ready"]),
+        },
+        "current_job": row.get("current_job"),
+        "updated_at": row["updated_at"],
+    }
+
+
+def _rewrite_managed_asset_urls(
+    markdown: str,
+    *,
+    textbook_id: str | UUID,
+    manifest: object,
+) -> str:
+    if not isinstance(manifest, list):
+        return markdown
+    assets = [
+        safe
+        for entry in manifest
+        if (safe := safe_asset_manifest_entry(entry)) is not None
+        and safe["artifact_kind"] == "embedded_image"
+    ]
+    by_path = {asset["relative_path"]: asset for asset in assets}
+    by_basename: dict[str, list[dict[str, str]]] = {}
+    for asset in assets:
+        basename = PurePosixPath(asset["relative_path"]).name
+        by_basename.setdefault(basename, []).append(asset)
+
+    def replace(match: re.Match[str]) -> str:
+        raw_target = match.group("target")
+        bracketed = raw_target.startswith("<") and raw_target.endswith(">")
+        target = raw_target[1:-1].strip() if bracketed else raw_target.strip()
+        target = unquote(target)
+        if (
+            not target
+            or target.startswith(("#", "//", "/"))
+            or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target)
+        ):
+            return match.group(0)
+        normalized = target[2:] if target.startswith("./") else target
+        if (
+            "\\" in normalized
+            or "\x00" in normalized
+            or any(part in {"", ".", ".."} for part in normalized.split("/"))
+        ):
+            return match.group(0)
+        asset = by_path.get(normalized)
+        if asset is None:
+            matches = by_basename.get(PurePosixPath(normalized).name, [])
+            if len(matches) != 1:
+                return match.group(0)
+            asset = matches[0]
+        endpoint = (
+            f"/api/v1/education/textbooks/{textbook_id}/assets/{asset['artifact_id']}"
+        )
+        replacement = f"<{endpoint}>" if bracketed else endpoint
+        return match.group(0).replace(raw_target, replacement, 1)
+
+    return _MARKDOWN_IMAGE_RE.sub(replace, markdown)
+
+
+async def list_book_source_candidates(*, parent_user_id: str) -> list[dict[str, Any]]:
+    rows = await list_book_source_candidates_for_parent(parent_user_id=parent_user_id)
+    return [_managed_source_candidate(row) for row in rows]
+
+
+async def create_managed_textbook(
+    *,
+    parent_user_id: str,
+    parse_job_id: str,
+    primary_artifact_id: str,
+    title: str,
+    idempotency_key: str,
+) -> dict[str, str]:
+    context = await get_household_context_for_parent(parent_user_id)
+    if context is None:
+        raise TextbookPermissionError("Only a parent can create family textbooks")
+    normalized_title = _required_title(title)
+    source_suffix = hashlib.sha256(
+        f"{parse_job_id}:{primary_artifact_id}".encode("utf-8")
+    ).hexdigest()[:12]
+    try:
+        created = await create_textbook_from_library_source(
+            parent_user_id=parent_user_id,
+            household_id=str(context["household_id"]),
+            title=normalized_title,
+            slug=_slug(normalized_title, unique_suffix=source_suffix),
+            parse_job_id=parse_job_id,
+            primary_artifact_id=primary_artifact_id,
+            idempotency_key=idempotency_key,
+            identity=get_more_to_skills_identity(),
+        )
+    except (TextbookSourceSnapshotError, ValueError) as exc:
+        raise TextbookError(str(exc)) from exc
+    return {
+        "textbook_id": str(created["textbook_id"]),
+        "job_id": str(created["job_id"]),
+    }
+
+
+async def list_managed_textbooks(*, parent_user_id: str) -> list[dict[str, Any]]:
+    rows = await list_managed_textbooks_for_parent(parent_user_id=parent_user_id)
+    return [_managed_summary(row) for row in rows]
+
+
+async def get_managed_textbook_workbench(
+    *, parent_user_id: str, textbook_id: str | UUID
+) -> dict[str, Any]:
+    row = await get_managed_textbook_for_parent(
+        parent_user_id=parent_user_id,
+        textbook_id=textbook_id,
+    )
+    if row is None:
+        raise TextbookNotFoundError("Textbook not found")
+    summary = _managed_summary(row)
+    summary.update(
+        {
+            "source": {
+                **_managed_source_candidate(row),
+                "frozen_at": row["frozen_at"],
+            },
+            "current_structure_id": row["current_structure_id"],
+            "recent_job": row.get("recent_job"),
+            "assigned_student_count": int(row["assigned_student_count"]),
+        }
+    )
+    return summary
+
+
+async def get_managed_textbook_structure(
+    *, parent_user_id: str, textbook_id: str | UUID
+) -> dict[str, Any]:
+    row = await get_managed_structure_for_parent(
+        parent_user_id=parent_user_id,
+        textbook_id=textbook_id,
+    )
+    if row is None:
+        raise TextbookNotFoundError("Textbook structure not found")
+    points = [dict(point) for point in row["knowledge_points"]]
+    content_files = {
+        str(point["skill_kp_id"]): f"materials/{point['knowledge_point_id']}.md"
+        for point in points
+        if point.get("content_key") is not None
+    }
+    projections = []
+    for point in points:
+        content_file = content_files.get(str(point["skill_kp_id"]))
+        projections.append(
+            {
+                "knowledge_point_id": point["knowledge_point_id"],
+                "skill_kp_id": point["skill_kp_id"],
+                "position": point["position"],
+                "title": point["title"],
+                "unit_skill_node_id": point["unit_skill_node_id"],
+                "node_skill_ids": point["node_skill_ids"],
+                "start_line": point["start_line"],
+                "end_line": point["end_line"],
+                "content_file": content_file,
+                "material_available": content_file is not None,
+            }
+        )
+    return {
+        "textbook_id": str(row["textbook_id"]),
+        "structure_id": row["structure_id"],
+        "schema_version": row["schema_version"],
+        "structure": project_material_content_files(
+            row["structure_json"], content_files
+        ),
+        "knowledge_points": projections,
+        "warnings": list(row["validation_warnings"] or []),
+    }
+
+
+async def get_managed_textbook_source(
+    *,
+    parent_user_id: str,
+    textbook_id: str | UUID,
+    start_line: int,
+    end_line: int,
+) -> dict[str, Any]:
+    if end_line < start_line:
+        raise TextbookError("end_line must be greater than or equal to start_line")
+    row = await get_managed_source_for_parent(
+        parent_user_id=parent_user_id,
+        textbook_id=textbook_id,
+    )
+    if row is None:
+        raise TextbookNotFoundError("Textbook source not found")
+    prefix = str(row["source_snapshot_prefix"])
+    markdown_key = str(row["source_markdown_key"])
+    if not markdown_key.startswith(prefix):
+        raise TextbookProcessingError("The textbook source pointer is invalid")
+    try:
+        content, _ = await read_snapshot_artifact_bytes(
+            snapshot_prefix=prefix,
+            relative_path=markdown_key.removeprefix(prefix),
+            expected_sha256=str(row["source_content_sha256"]),
+            max_bytes=int(row["source_size_bytes"]),
+        )
+        markdown = content.decode("utf-8")
+    except (TextbookSnapshotReadError, UnicodeDecodeError) as exc:
+        raise TextbookProcessingError("The textbook source is unavailable") from exc
+    lines = markdown.splitlines()
+    total_lines = len(lines)
+    if total_lines == 0 or start_line > total_lines:
+        raise TextbookError("start_line exceeds the textbook source")
+    actual_end = min(end_line, total_lines)
+    return {
+        "textbook_id": str(row["textbook_id"]),
+        "start_line": start_line,
+        "end_line": actual_end,
+        "total_lines": total_lines,
+        "markdown": _rewrite_managed_asset_urls(
+            "\n".join(lines[start_line - 1 : actual_end]),
+            textbook_id=row["textbook_id"],
+            manifest=row["source_asset_manifest"],
+        ),
+    }
+
+
+async def get_managed_knowledge_point_material(
+    *,
+    parent_user_id: str,
+    textbook_id: str | UUID,
+    knowledge_point_id: str | UUID,
+) -> dict[str, Any]:
+    row = await get_managed_material_for_parent(
+        parent_user_id=parent_user_id,
+        textbook_id=textbook_id,
+        knowledge_point_id=knowledge_point_id,
+    )
+    if row is None:
+        raise TextbookNotFoundError("Knowledge point not found")
+    base = {
+        "textbook_id": str(row["textbook_id"]),
+        "knowledge_point_id": row["knowledge_point_id"],
+        "skill_kp_id": str(row["skill_kp_id"]),
+    }
+    if row.get("content_key") is None:
+        return {
+            **base,
+            "material_available": False,
+            "markdown": None,
+            "generated_at": None,
+            "depth": None,
+            "requirements": None,
+            "content_sha256": None,
+        }
+    try:
+        content = await read_material_bytes(
+            household_id=UUID(str(row["household_id"])),
+            textbook_id=UUID(str(row["textbook_id"])),
+            knowledge_point_id=UUID(str(row["knowledge_point_id"])),
+            content_key=str(row["content_key"]),
+            expected_sha256=str(row["content_sha256"]),
+            expected_size=int(row["size_bytes"]),
+        )
+        markdown = content.decode("utf-8")
+    except (RuntimeError, UnicodeDecodeError) as exc:
+        raise TextbookProcessingError("The textbook material is unavailable") from exc
+    return {
+        **base,
+        "material_available": True,
+        "markdown": _rewrite_managed_asset_urls(
+            markdown,
+            textbook_id=row["textbook_id"],
+            manifest=row["source_asset_manifest"],
+        ),
+        "generated_at": row["updated_at"],
+        "depth": row["depth"],
+        "requirements": row["requirements"],
+        "content_sha256": row["content_sha256"],
+    }
+
+
+async def open_managed_textbook_asset(
+    *, parent_user_id: str, textbook_id: str | UUID, asset_id: str
+) -> dict[str, Any]:
+    row = await get_managed_asset_for_parent(
+        parent_user_id=parent_user_id,
+        textbook_id=textbook_id,
+        asset_id=asset_id,
+    )
+    if row is None:
+        raise TextbookNotFoundError("Textbook asset not found")
+    manifest = safe_asset_manifest_entry(row.get("manifest_entry"))
+    if manifest is None or manifest["artifact_id"] != asset_id:
+        raise TextbookProcessingError("The textbook asset manifest is invalid")
+    try:
+        content, _ = await read_snapshot_artifact_bytes(
+            snapshot_prefix=str(row["source_snapshot_prefix"]),
+            relative_path=manifest["relative_path"],
+            expected_sha256=manifest["sha256"],
+            max_bytes=get_document_parsing_config().max_upload_bytes,
+        )
+    except TextbookSnapshotReadError as exc:
+        raise TextbookProcessingError("The textbook asset is unavailable") from exc
+    return {
+        "content": content,
+        "media_type": manifest["media_type"],
+        "sha256": manifest["sha256"],
+    }
 
 
 def assert_version_transition(*, current: str, target: str) -> None:
@@ -121,7 +471,11 @@ def _uses_artifact_sources(job: Mapping[str, Any]) -> bool:
 
 
 def _snapshot_prefix(value: object) -> str:
-    if not isinstance(value, str) or not value.startswith("education/") or not value.endswith("/"):
+    if (
+        not isinstance(value, str)
+        or not value.startswith("education/")
+        or not value.endswith("/")
+    ):
         raise TextbookProcessingError("A frozen textbook snapshot prefix is invalid")
     path = PurePosixPath(value.rstrip("/"))
     if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
@@ -138,7 +492,9 @@ def _snapshot_relative_path(value: object) -> str:
     if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
         raise TextbookProcessingError("A frozen textbook artifact path is invalid")
     normalized = path.as_posix()
-    return normalized if normalized.startswith("artifacts/") else f"artifacts/{normalized}"
+    return (
+        normalized if normalized.startswith("artifacts/") else f"artifacts/{normalized}"
+    )
 
 
 def _is_sha256(value: object) -> bool:
@@ -158,7 +514,9 @@ def _source_position(source: Mapping[str, Any]) -> int:
 
 def _artifact_bundle_prefix(sources: list[Mapping[str, Any]]) -> str:
     namespaces = {
-        "/".join(_snapshot_prefix(source.get("snapshot_prefix")).rstrip("/").split("/")[:-1])
+        "/".join(
+            _snapshot_prefix(source.get("snapshot_prefix")).rstrip("/").split("/")[:-1]
+        )
         for source in sources
     }
     if len(namespaces) != 1:
@@ -175,7 +533,9 @@ async def build_frozen_artifact_package(job: dict[str, Any]) -> dict[str, Any]:
         ordered_sources = sorted(sources, key=_source_position)
     except TypeError as exc:
         raise TextbookProcessingError("A frozen textbook source is invalid") from exc
-    if len({_source_position(source) for source in ordered_sources}) != len(ordered_sources):
+    if len({_source_position(source) for source in ordered_sources}) != len(
+        ordered_sources
+    ):
         raise TextbookProcessingError("Frozen textbook source positions must be unique")
 
     max_bytes = int(get_document_parsing_config().max_upload_bytes)
@@ -193,27 +553,34 @@ async def build_frozen_artifact_package(job: dict[str, Any]) -> dict[str, Any]:
         document_id = source.get("document_id")
         producer_job_id = source.get("producer_job_id")
         if not isinstance(primary_artifact_id, str) or not primary_artifact_id:
-            raise TextbookProcessingError("A frozen textbook primary artifact is invalid")
+            raise TextbookProcessingError(
+                "A frozen textbook primary artifact is invalid"
+            )
         if not _is_sha256(primary_sha256):
             raise TextbookProcessingError("A frozen textbook source digest is invalid")
 
-        manifest_bytes = await asyncio.to_thread(
-            get_bytes, f"{prefix}manifest.json"
-        )
+        manifest_bytes = await asyncio.to_thread(get_bytes, f"{prefix}manifest.json")
         if (
             not isinstance(manifest_bytes, bytes)
             or not manifest_bytes
             or len(manifest_bytes) > max_bytes
         ):
-            raise TextbookProcessingError("A frozen textbook snapshot manifest is invalid")
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot manifest is invalid"
+            )
         try:
             manifest = json.loads(manifest_bytes.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise TextbookProcessingError(
                 "A frozen textbook snapshot manifest is invalid"
             ) from exc
-        if not isinstance(manifest, Mapping) or manifest.get("format") != _SOURCE_SNAPSHOT_FORMAT:
-            raise TextbookProcessingError("A frozen textbook snapshot manifest is invalid")
+        if (
+            not isinstance(manifest, Mapping)
+            or manifest.get("format") != _SOURCE_SNAPSHOT_FORMAT
+        ):
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot manifest is invalid"
+            )
         if (
             str(manifest.get("document_id") or "") != str(document_id or "")
             or str(manifest.get("producer_job_id") or "") != str(producer_job_id or "")
@@ -227,7 +594,9 @@ async def build_frozen_artifact_package(job: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(artifacts, list) or not artifacts:
             raise TextbookProcessingError("A frozen textbook snapshot has no artifacts")
         if any(not isinstance(artifact, Mapping) for artifact in artifacts):
-            raise TextbookProcessingError("A frozen textbook snapshot artifact is invalid")
+            raise TextbookProcessingError(
+                "A frozen textbook snapshot artifact is invalid"
+            )
         primary_matches = [
             artifact
             for artifact in artifacts
@@ -246,7 +615,9 @@ async def build_frozen_artifact_package(job: dict[str, Any]) -> dict[str, Any]:
             raise TextbookProcessingError(
                 "A frozen textbook snapshot Markdown format is invalid"
             )
-        media_type = str(primary.get("media_type") or "").split(";", 1)[0].strip().lower()
+        media_type = (
+            str(primary.get("media_type") or "").split(";", 1)[0].strip().lower()
+        )
         if media_type != _MARKDOWN_MEDIA_TYPE:
             raise TextbookProcessingError(
                 "A frozen textbook snapshot Markdown media type is invalid"
@@ -291,7 +662,9 @@ async def build_frozen_artifact_package(job: dict[str, Any]) -> dict[str, Any]:
 
         title = source.get("source_filename")
         if not isinstance(title, str) or not title.strip():
-            raise TextbookProcessingError("A frozen textbook source filename is invalid")
+            raise TextbookProcessingError(
+                "A frozen textbook source filename is invalid"
+            )
         title = title.strip()
         slug = _slug(title)
         if slug in used_slugs:
@@ -367,9 +740,7 @@ async def start_processing_from_parse_jobs(
     """Freeze every completed library bundle before creating any processing job."""
     context = await get_household_context_for_parent(parent_user_id)
     if not context:
-        raise TextbookPermissionError(
-            "Only a parent can start textbook processing"
-        )
+        raise TextbookPermissionError("Only a parent can start textbook processing")
     if not source_parse_job_ids:
         raise TextbookError("At least one textbook source is required")
     if len(set(source_parse_job_ids)) != len(source_parse_job_ids):
@@ -398,10 +769,7 @@ async def start_processing_from_parse_jobs(
                 owner_user_id=parent_user_id,
                 producer_job_id=producer_job_id,
             )
-            if (
-                not owned_job
-                or str(owned_job.get("status") or "") != "completed"
-            ):
+            if not owned_job or str(owned_job.get("status") or "") != "completed":
                 raise TextbookNotFoundError(
                     "One or more parse job sources are unavailable or incomplete"
                 )
@@ -585,12 +953,8 @@ async def list_completed_textbook_parse_jobs(
     *, parent_user_id: str
 ) -> list[dict[str, Any]]:
     if not await get_household_context_for_parent(parent_user_id):
-        raise TextbookPermissionError(
-            "Only a parent can select textbook sources"
-        )
-    return await list_completed_parse_jobs_for_parent(
-        parent_user_id=parent_user_id
-    )
+        raise TextbookPermissionError("Only a parent can select textbook sources")
+    return await list_completed_parse_jobs_for_parent(parent_user_id=parent_user_id)
 
 
 async def get_parent_textbook(

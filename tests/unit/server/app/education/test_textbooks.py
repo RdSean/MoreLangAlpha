@@ -13,7 +13,10 @@ from httpx import ASGITransport, AsyncClient
 
 from src.server.app.education.textbooks import router
 import src.server.app.education.textbooks as textbook_routes
-from src.server.services.education_textbooks import TextbookPermissionError
+from src.server.services.education_textbooks import (
+    TextbookNotFoundError,
+    TextbookPermissionError,
+)
 from src.server.utils.api import get_current_user_id
 
 
@@ -26,6 +29,40 @@ TEXTBOOK = {
 }
 
 MANAGED_JOB_ID = UUID("9998bb1a-687a-4d45-815d-5b1dd6ed2f17")
+KNOWLEDGE_POINT_ID = UUID("4c3f4d0c-a508-4bff-a89f-a3a584a2fe86")
+
+
+def _source_candidate() -> dict:
+    now = datetime.now(timezone.utc)
+    return {
+        "document_id": "doc-A1b2C3d4E5f6",
+        "parse_job_id": "job-A1b2C3d4E5f6",
+        "primary_artifact_id": "art-A1b2C3d4E5f6",
+        "filename": "English.md",
+        "media_type": "text/markdown",
+        "parser_id": "datalab",
+        "parser_name": "Datalab",
+        "completed_at": now,
+        "content_sha256": "a" * 64,
+        "size_bytes": 128,
+        "image_count": 1,
+    }
+
+
+def _workbench_snapshot() -> dict:
+    now = datetime.now(timezone.utc)
+    return {
+        "textbook_id": TEXTBOOK["textbook_id"],
+        "title": TEXTBOOK["title"],
+        "structure_status": "ready",
+        "materials": {"total": 1, "ready": 1},
+        "current_job": None,
+        "updated_at": now,
+        "source": {**_source_candidate(), "frozen_at": now},
+        "current_structure_id": UUID("0cf0c918-23dc-44a2-8ad7-6a8788279f3e"),
+        "recent_job": None,
+        "assigned_student_count": 0,
+    }
 
 
 def _managed_job_snapshot() -> dict:
@@ -273,11 +310,204 @@ async def test_activity_sse_empty_snapshot_does_not_advance_id():
 
 
 @pytest.mark.asyncio
+async def test_parent_lists_managed_textbook_sources(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    with patch.object(
+        textbook_routes,
+        "list_book_source_candidates",
+        new=AsyncMock(return_value=[_source_candidate()]),
+        create=True,
+    ) as list_sources:
+        response = await client.get("/api/v1/education/textbook-sources")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["parse_job_id"] == "job-A1b2C3d4E5f6"
+    list_sources.assert_awaited_once_with(parent_user_id="parent-1")
+
+
+@pytest.mark.asyncio
+async def test_parent_creates_managed_textbook_from_one_frozen_source(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    created = {
+        "textbook_id": TEXTBOOK["textbook_id"],
+        "job_id": str(MANAGED_JOB_ID),
+    }
+    with patch.object(
+        textbook_routes,
+        "create_managed_textbook",
+        new=AsyncMock(return_value=created),
+        create=True,
+    ) as create:
+        response = await client.post(
+            "/api/v1/education/textbooks",
+            json={
+                "parse_job_id": "job-A1b2C3d4E5f6",
+                "primary_artifact_id": "art-A1b2C3d4E5f6",
+                "title": "英语第二册",
+                "idempotency_key": "create-english-2",
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json() == created
+    create.assert_awaited_once_with(
+        parent_user_id="parent-1",
+        parse_job_id="job-A1b2C3d4E5f6",
+        primary_artifact_id="art-A1b2C3d4E5f6",
+        title="英语第二册",
+        idempotency_key="create-english-2",
+    )
+
+
+@pytest.mark.asyncio
+async def test_parent_reads_managed_workbench_and_content_without_storage_keys(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    structure = {
+        "textbook_id": TEXTBOOK["textbook_id"],
+        "structure_id": UUID("0cf0c918-23dc-44a2-8ad7-6a8788279f3e"),
+        "schema_version": "1.0.0",
+        "structure": {"schema_version": "1.0.0", "knowledge_points": []},
+        "knowledge_points": [],
+        "warnings": [],
+    }
+    source = {
+        "textbook_id": TEXTBOOK["textbook_id"],
+        "start_line": 2,
+        "end_line": 3,
+        "total_lines": 4,
+        "markdown": "second\nthird",
+    }
+    material = {
+        "textbook_id": TEXTBOOK["textbook_id"],
+        "knowledge_point_id": KNOWLEDGE_POINT_ID,
+        "skill_kp_id": "unit-1-k1",
+        "material_available": True,
+        "markdown": "# Lesson",
+        "generated_at": datetime.now(timezone.utc),
+        "depth": "lesson",
+        "requirements": None,
+        "content_sha256": "b" * 64,
+    }
+    with (
+        patch.object(
+            textbook_routes,
+            "get_managed_textbook_workbench",
+            new=AsyncMock(return_value=_workbench_snapshot()),
+            create=True,
+        ),
+        patch.object(
+            textbook_routes,
+            "get_managed_textbook_structure",
+            new=AsyncMock(return_value=structure),
+            create=True,
+        ),
+        patch.object(
+            textbook_routes,
+            "get_managed_textbook_source",
+            new=AsyncMock(return_value=source),
+            create=True,
+        ) as read_source,
+        patch.object(
+            textbook_routes,
+            "get_managed_knowledge_point_material",
+            new=AsyncMock(return_value=material),
+            create=True,
+        ),
+    ):
+        workbench_response = await client.get(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}"
+        )
+        structure_response = await client.get(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/structure"
+        )
+        source_response = await client.get(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/source",
+            params={"start_line": 2, "end_line": 3},
+        )
+        material_response = await client.get(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}"
+            f"/knowledge-points/{KNOWLEDGE_POINT_ID}/material"
+        )
+
+    assert workbench_response.status_code == 200
+    assert structure_response.status_code == 200
+    assert source_response.status_code == 200
+    assert material_response.status_code == 200
+    assert "storage_key" not in json.dumps(
+        [
+            workbench_response.json(),
+            structure_response.json(),
+            source_response.json(),
+            material_response.json(),
+        ]
+    )
+    read_source.assert_awaited_once_with(
+        parent_user_id="parent-1",
+        textbook_id=UUID(TEXTBOOK["textbook_id"]),
+        start_line=2,
+        end_line=3,
+    )
+
+
+@pytest.mark.asyncio
+async def test_managed_textbook_reads_hide_cross_household_records(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "other-parent"
+    with patch.object(
+        textbook_routes,
+        "get_managed_textbook_workbench",
+        new=AsyncMock(side_effect=TextbookNotFoundError("Textbook not found")),
+        create=True,
+    ):
+        response = await client.get(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}"
+        )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_managed_asset_response_is_private_and_digest_bound(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    with patch.object(
+        textbook_routes,
+        "open_managed_textbook_asset",
+        new=AsyncMock(
+            return_value={
+                "content": b"png-bytes",
+                "media_type": "image/png",
+                "sha256": "d" * 64,
+            }
+        ),
+        create=True,
+    ) as open_asset:
+        response = await client.get(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}"
+            "/assets/art-I1m2A3g4E5f6"
+        )
+
+    assert response.status_code == 200
+    assert response.content == b"png-bytes"
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["cache-control"].startswith("private")
+    assert response.headers["etag"] == f'"{"d" * 64}"'
+    open_asset.assert_awaited_once_with(
+        parent_user_id="parent-1",
+        textbook_id=UUID(TEXTBOOK["textbook_id"]),
+        asset_id="art-I1m2A3g4E5f6",
+    )
+
+
+@pytest.mark.asyncio
 async def test_student_cannot_create_or_publish_a_textbook(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "student-1"
     with patch(
-        "src.server.app.education.textbooks.create_textbook",
+        "src.server.app.education.textbooks.create_managed_textbook",
         new=AsyncMock(
             side_effect=TextbookPermissionError(
                 "Only a parent can create family textbooks"
@@ -285,45 +515,16 @@ async def test_student_cannot_create_or_publish_a_textbook(client):
         ),
     ):
         response = await client.post(
-            "/api/v1/education/textbooks", json={"title": "英语第二册"}
+            "/api/v1/education/textbooks",
+            json={
+                "parse_job_id": "job-A1b2C3d4E5f6",
+                "primary_artifact_id": "art-A1b2C3d4E5f6",
+                "title": "英语第二册",
+                "idempotency_key": "student-create",
+            },
         )
 
     assert response.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_parent_creates_textbook_and_starts_explicit_processing(client):
-    app = client._transport.app
-    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
-    job = {
-        "job_id": "6eebf7fb-9579-4c5d-825a-2e595b7f1b18",
-        "version_id": "65f47c8c-f452-47bd-8619-58ccd2a1f10c",
-        "status": "queued",
-    }
-    with (
-        patch(
-            "src.server.app.education.textbooks.create_textbook",
-            new=AsyncMock(return_value=TEXTBOOK),
-        ) as create,
-        patch(
-            "src.server.app.education.textbooks.start_processing",
-            new=AsyncMock(return_value=job),
-        ) as start,
-    ):
-        created = await client.post(
-            "/api/v1/education/textbooks", json={"title": "英语第二册"}
-        )
-        queued = await client.post(
-            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/processing",
-            json={"source_asset_ids": ["bc5734a8-8a30-459f-a1f3-8551feb4c169"]},
-        )
-
-    assert created.status_code == 201
-    assert queued.status_code == 202
-    assert create.await_args.kwargs["parent_user_id"] == "parent-1"
-    assert start.await_args.kwargs["source_asset_ids"] == [
-        "bc5734a8-8a30-459f-a1f3-8551feb4c169"
-    ]
 
 
 @pytest.mark.asyncio
@@ -395,184 +596,28 @@ async def test_parent_create_serializes_uuid_identifiers_from_database(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
     textbook_id = uuid4()
-    household_id = uuid4()
-    textbook = {
+    job_id = uuid4()
+    created = {
         "textbook_id": textbook_id,
-        "household_id": household_id,
-        "title": "英语第二册",
-        "slug": "english-2",
-        "created_by_user_id": "parent-1",
+        "job_id": job_id,
     }
     with patch(
-        "src.server.app.education.textbooks.create_textbook",
-        new=AsyncMock(return_value=textbook),
+        "src.server.app.education.textbooks.create_managed_textbook",
+        new=AsyncMock(return_value=created),
     ):
         response = await client.post(
-            "/api/v1/education/textbooks", json={"title": "英语第二册"}
+            "/api/v1/education/textbooks",
+            json={
+                "parse_job_id": "job-A1b2C3d4E5f6",
+                "primary_artifact_id": "art-A1b2C3d4E5f6",
+                "title": "英语第二册",
+                "idempotency_key": "create-uuid",
+            },
         )
 
     assert response.status_code == 201
     assert response.json()["textbook_id"] == str(textbook_id)
-    assert response.json()["household_id"] == str(household_id)
-
-
-@pytest.mark.asyncio
-async def test_parent_detail_exposes_safe_review_sources_and_page_mappings(client):
-    app = client._transport.app
-    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
-    version_id = uuid4()
-    source_id = uuid4()
-    chapter_id = uuid4()
-    question_id = uuid4()
-    detail = {
-        **TEXTBOOK,
-        "versions": [
-            {
-                "version_id": version_id,
-                "sequence": 1,
-                "status": "review",
-                "extractor_name": "local_pypdf",
-                "extractor_version": "1",
-                "processing_error": None,
-                "processing_job_id": None,
-                "processing_job_status": None,
-                "processing_attempt_count": None,
-                "chapter_count": 1,
-                "is_published": False,
-                "publication_id": None,
-                "sources": [
-                    {
-                        "legacy": True,
-                        "position": 1,
-                        "asset_id": source_id,
-                        "original_filename": "body.pdf",
-                        "content_type": "application/pdf",
-                        "size_bytes": 12,
-                        "storage_key": "education/private/body.pdf",
-                    }
-                ],
-                "chapters": [
-                    {
-                        "chapter_id": chapter_id,
-                        "position": 1,
-                        "slug": "01-introduction",
-                        "title": "导读",
-                        "page_start": 1,
-                        "page_end": 10,
-                        "markdown": "# 教材正文",
-                        "teaching_material": "# 学习材料",
-                        "questions": [
-                            {
-                                "question_id": question_id,
-                                "position": 1,
-                                "prompt": "下一步做什么？",
-                                "options": {"A": "完成知识检查"},
-                                "correct_option": "A",
-                                "explanation": "形成学习证据。",
-                                "knowledge_point": "学习证据",
-                            }
-                        ],
-                    }
-                ],
-                "assignments": [],
-            }
-        ],
-    }
-    with patch(
-        "src.server.app.education.textbooks.get_parent_textbook",
-        new=AsyncMock(return_value=detail),
-    ):
-        response = await client.get(
-            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}"
-        )
-
-    assert response.status_code == 200
-    assert response.json()["versions"][0]["sources"] == [
-        {
-            "legacy": True,
-            "position": 1,
-            "asset_id": str(source_id),
-            "original_filename": "body.pdf",
-            "content_type": "application/pdf",
-            "size_bytes": 12,
-        }
-    ]
-    assert response.json()["versions"][0]["chapters"][0]["page_start"] == 1
-    assert "storage_key" not in response.text
-
-
-@pytest.mark.asyncio
-async def test_parent_detail_exposes_safe_frozen_artifact_sources(client):
-    app = client._transport.app
-    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
-    version_id = uuid4()
-    detail = {
-        **TEXTBOOK,
-        "versions": [
-            {
-                "version_id": version_id,
-                "sequence": 1,
-                "status": "failed",
-                "chapter_count": 0,
-                "is_published": False,
-                "publication_id": None,
-                "processing_error": "sandbox unavailable",
-                "sources": [
-                    {
-                        "legacy": False,
-                        "position": 1,
-                        "document_id": "doc-A1b2C3d4E5f6",
-                        "producer_job_id": "job-A1b2C3d4E5f6",
-                        "primary_artifact_id": "art-A1b2C3d4E5f6",
-                        "filename": "textbook.pdf",
-                        "media_type": "application/pdf",
-                        "format": "pdf",
-                        "parser_id": "datalab",
-                        "parser_name": "Datalab",
-                        "parser_version": "2",
-                        "parse_completed_at": "2026-09-16T10:00:00Z",
-                        "primary_sha256": "a" * 64,
-                        "document_deleted": False,
-                        "document_accessible": True,
-                        "snapshot_prefix": "education/private/secret/",
-                        "storage_key": "documents/private/secret.md",
-                    }
-                ],
-                "chapters": [],
-                "assignments": [],
-            }
-        ],
-    }
-    with patch(
-        "src.server.app.education.textbooks.get_parent_textbook",
-        new=AsyncMock(return_value=detail),
-    ):
-        response = await client.get(
-            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}"
-        )
-
-    assert response.status_code == 200
-    assert response.json()["versions"][0]["sources"] == [
-        {
-            "legacy": False,
-            "position": 1,
-            "document_id": "doc-A1b2C3d4E5f6",
-            "producer_job_id": "job-A1b2C3d4E5f6",
-            "primary_artifact_id": "art-A1b2C3d4E5f6",
-            "filename": "textbook.pdf",
-            "media_type": "application/pdf",
-            "format": "pdf",
-            "parser_id": "datalab",
-            "parser_name": "Datalab",
-            "parser_version": "2",
-            "parse_completed_at": "2026-09-16T10:00:00Z",
-            "primary_sha256": "a" * 64,
-            "document_deleted": False,
-            "document_accessible": True,
-        }
-    ]
-    assert "snapshot_prefix" not in response.text
-    assert "storage_key" not in response.text
+    assert response.json()["job_id"] == str(job_id)
 
 
 @pytest.mark.asyncio

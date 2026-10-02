@@ -6,11 +6,19 @@ from contextlib import aclosing
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from src.server.app.education.book_models import (
     BookActivityPageResponse,
+    BookSourceListResponse,
+    BookSourceSliceResponse,
+    BookStructureResponse,
+    CreateBookRequest,
+    CreateBookResponse,
     BookJobResponse,
+    KnowledgePointMaterialResponse,
+    TextbookSummaryResponse,
+    TextbookWorkbenchResponse,
 )
 from src.server.app.education.models import (
     AssignTextbookPublicationRequest,
@@ -20,7 +28,6 @@ from src.server.app.education.models import (
     CreateBookPipelineRequest,
     CreateKnowledgePointLessonRevisionRequest,
     CreateLearningItemRequest,
-    CreateTextbookRequest,
     CreateTextbookStructureRequest,
     GenerateKnowledgePointLessonRequest,
     KnowledgePointCandidateIdsRequest,
@@ -39,10 +46,8 @@ from src.server.app.education.models import (
     StudentKnowledgePointLessonResponse,
     StudentTextbookStructureResponse,
     TextbookAssignmentResponse,
-    TextbookDetailResponse,
     TextbookParseJobCandidateResponse,
     TextbookProcessingResponse,
-    TextbookResponse,
     TextbookStructurePublicationResponse,
     TextbookStructureResponse,
     UpdateLearningItemRequest,
@@ -107,13 +112,18 @@ from src.server.services.education_textbooks import (
     TextbookPermissionError,
     TextbookTransitionError,
     assign_publication,
-    create_textbook,
-    get_parent_textbook,
+    create_managed_textbook,
+    get_managed_knowledge_point_material,
+    get_managed_textbook_source,
+    get_managed_textbook_structure,
+    get_managed_textbook_workbench,
     get_student_kp_lesson,
     get_student_structure,
+    list_book_source_candidates,
     list_learning_assignments,
     list_completed_textbook_parse_jobs,
-    list_parent_textbooks,
+    list_managed_textbooks,
+    open_managed_textbook_asset,
     retry_processing_for_parent,
     run_processing_for_parent,
     start_processing,
@@ -201,32 +211,128 @@ async def stream_managed_book_job_events(
     )
 
 
-@router.get("/textbooks", response_model=list[dict])
+@router.get("/textbook-sources", response_model=BookSourceListResponse)
+async def list_managed_textbook_sources(user_id: CurrentUserId):
+    try:
+        return {"items": await list_book_source_candidates(parent_user_id=user_id)}
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get("/textbooks", response_model=list[TextbookSummaryResponse])
 async def list_textbooks(user_id: CurrentUserId):
     try:
-        return await list_parent_textbooks(parent_user_id=user_id)
+        return await list_managed_textbooks(parent_user_id=user_id)
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
 
 
 @router.post(
-    "/textbooks", response_model=TextbookResponse, status_code=status.HTTP_201_CREATED
+    "/textbooks",
+    response_model=CreateBookResponse,
+    status_code=status.HTTP_201_CREATED,
 )
-async def create_family_textbook(body: CreateTextbookRequest, user_id: CurrentUserId):
+async def create_family_textbook(body: CreateBookRequest, user_id: CurrentUserId):
     try:
-        return await create_textbook(parent_user_id=user_id, title=body.title)
-    except TextbookError as exc:
-        raise _textbook_http_error(exc) from exc
-
-
-@router.get("/textbooks/{textbook_id}", response_model=TextbookDetailResponse)
-async def get_family_textbook(textbook_id: UUID, user_id: CurrentUserId):
-    try:
-        return await get_parent_textbook(
-            parent_user_id=user_id, textbook_id=str(textbook_id)
+        return await create_managed_textbook(
+            parent_user_id=user_id,
+            parse_job_id=body.parse_job_id,
+            primary_artifact_id=body.primary_artifact_id,
+            title=body.title,
+            idempotency_key=body.idempotency_key,
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
+
+
+@router.get("/textbooks/{textbook_id}", response_model=TextbookWorkbenchResponse)
+async def get_family_textbook(textbook_id: UUID, user_id: CurrentUserId):
+    try:
+        return await get_managed_textbook_workbench(
+            parent_user_id=user_id,
+            textbook_id=textbook_id,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/textbooks/{textbook_id}/structure",
+    response_model=BookStructureResponse,
+)
+async def get_managed_structure(textbook_id: UUID, user_id: CurrentUserId):
+    try:
+        return await get_managed_textbook_structure(
+            parent_user_id=user_id,
+            textbook_id=textbook_id,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/textbooks/{textbook_id}/source",
+    response_model=BookSourceSliceResponse,
+)
+async def get_managed_source(
+    textbook_id: UUID,
+    user_id: CurrentUserId,
+    start_line: int = Query(..., ge=1),
+    end_line: int = Query(..., ge=1),
+):
+    try:
+        return await get_managed_textbook_source(
+            parent_user_id=user_id,
+            textbook_id=textbook_id,
+            start_line=start_line,
+            end_line=end_line,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/textbooks/{textbook_id}/knowledge-points/{knowledge_point_id}/material",
+    response_model=KnowledgePointMaterialResponse,
+)
+async def get_managed_material(
+    textbook_id: UUID,
+    knowledge_point_id: UUID,
+    user_id: CurrentUserId,
+):
+    try:
+        return await get_managed_knowledge_point_material(
+            parent_user_id=user_id,
+            textbook_id=textbook_id,
+            knowledge_point_id=knowledge_point_id,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get("/textbooks/{textbook_id}/assets/{asset_id}", response_class=Response)
+async def get_managed_asset(
+    textbook_id: UUID,
+    asset_id: str,
+    user_id: CurrentUserId,
+):
+    try:
+        asset = await open_managed_textbook_asset(
+            parent_user_id=user_id,
+            textbook_id=textbook_id,
+            asset_id=asset_id,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+    return Response(
+        content=asset["content"],
+        media_type=asset["media_type"],
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "ETag": f'"{asset["sha256"]}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get(

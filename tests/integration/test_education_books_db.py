@@ -197,6 +197,68 @@ async def _catalog_signature(conn) -> tuple[tuple[object, ...], ...]:
     return tuple(signature)
 
 
+async def test_parent_facade_queries_current_book_without_legacy_adapters(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_books import (
+        get_managed_material_for_parent,
+        get_managed_source_for_parent,
+        get_managed_structure_for_parent,
+        get_managed_textbook_for_parent,
+        list_managed_textbooks_for_parent,
+    )
+
+    parent_user_id = seed_user["user_id"]
+    async with patched_get_db_connection() as conn:
+        household_id = await _seed_parent_household(conn, parent_user_id=parent_user_id)
+    created, _, snapshot = await _create_committed_book(
+        parent_user_id=parent_user_id,
+        household_id=household_id,
+    )
+    textbook_id = created["textbook_id"]
+    knowledge_point_id = snapshot["knowledge_points"][0]["knowledge_point_id"]
+
+    listed = await list_managed_textbooks_for_parent(parent_user_id=parent_user_id)
+    workbench = await get_managed_textbook_for_parent(
+        parent_user_id=parent_user_id,
+        textbook_id=textbook_id,
+    )
+    structure = await get_managed_structure_for_parent(
+        parent_user_id=parent_user_id,
+        textbook_id=textbook_id,
+    )
+    source = await get_managed_source_for_parent(
+        parent_user_id=parent_user_id,
+        textbook_id=textbook_id,
+    )
+    material = await get_managed_material_for_parent(
+        parent_user_id=parent_user_id,
+        textbook_id=textbook_id,
+        knowledge_point_id=knowledge_point_id,
+    )
+
+    matching = next(row for row in listed if row["textbook_id"] == textbook_id)
+    assert matching["structure_status"] == "ready"
+    assert matching["material_total"] == 1
+    assert matching["material_ready"] == 0
+    assert workbench is not None
+    assert workbench["current_structure_id"] == structure["structure_id"]
+    assert source is not None
+    assert source["source_markdown_key"].startswith(
+        f"education/{household_id}/textbooks/{textbook_id}/source/"
+    )
+    assert material is not None
+    assert material["content_key"] is None
+    assert (
+        await get_managed_textbook_for_parent(
+            parent_user_id="not-a-household-member",
+            textbook_id=textbook_id,
+        )
+        is None
+    )
+
+
 def _run_alembic(db_url: URL, revision: str) -> None:
     project_root = Path(__file__).parents[2]
     config = Config(str(project_root / "alembic.ini"))

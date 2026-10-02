@@ -44,8 +44,8 @@ class CreateBookRequest(_StrictModel):
 
 
 class CreateBookResponse(_StrictModel):
-    textbook_id: str
-    job_id: str
+    textbook_id: UUID
+    job_id: UUID
 
 
 class BookSourceCandidateResponse(_StrictModel):
@@ -60,6 +60,10 @@ class BookSourceCandidateResponse(_StrictModel):
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     size_bytes: int = Field(ge=0)
     image_count: int = Field(ge=0)
+
+
+class BookSourceListResponse(_StrictModel):
+    items: list[BookSourceCandidateResponse]
 
 
 class FrozenBookSourceResponse(BookSourceCandidateResponse):
