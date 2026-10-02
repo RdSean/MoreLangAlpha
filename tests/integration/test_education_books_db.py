@@ -1165,6 +1165,99 @@ async def test_learning_space_uses_current_assignment_and_retains_thread_protect
     )
 
 
+async def test_document_usage_projects_current_structure_and_material_counts(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_jobs import start_item_attempt
+    from src.server.database.education_books import (
+        commit_book_structure,
+        create_textbook_with_initial_job,
+        get_document_teaching_usage_access,
+        list_document_teaching_usages,
+    )
+
+    parent_user_id = seed_user["user_id"]
+    document_id = f"doc-{uuid4().hex[:12]}"
+    textbook_id = uuid4()
+    async with patched_get_db_connection() as conn:
+        household_id = await _seed_parent_household(conn, parent_user_id=parent_user_id)
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO documents (
+                    document_id, owner_user_id, original_filename, media_type,
+                    document_format, source_storage_key, source_size_bytes,
+                    source_sha256
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    document_id,
+                    parent_user_id,
+                    "lesson.pdf",
+                    "application/pdf",
+                    "pdf",
+                    f"documents/{parent_user_id}/{document_id}/source",
+                    128,
+                    "a" * 64,
+                ),
+            )
+    source = _source(
+        suffix=uuid4().hex[:12],
+        household_id=household_id,
+        textbook_id=str(textbook_id),
+    )
+    source["document_id"] = document_id
+    created = await create_textbook_with_initial_job(
+        textbook_id=textbook_id,
+        parent_user_id=parent_user_id,
+        household_id=household_id,
+        title="Library Reader",
+        slug=f"library-{uuid4().hex}",
+        source=source,
+        idempotency_key="document-usage",
+        identity=IDENTITY,
+    )
+
+    [queued] = await list_document_teaching_usages(
+        owner_user_id=parent_user_id,
+        document_id=document_id,
+    )
+    assert queued["structure_status"] == "queued"
+    assert queued["materials"] == {"ready": 0, "total": 0}
+    assert queued["parse_job_id"] == source["parse_job_id"]
+    assert queued["primary_artifact_id"] == source["primary_artifact_id"]
+
+    attempt_token = uuid4()
+    await start_item_attempt(item_id=created["item_id"], attempt_token=attempt_token)
+    await commit_book_structure(
+        textbook_id=created["textbook_id"],
+        job_id=created["job_id"],
+        item_id=created["item_id"],
+        attempt_token=attempt_token,
+        parsed=_parsed_structure(),
+        validated_identity=IDENTITY,
+    )
+
+    [ready] = await list_document_teaching_usages(
+        owner_user_id=parent_user_id,
+        document_id=document_id,
+    )
+    assert ready["structure_status"] == "ready"
+    assert ready["materials"] == {"ready": 0, "total": 1}
+    assert await get_document_teaching_usage_access(
+        owner_user_id=parent_user_id,
+        document_id=document_id,
+    )
+    assert (
+        await get_document_teaching_usage_access(
+            owner_user_id="foreign-owner",
+            document_id=document_id,
+        )
+        is None
+    )
+
+
 async def test_existing_structure_materials_use_the_normal_storage_flow(
     patched_get_db_connection,
     seed_user,

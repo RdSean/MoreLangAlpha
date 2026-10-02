@@ -70,21 +70,15 @@ def _job(status: str = "queued", version: int = 0) -> dict[str, object]:
 def _teaching_usage() -> dict[str, object]:
     return {
         "document_id": DOC_ID,
-        "producer_job_id": JOB_ID,
+        "parse_job_id": JOB_ID,
         "primary_artifact_id": ART_ID,
         "textbook_id": "book-A1b2C3d4E5f6",
         "textbook_title": "Reading Explorer 3",
-        "content_version_id": "ver-A1b2C3d4E5f6",
-        "content_version_sequence": 2,
-        "artifact_position": 1,
-        "structure_id": "structure-A1b2C3d4E5f6",
-        "structure_sequence": 1,
-        "structure_status": "review",
-        "book_asset_prefix": None,
-        "publication_id": "publication-A1b2C3d4E5f6",
-        "is_published": True,
-        "has_asset_manifest": True,
-        "created_at": "2026-09-16T12:00:00Z",
+        "source_filename": "lesson.pdf",
+        "source_completed_at": "2026-09-16T12:00:00Z",
+        "structure_status": "ready",
+        "materials": {"ready": 4, "total": 7},
+        "updated_at": "2026-10-02T12:00:00Z",
     }
 
 
@@ -307,9 +301,10 @@ async def test_artifact_download_streams_through_the_authenticated_api(api) -> N
     assert "location" not in response.headers
     assert response.headers["content-type"].startswith("text/markdown")
     assert response.headers["content-length"] == str(len(b"# Lesson\n"))
-    assert "filename*=UTF-8''%E6%95%99%E6%9D%90.md" in response.headers[
-        "content-disposition"
-    ]
+    assert (
+        "filename*=UTF-8''%E6%95%99%E6%9D%90.md"
+        in response.headers["content-disposition"]
+    )
     assert close.called
     services.jobs.open_artifact_download.assert_awaited_once_with(
         owner_user_id="owner-1", artifact_id=ART_ID
@@ -350,7 +345,9 @@ async def test_teaching_usage_returns_404_for_missing_or_foreign_document(api) -
 
 
 @pytest.mark.asyncio
-async def test_teaching_usage_returns_404_without_matching_parent_membership(api) -> None:
+async def test_teaching_usage_returns_404_without_matching_parent_membership(
+    api,
+) -> None:
     client, services = api
     services.teaching_usage_access.return_value = False
 

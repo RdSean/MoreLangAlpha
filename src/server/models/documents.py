@@ -74,23 +74,22 @@ class DocumentResponse(_RowModel):
     updated_at: datetime | None = None
 
 
+class DocumentTeachingMaterialCounts(_RowModel):
+    ready: int = Field(ge=0)
+    total: int = Field(ge=0)
+
+
 class DocumentTeachingUsage(_RowModel):
     document_id: str
-    producer_job_id: str
+    parse_job_id: str
     primary_artifact_id: str
     textbook_id: str
     textbook_title: str
-    content_version_id: str
-    content_version_sequence: int
-    artifact_position: int
-    structure_id: str | None = None
-    structure_sequence: int | None = None
-    structure_status: str | None = None
-    book_asset_prefix: str | None = None
-    publication_id: str | None = None
-    is_published: bool = False
-    has_asset_manifest: bool = False
-    created_at: datetime | None = None
+    source_filename: str
+    source_completed_at: datetime
+    structure_status: Literal["queued", "running", "ready", "failed"]
+    materials: DocumentTeachingMaterialCounts
+    updated_at: datetime
 
 
 class DocumentTeachingUsageResponse(BaseModel):

@@ -2,6 +2,13 @@
 
 ## 2026-10-02
 
+### 重构：图书馆教材使用查询切换到当前教材模型
+
+- 文档教学使用反查改为直接连接 `documents` 与新 `education_textbooks` 冻结来源字段；结构状态来自当前结构和最近 structure job，讲义 N/M 来自当前 KP/material 记录，不再 JOIN version、旧 structure、publication 或多来源 position。
+- 后端 DTO 与既有前端契约统一为解析任务、主产物、教材、冻结来源、结构状态、讲义计数和更新时间；移除 content version、publication、资产 manifest 及对象存储细节，链接继续直达教材工作台。
+- PostgreSQL 行为测试覆盖排队教材、结构提交后的 ready 状态与 0/1 讲义计数，以及文档所有者和当前家长成员权限；Task 6 的学生授权、阅读/笔记/总结、Flash 上下文、家长转录和图书馆消费者至此完成接线，Task 7 旧代码与资源清理尚未开始。
+- 验证：Task 6 相关后端单元测试 `48 passed`，`langalpha_test` 082 集成 `13 passed`，学生与文档前端测试 `32 passed`；`pnpm typecheck`、`pnpm build`、关键路径检查、Ruff、格式和 `git diff --check` 通过。5177/8000 均返回 200，未向开发数据库应用 `082`，未改动 Docker volume。
+
 ### 重构：学生 Flash 学习会话切换到当前教材授权
 
 - 学习空间、学生 thread 识别和家长转录查询改接 082 的教材 assignment，不再经过 publication/version 表；同一 assignment 并发复用唯一的学生私有 Flash thread。

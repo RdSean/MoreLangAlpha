@@ -5,42 +5,33 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from src.server.database import education_textbooks as education_textbook_repository
+from src.server.database import education_books as education_book_repository
 
 
 _SAFE_USAGE_FIELDS = (
     "document_id",
-    "producer_job_id",
+    "parse_job_id",
     "primary_artifact_id",
     "textbook_id",
     "textbook_title",
-    "content_version_id",
-    "content_version_sequence",
-    "artifact_position",
-    "structure_id",
-    "structure_sequence",
+    "source_filename",
+    "source_completed_at",
     "structure_status",
-    "book_asset_prefix",
-    "publication_id",
-    "is_published",
-    "has_asset_manifest",
-    "created_at",
-)
-_UUID_FIELDS = frozenset(
-    {
-        "textbook_id",
-        "content_version_id",
-        "structure_id",
-        "publication_id",
-    }
+    "materials",
+    "updated_at",
 )
 
 
 def _safe_usage(row: Mapping[str, Any]) -> dict[str, Any]:
     usage = {field: row.get(field) for field in _SAFE_USAGE_FIELDS}
-    for field in _UUID_FIELDS:
-        if usage[field] is not None:
-            usage[field] = str(usage[field])
+    usage["textbook_id"] = str(usage["textbook_id"])
+    materials = usage.get("materials")
+    if not isinstance(materials, Mapping):
+        materials = {}
+    usage["materials"] = {
+        "ready": int(materials.get("ready") or 0),
+        "total": int(materials.get("total") or 0),
+    }
     return usage
 
 
@@ -48,7 +39,7 @@ async def list_document_teaching_usages(
     *, owner_user_id: str, document_id: str
 ) -> list[dict[str, Any]]:
     """Return only public usage fields for the owner-scoped Document."""
-    rows = await education_textbook_repository.list_document_teaching_usages(
+    rows = await education_book_repository.list_document_teaching_usages(
         owner_user_id=owner_user_id,
         document_id=document_id,
     )
@@ -60,7 +51,7 @@ async def can_read_document_teaching_usage(
 ) -> bool:
     """Return whether the owner may read usages under current memberships."""
     return (
-        await education_textbook_repository.get_document_teaching_usage_access(
+        await education_book_repository.get_document_teaching_usage_access(
             owner_user_id=owner_user_id,
             document_id=document_id,
         )

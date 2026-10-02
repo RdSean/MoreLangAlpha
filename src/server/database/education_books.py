@@ -632,6 +632,116 @@ async def list_book_source_candidates_for_parent(
             return [dict(row) for row in await cur.fetchall()]
 
 
+async def list_document_teaching_usages(
+    *, owner_user_id: str, document_id: str
+) -> list[dict[str, Any]]:
+    """Project current textbooks created from one owned library document."""
+
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT documents.document_id,
+                       textbooks.source_parse_job_id AS parse_job_id,
+                       textbooks.source_primary_artifact_id AS primary_artifact_id,
+                       textbooks.textbook_id,
+                       textbooks.title AS textbook_title,
+                       textbooks.source_filename,
+                       textbooks.source_parse_completed_at AS source_completed_at,
+                       CASE
+                           WHEN textbooks.current_structure_id IS NOT NULL
+                               THEN 'ready'
+                           WHEN recent_structure.status IN ('queued', 'running')
+                               THEN recent_structure.status
+                           WHEN recent_structure.status IS NULL THEN 'queued'
+                           ELSE 'failed'
+                       END AS structure_status,
+                       jsonb_build_object(
+                           'ready', COALESCE(material_counts.ready, 0)::int,
+                           'total', COALESCE(material_counts.total, 0)::int
+                       ) AS materials,
+                       GREATEST(
+                           textbooks.updated_at,
+                           COALESCE(recent_structure.updated_at, textbooks.updated_at)
+                       ) AS updated_at
+                FROM documents
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.source_document_id = documents.document_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                 AND memberships.user_id = %s
+                 AND memberships.role = 'parent'
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS total,
+                           COUNT(materials.material_id) AS ready
+                    FROM education_book_knowledge_points AS points
+                    LEFT JOIN education_book_materials AS materials
+                      ON materials.knowledge_point_id = points.knowledge_point_id
+                    WHERE points.structure_id = textbooks.current_structure_id
+                ) AS material_counts ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT jobs.status, jobs.updated_at
+                    FROM education_book_jobs AS jobs
+                    WHERE jobs.textbook_id = textbooks.textbook_id
+                      AND jobs.kind = 'structure'
+                    ORDER BY jobs.created_at DESC, jobs.job_id DESC
+                    LIMIT 1
+                ) AS recent_structure ON TRUE
+                WHERE documents.document_id = %s
+                  AND documents.owner_user_id = %s
+                ORDER BY textbooks.created_at, textbooks.textbook_id
+                """,
+                (owner_user_id, document_id, owner_user_id),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def get_document_teaching_usage_access(
+    *, owner_user_id: str, document_id: str
+) -> bool | None:
+    """Authorize an owned document against its current textbook households."""
+
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                WITH usage_candidates AS (
+                    SELECT textbooks.household_id
+                    FROM documents
+                    JOIN education_textbooks AS textbooks
+                      ON textbooks.source_document_id = documents.document_id
+                    WHERE documents.document_id = %s
+                      AND documents.owner_user_id = %s
+                )
+                SELECT CASE
+                    WHEN NOT EXISTS (SELECT 1 FROM usage_candidates)
+                    THEN TRUE
+                    ELSE EXISTS (
+                        SELECT 1
+                        FROM usage_candidates
+                        JOIN education_memberships AS memberships
+                          ON memberships.household_id =
+                             usage_candidates.household_id
+                         AND memberships.user_id = %s
+                         AND memberships.role = 'parent'
+                    )
+                END AS can_read
+                FROM documents
+                WHERE documents.document_id = %s
+                  AND documents.owner_user_id = %s
+                """,
+                (
+                    document_id,
+                    owner_user_id,
+                    owner_user_id,
+                    document_id,
+                    owner_user_id,
+                ),
+            )
+            row = await cur.fetchone()
+    return bool(row["can_read"]) if row is not None else None
+
+
 _MANAGED_JOB_SUMMARY_SQL = """
     jsonb_build_object(
         'job_id', jobs.job_id,
