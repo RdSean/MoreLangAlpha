@@ -18,6 +18,8 @@ Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skill
 
 顺序：任务 1 定义契约 → 任务 2 建立数据与导入 → 任务 3/4 接运行和活动 → 任务 4A 补语义进度发送端 → 任务 5/6 接工作台和所有消费者 → 任务 7 一次切换清理 → 任务 8 完整验收。新模块可在隔离数据库测试；不在一半消费者仍依赖旧表时把迁移应用到当前运行数据库。
 
+语义进度独立计划只将其 Task 1–4 归入本计划 Task 4A；独立 Task 5 是本计划 Task 5 的活动面板细化，独立 Task 6 随本计划 Task 8 验收。不得要求 Task 4A 提前实现工作台或重写完整教材/学生门面。
+
 每项经过相应行为检查后补最小回归、中文 CHANGELOG 和原子提交。实现新模块时不添加旧 schema 兼容读取，不留下永久 feature flag。删除范围必须满足清理清单，而不是“最少改几行能跑”。
 
 ## Task 1：固定新契约和对外 API
@@ -115,12 +117,12 @@ Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skill
 - Modify: managed policy/tool assembly、`education_book_jobs.py`、`education_book_activity.py`、book DTO/API。
 - Create/update tests: PTC tool/policy、education progress/activity/job、activity API/SSE integration。
 
-1. 按独立[实施计划](2026-10-02-managed-textbook-progress-implementation.md)执行。向教材托管 PTC Agent 注入默认关闭、无数据库权限的 `report_progress(stage)`；普通 PTC/Flash 和其他 Skill 工具面不变。
-2. structure/material/supplementary 使用各自有限 stage；阶段和中文文案由 education 模块维护。`task.json` 只提供当前 item 的允许阶段，模型不能提供业务 ID、完成数、路径、正文或自由展示文案。
-3. observer 隐藏 `report_progress` 自身的通用工具开始/结束噪声，只保存经过白名单映射的业务阶段；未知、跨 item、重复、迟到和写入失败均不改变业务状态。
+1. 按独立[实施计划](2026-10-02-managed-textbook-progress-implementation.md)的 Task 1–4 执行。向教材托管 PTC Agent 注入默认关闭、无数据库权限的 `report_progress(stage)`；普通 PTC/Flash 和其他 Skill 工具面不变。
+2. structure/material/supplementary 使用各自有限 stage；阶段和中文文案由 education 模块维护。仅在 `task.json.progress` 提供工具名和当前 item 的允许阶段；已有任务身份/attempt/来源/输出字段保持原样，进度工具不接受业务 ID、完成数、路径、正文或自由展示文案。阶段可以漏报、重试和回退，不构成业务状态机。
+3. observer 隐藏 `report_progress` 自身的通用工具开始/结束噪声，只保存经过白名单映射的业务阶段；预算耗尽后的省略计数使用相同阶段验证、节流及过滤规则。未知、跨 item、重复、迟到和写入失败均不改变业务状态。
 4. job/item 快照是状态和计数真值；材料 N/M 只统计成功提交的 material items，supplementary 单列，结构提交前不显示知识点完成率。
-5. 冻结 `/book-jobs/:jobId/events` 的完整快照字段和权限/重连行为，为 Task 5 的活动面板提供唯一新活动接口；不恢复旧 polling/progress DTO。
-6. 完成 PTC、教育服务、PostgreSQL activity stream 聚焦回归并提交后再进入 Task 5。
+5. 只补齐授权 `GET /book-jobs/:jobId` 任务快照与 `/book-jobs/:jobId/events` 活动页，冻结 DTO、SSE id 和权限/重连行为。活动页不冒充完整 job/items；客户端从已消费 seq 重连，不能直接使用服务器 high-water。完整教材/学生门面继续归 Task 5/6，不提前重写，不恢复旧 polling/progress DTO。
+6. 完成 PTC、教育服务、必要 API、PostgreSQL activity stream 聚焦回归并提交后进入 Task 5；Task 4A 不以工作台或真实浏览器全链验收为完成前提。
 
 ## Task 5：新工作台及图书馆直达
 
@@ -136,6 +138,7 @@ Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skill
 1. 按设计线框构建一个工作台；不基于旧候选/结构页保留大量条件分支。复用现有 UI/theme/Markdown 基础组件。
 2. 新建教材使用共享单选来源面板与“添加并分析”；图书馆直接带入选中的成功解析产物，去空教材/版本/多来源步骤。
 3. 左栏切换 KP/原书目录，搜索和折叠；主内容讲义/原文两个视图，生成表单原位展开；活动按需展示，不占第三层导航。活动主线组合服务端里程碑、数据库 item 计数和当前 Agent 语义阶段，Read/Bash 等工具事件默认收进可展开明细。
+   活动面板按语义进度独立计划 Task 5 实施一次。以已成功合并事件的 `last_processed_seq` 恢复分页；首次/缓存丢失/游标过期从 0 重建有界活动。业务事件按每任务最多每秒一次合并刷新业务快照，活跃任务在可见页面每 5 秒兜底刷新；空事件、预算耗尽或活动 unavailable 也能更新当前项和 N/M。终态最终刷新、后台恢复、任务切换和迟到响应均按详细设计处理。
 4. URL 维护 skill KP ID/node ID/view，转换为后端 UUID 时使用当前结构映射。返回/前进、深链、搜索/展开及正文滚动符合设计，异步事件不劫持当前阅读位置。
 5. AST 源行映射做范围跳转/高亮；图片经授权 resolver；同书相对讲义链接未生成时打开目标原文。禁止任意 source.path 或任意 MinIO key 读取。
 6. 批量显式进入选择模式，默认跳过已有讲义；重做列明数量。运行中可浏览、可取消；失败仅重试未完成；已有材料不会因错误消失。
@@ -181,6 +184,8 @@ Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skill
 ## Task 8：端到端验收矩阵
 
 每行都需要自动化或真实行为证据；只读代码审查不算完成。
+
+语义进度独立计划 Task 6 在此汇总执行，覆盖分页中途断线、无活动的 item 切换、预算耗尽后 stage 省略统计及已有任务契约保持。Task 4A 的阶段性交付不替代此处完整验收。
 
 | 场景 | 必须观察的结果 |
 |---|---|
