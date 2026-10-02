@@ -35,13 +35,18 @@ from src.server.database.education_textbooks import (
 )
 from src.server.database.education_members import get_membership_for_user
 from src.server.database.education_books import (
-    get_managed_asset_for_parent,
-    get_managed_material_for_parent,
-    get_managed_source_for_parent,
-    get_managed_structure_for_parent,
+    get_managed_asset_for_user,
+    get_managed_material_for_user,
+    get_managed_source_for_user,
+    get_managed_structure_for_user,
     get_managed_textbook_for_parent,
     list_book_source_candidates_for_parent,
     list_managed_textbooks_for_parent,
+)
+from src.server.database.education_learning import (
+    assign_textbook_students,
+    list_textbook_assignments_for_parent,
+    revoke_textbook_students,
 )
 from src.server.database.education_book_jobs import (
     create_materials_job,
@@ -268,10 +273,10 @@ async def get_managed_textbook_workbench(
 
 
 async def get_managed_textbook_structure(
-    *, parent_user_id: str, textbook_id: str | UUID
+    *, user_id: str, textbook_id: str | UUID
 ) -> dict[str, Any]:
-    row = await get_managed_structure_for_parent(
-        parent_user_id=parent_user_id,
+    row = await get_managed_structure_for_user(
+        user_id=user_id,
         textbook_id=textbook_id,
     )
     if row is None:
@@ -313,15 +318,15 @@ async def get_managed_textbook_structure(
 
 async def get_managed_textbook_source(
     *,
-    parent_user_id: str,
+    user_id: str,
     textbook_id: str | UUID,
     start_line: int,
     end_line: int,
 ) -> dict[str, Any]:
     if end_line < start_line:
         raise TextbookError("end_line must be greater than or equal to start_line")
-    row = await get_managed_source_for_parent(
-        parent_user_id=parent_user_id,
+    row = await get_managed_source_for_user(
+        user_id=user_id,
         textbook_id=textbook_id,
     )
     if row is None:
@@ -360,12 +365,12 @@ async def get_managed_textbook_source(
 
 async def get_managed_knowledge_point_material(
     *,
-    parent_user_id: str,
+    user_id: str,
     textbook_id: str | UUID,
     knowledge_point_id: str | UUID,
 ) -> dict[str, Any]:
-    row = await get_managed_material_for_parent(
-        parent_user_id=parent_user_id,
+    row = await get_managed_material_for_user(
+        user_id=user_id,
         textbook_id=textbook_id,
         knowledge_point_id=knowledge_point_id,
     )
@@ -414,10 +419,10 @@ async def get_managed_knowledge_point_material(
 
 
 async def open_managed_textbook_asset(
-    *, parent_user_id: str, textbook_id: str | UUID, asset_id: str
+    *, user_id: str, textbook_id: str | UUID, asset_id: str
 ) -> dict[str, Any]:
-    row = await get_managed_asset_for_parent(
-        parent_user_id=parent_user_id,
+    row = await get_managed_asset_for_user(
+        user_id=user_id,
         textbook_id=textbook_id,
         asset_id=asset_id,
     )
@@ -534,6 +539,66 @@ async def retry_managed_textbook_job(
     if result is None:
         raise TextbookProcessingError("The retried textbook job could not be read")
     return result
+
+
+def _public_assignment(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "textbook_id": str(row["textbook_id"]),
+        "student_user_id": str(row["student_user_id"]),
+        "assigned_at": row["created_at"],
+    }
+
+
+async def list_managed_textbook_assignments(
+    *, parent_user_id: str, textbook_id: str | UUID
+) -> list[dict[str, Any]]:
+    if (
+        await get_managed_textbook_for_parent(
+            parent_user_id=parent_user_id,
+            textbook_id=textbook_id,
+        )
+        is None
+    ):
+        raise TextbookNotFoundError("Textbook not found")
+    rows = await list_textbook_assignments_for_parent(
+        textbook_id=textbook_id,
+        parent_user_id=parent_user_id,
+    )
+    return [_public_assignment(row) for row in rows]
+
+
+async def assign_managed_textbook(
+    *,
+    parent_user_id: str,
+    textbook_id: str | UUID,
+    student_user_ids: list[str],
+) -> list[dict[str, Any]]:
+    try:
+        rows = await assign_textbook_students(
+            textbook_id=textbook_id,
+            student_user_ids=student_user_ids,
+            assigned_by_user_id=parent_user_id,
+        )
+    except PermissionError as exc:
+        raise TextbookNotFoundError("Textbook or student not found") from exc
+    if rows is None:
+        raise TextbookNotFoundError("Textbook not found")
+    return [_public_assignment(row) for row in rows]
+
+
+async def revoke_managed_textbook(
+    *,
+    parent_user_id: str,
+    textbook_id: str | UUID,
+    student_user_ids: list[str],
+) -> None:
+    revoked = await revoke_textbook_students(
+        textbook_id=textbook_id,
+        student_user_ids=student_user_ids,
+        parent_user_id=parent_user_id,
+    )
+    if revoked is None:
+        raise TextbookNotFoundError("Textbook not found")
 
 
 def assert_version_transition(*, current: str, target: str) -> None:

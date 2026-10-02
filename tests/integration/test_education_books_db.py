@@ -889,6 +889,108 @@ async def test_learning_items_reject_knowledge_points_from_another_textbook(
         )
 
 
+async def test_assignment_grants_and_revokes_current_book_reads_atomically(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_books import (
+        get_managed_material_for_user,
+        get_managed_source_for_user,
+        get_managed_structure_for_user,
+    )
+    from src.server.database.education_learning import (
+        assign_textbook_students,
+        get_student_assignment,
+        revoke_textbook_students,
+    )
+
+    student_id = f"student-{uuid4().hex}"
+    outsider_id = f"student-{uuid4().hex}"
+    parent_user_id = seed_user["user_id"]
+    async with patched_get_db_connection() as conn:
+        household_id = await _seed_parent_household(conn, parent_user_id=parent_user_id)
+        async with conn.cursor() as cur:
+            await cur.executemany(
+                "INSERT INTO users (user_id, name) VALUES (%s, %s)",
+                [(student_id, "Student"), (outsider_id, "Outsider")],
+            )
+            await cur.execute(
+                """
+                INSERT INTO education_memberships (
+                    household_id, user_id, role, display_name
+                ) VALUES (%s, %s, 'student', %s)
+                """,
+                (household_id, student_id, "Student"),
+            )
+    created, _, snapshot = await _create_committed_book(
+        parent_user_id=parent_user_id,
+        household_id=household_id,
+    )
+    textbook_id = created["textbook_id"]
+    knowledge_point_id = snapshot["knowledge_points"][0]["knowledge_point_id"]
+
+    assert (
+        await get_managed_source_for_user(user_id=student_id, textbook_id=textbook_id)
+        is None
+    )
+    with pytest.raises(PermissionError, match="Every assigned student"):
+        await assign_textbook_students(
+            textbook_id=textbook_id,
+            student_user_ids=[student_id, outsider_id],
+            assigned_by_user_id=parent_user_id,
+        )
+    assert (
+        await get_student_assignment(
+            textbook_id=str(textbook_id), student_user_id=student_id
+        )
+        is None
+    )
+
+    assigned = await assign_textbook_students(
+        textbook_id=textbook_id,
+        student_user_ids=[student_id],
+        assigned_by_user_id=parent_user_id,
+    )
+    assert assigned is not None
+    assert [row["student_user_id"] for row in assigned] == [student_id]
+    assert (
+        await get_managed_structure_for_user(
+            user_id=student_id, textbook_id=textbook_id
+        )
+        is not None
+    )
+    assert (
+        await get_managed_source_for_user(user_id=student_id, textbook_id=textbook_id)
+        is not None
+    )
+    material = await get_managed_material_for_user(
+        user_id=student_id,
+        textbook_id=textbook_id,
+        knowledge_point_id=knowledge_point_id,
+    )
+    assert material is not None
+    assert material["content_key"] is None
+
+    assert (
+        await revoke_textbook_students(
+            textbook_id=textbook_id,
+            student_user_ids=[student_id],
+            parent_user_id=parent_user_id,
+        )
+        == 1
+    )
+    assert (
+        await get_managed_structure_for_user(
+            user_id=student_id, textbook_id=textbook_id
+        )
+        is None
+    )
+    assert (
+        await get_managed_source_for_user(user_id=student_id, textbook_id=textbook_id)
+        is None
+    )
+
+
 async def test_existing_structure_materials_use_the_normal_storage_flow(
     patched_get_db_connection,
     seed_user,

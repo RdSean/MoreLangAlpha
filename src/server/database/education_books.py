@@ -759,10 +759,10 @@ async def get_managed_textbook_for_parent(
     return rows[0] if rows else None
 
 
-async def get_managed_structure_for_parent(
-    *, parent_user_id: str, textbook_id: str | UUID
+async def get_managed_structure_for_user(
+    *, user_id: str, textbook_id: str | UUID
 ) -> dict[str, Any] | None:
-    """Read the current structure only through a parent household ACL."""
+    """Read the current structure for a household parent or assigned student."""
 
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
@@ -770,15 +770,24 @@ async def get_managed_structure_for_parent(
                 """
                 SELECT structures.*
                 FROM education_textbooks AS textbooks
-                JOIN education_memberships AS memberships
-                  ON memberships.household_id = textbooks.household_id
-                 AND memberships.user_id = %s
-                 AND memberships.role = 'parent'
                 JOIN education_book_structures AS structures
                   ON structures.structure_id = textbooks.current_structure_id
                 WHERE textbooks.textbook_id = %s
+                  AND (
+                      EXISTS (
+                          SELECT 1 FROM education_memberships AS memberships
+                          WHERE memberships.household_id = textbooks.household_id
+                            AND memberships.user_id = %s
+                            AND memberships.role = 'parent'
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM education_textbook_assignments AS assignments
+                          WHERE assignments.textbook_id = textbooks.textbook_id
+                            AND assignments.student_user_id = %s
+                      )
+                  )
                 """,
-                (parent_user_id, textbook_id),
+                (textbook_id, user_id, user_id),
             )
             structure = await cur.fetchone()
             if structure is None:
@@ -803,8 +812,17 @@ async def get_managed_structure_for_parent(
     return result
 
 
-async def get_managed_source_for_parent(
+async def get_managed_structure_for_parent(
     *, parent_user_id: str, textbook_id: str | UUID
+) -> dict[str, Any] | None:
+    return await get_managed_structure_for_user(
+        user_id=parent_user_id,
+        textbook_id=textbook_id,
+    )
+
+
+async def get_managed_source_for_user(
+    *, user_id: str, textbook_id: str | UUID
 ) -> dict[str, Any] | None:
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
@@ -816,21 +834,39 @@ async def get_managed_source_for_parent(
                        textbooks.source_size_bytes,
                        textbooks.source_asset_manifest
                 FROM education_textbooks AS textbooks
-                JOIN education_memberships AS memberships
-                  ON memberships.household_id = textbooks.household_id
-                 AND memberships.user_id = %s
-                 AND memberships.role = 'parent'
                 WHERE textbooks.textbook_id = %s
+                  AND (
+                      EXISTS (
+                          SELECT 1 FROM education_memberships AS memberships
+                          WHERE memberships.household_id = textbooks.household_id
+                            AND memberships.user_id = %s
+                            AND memberships.role = 'parent'
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM education_textbook_assignments AS assignments
+                          WHERE assignments.textbook_id = textbooks.textbook_id
+                            AND assignments.student_user_id = %s
+                      )
+                  )
                 """,
-                (parent_user_id, textbook_id),
+                (textbook_id, user_id, user_id),
             )
             row = await cur.fetchone()
     return dict(row) if row else None
 
 
-async def get_managed_material_for_parent(
+async def get_managed_source_for_parent(
+    *, parent_user_id: str, textbook_id: str | UUID
+) -> dict[str, Any] | None:
+    return await get_managed_source_for_user(
+        user_id=parent_user_id,
+        textbook_id=textbook_id,
+    )
+
+
+async def get_managed_material_for_user(
     *,
-    parent_user_id: str,
+    user_id: str,
     textbook_id: str | UUID,
     knowledge_point_id: str | UUID,
 ) -> dict[str, Any] | None:
@@ -845,25 +881,47 @@ async def get_managed_material_for_parent(
                        materials.size_bytes, materials.depth,
                        materials.requirements, materials.updated_at
                 FROM education_textbooks AS textbooks
-                JOIN education_memberships AS memberships
-                  ON memberships.household_id = textbooks.household_id
-                 AND memberships.user_id = %s
-                 AND memberships.role = 'parent'
                 JOIN education_book_knowledge_points AS points
                   ON points.structure_id = textbooks.current_structure_id
                  AND points.knowledge_point_id = %s
                 LEFT JOIN education_book_materials AS materials
                   ON materials.knowledge_point_id = points.knowledge_point_id
                 WHERE textbooks.textbook_id = %s
+                  AND (
+                      EXISTS (
+                          SELECT 1 FROM education_memberships AS memberships
+                          WHERE memberships.household_id = textbooks.household_id
+                            AND memberships.user_id = %s
+                            AND memberships.role = 'parent'
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM education_textbook_assignments AS assignments
+                          WHERE assignments.textbook_id = textbooks.textbook_id
+                            AND assignments.student_user_id = %s
+                      )
+                  )
                 """,
-                (parent_user_id, knowledge_point_id, textbook_id),
+                (knowledge_point_id, textbook_id, user_id, user_id),
             )
             row = await cur.fetchone()
     return dict(row) if row else None
 
 
-async def get_managed_asset_for_parent(
-    *, parent_user_id: str, textbook_id: str | UUID, asset_id: str
+async def get_managed_material_for_parent(
+    *,
+    parent_user_id: str,
+    textbook_id: str | UUID,
+    knowledge_point_id: str | UUID,
+) -> dict[str, Any] | None:
+    return await get_managed_material_for_user(
+        user_id=parent_user_id,
+        textbook_id=textbook_id,
+        knowledge_point_id=knowledge_point_id,
+    )
+
+
+async def get_managed_asset_for_user(
+    *, user_id: str, textbook_id: str | UUID, asset_id: str
 ) -> dict[str, Any] | None:
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
@@ -872,17 +930,36 @@ async def get_managed_asset_for_parent(
                 SELECT textbooks.textbook_id, textbooks.source_snapshot_prefix,
                        asset AS manifest_entry
                 FROM education_textbooks AS textbooks
-                JOIN education_memberships AS memberships
-                  ON memberships.household_id = textbooks.household_id
-                 AND memberships.user_id = %s
-                 AND memberships.role = 'parent'
                 CROSS JOIN LATERAL
                     jsonb_array_elements(textbooks.source_asset_manifest) AS asset
                 WHERE textbooks.textbook_id = %s
                   AND asset->>'artifact_id' = %s
+                  AND (
+                      EXISTS (
+                          SELECT 1 FROM education_memberships AS memberships
+                          WHERE memberships.household_id = textbooks.household_id
+                            AND memberships.user_id = %s
+                            AND memberships.role = 'parent'
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM education_textbook_assignments AS assignments
+                          WHERE assignments.textbook_id = textbooks.textbook_id
+                            AND assignments.student_user_id = %s
+                      )
+                  )
                 LIMIT 1
                 """,
-                (parent_user_id, textbook_id, asset_id),
+                (textbook_id, asset_id, user_id, user_id),
             )
             row = await cur.fetchone()
     return dict(row) if row else None
+
+
+async def get_managed_asset_for_parent(
+    *, parent_user_id: str, textbook_id: str | UUID, asset_id: str
+) -> dict[str, Any] | None:
+    return await get_managed_asset_for_user(
+        user_id=parent_user_id,
+        textbook_id=textbook_id,
+        asset_id=asset_id,
+    )

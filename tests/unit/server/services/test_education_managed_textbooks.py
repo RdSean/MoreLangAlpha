@@ -89,14 +89,14 @@ async def test_source_slice_reads_verified_frozen_markdown(monkeypatch):
     read = AsyncMock(return_value=(markdown, source["source_markdown_key"]))
     monkeypatch.setattr(
         textbooks,
-        "get_managed_source_for_parent",
+        "get_managed_source_for_user",
         AsyncMock(return_value=source),
         raising=False,
     )
     monkeypatch.setattr(textbooks, "read_snapshot_artifact_bytes", read, raising=False)
 
     result = await textbooks.get_managed_textbook_source(
-        parent_user_id="parent-1",
+        user_id="student-1",
         textbook_id=TEXTBOOK_ID,
         start_line=2,
         end_line=99,
@@ -150,13 +150,13 @@ async def test_structure_projects_only_current_material_pointers(monkeypatch):
     }
     monkeypatch.setattr(
         textbooks,
-        "get_managed_structure_for_parent",
+        "get_managed_structure_for_user",
         AsyncMock(return_value=raw),
         raising=False,
     )
 
     result = await textbooks.get_managed_textbook_structure(
-        parent_user_id="parent-1", textbook_id=TEXTBOOK_ID
+        user_id="student-1", textbook_id=TEXTBOOK_ID
     )
 
     expected_path = f"materials/{KNOWLEDGE_POINT_ID}.md"
@@ -199,14 +199,14 @@ async def test_material_read_uses_authorized_current_pointer(monkeypatch):
     read = AsyncMock(return_value=markdown)
     monkeypatch.setattr(
         textbooks,
-        "get_managed_material_for_parent",
+        "get_managed_material_for_user",
         AsyncMock(return_value=material),
         raising=False,
     )
     monkeypatch.setattr(textbooks, "read_material_bytes", read, raising=False)
 
     result = await textbooks.get_managed_knowledge_point_material(
-        parent_user_id="parent-1",
+        user_id="student-1",
         textbook_id=TEXTBOOK_ID,
         knowledge_point_id=KNOWLEDGE_POINT_ID,
     )
@@ -246,13 +246,11 @@ async def test_asset_read_resolves_only_database_manifest_entry(monkeypatch):
         return_value=(b"png-bytes", f"{prefix}artifacts/images/figure.png")
     )
     lookup = AsyncMock(return_value=asset)
-    monkeypatch.setattr(
-        textbooks, "get_managed_asset_for_parent", lookup, raising=False
-    )
+    monkeypatch.setattr(textbooks, "get_managed_asset_for_user", lookup, raising=False)
     monkeypatch.setattr(textbooks, "read_snapshot_artifact_bytes", read, raising=False)
 
     result = await textbooks.open_managed_textbook_asset(
-        parent_user_id="parent-1",
+        user_id="student-1",
         textbook_id=TEXTBOOK_ID,
         asset_id="art-I1m2A3g4E5f6",
     )
@@ -263,7 +261,7 @@ async def test_asset_read_resolves_only_database_manifest_entry(monkeypatch):
         "sha256": "d" * 64,
     }
     lookup.assert_awaited_once_with(
-        parent_user_id="parent-1",
+        user_id="student-1",
         textbook_id=TEXTBOOK_ID,
         asset_id="art-I1m2A3g4E5f6",
     )
@@ -381,3 +379,56 @@ async def test_retry_managed_job_uses_source_job_as_idempotency_scope(monkeypatc
 
     assert result["job_id"] == str(new_job_id)
     assert retry.await_args.kwargs["idempotency_key"] == f"retry:{source_job_id}"
+
+
+@pytest.mark.asyncio
+async def test_assign_managed_textbook_is_atomic_and_maps_public_rows(monkeypatch):
+    now = datetime.now(timezone.utc)
+    assign = AsyncMock(
+        return_value=[
+            {
+                "textbook_id": TEXTBOOK_ID,
+                "student_user_id": "student-1",
+                "created_at": now,
+            },
+            {
+                "textbook_id": TEXTBOOK_ID,
+                "student_user_id": "student-2",
+                "created_at": now,
+            },
+        ]
+    )
+    monkeypatch.setattr(textbooks, "assign_textbook_students", assign, raising=False)
+
+    result = await textbooks.assign_managed_textbook(
+        parent_user_id="parent-1",
+        textbook_id=TEXTBOOK_ID,
+        student_user_ids=["student-1", "student-2"],
+    )
+
+    assert [row["student_user_id"] for row in result] == ["student-1", "student-2"]
+    assert all(row["assigned_at"] == now for row in result)
+    assign.assert_awaited_once_with(
+        textbook_id=TEXTBOOK_ID,
+        student_user_ids=["student-1", "student-2"],
+        assigned_by_user_id="parent-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_revoke_managed_textbook_hides_unknown_parent_scope(monkeypatch):
+    revoke = AsyncMock(return_value=None)
+    monkeypatch.setattr(textbooks, "revoke_textbook_students", revoke, raising=False)
+
+    with pytest.raises(textbooks.TextbookNotFoundError, match="Textbook not found"):
+        await textbooks.revoke_managed_textbook(
+            parent_user_id="other-parent",
+            textbook_id=TEXTBOOK_ID,
+            student_user_ids=["student-1"],
+        )
+
+    revoke.assert_awaited_once_with(
+        textbook_id=TEXTBOOK_ID,
+        student_user_ids=["student-1"],
+        parent_user_id="other-parent",
+    )

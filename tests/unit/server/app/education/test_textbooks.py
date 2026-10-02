@@ -65,6 +65,14 @@ def _workbench_snapshot() -> dict:
     }
 
 
+def _assignment(student_user_id: str = "student-1") -> dict:
+    return {
+        "textbook_id": TEXTBOOK["textbook_id"],
+        "student_user_id": student_user_id,
+        "assigned_at": datetime.now(timezone.utc),
+    }
+
+
 def _managed_job_snapshot() -> dict:
     now = datetime.now(timezone.utc)
     return {
@@ -445,7 +453,7 @@ async def test_parent_reads_managed_workbench_and_content_without_storage_keys(c
         ]
     )
     read_source.assert_awaited_once_with(
-        parent_user_id="parent-1",
+        user_id="parent-1",
         textbook_id=UUID(TEXTBOOK["textbook_id"]),
         start_line=2,
         end_line=3,
@@ -496,7 +504,7 @@ async def test_managed_asset_response_is_private_and_digest_bound(client):
     assert response.headers["cache-control"].startswith("private")
     assert response.headers["etag"] == f'"{"d" * 64}"'
     open_asset.assert_awaited_once_with(
-        parent_user_id="parent-1",
+        user_id="parent-1",
         textbook_id=UUID(TEXTBOOK["textbook_id"]),
         asset_id="art-I1m2A3g4E5f6",
     )
@@ -558,6 +566,113 @@ async def test_parent_creates_cancels_and_retries_managed_book_jobs(client):
         parent_user_id="parent-1", job_id=MANAGED_JOB_ID
     )
     retry_job.assert_awaited_once_with(parent_user_id="parent-1", job_id=MANAGED_JOB_ID)
+
+
+@pytest.mark.asyncio
+async def test_parent_lists_assigns_and_revokes_managed_textbook_students(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    list_assignments = AsyncMock(return_value=[_assignment()])
+    assign = AsyncMock(return_value=[_assignment(), _assignment("student-2")])
+    revoke = AsyncMock(return_value=None)
+    with (
+        patch.object(
+            textbook_routes,
+            "list_managed_textbook_assignments",
+            new=list_assignments,
+            create=True,
+        ),
+        patch.object(
+            textbook_routes,
+            "assign_managed_textbook",
+            new=assign,
+            create=True,
+        ),
+        patch.object(
+            textbook_routes,
+            "revoke_managed_textbook",
+            new=revoke,
+            create=True,
+        ),
+    ):
+        listed = await client.get(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/assignments"
+        )
+        assigned = await client.post(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/assignments",
+            json={"student_user_ids": ["student-1", "student-2"]},
+        )
+        revoked = await client.request(
+            "DELETE",
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/assignments",
+            json={"student_user_ids": ["student-2"]},
+        )
+
+    assert listed.status_code == 200
+    assert assigned.status_code == 200
+    assert [row["student_user_id"] for row in assigned.json()] == [
+        "student-1",
+        "student-2",
+    ]
+    assert revoked.status_code == 204
+    list_assignments.assert_awaited_once_with(
+        parent_user_id="parent-1",
+        textbook_id=UUID(TEXTBOOK["textbook_id"]),
+    )
+    assert assign.await_args.kwargs["student_user_ids"] == ["student-1", "student-2"]
+    assert revoke.await_args.kwargs["student_user_ids"] == ["student-2"]
+
+
+@pytest.mark.asyncio
+async def test_assigned_student_reads_content_but_cannot_create_jobs(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "student-1"
+    source = {
+        "textbook_id": TEXTBOOK["textbook_id"],
+        "start_line": 1,
+        "end_line": 1,
+        "total_lines": 1,
+        "markdown": "lesson",
+    }
+    read_source = AsyncMock(return_value=source)
+    create_job = AsyncMock(side_effect=TextbookNotFoundError("Textbook not found"))
+    with (
+        patch.object(
+            textbook_routes,
+            "get_managed_textbook_source",
+            new=read_source,
+        ),
+        patch.object(
+            textbook_routes,
+            "create_managed_textbook_job",
+            new=create_job,
+        ),
+    ):
+        readable = await client.get(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/source",
+            params={"start_line": 1, "end_line": 1},
+        )
+        forbidden = await client.post(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/jobs",
+            json={
+                "kind": "materials",
+                "knowledge_point_ids": [str(KNOWLEDGE_POINT_ID)],
+                "depth": "lesson",
+                "requirements": None,
+                "replace_existing": False,
+                "include_supplementary": False,
+                "idempotency_key": "student-job",
+            },
+        )
+
+    assert readable.status_code == 200
+    assert forbidden.status_code == 404
+    read_source.assert_awaited_once_with(
+        user_id="student-1",
+        textbook_id=UUID(TEXTBOOK["textbook_id"]),
+        start_line=1,
+        end_line=1,
+    )
 
 
 @pytest.mark.asyncio

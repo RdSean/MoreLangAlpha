@@ -10,6 +10,8 @@ from fastapi.responses import Response, StreamingResponse
 
 from src.server.app.education.book_models import (
     BookActivityPageResponse,
+    BookAssignmentRequest,
+    BookAssignmentResponse,
     BookJobCreateRequest,
     BookSourceListResponse,
     BookSourceSliceResponse,
@@ -113,6 +115,7 @@ from src.server.services.education_textbooks import (
     TextbookPermissionError,
     TextbookTransitionError,
     assign_publication,
+    assign_managed_textbook,
     create_managed_textbook,
     create_managed_textbook_job,
     cancel_managed_textbook_job,
@@ -122,12 +125,14 @@ from src.server.services.education_textbooks import (
     get_managed_textbook_workbench,
     get_student_kp_lesson,
     get_student_structure,
+    list_managed_textbook_assignments,
     list_book_source_candidates,
     list_learning_assignments,
     list_completed_textbook_parse_jobs,
     list_managed_textbooks,
     open_managed_textbook_asset,
     retry_managed_textbook_job,
+    revoke_managed_textbook,
     retry_processing_for_parent,
     run_processing_for_parent,
     start_processing,
@@ -267,7 +272,7 @@ async def get_family_textbook(textbook_id: UUID, user_id: CurrentUserId):
 async def get_managed_structure(textbook_id: UUID, user_id: CurrentUserId):
     try:
         return await get_managed_textbook_structure(
-            parent_user_id=user_id,
+            user_id=user_id,
             textbook_id=textbook_id,
         )
     except TextbookError as exc:
@@ -286,7 +291,7 @@ async def get_managed_source(
 ):
     try:
         return await get_managed_textbook_source(
-            parent_user_id=user_id,
+            user_id=user_id,
             textbook_id=textbook_id,
             start_line=start_line,
             end_line=end_line,
@@ -306,7 +311,7 @@ async def get_managed_material(
 ):
     try:
         return await get_managed_knowledge_point_material(
-            parent_user_id=user_id,
+            user_id=user_id,
             textbook_id=textbook_id,
             knowledge_point_id=knowledge_point_id,
         )
@@ -322,7 +327,7 @@ async def get_managed_asset(
 ):
     try:
         asset = await open_managed_textbook_asset(
-            parent_user_id=user_id,
+            user_id=user_id,
             textbook_id=textbook_id,
             asset_id=asset_id,
         )
@@ -386,6 +391,59 @@ async def retry_managed_job(job_id: UUID, user_id: CurrentUserId):
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
+
+
+@router.get(
+    "/textbooks/{textbook_id}/assignments",
+    response_model=list[BookAssignmentResponse],
+)
+async def list_managed_assignments(textbook_id: UUID, user_id: CurrentUserId):
+    try:
+        return await list_managed_textbook_assignments(
+            parent_user_id=user_id,
+            textbook_id=textbook_id,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/textbooks/{textbook_id}/assignments",
+    response_model=list[BookAssignmentResponse],
+)
+async def assign_managed_students(
+    textbook_id: UUID,
+    body: BookAssignmentRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        return await assign_managed_textbook(
+            parent_user_id=user_id,
+            textbook_id=textbook_id,
+            student_user_ids=body.student_user_ids,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.delete(
+    "/textbooks/{textbook_id}/assignments",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def revoke_managed_students(
+    textbook_id: UUID,
+    body: BookAssignmentRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        await revoke_managed_textbook(
+            parent_user_id=user_id,
+            textbook_id=textbook_id,
+            student_user_ids=body.student_user_ids,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(

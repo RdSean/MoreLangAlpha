@@ -3,12 +3,139 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from src.server.database.pool import get_db_connection
+
+
+async def assign_textbook_students(
+    *,
+    textbook_id: str | UUID,
+    student_user_ids: list[str],
+    assigned_by_user_id: str,
+) -> list[dict[str, Any]] | None:
+    """Atomically grant one parent-selected set of household students access."""
+
+    student_user_ids = list(dict.fromkeys(student_user_ids))
+    async with get_db_connection() as conn, conn.transaction():
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT textbooks.household_id
+                FROM education_textbooks AS textbooks
+                JOIN education_memberships AS parent
+                  ON parent.household_id = textbooks.household_id
+                 AND parent.user_id = %s
+                 AND parent.role = 'parent'
+                WHERE textbooks.textbook_id = %s
+                FOR SHARE OF textbooks
+                """,
+                (assigned_by_user_id, textbook_id),
+            )
+            textbook = await cur.fetchone()
+            if textbook is None:
+                return None
+            await cur.execute(
+                """
+                SELECT memberships.user_id
+                FROM education_memberships AS memberships
+                WHERE memberships.household_id = %s
+                  AND memberships.role = 'student'
+                  AND memberships.user_id = ANY(%s::text[])
+                """,
+                (textbook["household_id"], student_user_ids),
+            )
+            found = {str(row["user_id"]) for row in await cur.fetchall()}
+            if found != set(student_user_ids):
+                raise PermissionError(
+                    "Every assigned student must belong to the book household"
+                )
+            assignments: list[dict[str, Any]] = []
+            for student_user_id in student_user_ids:
+                await cur.execute(
+                    """
+                    INSERT INTO education_textbook_assignments (
+                        assignment_id, textbook_id, student_user_id,
+                        assigned_by_user_id
+                    ) VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (textbook_id, student_user_id)
+                    DO UPDATE SET assigned_by_user_id = EXCLUDED.assigned_by_user_id
+                    RETURNING textbook_id, student_user_id, created_at
+                    """,
+                    (
+                        uuid4(),
+                        textbook_id,
+                        student_user_id,
+                        assigned_by_user_id,
+                    ),
+                )
+                row = await cur.fetchone()
+                assert row is not None
+                assignments.append(dict(row))
+            return assignments
+
+
+async def list_textbook_assignments_for_parent(
+    *, textbook_id: str | UUID, parent_user_id: str
+) -> list[dict[str, Any]]:
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT assignments.textbook_id, assignments.student_user_id,
+                       assignments.created_at
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = assignments.textbook_id
+                JOIN education_memberships AS parent
+                  ON parent.household_id = textbooks.household_id
+                 AND parent.user_id = %s
+                 AND parent.role = 'parent'
+                WHERE assignments.textbook_id = %s
+                ORDER BY assignments.created_at, assignments.student_user_id
+                """,
+                (parent_user_id, textbook_id),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def revoke_textbook_students(
+    *,
+    textbook_id: str | UUID,
+    student_user_ids: list[str],
+    parent_user_id: str,
+) -> int | None:
+    """Atomically revoke selected students, returning None outside parent scope."""
+
+    async with get_db_connection() as conn, conn.transaction():
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT 1
+                FROM education_textbooks AS textbooks
+                JOIN education_memberships AS parent
+                  ON parent.household_id = textbooks.household_id
+                 AND parent.user_id = %s
+                 AND parent.role = 'parent'
+                WHERE textbooks.textbook_id = %s
+                FOR SHARE OF textbooks
+                """,
+                (parent_user_id, textbook_id),
+            )
+            if await cur.fetchone() is None:
+                return None
+            await cur.execute(
+                """
+                DELETE FROM education_textbook_assignments
+                WHERE textbook_id = %s
+                  AND student_user_id = ANY(%s::text[])
+                """,
+                (textbook_id, student_user_ids),
+            )
+            return cur.rowcount
 
 
 async def assign_textbook(
