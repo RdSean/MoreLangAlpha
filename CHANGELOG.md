@@ -7,6 +7,7 @@
 - 新增托管教材语义进度设计，明确教育服务掌握 structure/material/supplementary 任务边界，托管 PTC Agent 通过受限 `report_progress(stage)` 解释 item 内部阶段，最终状态和完成数量仍只由产物校验与数据库事务决定。
 - 确定不修改 `more-to-skills` 核心 Skill、不解析 Bash/stdout 猜测阶段、不恢复旧 progress JSONL；阶段采用服务端白名单和中文映射，普通工具活动降为可展开明细。
 - 将该契约回写总设计，补齐工作台 timeline 的权威层级、结构阶段无虚假完成率、材料计数口径以及 OCR/学生状态等非教材 Agent 阶段的边界。本次仅更新设计文档，未修改运行代码、数据库或 Docker 数据。
+- 新增独立 TDD 实施计划并回写总实施顺序，将语义进度发送端列为 Task 4A、Task 5 工作台的前置任务；同时更正计划中的当前 worktree/分支，明确工具注入、阶段契约、活动投影、可恢复 API、前端时间线及全量验收的原子提交边界。
 
 ### 新增：有界教材活动与跨 worker 浏览器恢复
 

@@ -179,4 +179,3 @@ report_progress(stage="structure_organizing")
 - “完成 N/M”只随成功提交事务变化，刷新和跨 worker 重连后保持一致。
 - timeline 主视图不泄露工具参数、结果、路径、教材正文或思维内容。
 - 活动不可用与任务失败在 UI 上保持不同语义。
-
