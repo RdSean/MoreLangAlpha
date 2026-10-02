@@ -36,6 +36,8 @@ function requestId() {
     : `book-job-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+const SOURCE_CONTEXT_LINES = 12;
+
 export default function TextbookWorkbenchPage() {
   const { textbookId } = useParams<{ textbookId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -114,11 +116,20 @@ export default function TextbookWorkbenchPage() {
     : selectedNode
       ? { start: selectedNode.anchor.start_line, end: selectedNode.anchor.end_line }
       : undefined;
+  const sourceRequestRange = sourceRange && structure.data
+    ? {
+        start: Math.max(1, sourceRange.start - SOURCE_CONTEXT_LINES),
+        end: Math.min(
+          structure.data.structure.source.total_lines,
+          sourceRange.end + SOURCE_CONTEXT_LINES,
+        ),
+      }
+    : undefined;
   const source = useManagedBookSourceSlice(
     textbookId,
-    sourceRange?.start,
-    sourceRange?.end,
-    Boolean(sourceRange),
+    sourceRequestRange?.start,
+    sourceRequestRange?.end,
+    Boolean(sourceRequestRange),
   );
   const material = useManagedKnowledgePointMaterial(
     textbookId,
@@ -169,6 +180,15 @@ export default function TextbookWorkbenchPage() {
       next.set('view', 'source');
     });
     setNavigatorOpen(false);
+  };
+
+  const openMaterialLink = (path: string) => {
+    const normalizedPath = path.replace(/^\.\//, '').split(/[?#]/, 1)[0];
+    const target = structure.data?.knowledge_points.find((entry) => (
+      entry.content_file === normalizedPath
+      || `materials/${entry.knowledge_point_id}.md` === normalizedPath
+    ));
+    if (target) selectKnowledgePoint(target.skill_kp_id);
   };
 
   const startGeneration = async (
@@ -253,11 +273,17 @@ export default function TextbookWorkbenchPage() {
               <span>重试未完成项</span>
             </Button>
           )}
-          <Button variant="ghost" className="min-h-11 px-3" disabled={!activeJob} onClick={() => activeJob && updateSearch((next) => next.set('activity', activeJob.job_id))}>
+          <Button
+            variant="ghost"
+            className="min-h-11 px-3"
+            disabled={!activeJob}
+            onClick={() => activeJob && updateSearch((next) => next.set('activity', activeJob.job_id))}
+            aria-label="活动"
+          >
             <Activity className="size-4 sm:mr-2" aria-hidden="true" />
             <span className="hidden sm:inline">活动</span>
           </Button>
-          <Button variant="outline" className="min-h-11 px-3">
+          <Button variant="outline" className="min-h-11 px-3" aria-label="给学生使用">
             <Users className="size-4 sm:mr-2" aria-hidden="true" />
             <span className="hidden sm:inline">给学生使用</span>
           </Button>
@@ -317,7 +343,10 @@ export default function TextbookWorkbenchPage() {
                 source={source.data}
                 loading={source.isLoading || material.isLoading}
                 generationPending={mutations.createJob.isPending}
+                readingPositionKey={`textbook:${textbookId}:${selectedKnowledgePoint?.skill_kp_id ?? `node:${selectedNode?.id}`}:${readerView}`}
+                sourceHighlightRange={sourceRange}
                 onViewChange={(view) => updateSearch((next) => next.set('view', view))}
+                onOpenMaterialLink={openMaterialLink}
                 onGenerate={selectedKnowledgePoint && !currentJob
                   ? (values) => startGeneration([selectedKnowledgePoint], values)
                   : undefined}

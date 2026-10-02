@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { scrollMemory } from '@/lib/scrollMemory';
 import { BookGenerationForm } from '../components/BookGenerationForm';
 import { BookReader } from '../components/BookReader';
 import TextbookWorkbenchPage from '../TextbookWorkbenchPage';
@@ -45,6 +46,7 @@ const pageState = vi.hoisted(() => ({
   createJob: vi.fn(),
   cancelJob: vi.fn(),
   retryJob: vi.fn(),
+  sourceSlice: vi.fn(),
   workbench: {
     textbook_id: 'book-1',
     title: 'Reading Explorer 3',
@@ -127,14 +129,8 @@ const pageState = vi.hoisted(() => ({
 vi.mock('../queries', () => ({
   useTextbookWorkbench: () => ({ data: pageState.workbench, isLoading: false, isError: false }),
   useManagedBookStructure: () => ({ data: pageState.structure, isLoading: false, isError: false }),
-  useManagedBookSourceSlice: (_bookId: string, startLine: number, endLine: number) => ({
-    data: {
-      textbook_id: 'book-1',
-      start_line: startLine,
-      end_line: endLine,
-      total_lines: 120,
-      markdown: `# Source ${startLine}-${endLine}`,
-    },
+  useManagedBookSourceSlice: (bookId: string, startLine: number, endLine: number) => ({
+    data: pageState.sourceSlice(bookId, startLine, endLine),
     isLoading: false,
   }),
   useManagedKnowledgePointMaterial: (_bookId: string, knowledgePointId: string) => ({
@@ -144,7 +140,7 @@ vi.mock('../queries', () => ({
         knowledge_point_id: 'kp-db-2',
         skill_kp_id: 'sports-training',
         material_available: true,
-        markdown: '# 已有冠军训练讲义',
+        markdown: '# 已有冠军训练讲义\n\n[回到全球运动](materials/kp-db-1.md)',
         generated_at: '2026-10-02T06:00:00Z',
         depth: 'lesson',
         requirements: null,
@@ -173,11 +169,19 @@ vi.mock('../queries', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  scrollMemory.clear();
   pageState.workbench.current_job = null;
   pageState.workbench.recent_job = null;
   pageState.createJob.mockResolvedValue({ job_id: 'job-created' });
   pageState.cancelJob.mockResolvedValue({ job_id: 'job-active' });
   pageState.retryJob.mockResolvedValue({ job_id: 'job-retry' });
+  pageState.sourceSlice.mockImplementation((_bookId, startLine, endLine) => ({
+    textbook_id: 'book-1',
+    start_line: startLine,
+    end_line: endLine,
+    total_lines: 120,
+    markdown: `# Source ${startLine}-${endLine}`,
+  }));
 });
 
 describe('BookGenerationForm', () => {
@@ -275,6 +279,61 @@ describe('BookReader', () => {
     expect(screen.queryByRole('button', { name: '生成讲义' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: '讲义' })).not.toBeInTheDocument();
   });
+
+  it('restores independent material and source scroll positions', () => {
+    const { rerender, unmount } = render(
+      <BookReader
+        title="足球如何成为全球运动"
+        view="material"
+        material={readyMaterial}
+        source={source}
+        readingPositionKey="book-1:sports-global-game:material"
+        onViewChange={vi.fn()}
+      />,
+    );
+    const reader = screen.getByTestId('book-reader-scroll');
+    reader.scrollTop = 184;
+    fireEvent.scroll(reader);
+
+    rerender(
+      <BookReader
+        title="足球如何成为全球运动"
+        view="source"
+        material={readyMaterial}
+        source={source}
+        readingPositionKey="book-1:sports-global-game:source"
+        onViewChange={vi.fn()}
+      />,
+    );
+    expect(reader.scrollTop).toBe(0);
+    reader.scrollTop = 63;
+    fireEvent.scroll(reader);
+
+    rerender(
+      <BookReader
+        title="足球如何成为全球运动"
+        view="material"
+        material={readyMaterial}
+        source={source}
+        readingPositionKey="book-1:sports-global-game:material"
+        onViewChange={vi.fn()}
+      />,
+    );
+    expect(reader.scrollTop).toBe(184);
+
+    unmount();
+    render(
+      <BookReader
+        title="足球如何成为全球运动"
+        view="source"
+        material={readyMaterial}
+        source={source}
+        readingPositionKey="book-1:sports-global-game:source"
+        onViewChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('book-reader-scroll').scrollTop).toBe(63);
+  });
 });
 
 function LocationProbe() {
@@ -305,11 +364,32 @@ describe('TextbookWorkbenchPage', () => {
     expect(screen.getByRole('heading', { name: '足球如何成为全球运动' })).toBeInTheDocument();
   });
 
+  it('loads bounded context around the selected source anchor', async () => {
+    renderWorkbench('/textbooks/book-1?kp=sports-global-game&view=source');
+
+    await waitFor(() => {
+      expect(pageState.sourceSlice).toHaveBeenCalledWith('book-1', 1, 34);
+    });
+    expect(screen.getByText('第 10–22 行，共 120 行')).toBeInTheDocument();
+  });
+
   it('uses material by default for a generated KP and source for an ungenerated KP', async () => {
     renderWorkbench('/textbooks/book-1?kp=sports-training');
 
     await waitFor(() => expect(screen.getByText('已有冠军训练讲义')).toBeInTheDocument());
     fireEvent.click(screen.getByText('足球如何成为全球运动'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location')).toHaveTextContent('kp=sports-global-game');
+      expect(screen.getByTestId('location')).toHaveTextContent('view=source');
+    });
+  });
+
+  it('opens a linked knowledge point source when its material is not generated', async () => {
+    const user = userEvent.setup();
+    renderWorkbench('/textbooks/book-1?kp=sports-training&view=material');
+
+    await user.click(await screen.findByRole('link', { name: '回到全球运动' }));
 
     await waitFor(() => {
       expect(screen.getByTestId('location')).toHaveTextContent('kp=sports-global-game');

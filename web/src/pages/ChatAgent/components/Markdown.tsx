@@ -612,9 +612,19 @@ interface MarkdownProps {
   onOpenFile?: (path: string, workspaceId?: string) => void;
   /** Force code blocks to use a specific syntax theme regardless of app theme */
   codeTheme?: 'light' | 'dark';
+  /** Additional trusted rehype transforms applied after sanitization. */
+  rehypePlugins?: NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']>;
 }
 
-function Markdown({ content, variant = 'panel', className = '', style, onOpenFile, codeTheme }: MarkdownProps): React.ReactElement {
+function Markdown({
+  content,
+  variant = 'panel',
+  className = '',
+  style,
+  onOpenFile,
+  codeTheme,
+  rehypePlugins = [],
+}: MarkdownProps): React.ReactElement {
   const config = VARIANTS[variant];
   // Every pass below rewrites prose before the markdown parser sees it, so each
   // one has to say how much of the string it may touch. Inside code, markdown
@@ -693,6 +703,7 @@ function Markdown({ content, variant = 'panel', className = '', style, onOpenFil
           const wsRef = parseWsPath(href);
           return (
             <a
+              href={href}
               className="underline hover:opacity-80 transition-opacity cursor-pointer"
               style={{ color: 'var(--color-accent-primary)' }}
               onClick={(e: React.MouseEvent) => { e.preventDefault(); onOpenFile(normalizeFilePath(href), wsRef?.workspaceId); }}
@@ -717,7 +728,12 @@ function Markdown({ content, variant = 'panel', className = '', style, onOpenFil
       className={`font-content ${config.className} ${className}`.trim()}
       style={{ ...config.style, ...style }}
     >
-      <ReactMarkdown key={lineKey} remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkFriendly, remarkMath]} rehypePlugins={[[rehypeKatex, { strict: false }], rehypeRaw, [rehypeSanitize, sanitizeSchema]]} components={components}>
+      <ReactMarkdown
+        key={lineKey}
+        remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkFriendly, remarkMath]}
+        rehypePlugins={[[rehypeKatex, { strict: false }], rehypeRaw, [rehypeSanitize, sanitizeSchema], ...rehypePlugins]}
+        components={components}
+      >
         {processed}
       </ReactMarkdown>
     </div>
