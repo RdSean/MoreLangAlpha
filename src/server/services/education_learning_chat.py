@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from src.server.models.additional_context import DirectiveContext
 from src.server.services.education_textbooks import (
     TextbookError,
     get_student_kp_lesson,
@@ -88,8 +89,8 @@ async def attach_learning_chat_context(
         )
         if point is None or not str(point.get("title") or "").strip():
             raise EducationLearningChatContextError("Learning material is unavailable")
-        context = {
-            "content": "\n\n".join(
+        context = DirectiveContext(
+            content="\n\n".join(
                 [
                     f"# {point['title']}",
                     "以下是学生当前获授权教材中的成功讲义。只根据这份冻结到本轮请求"
@@ -97,7 +98,7 @@ async def attach_learning_chat_context(
                     markdown,
                 ]
             )
-        }
+        )
     except EducationLearningChatContextError:
         raise
     except TextbookError as exc:
@@ -106,4 +107,4 @@ async def attach_learning_chat_context(
         ) from exc
     # Discard client context so it cannot change or dilute the assigned material.
     del additional_context
-    return [{"type": "directive", "content": context["content"]}]
+    return [context]

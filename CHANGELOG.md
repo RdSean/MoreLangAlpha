@@ -2,6 +2,12 @@
 
 ## 2026-10-02
 
+### 修复：教材学习上下文沿用聊天持久化契约
+
+- 真实学生 Flash 追问返回成功后，数据库核对发现裸字典上下文可被运行时读取，却被现有类型化 metadata 序列化器跳过。教育模块改为返回标准 `DirectiveContext`，不修改聊天运行主干或持久化器，也不放宽学生授权。
+- 新增先失败后通过的 request copy → 真实 metadata 序列化 → directive parser 回归，验证冻结讲义可保存且浏览器伪造上下文被丢弃。真实模型复验确认 query metadata 含服务端讲义、无客户端 sentinel，runtime ledger 为 completed。
+- 验证：学生相关聚焦 `43 passed`；后端全量 `7918 passed, 8 deselected, 1 xpassed, 33 warnings`；隔离库教材三套集成 `42 passed`。改动文件 Ruff/格式、`git diff --check` 与独立代码审查通过，未改 more-to-skills 技能、模型凭据或基础设施 volumes。
+
 ### 修复：学生教材列表的 UUID 公开投影
 
 - 普通学生 cookie 登录真实验收发现 `/education/learning` 将 PostgreSQL UUID 直接交给字符串 DTO，导致列表返回 500；在教育服务公开投影处转换教材 ID，不改变数据库类型、API 字段或家庭授权规则。
