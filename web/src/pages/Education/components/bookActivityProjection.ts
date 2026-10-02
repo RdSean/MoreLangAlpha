@@ -40,8 +40,18 @@ export interface BookActivityProjection {
   currentItem: BookJobItem | null;
   currentStage: BookActivityEvent | null;
   currentDescription: string;
+  currentObjectLabel: string | null;
   milestones: BookActivityEvent[];
+  groups: { key: number; itemId: string | null; label: string | null; events: BookActivityEvent[] }[];
   toolDetails: BookActivityEvent[];
+}
+
+function itemLabel(item: BookJobItem | undefined) {
+  if (!item) return '教材处理项';
+  if (item.kind === 'structure') return '教材结构分析';
+  if (item.kind === 'supplementary') return '全书附加材料';
+  const title = item.knowledge_point_title?.trim();
+  return title ? `知识点：${title}` : `讲义任务（本次第 ${item.position} 项）`;
 }
 
 function fallbackDescription(item: BookJobItem | null, kind: BookJob['kind']) {
@@ -60,6 +70,37 @@ export function projectBookActivity(
   events: readonly BookActivityEvent[],
 ): BookActivityProjection {
   const isTerminal = isTerminalBookJobStatus(job.status);
+  const itemsById = new Map(job.items.map((item) => [item.item_id, item]));
+  const milestones: BookActivityEvent[] = [];
+  for (const entry of [...events].sort((left, right) => left.seq - right.seq)) {
+    if (entry.kind === 'tool') continue;
+    if (entry.kind === 'progress') {
+      const item = entry.item_id ? itemsById.get(entry.item_id) : undefined;
+      const stage = entry.metadata.stage;
+      if (typeof stage !== 'string' || !(item
+        ? PROGRESS_STAGES[item.kind].has(stage)
+        : Object.values(PROGRESS_STAGES).some((stages) => stages.has(stage)))) continue;
+      const previous = milestones.at(-1);
+      if (previous?.kind === 'progress' && previous.item_id === entry.item_id
+        && previous.metadata.stage === stage && previous.metadata.action === entry.metadata.action) {
+        milestones[milestones.length - 1] = entry;
+        continue;
+      }
+    }
+    milestones.push(entry);
+  }
+  const groups: BookActivityProjection['groups'] = [];
+  for (const entry of milestones) {
+    const itemId = entry.kind === 'summary' || entry.kind === 'job' ? null : entry.item_id;
+    const previous = groups.at(-1);
+    if (itemId && previous?.itemId === itemId) previous.events.push(entry);
+    else groups.push({
+      key: entry.seq,
+      itemId,
+      label: itemId ? itemLabel(itemsById.get(itemId)) : null,
+      events: [entry],
+    });
+  }
   const currentItem = isTerminal
     ? null
     : [...job.items]
@@ -98,7 +139,9 @@ export function projectBookActivity(
     currentDescription: activityUnavailable && !isTerminal
       ? `活动暂不可用，${currentDescription}`
       : currentDescription,
-    milestones: events.filter((entry) => entry.kind !== 'tool' && entry.kind !== 'progress'),
+    currentObjectLabel: currentItem ? itemLabel(currentItem) : null,
+    milestones,
+    groups,
     toolDetails: events.filter((entry) => entry.kind === 'tool'),
   };
 }

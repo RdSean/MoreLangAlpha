@@ -271,10 +271,22 @@ function mergeBoundedActivity(
 ) {
   if (incoming.length === 0) return [...previous];
   const bySequence = new Map(previous.map((entry) => [entry.seq, entry]));
-  for (const entry of incoming) bySequence.set(entry.seq, entry);
-  return [...bySequence.values()]
-    .sort((left, right) => left.seq - right.seq)
-    .slice(-1_000);
+  for (const entry of incoming) {
+    if (entry.kind === 'summary' && entry.status === 'truncated') {
+      const newer = [...bySequence.values()].some((saved) => saved.job_id === entry.job_id
+        && saved.kind === 'summary' && saved.status === 'truncated' && saved.seq > entry.seq);
+      if (newer) continue;
+      for (const [seq, saved] of bySequence) {
+        if (saved.job_id === entry.job_id && saved.kind === 'summary' && saved.status === 'truncated') bySequence.delete(seq);
+      }
+    }
+    bySequence.set(entry.seq, entry);
+  }
+  const ordered = [...bySequence.values()].sort((left, right) => left.seq - right.seq);
+  const business = ordered.filter((entry) => entry.kind !== 'tool').slice(-1_000);
+  const remaining = 1_000 - business.length;
+  const tools = remaining > 0 ? ordered.filter((entry) => entry.kind === 'tool').slice(-remaining) : [];
+  return [...business, ...tools].sort((left, right) => left.seq - right.seq);
 }
 
 export function useBookActivity(
@@ -287,6 +299,7 @@ export function useBookActivity(
   const job = useBookJob(jobId, enabled);
   const [events, setEvents] = useState<BookActivityEvent[]>([]);
   const eventsRef = useRef<BookActivityEvent[]>([]);
+  const lastProcessedSeqRef = useRef(0);
   const [connectionState, setConnectionState] = useState<BookActivityConnectionState>('connecting');
   const [streamError, setStreamError] = useState<unknown>(null);
   const visible = usePageVisibility();
@@ -302,10 +315,11 @@ export function useBookActivity(
 
   useEffect(() => {
     eventsRef.current = [];
+    lastProcessedSeqRef.current = 0;
     setEvents([]);
     setStreamError(null);
     setConnectionState('connecting');
-  }, [jobId]);
+  }, [jobId, enabled]);
 
   useEffect(() => {
     if (!enabled || !jobId || !visible || (terminal && !streamEnabled)) return;
@@ -333,7 +347,7 @@ export function useBookActivity(
         scheduler.dispose();
       };
     }
-    const afterSeq = eventsRef.current.at(-1)?.seq ?? 0;
+    const afterSeq = lastProcessedSeqRef.current;
     void educationApi.watchBookActivity(jobId, {
       afterSeq,
       signal: abortController.signal,
@@ -345,15 +359,25 @@ export function useBookActivity(
       onError: (error) => {
         if (!disposed) setStreamError(error);
       },
+      onAccessLost: () => {
+        if (disposed) return;
+        eventsRef.current = [];
+        lastProcessedSeqRef.current = 0;
+        setEvents([]);
+        setStreamError(new Error('教材活动已不可访问'));
+        disposed = true;
+        abortController.abort();
+        window.clearInterval(fallbackTimer);
+        scheduler.dispose();
+      },
       onPage: async (page) => {
         if (disposed) return;
         setStreamError(null);
         if (page.events.length > 0) {
-          setEvents((previous) => {
-            const merged = mergeBoundedActivity(previous, page.events);
-            eventsRef.current = merged;
-            return merged;
-          });
+          const merged = mergeBoundedActivity(eventsRef.current, page.events);
+          eventsRef.current = merged;
+          lastProcessedSeqRef.current = Math.max(lastProcessedSeqRef.current, ...page.events.map((entry) => entry.seq));
+          setEvents(merged);
         }
         queryClient.setQueryData<BookJob>(jobKey, (current) => current
           ? { ...current, activity_status: page.activity_status }
@@ -370,6 +394,7 @@ export function useBookActivity(
       onCursorExpired: async () => {
         if (disposed) return;
         eventsRef.current = [];
+        lastProcessedSeqRef.current = 0;
         setEvents([]);
         await scheduler.flush();
         if (!disposed) await invalidateWorkbench();

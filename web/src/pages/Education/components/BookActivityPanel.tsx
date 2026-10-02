@@ -1,4 +1,6 @@
-import { AlertCircle, Check, ChevronDown, LoaderCircle, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertCircle, Check, ChevronDown, Circle, Minus, X } from 'lucide-react';
+import { Loader } from '@/components/ui/loader';
 import { useSearchParams } from 'react-router-dom';
 import type { BookActivityEvent, BookJob, BookJobStatus } from '../types';
 import {
@@ -29,6 +31,9 @@ export function BookActivityPanel({
   onClose,
 }: BookActivityPanelProps) {
   const activity = projectBookActivity(job, events);
+  const [diagnosticJobId, setDiagnosticJobId] = useState<string | null>(null);
+  const diagnosticsOpen = diagnosticJobId === job.job_id;
+  useEffect(() => setDiagnosticJobId(null), [job.job_id]);
   const terminalError = job.status === 'failed' || job.status === 'partially_succeeded';
 
   return (
@@ -67,8 +72,9 @@ export function BookActivityPanel({
 
         {!isTerminalBookJobStatus(job.status) && (
           <div className="flex min-h-12 items-start gap-3">
-            <LoaderCircle className="mt-0.5 size-4 shrink-0 animate-spin text-primary motion-reduce:animate-none" aria-hidden="true" />
+            <span className="mt-0.5 shrink-0" aria-hidden="true"><Loader size={16} /></span>
             <div className="min-w-0">
+              {activity.currentObjectLabel && <p className="break-words text-xs text-muted-foreground">{activity.currentObjectLabel}</p>}
               <p className="break-words text-sm font-medium text-foreground">
                 {activity.currentDescription}
               </p>
@@ -77,42 +83,58 @@ export function BookActivityPanel({
           </div>
         )}
 
-        <ol className="mt-4 space-y-3">
-          {activity.milestones.map((entry) => (
-            <li key={entry.seq} className="flex min-h-10 items-start gap-3 text-sm">
-              {entry.status === 'failed'
-                ? <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-                : <Check className="mt-0.5 size-4 shrink-0 text-emerald-600" aria-hidden="true" />}
-              <span className="min-w-0 break-words text-muted-foreground">{entry.message}</span>
-            </li>
+        <div className="mt-4 space-y-4">
+          {activity.groups.map((group) => (
+            <section key={group.key} className="min-w-0">
+              {group.label && <h3 className="mb-2 break-words text-xs font-medium text-foreground">{group.label}</h3>}
+              <ol className="space-y-2">
+                {group.events.filter((entry) => activity.activityUnavailable || entry.seq !== activity.currentStage?.seq).map((entry) => (
+                  <li key={entry.seq} className="flex min-h-8 items-start gap-3 text-sm">
+                    <ActivityIcon entry={entry} />
+                    <span className="min-w-0 break-words text-muted-foreground">{entry.message}</span>
+                  </li>
+                ))}
+              </ol>
+            </section>
           ))}
-        </ol>
+        </div>
 
         {activity.toolDetails.length > 0 && (
-          <details className="mt-5 border-t pt-3">
-            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm text-muted-foreground">
-              <ChevronDown className="size-4" aria-hidden="true" />
-              运行明细（{activity.toolDetails.length}）
-            </summary>
-            <ol className="space-y-2 pb-2 pl-6 text-xs text-muted-foreground">
+          <div className="mt-5 border-t pt-3">
+            <button type="button" aria-expanded={diagnosticsOpen}
+              className="flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => setDiagnosticJobId(diagnosticsOpen ? null : job.job_id)}>
+              <ChevronDown className={`size-4 shrink-0 ${diagnosticsOpen ? '' : '-rotate-90'}`} aria-hidden="true" />
+              诊断明细（{activity.toolDetails.length}）
+            </button>
+            {diagnosticsOpen && <ol className="space-y-2 pb-2 pl-6 text-xs text-muted-foreground">
               {activity.toolDetails.map((entry) => (
                 <li key={entry.seq} className="break-words">{entry.message}</li>
               ))}
-            </ol>
-          </details>
+            </ol>}
+          </div>
         )}
 
         {isTerminalBookJobStatus(job.status) && (
           <div className={`mt-4 flex min-h-11 items-start gap-3 text-sm ${terminalError ? 'text-destructive' : 'text-foreground'}`}>
             {terminalError
               ? <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              : <Check className="mt-0.5 size-4 shrink-0 text-emerald-600" aria-hidden="true" />}
+              : job.status === 'succeeded'
+                ? <Check className="mt-0.5 size-4 shrink-0 text-emerald-600" aria-hidden="true" />
+                : <Minus className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
             <span className="min-w-0 break-words">{job.safe_error || STATUS_LABELS[job.status]}</span>
           </div>
         )}
       </div>
     </aside>
   );
+}
+
+function ActivityIcon({ entry }: { entry: BookActivityEvent }) {
+  if (entry.status === 'failed') return <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />;
+  if (entry.status === 'cancelled' || entry.status === 'not_run') return <Minus className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />;
+  if (entry.kind !== 'progress' && entry.kind !== 'summary' && entry.status === 'succeeded') return <Check className="mt-0.5 size-4 shrink-0 text-emerald-600" aria-hidden="true" />;
+  return <Circle className="mt-1 size-3 shrink-0 text-muted-foreground" aria-hidden="true" />;
 }
 
 export function RoutedBookActivityPanel(props: Omit<BookActivityPanelProps, 'onClose'>) {

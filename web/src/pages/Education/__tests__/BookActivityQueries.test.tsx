@@ -102,6 +102,71 @@ describe('createCoalescedRefreshScheduler', () => {
 });
 
 describe('useBookActivity', () => {
+  it('clears activity and aborts delivery when authorization is lost', async () => {
+    vi.spyOn(educationApi, 'getBookJob').mockResolvedValue(runningJob());
+    let options: educationApi.WatchBookActivityOptions | undefined;
+    vi.spyOn(educationApi, 'watchBookActivity').mockImplementation((_jobId, supplied) => {
+      options = supplied;
+      return new Promise((resolve) => supplied.signal?.addEventListener('abort', () => resolve()));
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = renderHook(() => useBookActivity('job-1', 'book-1'), { wrapper: wrapper(client) });
+    await waitFor(() => expect(options).toBeDefined());
+    await act(async () => { await options?.onPage(activityPage()); });
+    expect(view.result.current.events).toHaveLength(1);
+    await act(async () => { options?.onAccessLost?.(); });
+    expect(view.result.current.events).toEqual([]);
+    expect(options?.signal?.aborted).toBe(true);
+    await act(async () => { await options?.onPage(activityPage()); });
+    expect(view.result.current.events).toEqual([]);
+    view.unmount();
+  });
+
+  it('retains business events while reconnecting from consumed tool events outside the cache', async () => {
+    let visibility: DocumentVisibilityState = 'visible';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+    vi.spyOn(educationApi, 'getBookJob').mockResolvedValue(runningJob());
+    const subscriptions: educationApi.WatchBookActivityOptions[] = [];
+    vi.spyOn(educationApi, 'watchBookActivity').mockImplementation((_jobId, options) => {
+      subscriptions.push(options);
+      return new Promise((resolve) => options.signal?.addEventListener('abort', () => resolve()));
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
+    const view = renderHook(() => useBookActivity('job-1', 'book-1'), { wrapper: wrapper(client) });
+    await waitFor(() => expect(subscriptions).toHaveLength(1));
+    const base = activityPage().events[0];
+    await act(async () => { await subscriptions[0].onPage({ ...activityPage(), events: [
+      ...Array.from({ length: 1000 }, (_, index) => ({ ...base, seq: index + 1 })),
+      { ...base, seq: 1001, kind: 'tool', message: 'Bash' },
+    ], high_water_seq: 1001 }); });
+    expect(view.result.current.events).toHaveLength(1000);
+    expect(view.result.current.events[0].seq).toBe(1);
+    expect(view.result.current.events.at(-1)?.seq).toBe(1000);
+    await act(async () => { visibility = 'hidden'; document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => { visibility = 'visible'; document.dispatchEvent(new Event('visibilitychange')); });
+    await waitFor(() => expect(subscriptions).toHaveLength(2));
+    expect(subscriptions[1].afterSeq).toBe(1001);
+    view.unmount();
+  });
+
+  it('replaces the moving budget summary without accumulating old sequence copies', async () => {
+    vi.spyOn(educationApi, 'getBookJob').mockResolvedValue(runningJob());
+    let options: educationApi.WatchBookActivityOptions | undefined;
+    vi.spyOn(educationApi, 'watchBookActivity').mockImplementation((_jobId, supplied) => {
+      options = supplied;
+      return new Promise((resolve) => supplied.signal?.addEventListener('abort', () => resolve()));
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = renderHook(() => useBookActivity('job-1', 'book-1'), { wrapper: wrapper(client) });
+    await waitFor(() => expect(options).toBeDefined());
+    const summary = { ...activityPage().events[0], kind: 'summary', status: 'truncated', metadata: { dropped_count: 1 } };
+    await act(async () => { await options?.onPage({ ...activityPage(), events: [summary] }); });
+    await act(async () => { await options?.onPage({ ...activityPage(), events: [{ ...summary, seq: 2, metadata: { dropped_count: 3 } }] }); });
+    expect(view.result.current.events).toHaveLength(1);
+    expect(view.result.current.events[0].metadata.dropped_count).toBe(3);
+    view.unmount();
+  });
+
   it('loads retained activity when first opening an already completed job', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const completed = { ...runningJob(), status: 'succeeded' as const, succeeded_items: 1 };

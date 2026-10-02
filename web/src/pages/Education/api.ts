@@ -189,6 +189,7 @@ export interface WatchBookActivityOptions {
   reconnectDelayMs?: number;
   onPage: (page: BookActivityPage) => void | Promise<void>;
   onCursorExpired?: () => void | Promise<void>;
+  onAccessLost?: () => void;
   onConnectionChange?: (state: BookActivityConnectionState) => void;
   onError?: (error: unknown) => void;
 }
@@ -334,7 +335,8 @@ export async function watchBookActivity(
           signal: options.signal,
         },
       );
-      if (response.status === 403 || response.status === 404) {
+      if ([401, 403, 404].includes(response.status)) {
+        options.onAccessLost?.();
         throw new TerminalBookActivityStreamError('Textbook activity is no longer available');
       }
       if (!response.ok

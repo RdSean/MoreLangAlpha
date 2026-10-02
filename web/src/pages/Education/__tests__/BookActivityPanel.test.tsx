@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { watchBookActivity } from '../api';
 import {
+  BookActivityPanel,
   RoutedBookActivityPanel,
 } from '../components/BookActivityPanel';
 import { projectBookActivity } from '../components/bookActivityProjection';
@@ -121,6 +122,37 @@ function LocationProbe() {
 }
 
 describe('projectBookActivity', () => {
+  it('keeps terminal actions grouped by item identity and preserves chronological returns', () => {
+    const first = { ...item('material-1', 'material', 'succeeded', 1), knowledge_point_title: '位值' };
+    const second = { ...item('material-2', 'material', 'succeeded', 2), knowledge_point_title: '位值' };
+    const projection = projectBookActivity(job({ status: 'succeeded', items: [first, second] }), [
+      event(1, 'progress', 'material-1', '概念', { stage: 'material_writing', action: 'clarifying_concepts' }),
+      event(2, 'tool', 'material-1', 'Running Bash'),
+      event(3, 'progress', 'material-1', '概念', { stage: 'material_writing', action: 'clarifying_concepts' }),
+      event(4, 'progress', 'material-1', '示例', { stage: 'material_writing', action: 'explaining_source_examples' }),
+      event(5, 'progress', 'material-2', '概念', { stage: 'material_writing' }),
+      event(6, 'job', null, '任务状态'),
+      event(7, 'progress', 'material-1', '概念', { stage: 'material_writing', action: 'clarifying_concepts' }),
+    ]);
+    expect(projection.milestones.map((entry) => entry.seq)).toEqual([3, 4, 5, 6, 7]);
+    expect(projection.groups.map((group) => group.itemId)).toEqual(['material-1', 'material-2', null, 'material-1']);
+    expect(projection.groups[0].label).toBe('知识点：位值');
+    expect(projection.currentItem).toBeNull();
+  });
+
+  it('labels the running object from the snapshot and safely falls back for missing titles', () => {
+    const active = { ...item('material-2', 'material', 'running', 1), knowledge_point_title: '<位值>' };
+    const projection = projectBookActivity(job({ items: [active] }), [
+      event(1, 'progress', 'missing-item', 'unmatched', { stage: 'material_writing' }),
+      event(2, 'item', 'missing-item', 'item state'),
+    ]);
+    expect(projection.currentObjectLabel).toBe('知识点：<位值>');
+    expect(projection.groups[0].label).toBe('教材处理项');
+    expect(projection.groups[0].events.map((entry) => entry.seq)).toEqual([1, 2]);
+    expect(projectBookActivity(job({ items: [item('material-1', 'material', 'running', 1)] }), []).currentObjectLabel)
+      .toBe('讲义任务（本次第 1 项）');
+  });
+
   it('counts only succeeded material items in lesson progress', () => {
     const projection = projectBookActivity(job(), []);
 
@@ -207,6 +239,17 @@ describe('projectBookActivity', () => {
 });
 
 describe('watchBookActivity', () => {
+  it.each([401, 403, 404])('clears access on HTTP %s and does not reconnect', async (status) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('', { status }));
+    vi.stubGlobal('fetch', fetchMock);
+    const onAccessLost = vi.fn();
+    const onError = vi.fn();
+    await watchBookActivity('job-1', { onPage: vi.fn(), onAccessLost, onError });
+    expect(onAccessLost).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('finishes every retained page before stopping a completed job replay', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(sseResponse(page([event(1, 'tool', 'material-1', 'Read')], {
@@ -368,6 +411,39 @@ describe('watchBookActivity', () => {
 });
 
 describe('RoutedBookActivityPanel', () => {
+  it('unmounts diagnostics by default and resets them when switching jobs', () => {
+    const events = [event(1, 'tool', 'material-2', 'Running Bash')];
+    const view = render(<BookActivityPanel job={job()} events={events} />);
+    expect(screen.queryByText('Running Bash')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '诊断明细（1）' }));
+    expect(screen.getByText('Running Bash')).toBeInTheDocument();
+    view.rerender(<BookActivityPanel job={job({ job_id: 'job-2' })} events={events} />);
+    expect(screen.queryByText('Running Bash')).not.toBeInTheDocument();
+    view.rerender(<BookActivityPanel job={job()} events={events} />);
+    expect(screen.queryByText('Running Bash')).not.toBeInTheDocument();
+  });
+
+  it('renders completed action history as neutral progress and titles as plain text', () => {
+    const completed = job({ status: 'succeeded', items: [
+      { ...item('material-1', 'material', 'succeeded', 1), knowledge_point_title: '<img src=x onerror=alert(1)>' },
+    ] });
+    const view = render(<BookActivityPanel job={completed} events={[
+      event(1, 'progress', 'material-1', '正在澄清概念与术语', { stage: 'material_writing', action: 'clarifying_concepts' }),
+      { ...event(2, 'material', 'material-1', '讲义已提交'), status: 'succeeded' },
+    ]} />);
+    expect(screen.getByText('知识点：<img src=x onerror=alert(1)>')).toBeInTheDocument();
+    const progressRow = screen.getByText('正在澄清概念与术语').closest('li');
+    expect(progressRow?.querySelector('.lucide-check')).toBeNull();
+    expect(view.container.querySelector('img')).toBeNull();
+    expect(screen.getByText('讲义已提交').closest('li')?.querySelector('.lucide-check')).not.toBeNull();
+  });
+
+  it('does not mark a cancelled job as successful', () => {
+    const view = render(<BookActivityPanel job={job({ status: 'cancelled' })} events={[]} />);
+    expect(view.container.querySelector('.lucide-check')).toBeNull();
+    expect(screen.getAllByText('已取消').length).toBeGreaterThan(0);
+  });
+
   it('stays closed until the activity query parameter names the job', () => {
     const closed = render(
       <MemoryRouter initialEntries={['/textbooks/book-1']}>
@@ -402,7 +478,7 @@ describe('RoutedBookActivityPanel', () => {
     const reader = screen.getByTestId('reader');
     reader.scrollTop = 73;
 
-    fireEvent.click(screen.getByText('运行明细（1）'));
+    fireEvent.click(screen.getByRole('button', { name: '诊断明细（1）' }));
 
     expect(screen.getByTestId('location')).toHaveTextContent('?kp=lesson-3&activity=job-1');
     expect(reader.scrollTop).toBe(73);

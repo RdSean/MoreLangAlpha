@@ -150,6 +150,7 @@ const job = {
       position: 1,
       knowledge_point_id: 'kp-db-1',
       skill_kp_id: 'sports-global-game',
+      knowledge_point_title: '足球如何成为全球运动',
       status: 'succeeded',
       attempt: 1,
       safe_error: null,
@@ -162,6 +163,7 @@ const job = {
       position: 2,
       knowledge_point_id: 'kp-db-2',
       skill_kp_id: 'sports-training',
+      knowledge_point_title: '冠军的训练方法',
       status: 'succeeded',
       attempt: 1,
       safe_error: null,
@@ -395,7 +397,7 @@ test('activity reconnects after the first 200 of 500 events without skipping or 
       await remainderReady;
       return fulfillActivity(route, activityFrame(events.slice(150)));
     }
-    return route.fulfill({ status: 403 });
+    return fulfillActivity(route, activityFrame());
   });
   await mockAPI(page, {
     'GET /education/textbooks/book-1/source': (route) => fulfillJSON(route, {
@@ -406,23 +408,64 @@ test('activity reconnects after the first 200 of 500 events without skipping or 
 
   await page.goto('/textbooks/book-1?kp=sports-global-game&view=source&activity=job-1');
   const panel = page.getByRole('complementary', { name: '教材处理活动' });
-  await expect(panel.getByText('运行明细（200）')).toBeVisible();
+  await expect(panel.getByText('诊断明细（200）')).toBeVisible();
   await expect(panel.getByText('正在重新连接活动流')).toBeVisible();
   releaseRemainder();
-  await expect(panel.getByText('运行明细（500）')).toBeVisible();
+  await expect(panel.getByText('诊断明细（500）')).toBeVisible();
   expect(cursors.slice(0, 3)).toEqual([0, 200, 200]);
   const readingURL = page.url();
   const reader = page.getByTestId('book-reader-scroll');
   await reader.evaluate((element) => { element.scrollTop = 180; });
   await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   const readingScroll = await reader.evaluate((element) => element.scrollTop);
-  await panel.locator('summary').click();
+  await expect(panel.getByText('Running Read 500', { exact: true })).toHaveCount(0);
+  await panel.getByRole('button', { name: '诊断明细（500）' }).click();
   await expect(panel.getByText('Running Read 500', { exact: true })).toBeVisible();
   await expect(panel.getByText('Running Read 200', { exact: true })).toHaveCount(1);
   expect(page.url()).toBe(readingURL);
   expect(await reader.evaluate((element) => element.scrollTop)).toBe(readingScroll);
   await expect(panel.getByText('处理失败', { exact: true })).toHaveCount(0);
 });
+
+for (const width of [1440, 375]) {
+  test(`${width}px completed business history replays titles and keeps diagnostics opt-in`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockWorkbench(page);
+    const longTitle = 'Place Value: How a Digit\'s Position Sets Its Value <b>原文标题</b> '.repeat(2);
+    await mockAPI(page, {
+      'GET /education/book-jobs/job-1': { ...job, items: job.items.map((item, index) => ({
+        ...item, knowledge_point_title: index === 0 ? longTitle : item.knowledge_point_title,
+      })) },
+      'GET /education/book-jobs/job-1/events': (route) => fulfillActivity(route, activityFrame([
+        activityEvent(1, { kind: 'progress', message: '正在澄清概念与术语', metadata: { stage: 'material_writing', action: 'clarifying_concepts' } }),
+        activityEvent(2, { message: 'Running Bash diagnostic only' }),
+        activityEvent(3, { kind: 'progress', message: '正在整理原文示例', metadata: { stage: 'material_writing', action: 'explaining_source_examples' } }),
+        activityEvent(4, { kind: 'item_succeeded', status: 'succeeded', message: '讲义已提交' }),
+        activityEvent(5, { item_id: 'item-2', kind: 'progress', message: '正在澄清概念与术语', metadata: { stage: 'material_writing', action: 'clarifying_concepts' } }),
+        activityEvent(6, { item_id: 'item-2', kind: 'item_succeeded', status: 'succeeded', message: '讲义已提交' }),
+      ], { status: 'succeeded', high_water_seq: 6 })),
+    });
+    await page.goto('/textbooks/book-1?kp=sports-global-game&view=source&activity=job-1');
+    const panel = page.getByRole('complementary', { name: '教材处理活动' });
+    await expect(panel.getByRole('heading', { name: `知识点：${longTitle}` })).toBeVisible();
+    await expect(panel.getByRole('heading', { name: '知识点：冠军的训练方法' })).toBeVisible();
+    await expect(panel.getByText('正在澄清概念与术语')).toHaveCount(2);
+    await expect(panel.locator('b')).toHaveCount(0);
+    await expect(panel.getByText('Running Bash diagnostic only')).toHaveCount(0);
+    const diagnostics = panel.getByRole('button', { name: '诊断明细（1）' });
+    await diagnostics.focus();
+    await page.keyboard.press('Enter');
+    await expect(diagnostics).toHaveAttribute('aria-expanded', 'true');
+    await expect(panel.getByText('Running Bash diagnostic only')).toBeVisible();
+    await page.reload();
+    await expect(panel.getByText('正在整理原文示例')).toBeVisible();
+    await expect(panel.getByText('讲义已提交')).toHaveCount(2);
+    await expect(diagnostics).toHaveAttribute('aria-expanded', 'false');
+    await expect(panel.getByText('Running Bash diagnostic only')).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({ path: testInfo.outputPath(`business-history-${width}.png`), animations: 'disabled' });
+  });
+}
 
 for (const activityStatus of ['available', 'unavailable']) {
   test(`snapshot updates material counts and current item with ${activityStatus} open silent activity`, async ({ page }) => {
@@ -455,7 +498,8 @@ for (const activityStatus of ['available', 'unavailable']) {
 
     await expect(panel.getByText('已完成 1/2 份讲义')).toBeVisible({ timeout: 8000 });
     expect(jobRequests).toBeGreaterThan(previousRequests);
-    await expect(panel.getByText('正在撰写讲义', { exact: true })).toHaveCount(0);
+    await expect(panel.getByText('正在撰写讲义', { exact: true })).toHaveCount(1);
+    await expect(panel.getByText('知识点：冠军的训练方法', { exact: true })).toBeVisible();
     await expect(panel.getByText(activityStatus === 'available' ? '正在生成讲义' : '活动暂不可用，讲义生成仍在继续', { exact: true })).toBeVisible();
     const activityRequests = (await getCapturedRequests()).filter((request) => request.url.startsWith('/api/v1/education/book-jobs/job-1/events'));
     expect(activityRequests).toHaveLength(1);

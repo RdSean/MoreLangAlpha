@@ -168,6 +168,7 @@ export interface BookJobItem {
   position: number;
   knowledge_point_id: string | null;
   skill_kp_id: string | null;
+  knowledge_point_title?: string | null;
   status: BookJobItemStatus;
   attempt: number;
   safe_error: string | null;
