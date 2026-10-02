@@ -446,7 +446,9 @@ def managed_item_prompt(item: Mapping[str, Any]) -> str:
         f"{root}/.agents/skills/more-to-skills/SKILL.md contract. Use normal "
         "Read, image reading, Bash, and ExecuteCode as needed. Follow the "
         "task.json progress contract: call report_progress only with a listed "
-        "progress.allowed_stages value when entering a real stage. Progress is "
+        "progress.allowed_stages value when entering a real stage, optionally selecting "
+        "an allowed action matching its stages and when condition. Follow the Skill's "
+        "optional host progress guidance; the catalog is not a required checklist. Progress is "
         "optional and does not replace outputs or the final response. Write only the "
         "single task's declared outputs; do not infer business identifiers from paths."
     )

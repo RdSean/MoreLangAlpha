@@ -24,7 +24,7 @@ Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skill
 
 ### 当前检查点（2026-10-02）
 
-**2026-10-03 计划补充（未实施）：** [教材业务动作时间线开发细则](2026-10-03-textbook-business-activity.md)细化 Task 4/4A 的可选 action 契约与工具预算、Task 5 的终态业务历史/隐藏诊断/独立消费游标，以及 Skill 可选上报约定。待用户审阅后按该补充实施，不重开 Task 1–7，也不改变原提交/权限/恢复边界；新增验收并入 Task 8，原未完成项保留。
+**2026-10-03 增量已交付：** [教材业务动作时间线开发细则](2026-10-03-textbook-business-activity.md)的可选 action/工具预算、知识点标题分组/终态历史/隐藏诊断/独立游标及 Skill 可选报告已实施。两份专用数学/语言讲义真实提交，动作经 PG/SSE/browser 回放，未因上报扩写例题/词表；后端聚焦 119、PG 45、前端聚焦 49、工作台 Chromium 11 passed。详细范围与性能/身份验证限制见[增量验收记录](2026-10-03-textbook-business-activity-results.md)。不重开 Task 1–7，不改变提交/权限/恢复边界；总 Task 8 原未完成项保留。
 
 Task 1–7 与 Task 4A 已交付。Task 7 已向开发库应用 `082_more_to_skills_textbooks`，并按升级前导出的私人资源清单清理旧教材；详细范围、保护计数、检查证据和未验收项见[切换记录](2026-10-02-more-to-skills-cutover-results.md)。Task 8 已开始但仍有真实存储/提交 ACK 故障、模型已完成结果的跨进程恢复提交及完整普通产品 live 链路未覆盖，不能将清理或局部真实加工成功等同于整个重构验收通过。
 

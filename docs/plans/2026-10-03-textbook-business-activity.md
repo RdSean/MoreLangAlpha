@@ -10,7 +10,7 @@
 
 ---
 
-**状态：待审阅，未实施。** 本文是[总实施计划](2026-09-30-more-to-skills-implementation.md) Task 4/4A/5 的增量补充，验收并入 Task 8。保留[原语义进度设计](2026-10-02-managed-textbook-progress-design.md)及其[实施计划](2026-10-02-managed-textbook-progress-implementation.md)的历史记录；下述变更在后续实施后才生效，不代表当前运行行为。
+**状态：用户已批准，本增量已实施并通过聚焦与两项真实加工验收。** 本文是[总实施计划](2026-09-30-more-to-skills-implementation.md) Task 4/4A/5 的增量补充，验收并入 Task 8。保留[原语义进度设计](2026-10-02-managed-textbook-progress-design.md)及其[实施计划](2026-10-02-managed-textbook-progress-implementation.md)的历史记录；实际证据及限制见[本增量验收记录](2026-10-03-textbook-business-activity-results.md)。总 Task 8 仍未完成。
 
 ## 设计边界
 
@@ -283,3 +283,11 @@ pnpm exec eslint src/pages/Education/components/BookActivityPanel.tsx src/pages/
 2026-10-03：开发计划细则已补写，待用户审阅后开发。本轮只创建/修改计划与索引文档；产品代码、Skill、数据库和运行服务均未修改。已完成只读代码依赖检查和一次提示应用基线，未执行本计划中的红绿测试、真实模型加工或浏览器验收。
 
 同日补充：明确知识点标题由授权任务快照提供，前端按 item 身份分组并标注当前对象；补齐 API/类型接线位置、缺失标题回退、同名/子集/回放规则与验收。仍仅修改文档，未实施。
+
+### 用户批准后的实施检查点
+
+- P1/P2 已完成：工具/observer/预算/title 红绿测试，后端契约提交 `a4fb1bc9d`；前端业务历史、诊断折叠、游标与授权失效处理提交 `26a4e0882`。聚焦后端 119 passed、真实 PostgreSQL 三套 45 passed、前端聚焦 49 passed、工作台 Chromium 11 passed。
+- P3 已完成：修改 Skill 前开发库 queued/running 教材任务为 0；增加通用可选报告及局部提醒，不改模板/脚本/schema。Skill manifest 为 `46ca820bfd66b3adaba0b8cbd405e71af27276caf891202c8376a3897c961495`，schema/version 不变。修改前后只读独立 Agent 场景符合内容范围，但基线本来也没有硬加例子，不能记为真实模型失败到通过。
+- 专用教材经正常图书馆 PDF 上传/解析、真实结构分析后，数学无例题摘要与语言两原例讲义分别成功。实际接收 action，PG 与完整 HTTP SSE 逐条一致；工作台桌面/375px 可回放知识点及动作，默认无工具行，展开可读。没有修改用户原教材、账号配置或数据卷。
+- P4 已完成：更新总计划与语义计划/Task 8 索引及中文日志；保持本开发分支与 5177/8000，本机/LAN HTTP 200。全量后端 7928 passed；前端全量 2592 passed、1 个既有无关 Plugins storage-throws 失败，build/typecheck/lint 通过。未合并、推送或删除 worktree。
+- 限制：新旧真实运行不是同材料/深度的配对实验，现有托管运行未持久化 token usage，不能量化进度上报的额外 token 或吞吐。新的工具压力以真实 PG 并发/预算测试验证，旧 150001 delta 组合实验没有在新版本重跑。总 Task 8 原有存储/COMMIT ACK、完成结果跨进程提交恢复、家长 cookie 添加及普通产品 live 剩余矩阵继续保持未完成。
