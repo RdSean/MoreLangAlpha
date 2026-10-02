@@ -23,10 +23,7 @@ from src.server.database.education_textbooks import (
     get_processing_job_for_parent,
     get_owned_parse_job,
     get_textbook_for_parent,
-    get_student_published_kp_lesson,
-    get_student_published_structure,
     list_completed_parse_jobs_for_parent,
-    list_student_assignments,
     list_textbooks_for_parent,
     queue_textbook_processing,
     queue_textbook_processing_from_artifacts,
@@ -45,6 +42,8 @@ from src.server.database.education_books import (
 )
 from src.server.database.education_learning import (
     assign_textbook_students,
+    get_student_assignment_by_id,
+    list_student_textbook_assignments,
     list_textbook_assignments_for_parent,
     revoke_textbook_students,
 )
@@ -72,9 +71,6 @@ from src.server.services.education_book_structure import (
     project_material_content_files,
 )
 from src.server.services.education_textbook_storage import write_textbook_content_bundle
-from src.server.services.education_teaching_storage import (
-    read_kp_lesson_revision,
-)
 from src.utils.storage import get_bytes
 
 if TYPE_CHECKING:
@@ -1183,7 +1179,7 @@ async def list_learning_assignments(*, student_user_id: str) -> list[dict[str, A
     membership = await get_membership_for_user(student_user_id)
     if not membership or membership["role"] != "student":
         raise TextbookPermissionError("Only a student can access learning assignments")
-    return await list_student_assignments(student_user_id)
+    return await list_student_textbook_assignments(student_user_id=student_user_id)
 
 
 async def get_student_structure(
@@ -1192,13 +1188,21 @@ async def get_student_structure(
     membership = await get_membership_for_user(student_user_id)
     if not membership or membership["role"] != "student":
         raise TextbookPermissionError("Only a student can access learning assignments")
-    structure = await get_student_published_structure(
+    assignment = await get_student_assignment_by_id(
         student_user_id=student_user_id,
         assignment_id=assignment_id,
     )
-    if not structure:
-        raise TextbookNotFoundError("Published textbook structure not found")
-    return structure
+    if not assignment:
+        raise TextbookNotFoundError("Textbook assignment not found")
+    structure = await get_managed_textbook_structure(
+        user_id=student_user_id,
+        textbook_id=assignment["textbook_id"],
+    )
+    return {
+        **structure,
+        "assignment_id": assignment["assignment_id"],
+        "textbook_title": assignment["textbook_title"],
+    }
 
 
 async def get_student_kp_lesson(
@@ -1207,19 +1211,18 @@ async def get_student_kp_lesson(
     membership = await get_membership_for_user(student_user_id)
     if not membership or membership["role"] != "student":
         raise TextbookPermissionError("Only a student can access learning lessons")
-    lesson = await get_student_published_kp_lesson(
+    assignment = await get_student_assignment_by_id(
         student_user_id=student_user_id,
         assignment_id=assignment_id,
+    )
+    if not assignment:
+        raise TextbookNotFoundError("Textbook assignment not found")
+    material = await get_managed_knowledge_point_material(
+        user_id=student_user_id,
+        textbook_id=assignment["textbook_id"],
         knowledge_point_id=knowledge_point_id,
     )
-    if not lesson:
-        raise TextbookNotFoundError("Published knowledge-point lesson not found")
-    content = await read_kp_lesson_revision(
-        str(lesson["content_key"]),
-        expected_sha256=str(lesson["content_sha256"]),
-        expected_size=int(lesson["size_bytes"]),
-    )
     return {
-        **lesson,
-        "content_markdown": content.decode("utf-8"),
+        **material,
+        "assignment_id": assignment["assignment_id"],
     }

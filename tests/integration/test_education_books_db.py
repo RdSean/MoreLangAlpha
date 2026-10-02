@@ -900,7 +900,9 @@ async def test_assignment_grants_and_revokes_current_book_reads_atomically(
     )
     from src.server.database.education_learning import (
         assign_textbook_students,
+        get_student_assignment_by_id,
         get_student_assignment,
+        list_student_textbook_assignments,
         revoke_textbook_students,
     )
 
@@ -953,6 +955,27 @@ async def test_assignment_grants_and_revokes_current_book_reads_atomically(
     )
     assert assigned is not None
     assert [row["student_user_id"] for row in assigned] == [student_id]
+    assignment_id = assigned[0]["assignment_id"]
+    listed = await list_student_textbook_assignments(student_user_id=student_id)
+    assert [row["assignment_id"] for row in listed] == [assignment_id]
+    assert listed[0]["textbook_id"] == textbook_id
+    assert listed[0]["textbook_title"] == "Atomic Book"
+    assert listed[0]["knowledge_point_count"] == 1
+    assert listed[0]["completed_knowledge_point_count"] == 0
+    resolved = await get_student_assignment_by_id(
+        assignment_id=assignment_id,
+        student_user_id=student_id,
+    )
+    assert resolved is not None
+    assert resolved["textbook_id"] == textbook_id
+    assert resolved["textbook_title"] == "Atomic Book"
+    assert (
+        await get_student_assignment_by_id(
+            assignment_id=assignment_id,
+            student_user_id=outsider_id,
+        )
+        is None
+    )
     assert (
         await get_managed_structure_for_user(
             user_id=student_id, textbook_id=textbook_id

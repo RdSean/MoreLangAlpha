@@ -2,6 +2,13 @@
 
 ## 2026-10-02
 
+### 重构：学生教材读取切换到当前结构与讲义
+
+- 学生学习列表与稳定 assignment URL 改为读取 `education_textbook_assignments` 的教材授权；结构和讲义复用新教材门面的当前成功内容，不再通过 publication、version 或 revision 冻结链路。
+- 新增严格的学生 assignment、结构和讲义响应 DTO；结构保留 Skill node/KP ID 与数据库 KP UUID 映射，讲义缺失时显式返回 `material_available=false`，响应不再暴露旧发布字段。
+- 新数据库查询按 `assignment_id + student_user_id` 解析教材，并只统计当前结构的知识点与已读进度；跨学生 assignment 不可见，撤销授权后现有结构、原文、讲义和图片门面继续统一拒绝。
+- 验证：聚焦学生 HTTP/facade 单元测试 `2 passed`，`langalpha_test` PostgreSQL assignment 集成测试 `1 passed`；未向开发数据库应用 `082`，未改动 Docker volume。
+
 ### 完善：教材工作台学生授权闭环
 
 - “给学生使用”接入新教材 assignments 门面；弹窗只列出同家庭学生，打开时回显当前授权，保存时分别批量提交新增与移除的差集，不恢复 publication、revision 或逐讲义审批流程。

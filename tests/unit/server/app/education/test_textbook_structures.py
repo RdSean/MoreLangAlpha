@@ -1493,56 +1493,55 @@ async def test_parent_reads_knowledge_point_source_preview(client):
 
 
 @pytest.mark.asyncio
-async def test_student_reads_only_published_structure_and_lesson(client):
+async def test_student_reads_current_structure_and_material_without_publication_fields(
+    client,
+):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "student-1"
     assignment_id = uuid4()
     structure_id = uuid4()
-    unit_id = uuid4()
     knowledge_point_id = uuid4()
-    revision_id = uuid4()
+    textbook_id = uuid4()
     structure = {
         "assignment_id": assignment_id,
-        "publication_id": uuid4(),
-        "textbook_id": uuid4(),
+        "textbook_id": str(textbook_id),
         "textbook_title": "Reading Explorer 3",
-        "textbook_slug": "re3",
-        "version_sequence": 1,
         "structure_id": structure_id,
-        "structure_sequence": 1,
-        "units": [
+        "schema_version": "2.1.0",
+        "structure": {
+            "schema_version": "2.1.0",
+            "book": {"title": "Reading Explorer 3"},
+            "source": {"path": "source.md", "total_lines": 20},
+            "coverage": {},
+            "nodes": [],
+        },
+        "knowledge_points": [
             {
-                "unit_id": unit_id,
+                "knowledge_point_id": knowledge_point_id,
+                "skill_kp_id": "world-game",
                 "position": 1,
-                "slug": "unit-1",
-                "title": "Unit 1",
-                "summary": "",
-                "unit_type": "teaching",
-                "knowledge_points": [
-                    {
-                        "knowledge_point_id": knowledge_point_id,
-                        "position": 1,
-                        "slug": "world-game",
-                        "title": "世界运动",
-                        "summary": "",
-                        "has_lesson": True,
-                    }
-                ],
+                "title": "世界运动",
+                "unit_skill_node_id": "unit-1",
+                "node_skill_ids": [],
+                "start_line": 2,
+                "end_line": 8,
+                "content_file": f"materials/{knowledge_point_id}.md",
+                "material_available": True,
             }
         ],
+        "warnings": [],
     }
-    lesson = {
+    material = {
         "assignment_id": assignment_id,
+        "textbook_id": str(textbook_id),
         "knowledge_point_id": knowledge_point_id,
-        "knowledge_point_title": "世界运动",
-        "unit_id": unit_id,
-        "unit_title": "Unit 1",
-        "revision_id": revision_id,
-        "revision": 1,
-        "format": "markdown",
+        "skill_kp_id": "world-game",
+        "material_available": True,
+        "markdown": "# 世界运动\n",
+        "generated_at": "2026-10-02T08:00:00Z",
+        "depth": "lesson",
+        "requirements": None,
         "content_sha256": "a" * 64,
-        "size_bytes": 20,
-        "content_markdown": "# 世界运动\n",
     }
     with (
         patch(
@@ -1551,7 +1550,7 @@ async def test_student_reads_only_published_structure_and_lesson(client):
         ),
         patch(
             "src.server.app.education.textbooks.get_student_kp_lesson",
-            new=AsyncMock(return_value=lesson),
+            new=AsyncMock(return_value=material),
         ),
     ):
         structure_response = await client.get(
@@ -1564,7 +1563,9 @@ async def test_student_reads_only_published_structure_and_lesson(client):
     assert structure_response.status_code == 200
     assert lesson_response.status_code == 200
     assert (
-        structure_response.json()["units"][0]["knowledge_points"][0]["has_lesson"]
-        is True
+        structure_response.json()["knowledge_points"][0]["material_available"] is True
     )
-    assert lesson_response.json()["content_markdown"] == "# 世界运动\n"
+    assert "publication_id" not in structure_response.json()
+    assert "version_sequence" not in structure_response.json()
+    assert lesson_response.json()["markdown"] == "# 世界运动\n"
+    assert "revision_id" not in lesson_response.json()

@@ -176,6 +176,25 @@ class KnowledgePointMaterialResponse(_StrictModel):
         return self
 
 
+class StudentBookAssignmentResponse(_StrictModel):
+    assignment_id: UUID
+    textbook_id: str
+    textbook_title: str
+    structure_id: UUID | None = None
+    knowledge_point_count: int = Field(ge=0)
+    completed_knowledge_point_count: int = Field(ge=0)
+    created_at: datetime
+
+
+class StudentBookStructureResponse(BookStructureResponse):
+    assignment_id: UUID
+    textbook_title: str
+
+
+class StudentKnowledgePointMaterialResponse(KnowledgePointMaterialResponse):
+    assignment_id: UUID
+
+
 class BookJobCreateRequest(_StrictModel):
     kind: BookJobKind
     knowledge_point_ids: list[UUID] = Field(default_factory=list, max_length=1000)

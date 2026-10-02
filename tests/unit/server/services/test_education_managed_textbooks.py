@@ -16,6 +16,7 @@ from src.server.services import education_textbooks as textbooks
 TEXTBOOK_ID = UUID("bc5734a8-8a30-459f-a1f3-8551feb4c169")
 HOUSEHOLD_ID = UUID("6eebf7fb-9579-4c5d-825a-2e595b7f1b18")
 KNOWLEDGE_POINT_ID = UUID("4c3f4d0c-a508-4bff-a89f-a3a584a2fe86")
+ASSIGNMENT_ID = UUID("d38d5a0c-d4eb-4afd-8a25-9e064ca13f7e")
 
 
 @pytest.mark.asyncio
@@ -224,6 +225,94 @@ async def test_material_read_uses_authorized_current_pointer(monkeypatch):
         content_key=material["content_key"],
         expected_sha256="c" * 64,
         expected_size=len(markdown),
+    )
+
+
+@pytest.mark.asyncio
+async def test_student_learning_reads_resolve_assignment_to_current_book(monkeypatch):
+    now = datetime.now(timezone.utc)
+    assignment = {
+        "assignment_id": ASSIGNMENT_ID,
+        "textbook_id": TEXTBOOK_ID,
+        "textbook_title": "Reading Explorer 3",
+        "structure_id": UUID("0cf0c918-23dc-44a2-8ad7-6a8788279f3e"),
+        "knowledge_point_count": 4,
+        "completed_knowledge_point_count": 2,
+        "created_at": now,
+    }
+    structure = {
+        "textbook_id": str(TEXTBOOK_ID),
+        "structure_id": assignment["structure_id"],
+        "schema_version": "2.1.0",
+        "structure": {"nodes": []},
+        "knowledge_points": [],
+        "warnings": [],
+    }
+    material = {
+        "textbook_id": str(TEXTBOOK_ID),
+        "knowledge_point_id": KNOWLEDGE_POINT_ID,
+        "skill_kp_id": "world-game",
+        "material_available": True,
+        "markdown": "# Lesson\n",
+        "generated_at": now,
+        "depth": "lesson",
+        "requirements": None,
+        "content_sha256": "a" * 64,
+    }
+    membership = AsyncMock(return_value={"role": "student"})
+    list_assignments = AsyncMock(return_value=[assignment])
+    get_assignment = AsyncMock(return_value=assignment)
+    get_structure = AsyncMock(return_value=structure)
+    get_material = AsyncMock(return_value=material)
+    monkeypatch.setattr(textbooks, "get_membership_for_user", membership)
+    monkeypatch.setattr(
+        textbooks,
+        "list_student_textbook_assignments",
+        list_assignments,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        textbooks,
+        "get_student_assignment_by_id",
+        get_assignment,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        textbooks,
+        "get_managed_textbook_structure",
+        get_structure,
+    )
+    monkeypatch.setattr(
+        textbooks,
+        "get_managed_knowledge_point_material",
+        get_material,
+    )
+
+    listed = await textbooks.list_learning_assignments(student_user_id="student-1")
+    loaded_structure = await textbooks.get_student_structure(
+        student_user_id="student-1",
+        assignment_id=str(ASSIGNMENT_ID),
+    )
+    loaded_material = await textbooks.get_student_kp_lesson(
+        student_user_id="student-1",
+        assignment_id=str(ASSIGNMENT_ID),
+        knowledge_point_id=str(KNOWLEDGE_POINT_ID),
+    )
+
+    assert listed == [assignment]
+    assert loaded_structure == {
+        **structure,
+        "assignment_id": ASSIGNMENT_ID,
+        "textbook_title": "Reading Explorer 3",
+    }
+    assert loaded_material == {**material, "assignment_id": ASSIGNMENT_ID}
+    list_assignments.assert_awaited_once_with(student_user_id="student-1")
+    assert get_assignment.await_count == 2
+    get_structure.assert_awaited_once_with(user_id="student-1", textbook_id=TEXTBOOK_ID)
+    get_material.assert_awaited_once_with(
+        user_id="student-1",
+        textbook_id=TEXTBOOK_ID,
+        knowledge_point_id=str(KNOWLEDGE_POINT_ID),
     )
 
 

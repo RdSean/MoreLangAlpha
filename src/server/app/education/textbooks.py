@@ -20,6 +20,9 @@ from src.server.app.education.book_models import (
     CreateBookResponse,
     BookJobResponse,
     KnowledgePointMaterialResponse,
+    StudentBookAssignmentResponse,
+    StudentBookStructureResponse,
+    StudentKnowledgePointMaterialResponse,
     TextbookSummaryResponse,
     TextbookWorkbenchResponse,
 )
@@ -46,8 +49,6 @@ from src.server.app.education.models import (
     MergeKnowledgePointCandidatesRequest,
     SplitKnowledgePointCandidateRequest,
     StructureGenerationJobResponse,
-    StudentKnowledgePointLessonResponse,
-    StudentTextbookStructureResponse,
     TextbookAssignmentResponse,
     TextbookParseJobCandidateResponse,
     TextbookProcessingResponse,
@@ -1115,7 +1116,7 @@ async def assign_family_textbook_publication(
         raise _textbook_http_error(exc) from exc
 
 
-@router.get("/learning", response_model=list[dict])
+@router.get("/learning", response_model=list[StudentBookAssignmentResponse])
 async def list_student_learning(user_id: CurrentUserId):
     try:
         return await list_learning_assignments(student_user_id=user_id)
@@ -1125,7 +1126,7 @@ async def list_student_learning(user_id: CurrentUserId):
 
 @router.get(
     "/learning/{assignment_id}/structure",
-    response_model=StudentTextbookStructureResponse,
+    response_model=StudentBookStructureResponse,
 )
 async def get_student_assignment_structure(
     assignment_id: UUID,
@@ -1142,7 +1143,7 @@ async def get_student_assignment_structure(
 
 @router.get(
     "/learning/{assignment_id}/knowledge-points/{knowledge_point_id}",
-    response_model=StudentKnowledgePointLessonResponse,
+    response_model=StudentKnowledgePointMaterialResponse,
 )
 async def get_student_assignment_knowledge_point_lesson(
     assignment_id: UUID,

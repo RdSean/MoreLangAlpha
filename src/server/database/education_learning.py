@@ -63,7 +63,7 @@ async def assign_textbook_students(
                     ) VALUES (%s, %s, %s, %s)
                     ON CONFLICT (textbook_id, student_user_id)
                     DO UPDATE SET assigned_by_user_id = EXCLUDED.assigned_by_user_id
-                    RETURNING textbook_id, student_user_id, created_at
+                    RETURNING assignment_id, textbook_id, student_user_id, created_at
                     """,
                     (
                         uuid4(),
@@ -216,6 +216,78 @@ async def get_student_assignment(
                   AND assignments.student_user_id = %s
                 """,
                 (textbook_id, student_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def list_student_textbook_assignments(
+    *, student_user_id: str
+) -> list[dict[str, Any]]:
+    """List the student's assigned books against each current structure."""
+
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT assignments.assignment_id, assignments.textbook_id,
+                       textbooks.title AS textbook_title,
+                       textbooks.current_structure_id AS structure_id,
+                       assignments.created_at,
+                       COALESCE((
+                           SELECT COUNT(*)
+                           FROM education_book_knowledge_points AS points
+                           WHERE points.structure_id = textbooks.current_structure_id
+                       ), 0) AS knowledge_point_count,
+                       COALESCE((
+                           SELECT COUNT(*)
+                           FROM education_learning_kp_progress AS progress
+                           JOIN education_book_knowledge_points AS points
+                             ON points.textbook_id = progress.textbook_id
+                            AND points.knowledge_point_id = progress.knowledge_point_id
+                           WHERE progress.assignment_id = assignments.assignment_id
+                             AND points.structure_id = textbooks.current_structure_id
+                             AND progress.status = 'read'
+                       ), 0) AS completed_knowledge_point_count
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = assignments.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                 AND memberships.user_id = assignments.student_user_id
+                 AND memberships.role = 'student'
+                WHERE assignments.student_user_id = %s
+                ORDER BY assignments.created_at DESC, assignments.assignment_id
+                """,
+                (student_user_id,),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def get_student_assignment_by_id(
+    *, assignment_id: str | UUID, student_user_id: str
+) -> dict[str, Any] | None:
+    """Resolve a stable student assignment without exposing legacy publications."""
+
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT assignments.assignment_id, assignments.textbook_id,
+                       textbooks.title AS textbook_title,
+                       textbooks.current_structure_id AS structure_id,
+                       assignments.created_at
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = assignments.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                 AND memberships.user_id = assignments.student_user_id
+                 AND memberships.role = 'student'
+                WHERE assignments.assignment_id = %s
+                  AND assignments.student_user_id = %s
+                """,
+                (assignment_id, student_user_id),
             )
             row = await cur.fetchone()
     return dict(row) if row else None
