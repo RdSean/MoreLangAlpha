@@ -1,0 +1,387 @@
+"""PostgreSQL authority and activity-budget integration coverage."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+
+from src.server.services.education_book_structure import MoreToSkillsIdentity
+
+
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+IDENTITY = MoreToSkillsIdentity(
+    version="2.1.0",
+    skill_sha256="b" * 64,
+    schema_sha256="c" * 64,
+)
+
+
+async def _seed_running_item(connection_factory, *, parent_user_id: str) -> dict:
+    from src.server.database.education_book_jobs import claim_next_book_item
+    from src.server.database.education_books import create_textbook_with_initial_job
+
+    household_id = uuid4()
+    textbook_id = uuid4()
+    prefix = f"education/{household_id}/textbooks/{textbook_id}/source/"
+    async with connection_factory() as conn, conn.transaction():
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO education_households (
+                    household_id, name, model_owner_user_id
+                ) VALUES (%s, 'Activity household', %s)
+                """,
+                (household_id, parent_user_id),
+            )
+            await cur.execute(
+                """
+                INSERT INTO education_memberships (
+                    household_id, user_id, role, display_name
+                ) VALUES (%s, %s, 'parent', 'Parent')
+                """,
+                (household_id, parent_user_id),
+            )
+    created = await create_textbook_with_initial_job(
+        textbook_id=textbook_id,
+        parent_user_id=parent_user_id,
+        household_id=str(household_id),
+        title="Activity Book",
+        slug=f"activity-{uuid4().hex}",
+        source={
+            "document_id": f"doc-{uuid4().hex}",
+            "parse_job_id": f"parse-{uuid4().hex}",
+            "primary_artifact_id": f"artifact-{uuid4().hex}",
+            "filename": "book.pdf",
+            "media_type": "application/pdf",
+            "format": "pdf",
+            "parser_id": "datalab",
+            "parser_name": "Datalab",
+            "parser_version": "2",
+            "parse_completed_at": "2026-10-02T00:00:00+09:00",
+            "content_sha256": "a" * 64,
+            "size_bytes": 128,
+            "snapshot_prefix": prefix,
+            "markdown_key": f"{prefix}artifacts/document.md",
+            "blocks_key": f"{prefix}artifacts/blocks.json",
+            "report_key": f"{prefix}artifacts/report.json",
+            "asset_manifest": [],
+            "snapshot": {"format": "langalpha-textbook-source-snapshot/v2"},
+        },
+        idempotency_key="activity-structure",
+        identity=IDENTITY,
+    )
+    claimed = await claim_next_book_item(worker_id="activity-worker", lease_seconds=60)
+    assert claimed is not None
+    return {**created, **claimed, "household_id": household_id}
+
+
+async def test_detail_budget_bounds_rows_bytes_and_keeps_terminal_events(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_activity import (
+        append_book_activity_event,
+        get_book_activity_page,
+    )
+    from src.server.database.education_book_jobs import fail_book_item
+
+    item = await _seed_running_item(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+    )
+    for index in range(1_100):
+        await append_book_activity_event(
+            job_id=item["job_id"],
+            item_id=item["item_id"],
+            attempt_token=item["attempt_token"],
+            dedupe_key=f"detail:{index}",
+            kind="tool",
+            status="running",
+            message="Reading source " + ("界" * 480),
+            metadata={"tool_name": "Read", "tool_call_id": str(index)},
+        )
+    await fail_book_item(
+        item_id=item["item_id"],
+        attempt_token=item["attempt_token"],
+        safe_error="Generated output was invalid",
+        stop_remaining=False,
+    )
+
+    async with patched_get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT
+                    count(*) FILTER (
+                        WHERE metadata->>'budget_class' = 'detail'
+                    ) AS detail_count,
+                    coalesce(sum(
+                        CASE WHEN metadata->>'budget_class' = 'detail'
+                        THEN (metadata->>'activity_bytes')::int ELSE 0 END
+                    ), 0) AS detail_bytes,
+                    count(*) FILTER (
+                        WHERE metadata->>'budget_class' = 'summary'
+                    ) AS summary_count,
+                    count(*) FILTER (
+                        WHERE metadata->>'budget_class' = 'terminal'
+                    ) AS terminal_count
+                FROM education_book_activity_events
+                WHERE job_id = %s
+                """,
+                (item["job_id"],),
+            )
+            counts = await cur.fetchone()
+
+    assert counts["detail_count"] <= 1_000
+    assert counts["detail_bytes"] <= 1024 * 1024
+    assert counts["summary_count"] == 1
+    assert counts["terminal_count"] == 2
+
+    page = await get_book_activity_page(
+        job_id=item["job_id"],
+        parent_user_id=seed_user["user_id"],
+        after_seq=0,
+        limit=2_100,
+    )
+    assert page is not None
+    assert page["status"] == "failed"
+    assert page["high_water_seq"] == max(event["seq"] for event in page["events"])
+    assert page["cursor_expired"] is False
+    assert [(event["kind"], event["status"]) for event in page["events"][-2:]] == [
+        ("item", "failed"),
+        ("job", "failed"),
+    ]
+
+
+async def test_activity_page_detects_future_cursor_and_parent_scope(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_activity import get_book_activity_page
+
+    item = await _seed_running_item(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+    )
+
+    future = await get_book_activity_page(
+        job_id=item["job_id"],
+        parent_user_id=seed_user["user_id"],
+        after_seq=99,
+        limit=100,
+    )
+    denied = await get_book_activity_page(
+        job_id=item["job_id"],
+        parent_user_id="other-parent",
+        after_seq=0,
+        limit=100,
+    )
+
+    assert future is not None
+    assert future["cursor_expired"] is True
+    assert denied is None
+
+
+async def test_activity_page_exposes_durable_unavailable_status(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_activity import (
+        get_book_activity_page,
+        mark_book_activity_unavailable,
+    )
+
+    item = await _seed_running_item(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+    )
+
+    result = await mark_book_activity_unavailable(
+        job_id=item["job_id"],
+        item_id=item["item_id"],
+        attempt_token=item["attempt_token"],
+    )
+    page = await get_book_activity_page(
+        job_id=item["job_id"],
+        parent_user_id=seed_user["user_id"],
+        after_seq=0,
+        limit=100,
+    )
+
+    assert result == {"outcome": "stored", "high_water_seq": 0}
+    assert page is not None
+    assert page["activity_status"] == "unavailable"
+    assert page["events"] == []
+
+
+async def test_event_size_limit_counts_the_complete_public_envelope(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_activity import append_book_activity_event
+
+    item = await _seed_running_item(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+    )
+
+    with pytest.raises(ValueError, match="serialized size limit"):
+        await append_book_activity_event(
+            job_id=item["job_id"],
+            item_id=item["item_id"],
+            attempt_token=item["attempt_token"],
+            dedupe_key="oversized-envelope",
+            kind="progress",
+            status="running",
+            message="m" * 512,
+            metadata={"stage": "s" * 1_400},
+        )
+
+
+async def test_budget_summary_coalesces_dropped_updates_for_one_second(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_activity import get_book_activity_page
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    item = await _seed_running_item(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+    )
+    async with patched_get_db_connection() as conn, conn.transaction():
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO education_book_activity_events (
+                    job_id, seq, dedupe_key, item_id, kind, status,
+                    message, metadata
+                )
+                SELECT %s, value, 'seed:' || value, %s,
+                       'tool', 'running', 'seed',
+                       '{"budget_class":"detail","activity_bytes":256}'::jsonb
+                FROM generate_series(1, 1000) AS value
+                """,
+                (item["job_id"], item["item_id"]),
+            )
+            await cur.execute(
+                """
+                UPDATE education_book_jobs SET high_water_seq = 1000
+                WHERE job_id = %s
+                """,
+                (item["job_id"],),
+            )
+
+    observer = BookActivityObserver(
+        job_id=item["job_id"],
+        item_id=item["item_id"],
+        attempt_token=item["attempt_token"],
+        publish=AsyncMock(),
+        monotonic=lambda: 10.0,
+    )
+    for index in range(2):
+        await observer(
+            "tool_calls",
+            {"tool_calls": [{"id": f"overflow-{index}", "name": "Read"}]},
+        )
+
+    async with patched_get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT seq, (metadata->>'dropped_count')::int AS dropped_count
+                FROM education_book_activity_events
+                WHERE job_id = %s AND dedupe_key = 'activity-detail-budget'
+                """,
+                (item["job_id"],),
+            )
+            summary = await cur.fetchone()
+
+    assert summary["dropped_count"] == 1
+    first_summary_seq = summary["seq"]
+
+    await observer.flush()
+
+    page = await get_book_activity_page(
+        job_id=item["job_id"],
+        parent_user_id=seed_user["user_id"],
+        after_seq=first_summary_seq,
+        limit=100,
+    )
+    assert page is not None
+    assert len(page["events"]) == 1
+    assert page["events"][0]["kind"] == "summary"
+    assert page["events"][0]["metadata"]["dropped_count"] == 2
+    assert page["events"][0]["seq"] == page["high_water_seq"]
+
+
+async def test_cancel_records_one_terminal_event_for_item_and_job(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_jobs import mark_book_job_cancelled
+
+    item = await _seed_running_item(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+    )
+
+    cancelled = await mark_book_job_cancelled(
+        job_id=item["job_id"],
+        item_id=item["item_id"],
+        attempt_token=item["attempt_token"],
+    )
+
+    async with patched_get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT kind, status, metadata->>'budget_class' AS budget_class
+                FROM education_book_activity_events
+                WHERE job_id = %s ORDER BY seq
+                """,
+                (item["job_id"],),
+            )
+            events = await cur.fetchall()
+
+    assert cancelled["status"] == "cancelled"
+    assert [
+        (event["kind"], event["status"], event["budget_class"]) for event in events
+    ] == [
+        ("item", "cancelled", "terminal"),
+        ("job", "cancelled", "terminal"),
+    ]
+
+
+async def test_long_business_error_cannot_rollback_terminal_state(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_activity import get_book_activity_page
+    from src.server.database.education_book_jobs import fail_book_item
+
+    item = await _seed_running_item(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+    )
+
+    failed = await fail_book_item(
+        item_id=item["item_id"],
+        attempt_token=item["attempt_token"],
+        safe_error="x" * 513,
+        stop_remaining=False,
+    )
+    page = await get_book_activity_page(
+        job_id=item["job_id"],
+        parent_user_id=seed_user["user_id"],
+        after_seq=0,
+        limit=100,
+    )
+
+    assert failed["status"] == "failed"
+    assert page is not None
+    assert len(page["events"][0]["message"]) == 512
+    assert page["events"][0]["status"] == "failed"

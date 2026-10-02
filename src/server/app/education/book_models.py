@@ -28,6 +28,7 @@ BookJobItemStatus = Literal[
     "not_run",
 ]
 BookStructureStatus = Literal["queued", "running", "ready", "failed"]
+BookActivityStatus = Literal["available", "unavailable"]
 
 
 class _StrictModel(BaseModel):
@@ -74,6 +75,7 @@ class BookJobSummaryResponse(_StrictModel):
     cancelled_items: int = Field(ge=0)
     not_run_items: int = Field(ge=0)
     high_water_seq: int = Field(ge=0)
+    activity_status: BookActivityStatus = "available"
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -217,6 +219,7 @@ class BookActivityEventResponse(_StrictModel):
     kind: str
     status: str
     message: str = Field(max_length=512)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 
@@ -224,6 +227,7 @@ class BookActivityPageResponse(_StrictModel):
     job_id: str
     events: list[BookActivityEventResponse]
     high_water_seq: int = Field(ge=0)
+    activity_status: BookActivityStatus = "available"
     cursor_expired: bool = False
 
 

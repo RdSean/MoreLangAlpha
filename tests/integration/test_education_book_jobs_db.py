@@ -141,6 +141,54 @@ async def _seed_book(
     return {**created, "household_id": household_id}
 
 
+async def _seed_claimed_material_job(
+    connection_factory,
+    *,
+    parent_user_id: str,
+    include_supplementary: bool,
+    target_count: int = 1,
+) -> tuple[dict, dict, dict]:
+    from src.server.database.education_book_jobs import (
+        claim_next_book_item,
+        create_materials_job,
+    )
+    from src.server.database.education_books import (
+        commit_book_structure,
+        get_current_structure,
+    )
+
+    created = await _seed_book(connection_factory, parent_user_id=parent_user_id)
+    structure_claim = await claim_next_book_item(worker_id="worker-a", lease_seconds=60)
+    assert structure_claim is not None
+    await commit_book_structure(
+        textbook_id=created["textbook_id"],
+        job_id=created["job_id"],
+        item_id=created["item_id"],
+        attempt_token=structure_claim["attempt_token"],
+        parsed=_parsed_two_points(),
+        validated_identity=IDENTITY,
+    )
+    structure = await get_current_structure(textbook_id=created["textbook_id"])
+    assert structure is not None
+    job = await create_materials_job(
+        textbook_id=created["textbook_id"],
+        requested_by_user_id=parent_user_id,
+        knowledge_point_ids=[
+            point["knowledge_point_id"]
+            for point in structure["knowledge_points"][:target_count]
+        ],
+        depth="lesson",
+        requirements=None,
+        replace_existing=False,
+        include_supplementary=include_supplementary,
+        idempotency_key=f"cancel-fence-{uuid4().hex}",
+        identity=IDENTITY,
+    )
+    claimed = await claim_next_book_item(worker_id="worker-a", lease_seconds=60)
+    assert claimed is not None and claimed["kind"] == "material"
+    return created, job, claimed
+
+
 async def test_claim_next_item_persists_attempt_execution_and_lease(
     patched_get_db_connection,
     seed_user,
@@ -164,6 +212,273 @@ async def test_claim_next_item_persists_attempt_execution_and_lease(
     assert claimed["lease_owner"] == "worker-a"
     assert isinstance(claimed["lease_expires_at"], datetime)
     assert await claim_next_book_item(worker_id="worker-b", lease_seconds=60) is None
+
+
+async def test_durable_cancel_intent_fences_a_queued_job_until_recovery(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_jobs import (
+        claim_next_book_item,
+        request_book_job_cancel,
+    )
+
+    created = await _seed_book(
+        patched_get_db_connection, parent_user_id=seed_user["user_id"]
+    )
+
+    context = await request_book_job_cancel(job_id=created["job_id"])
+
+    assert context is not None
+    assert context["item_id"] is None
+    assert context["thread_id"] is None
+    assert context["run_id"] is None
+    assert context["cancel_requested_at"] is not None
+    assert await claim_next_book_item(worker_id="worker-a", lease_seconds=60) is None
+    async with patched_get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT status, cancel_requested_at
+                FROM education_book_jobs WHERE job_id = %s
+                """,
+                (created["job_id"],),
+            )
+            job = await cur.fetchone()
+    assert job["status"] == "queued"
+    assert job["cancel_requested_at"] is not None
+
+
+async def test_structure_finalizer_rejects_a_durable_cancel_intent(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_jobs import (
+        claim_next_book_item,
+        request_book_job_cancel,
+    )
+    from src.server.database.education_books import commit_book_structure
+
+    created = await _seed_book(
+        patched_get_db_connection, parent_user_id=seed_user["user_id"]
+    )
+    claimed = await claim_next_book_item(worker_id="worker-a", lease_seconds=60)
+    assert claimed is not None
+    await request_book_job_cancel(job_id=created["job_id"])
+
+    with pytest.raises(RuntimeError, match="cancellation was requested"):
+        await commit_book_structure(
+            textbook_id=created["textbook_id"],
+            job_id=created["job_id"],
+            item_id=created["item_id"],
+            attempt_token=claimed["attempt_token"],
+            parsed=_parsed_two_points(),
+            validated_identity=IDENTITY,
+        )
+
+    async with patched_get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT count(*) AS count FROM education_book_structures WHERE created_by_job_id = %s",
+                (created["job_id"],),
+            )
+            assert (await cur.fetchone())["count"] == 0
+
+
+async def test_material_finalizer_rejects_a_durable_cancel_intent(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_jobs import (
+        fail_book_item,
+        finalize_material,
+        list_book_jobs_pending_cancellation,
+        mark_book_job_cancelled,
+        record_candidate_object,
+        request_book_job_cancel,
+    )
+
+    _created, job, claimed = await _seed_claimed_material_job(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+        include_supplementary=False,
+    )
+    content_key = f"education/test/{claimed['item_id']}/lesson.md"
+    await record_candidate_object(
+        item_id=claimed["item_id"],
+        attempt_token=claimed["attempt_token"],
+        content_key=content_key,
+    )
+    await request_book_job_cancel(job_id=job["job_id"])
+
+    with pytest.raises(RuntimeError, match="cancellation was requested"):
+        await finalize_material(
+            item_id=claimed["item_id"],
+            attempt_token=claimed["attempt_token"],
+            content_key=content_key,
+            content_sha256="d" * 64,
+            size_bytes=100,
+            generation_params={"depth": "lesson"},
+        )
+
+    async with patched_get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT count(*) AS count FROM education_book_materials WHERE source_job_id = %s",
+                (job["job_id"],),
+            )
+            assert (await cur.fetchone())["count"] == 0
+
+    failed = await fail_book_item(
+        item_id=claimed["item_id"],
+        attempt_token=claimed["attempt_token"],
+        safe_error="Cancellation fence rejected the late result",
+        stop_remaining=False,
+    )
+    assert failed["status"] == "failed"
+    pending = await list_book_jobs_pending_cancellation()
+    assert [row["job_id"] for row in pending] == [job["job_id"]]
+    cancelled = await mark_book_job_cancelled(
+        job_id=job["job_id"],
+        item_id=claimed["item_id"],
+        attempt_token=claimed["attempt_token"],
+    )
+    assert cancelled["status"] == "cancelled"
+
+
+async def test_partial_success_remains_recoverable_after_cancel_fence_rejection(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_jobs import (
+        claim_next_book_item,
+        fail_book_item,
+        finalize_material,
+        list_book_jobs_pending_cancellation,
+        mark_book_job_cancelled,
+        record_candidate_object,
+        request_book_job_cancel,
+    )
+
+    _created, job, first = await _seed_claimed_material_job(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+        include_supplementary=False,
+        target_count=2,
+    )
+    first_key = f"education/test/{first['item_id']}/lesson.md"
+    await record_candidate_object(
+        item_id=first["item_id"],
+        attempt_token=first["attempt_token"],
+        content_key=first_key,
+    )
+    await finalize_material(
+        item_id=first["item_id"],
+        attempt_token=first["attempt_token"],
+        content_key=first_key,
+        content_sha256="a" * 64,
+        size_bytes=100,
+        generation_params={},
+    )
+    second = await claim_next_book_item(worker_id="worker-a", lease_seconds=60)
+    assert second is not None and second["kind"] == "material"
+    second_key = f"education/test/{second['item_id']}/lesson.md"
+    await record_candidate_object(
+        item_id=second["item_id"],
+        attempt_token=second["attempt_token"],
+        content_key=second_key,
+    )
+    await request_book_job_cancel(job_id=job["job_id"])
+
+    with pytest.raises(RuntimeError, match="cancellation was requested"):
+        await finalize_material(
+            item_id=second["item_id"],
+            attempt_token=second["attempt_token"],
+            content_key=second_key,
+            content_sha256="b" * 64,
+            size_bytes=100,
+            generation_params={},
+        )
+    partial = await fail_book_item(
+        item_id=second["item_id"],
+        attempt_token=second["attempt_token"],
+        safe_error="Cancellation fence rejected the late result",
+        stop_remaining=False,
+    )
+
+    assert partial["status"] == "partially_succeeded"
+    pending = await list_book_jobs_pending_cancellation()
+    assert [row["job_id"] for row in pending] == [job["job_id"]]
+    cancelled = await mark_book_job_cancelled(
+        job_id=job["job_id"],
+        item_id=second["item_id"],
+        attempt_token=second["attempt_token"],
+    )
+    assert cancelled["status"] == "cancelled"
+
+
+async def test_supplementary_finalizer_rejects_a_durable_cancel_intent(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_jobs import (
+        claim_next_book_item,
+        finalize_material,
+        finalize_supplementary,
+        record_candidate_object,
+        request_book_job_cancel,
+    )
+
+    _created, job, material = await _seed_claimed_material_job(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+        include_supplementary=True,
+    )
+    material_key = f"education/test/{material['item_id']}/lesson.md"
+    await record_candidate_object(
+        item_id=material["item_id"],
+        attempt_token=material["attempt_token"],
+        content_key=material_key,
+    )
+    await finalize_material(
+        item_id=material["item_id"],
+        attempt_token=material["attempt_token"],
+        content_key=material_key,
+        content_sha256="e" * 64,
+        size_bytes=100,
+        generation_params={"depth": "lesson"},
+    )
+    supplementary = await claim_next_book_item(worker_id="worker-a", lease_seconds=60)
+    assert supplementary is not None and supplementary["kind"] == "supplementary"
+    files = [
+        {
+            "name": "glossary.md",
+            "content_key": f"education/test/{supplementary['item_id']}/glossary.md",
+            "content_sha256": "f" * 64,
+            "size_bytes": 12,
+        }
+    ]
+    await record_candidate_object(
+        item_id=supplementary["item_id"],
+        attempt_token=supplementary["attempt_token"],
+        content_key=files[0]["content_key"],
+    )
+    await request_book_job_cancel(job_id=job["job_id"])
+
+    with pytest.raises(RuntimeError, match="cancellation was requested"):
+        await finalize_supplementary(
+            item_id=supplementary["item_id"],
+            attempt_token=supplementary["attempt_token"],
+            result_snapshot={"files": files},
+        )
+
+    async with patched_get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT result_snapshot FROM education_book_job_items WHERE item_id = %s",
+                (supplementary["item_id"],),
+            )
+            assert (await cur.fetchone())["result_snapshot"] is None
 
 
 async def test_terminal_candidate_cleanup_uses_only_recorded_keys(
@@ -403,6 +718,13 @@ async def test_cancelled_job_retry_clones_cancelled_items(
         attempt_token=claimed["attempt_token"],
     )
     assert cancelled["status"] == "cancelled"
+    assert cancelled["runtime_contexts"]
+    assert set(cancelled["runtime_contexts"][0]) == {
+        "item_id",
+        "attempt_token",
+        "thread_id",
+        "run_id",
+    }
 
     retried = await retry_book_job(
         source_job_id=material_job["job_id"],
@@ -451,6 +773,24 @@ async def test_cancel_fence_wins_if_terminal_failure_callback_commits_first(
     assert cancelled["status"] == "cancelled"
     assert cancelled["failed_items"] == 0
     assert cancelled["cancelled_items"] == 1
+    async with patched_get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT kind, status, metadata->>'budget_class' AS budget_class
+                FROM education_book_activity_events
+                WHERE job_id = %s ORDER BY seq
+                """,
+                (created["job_id"],),
+            )
+            terminal_events = await cur.fetchall()
+    assert [
+        (event["kind"], event["status"], event["budget_class"])
+        for event in terminal_events
+    ] == [
+        ("item", "cancelled", "terminal"),
+        ("job", "cancelled", "terminal"),
+    ]
 
 
 async def test_structure_retry_preserves_follow_up_and_refreshes_skill_identity(

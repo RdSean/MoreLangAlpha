@@ -60,6 +60,18 @@ CLAIMED = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _default_no_pending_book_cancellations(monkeypatch):
+    from src.server.services import education_book_recovery
+
+    monkeypatch.setattr(
+        education_book_recovery,
+        "list_book_jobs_pending_cancellation",
+        AsyncMock(return_value=[]),
+        raising=False,
+    )
+
+
 @pytest.mark.asyncio
 async def test_failure_lock_resolves_and_locks_job_before_item_mutation():
     from src.server.database import education_book_jobs
@@ -239,11 +251,16 @@ async def test_cancel_book_job_stamps_runtime_intent_and_cross_worker_nudge(
     )
     nudge = AsyncMock(side_effect=lambda *_args: events.append("nudge"))
     signal = AsyncMock(side_effect=lambda *_args: events.append("signal") or True)
+    publish_activity = AsyncMock(side_effect=lambda *_args: events.append("activity"))
     mark_cancelled = AsyncMock(
         side_effect=lambda **_kwargs: events.append("mark")
-        or {"status": "cancelled", "runtime_contexts": [raced_context]}
+        or {
+            "status": "cancelled",
+            "high_water_seq": 5,
+            "runtime_contexts": [raced_context],
+        }
     )
-    monkeypatch.setattr(education_book_jobs, "get_book_job_cancel_context", get_context)
+    monkeypatch.setattr(education_book_jobs, "request_book_job_cancel", get_context)
     monkeypatch.setattr(education_book_jobs, "request_run_cancel", request_cancel)
     monkeypatch.setattr(education_book_jobs, "publish_cancel_nudge", nudge)
     monkeypatch.setattr(
@@ -252,6 +269,9 @@ async def test_cancel_book_job_stamps_runtime_intent_and_cross_worker_nudge(
         lambda: type("Executor", (), {"signal_cancel": signal})(),
     )
     monkeypatch.setattr(education_book_jobs, "mark_book_job_cancelled", mark_cancelled)
+    monkeypatch.setattr(
+        education_book_jobs, "publish_book_activity_hint", publish_activity
+    )
 
     result = await education_book_jobs.cancel_book_job(job_id=str(CLAIMED["job_id"]))
 
@@ -273,7 +293,55 @@ async def test_cancel_book_job_stamps_runtime_intent_and_cross_worker_nudge(
     )
     assert events.index("mark") < events.index("signal")
     assert events.index("mark") < events.index("nudge")
-    assert result == {"status": "cancelled"}
+    assert events.index("mark") < events.index("activity") < events.index("signal")
+    publish_activity.assert_awaited_once_with(CLAIMED["job_id"], 5)
+    assert result == {"status": "cancelled", "high_water_seq": 5}
+
+
+@pytest.mark.asyncio
+async def test_cancel_book_job_signals_runtime_when_terminal_activity_write_fails(
+    monkeypatch,
+):
+    from src.server.database.education_book_activity import BookActivityWriteError
+    from src.server.services import education_book_jobs
+
+    context = {
+        "job_id": CLAIMED["job_id"],
+        "item_id": CLAIMED["item_id"],
+        "attempt_token": CLAIMED["attempt_token"],
+        "thread_id": "1e0d57be-2b7e-4ed2-8daf-246c408d09ec",
+        "run_id": "e21b6198-85c6-41e2-b22b-2662851bc782",
+    }
+    request_cancel = AsyncMock(return_value={"state": "requested"})
+    signal = AsyncMock(return_value=True)
+    nudge = AsyncMock()
+    activity_error = BookActivityWriteError("activity unavailable")
+    monkeypatch.setattr(
+        education_book_jobs,
+        "request_book_job_cancel",
+        AsyncMock(return_value=context),
+    )
+    monkeypatch.setattr(education_book_jobs, "request_run_cancel", request_cancel)
+    monkeypatch.setattr(education_book_jobs, "publish_cancel_nudge", nudge)
+    monkeypatch.setattr(
+        education_book_jobs.LocalRunExecutor,
+        "get_instance",
+        lambda: type("Executor", (), {"signal_cancel": signal})(),
+    )
+    monkeypatch.setattr(
+        education_book_jobs,
+        "mark_book_job_cancelled",
+        AsyncMock(side_effect=activity_error),
+    )
+
+    with pytest.raises(BookActivityWriteError, match="activity unavailable"):
+        await education_book_jobs.cancel_book_job(job_id=str(CLAIMED["job_id"]))
+
+    request_cancel.assert_awaited_once_with(
+        context["run_id"], thread_id=context["thread_id"]
+    )
+    signal.assert_awaited_once_with(context["thread_id"], context["run_id"])
+    nudge.assert_awaited_once_with(context["thread_id"], context["run_id"])
 
 
 @pytest.mark.asyncio
@@ -799,10 +867,11 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
     graph = object()
     build_graph = AsyncMock(return_value=(graph, {"messages": []}, {"metadata": {}}))
     workflow = object()
+    handler_kwargs = {}
 
     class Handler:
-        def __init__(self, **_kwargs):
-            pass
+        def __init__(self, **kwargs):
+            handler_kwargs.update(kwargs)
 
         def stream_workflow(self, **_kwargs):
             return workflow
@@ -813,7 +882,10 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
         started.update(kwargs)
 
     finalize = AsyncMock(return_value={"structure_id": "structure-1"})
-    fail = AsyncMock()
+    fail = AsyncMock(return_value={"high_water_seq": 7})
+    publish_activity = AsyncMock()
+    observer = object()
+    observer_factory = Mock(return_value=observer)
     cleanup_candidates = AsyncMock()
     cleanup_runtime = AsyncMock()
     identity = Mock(
@@ -856,6 +928,18 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
     )
     monkeypatch.setattr(education_book_jobs, "RunSSEProducer", Handler)
     monkeypatch.setattr(
+        education_book_jobs,
+        "BookActivityObserver",
+        observer_factory,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        education_book_jobs,
+        "publish_book_activity_hint",
+        publish_activity,
+        raising=False,
+    )
+    monkeypatch.setattr(
         education_book_jobs.LocalRunExecutor,
         "get_instance",
         lambda: type("Executor", (), {"start_run": staticmethod(start_executor)})(),
@@ -892,6 +976,12 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
     assert started["workflow_generator"] is workflow
     assert started["graph"] is graph
     assert started["capacity_reservation"] == "reservation-1"
+    observer_factory.assert_called_once_with(
+        job_id=CLAIMED["job_id"],
+        item_id=CLAIMED["item_id"],
+        attempt_token=CLAIMED["attempt_token"],
+    )
+    assert handler_kwargs["event_observer"] is observer
     assert launched == {
         "workspace_id": workspace_id,
         "thread_id": thread_id,
@@ -903,6 +993,7 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
         type("TaskInfo", (), {"error": None})(), "completed"
     )
     finalize.assert_awaited_once()
+    publish_activity.assert_awaited_once_with(CLAIMED["job_id"], None)
     assert finalize.await_args.kwargs["item"]["source_total_lines"] == 120
     fail.assert_not_awaited()
     cleanup_candidates.assert_awaited_with(
@@ -918,6 +1009,7 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
         type("TaskInfo", (), {"error": "provider unavailable"})(), "error"
     )
     assert fail.await_args.kwargs["stop_remaining"] is True
+    publish_activity.assert_awaited_with(CLAIMED["job_id"], 7)
 
     fail.reset_mock()
     await started["terminal_callback"](
@@ -951,8 +1043,22 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
     )
     assert fail.await_args.kwargs["stop_remaining"] is True
 
+    from src.server.database.education_book_activity import BookActivityWriteError
+
+    fail.reset_mock()
+    cleanup_candidates.reset_mock()
+    cleanup_runtime.reset_mock()
+    finalize.side_effect = BookActivityWriteError("activity unavailable")
+    await started["terminal_callback"](
+        type("TaskInfo", (), {"error": None})(), "completed"
+    )
+    fail.assert_not_awaited()
+    cleanup_candidates.assert_not_awaited()
+    cleanup_runtime.assert_not_awaited()
+
     stage.side_effect = RuntimeError("staging failed")
     fail.reset_mock()
+    publish_activity.reset_mock()
     cleanup_candidates.reset_mock()
     cleanup_runtime.reset_mock()
 
@@ -968,6 +1074,7 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
         safe_error="Managed textbook execution could not start",
         stop_remaining=True,
     )
+    publish_activity.assert_awaited_once_with(CLAIMED["job_id"], 7)
     cleanup_candidates.assert_awaited_once_with(
         item_id=CLAIMED["item_id"],
         attempt_token=CLAIMED["attempt_token"],
@@ -995,7 +1102,7 @@ async def test_recovery_renews_live_runtime_without_restarting_the_item(monkeypa
     )
     renew = AsyncMock(return_value=True)
     recover = AsyncMock()
-    fail = AsyncMock()
+    fail = AsyncMock(return_value={"high_water_seq": 8})
     monkeypatch.setattr(education_book_recovery, "renew_book_item_lease", renew)
     monkeypatch.setattr(education_book_recovery, "recover_completed_book_item", recover)
     monkeypatch.setattr(education_book_recovery, "fail_book_item", fail)
@@ -1033,9 +1140,16 @@ async def test_recovery_finalizes_completed_runtime_from_persisted_identity(
         AsyncMock(return_value={"status": "completed"}),
     )
     recover = AsyncMock(return_value={"material_id": "material-1"})
+    publish_activity = AsyncMock()
     monkeypatch.setattr(education_book_recovery, "recover_completed_book_item", recover)
     monkeypatch.setattr(education_book_recovery, "renew_book_item_lease", AsyncMock())
     monkeypatch.setattr(education_book_recovery, "fail_book_item", AsyncMock())
+    monkeypatch.setattr(
+        education_book_recovery,
+        "publish_book_activity_hint",
+        publish_activity,
+        raising=False,
+    )
 
     reconciled = await education_book_recovery.reconcile_book_jobs_once(
         worker_id="recovery-a", lease_seconds=60
@@ -1043,6 +1157,7 @@ async def test_recovery_finalizes_completed_runtime_from_persisted_identity(
 
     assert reconciled == 1
     recover.assert_awaited_once_with(item)
+    publish_activity.assert_awaited_once_with(CLAIMED["job_id"], None)
 
 
 @pytest.mark.asyncio
@@ -1075,8 +1190,14 @@ async def test_recovery_keeps_queue_running_after_completed_item_content_error(
         "recover_completed_book_item",
         AsyncMock(side_effect=finalization_error),
     )
-    fail = AsyncMock()
+    fail = AsyncMock(return_value={"high_water_seq": 8})
+    publish_activity = AsyncMock()
     monkeypatch.setattr(education_book_recovery, "fail_book_item", fail)
+    monkeypatch.setattr(
+        education_book_recovery,
+        "publish_book_activity_hint",
+        publish_activity,
+    )
 
     reconciled = await education_book_recovery.reconcile_book_jobs_once(
         worker_id="recovery-a", lease_seconds=60
@@ -1084,6 +1205,7 @@ async def test_recovery_keeps_queue_running_after_completed_item_content_error(
 
     assert reconciled == 1
     assert fail.await_args.kwargs["stop_remaining"] is False
+    publish_activity.assert_awaited_once_with(CLAIMED["job_id"], 8)
 
 
 @pytest.mark.asyncio
@@ -1107,8 +1229,14 @@ async def test_recovery_stops_queue_after_completed_item_storage_error(monkeypat
         "recover_completed_book_item",
         AsyncMock(side_effect=BookStorageError("storage unavailable")),
     )
-    fail = AsyncMock()
+    fail = AsyncMock(return_value={"high_water_seq": 8})
+    publish_activity = AsyncMock()
     monkeypatch.setattr(education_book_recovery, "fail_book_item", fail)
+    monkeypatch.setattr(
+        education_book_recovery,
+        "publish_book_activity_hint",
+        publish_activity,
+    )
 
     reconciled = await education_book_recovery.reconcile_book_jobs_once(
         worker_id="recovery-a", lease_seconds=60
@@ -1116,6 +1244,38 @@ async def test_recovery_stops_queue_after_completed_item_storage_error(monkeypat
 
     assert reconciled == 1
     assert fail.await_args.kwargs["stop_remaining"] is True
+    publish_activity.assert_awaited_once_with(CLAIMED["job_id"], 8)
+
+
+@pytest.mark.asyncio
+async def test_recovery_defers_when_terminal_activity_storage_is_unavailable(
+    monkeypatch,
+):
+    from src.server.database.education_book_activity import BookActivityWriteError
+    from src.server.services import education_book_recovery
+
+    item = {**CLAIMED, "run_id": UUID("e21b6198-85c6-41e2-b22b-2662851bc782")}
+    monkeypatch.setattr(
+        education_book_recovery,
+        "list_book_items_for_recovery",
+        AsyncMock(return_value=[item]),
+    )
+    monkeypatch.setattr(
+        education_book_recovery,
+        "get_run",
+        AsyncMock(return_value={"status": "completed"}),
+    )
+    recover = AsyncMock(side_effect=BookActivityWriteError("activity unavailable"))
+    fail = AsyncMock()
+    monkeypatch.setattr(education_book_recovery, "recover_completed_book_item", recover)
+    monkeypatch.setattr(education_book_recovery, "fail_book_item", fail)
+
+    reconciled = await education_book_recovery.reconcile_book_jobs_once(
+        worker_id="recovery-a", lease_seconds=60
+    )
+
+    assert reconciled == 0
+    fail.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1135,11 +1295,18 @@ async def test_recovery_marks_runtime_failure_retriable_and_stops_remainder(
         "get_run",
         AsyncMock(return_value={"status": "error"}),
     )
-    fail = AsyncMock()
+    fail = AsyncMock(return_value={"high_water_seq": 8})
+    publish_activity = AsyncMock()
     monkeypatch.setattr(education_book_recovery, "fail_book_item", fail)
     monkeypatch.setattr(education_book_recovery, "renew_book_item_lease", AsyncMock())
     monkeypatch.setattr(
         education_book_recovery, "recover_completed_book_item", AsyncMock()
+    )
+    monkeypatch.setattr(
+        education_book_recovery,
+        "publish_book_activity_hint",
+        publish_activity,
+        raising=False,
     )
 
     reconciled = await education_book_recovery.reconcile_book_jobs_once(
@@ -1153,6 +1320,7 @@ async def test_recovery_marks_runtime_failure_retriable_and_stops_remainder(
         safe_error="Managed textbook runtime ended before business commit",
         stop_remaining=True,
     )
+    publish_activity.assert_awaited_once_with(CLAIMED["job_id"], 8)
 
 
 @pytest.mark.asyncio
@@ -1177,7 +1345,7 @@ async def test_recovery_keeps_queue_running_after_item_recursion_limit(monkeypat
             }
         ),
     )
-    fail = AsyncMock()
+    fail = AsyncMock(return_value={"high_water_seq": 8})
     monkeypatch.setattr(education_book_recovery, "fail_book_item", fail)
 
     reconciled = await education_book_recovery.reconcile_book_jobs_once(
@@ -1205,10 +1373,17 @@ async def test_recovery_preserves_durable_user_cancellation(monkeypatch):
             return_value={"status": "cancelled", "cancel_requested_at": object()}
         ),
     )
-    cancel = AsyncMock(return_value={"status": "cancelled"})
+    cancel = AsyncMock(return_value={"status": "cancelled", "high_water_seq": 9})
     fail = AsyncMock()
+    publish_activity = AsyncMock()
     monkeypatch.setattr(education_book_recovery, "mark_book_job_cancelled", cancel)
     monkeypatch.setattr(education_book_recovery, "fail_book_item", fail)
+    monkeypatch.setattr(
+        education_book_recovery,
+        "publish_book_activity_hint",
+        publish_activity,
+        raising=False,
+    )
 
     reconciled = await education_book_recovery.reconcile_book_jobs_once(
         worker_id="recovery-a", lease_seconds=60
@@ -1221,6 +1396,112 @@ async def test_recovery_preserves_durable_user_cancellation(monkeypatch):
         attempt_token=CLAIMED["attempt_token"],
     )
     fail.assert_not_awaited()
+    publish_activity.assert_awaited_once_with(CLAIMED["job_id"], 9)
+
+
+@pytest.mark.asyncio
+async def test_recovery_settles_queued_job_with_durable_cancel_intent(monkeypatch):
+    from src.server.services import education_book_recovery
+
+    pending = {
+        "job_id": CLAIMED["job_id"],
+        "item_id": None,
+        "attempt_token": None,
+    }
+    monkeypatch.setattr(
+        education_book_recovery,
+        "list_book_jobs_pending_cancellation",
+        AsyncMock(return_value=[pending]),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        education_book_recovery,
+        "list_book_items_for_recovery",
+        AsyncMock(return_value=[]),
+    )
+    cancel = AsyncMock(return_value={"status": "cancelled", "high_water_seq": 3})
+    publish_activity = AsyncMock()
+    monkeypatch.setattr(education_book_recovery, "mark_book_job_cancelled", cancel)
+    monkeypatch.setattr(
+        education_book_recovery,
+        "publish_book_activity_hint",
+        publish_activity,
+    )
+
+    reconciled = await education_book_recovery.reconcile_book_jobs_once(
+        worker_id="recovery-a", lease_seconds=60
+    )
+
+    assert reconciled == 1
+    cancel.assert_awaited_once_with(
+        job_id=CLAIMED["job_id"],
+        item_id=None,
+        attempt_token=None,
+    )
+    publish_activity.assert_awaited_once_with(CLAIMED["job_id"], 3)
+
+
+@pytest.mark.asyncio
+async def test_recovery_replays_runtime_signal_for_durable_cancel_intent(monkeypatch):
+    from src.server.services import education_book_recovery
+
+    pending = {
+        "job_id": CLAIMED["job_id"],
+        "item_id": CLAIMED["item_id"],
+        "attempt_token": CLAIMED["attempt_token"],
+        "thread_id": "1e0d57be-2b7e-4ed2-8daf-246c408d09ec",
+        "run_id": "e21b6198-85c6-41e2-b22b-2662851bc782",
+    }
+    monkeypatch.setattr(
+        education_book_recovery,
+        "list_book_jobs_pending_cancellation",
+        AsyncMock(return_value=[pending]),
+    )
+    monkeypatch.setattr(
+        education_book_recovery,
+        "list_book_items_for_recovery",
+        AsyncMock(return_value=[]),
+    )
+    request_cancel = AsyncMock(return_value={"state": "requested"})
+    signal = AsyncMock(return_value=True)
+    nudge = AsyncMock()
+    monkeypatch.setattr(
+        education_book_recovery, "request_run_cancel", request_cancel, raising=False
+    )
+    monkeypatch.setattr(
+        education_book_recovery.LocalRunExecutor,
+        "get_instance",
+        lambda: type("Executor", (), {"signal_cancel": signal})(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        education_book_recovery, "publish_cancel_nudge", nudge, raising=False
+    )
+    monkeypatch.setattr(
+        education_book_recovery,
+        "mark_book_job_cancelled",
+        AsyncMock(
+            return_value={
+                "status": "cancelled",
+                "high_water_seq": 3,
+                "runtime_contexts": [pending],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        education_book_recovery, "publish_book_activity_hint", AsyncMock()
+    )
+
+    reconciled = await education_book_recovery.reconcile_book_jobs_once(
+        worker_id="recovery-a", lease_seconds=60
+    )
+
+    assert reconciled == 1
+    request_cancel.assert_awaited_once_with(
+        pending["run_id"], thread_id=pending["thread_id"]
+    )
+    signal.assert_awaited_once_with(pending["thread_id"], pending["run_id"])
+    nudge.assert_awaited_once_with(pending["thread_id"], pending["run_id"])
 
 
 @pytest.mark.asyncio

@@ -20,11 +20,12 @@ from src.server.database.education_book_jobs import (
     bind_book_item_runtime,
     claim_next_book_item,
     fail_book_item,
-    get_book_job_cancel_context,
     list_book_items_for_terminal_cleanup,
     mark_book_job_cancelled,
+    request_book_job_cancel,
     renew_book_item_lease,
 )
+from src.server.database.education_book_activity import BookActivityWriteError
 from src.server.database.conversation import create_thread, update_thread_fields
 from src.server.database.runs.lifecycle import QuerySpec
 from src.server.database.education_books import commit_book_structure
@@ -36,6 +37,10 @@ from src.server.services.education_book_storage import (
     cleanup_book_item_candidates,
     store_material,
     store_supplementary,
+)
+from src.server.services.education_book_activity import (
+    BookActivityObserver,
+    publish_book_activity_hint,
 )
 from src.server.services.education_book_structure import (
     MoreToSkillsIdentity,
@@ -101,11 +106,14 @@ async def _settle_failed_book_launch(
         except Exception:
             logger.exception("Could not fail the managed textbook runtime ledger")
     try:
-        await fail_book_item(
+        failed_job = await fail_book_item(
             item_id=item["item_id"],
             attempt_token=UUID(identity["attempt_token"]),
             safe_error="Managed textbook execution could not start",
             stop_remaining=True,
+        )
+        await publish_book_activity_hint(
+            item["job_id"], failed_job.get("high_water_seq")
         )
     except Exception:
         logger.exception("Could not fail the managed textbook business item")
@@ -751,14 +759,21 @@ async def launch_book_item(
             execution_id=identity["execution_id"],
             attempt_token=identity["attempt_token"],
         )
+        activity_observer = BookActivityObserver(
+            job_id=item["job_id"],
+            item_id=item["item_id"],
+            attempt_token=UUID(identity["attempt_token"]),
+        )
         handler = RunSSEProducer(
             thread_id=thread_id,
             run_id=run_id,
             workflow_timeout=get_education_book_workflow_timeout(),
             replay_profile="education_compact",
+            event_observer=activity_observer,
         )
 
         async def on_terminal(task_info: Any, status: str) -> None:
+            retain_runtime_for_recovery = False
             try:
                 stop_remaining = status != "completed" and not (
                     status == "error"
@@ -766,10 +781,22 @@ async def launch_book_item(
                 )
                 if status == "completed":
                     try:
-                        await finalize_book_item(
+                        result = await finalize_book_item(
                             item=item,
                             task=task,
                             sandbox=session.sandbox,
+                        )
+                        await publish_book_activity_hint(
+                            item["job_id"],
+                            result.get("high_water_seq")
+                            if isinstance(result, Mapping)
+                            else None,
+                        )
+                        return
+                    except BookActivityWriteError:
+                        retain_runtime_for_recovery = True
+                        logger.warning(
+                            "Deferring textbook finalization until activity storage recovers"
                         )
                         return
                     except Exception as exc:
@@ -781,24 +808,34 @@ async def launch_book_item(
                         or f"Managed textbook run ended with {status}"
                     )
                 try:
-                    await fail_book_item(
+                    failed_job = await fail_book_item(
                         item_id=item["item_id"],
                         attempt_token=UUID(identity["attempt_token"]),
                         safe_error=error[:2000],
                         stop_remaining=stop_remaining,
                     )
+                    await publish_book_activity_hint(
+                        item["job_id"], failed_job.get("high_water_seq")
+                    )
+                except BookActivityWriteError:
+                    retain_runtime_for_recovery = True
+                    logger.warning(
+                        "Deferring textbook failure finalization until activity storage recovers"
+                    )
+                    return
                 except RuntimeError:
                     # A user cancel or newer attempt won the fence.
                     return
             finally:
-                await cleanup_book_item_candidates(
-                    item_id=UUID(str(item["item_id"])),
-                    attempt_token=UUID(identity["attempt_token"]),
-                )
-                await cleanup_managed_book_runtime(
-                    workspace_id=workspace_id,
-                    thread_id=thread_id,
-                )
+                if not retain_runtime_for_recovery:
+                    await cleanup_book_item_candidates(
+                        item_id=UUID(str(item["item_id"])),
+                        attempt_token=UUID(identity["attempt_token"]),
+                    )
+                    await cleanup_managed_book_runtime(
+                        workspace_id=workspace_id,
+                        thread_id=thread_id,
+                    )
 
         workflow = handler.stream_workflow(
             graph=graph,
@@ -850,7 +887,7 @@ async def cancel_book_job(*, job_id: str) -> dict[str, Any]:
         return str(thread_id), str(run_id)
 
     normalized_job_id = UUID(job_id)
-    context = await get_book_job_cancel_context(job_id=normalized_job_id)
+    context = await request_book_job_cancel(job_id=normalized_job_id)
     if context is None:
         raise LookupError("Active textbook job was not found")
     durable_cancelled: set[tuple[str, str]] = set()
@@ -859,12 +896,22 @@ async def cancel_book_job(*, job_id: str) -> dict[str, Any]:
         thread_id, run_id = initial_runtime
         await request_run_cancel(run_id, thread_id=thread_id)
         durable_cancelled.add(initial_runtime)
-    result = await mark_book_job_cancelled(
-        job_id=normalized_job_id,
-        item_id=context.get("item_id"),
-        attempt_token=context.get("attempt_token"),
-    )
-    runtime_contexts = result.pop("runtime_contexts", [])
+    activity_error: BookActivityWriteError | None = None
+    try:
+        result = await mark_book_job_cancelled(
+            job_id=normalized_job_id,
+            item_id=context.get("item_id"),
+            attempt_token=context.get("attempt_token"),
+        )
+    except BookActivityWriteError as exc:
+        activity_error = exc
+        result = None
+        runtime_contexts = []
+    else:
+        await publish_book_activity_hint(
+            normalized_job_id, result.get("high_water_seq")
+        )
+        runtime_contexts = result.pop("runtime_contexts", [])
     signalled: set[tuple[str, str]] = set()
     for runtime_context in (context, *runtime_contexts):
         identity = runtime_identity(runtime_context)
@@ -877,6 +924,9 @@ async def cancel_book_job(*, job_id: str) -> dict[str, Any]:
         await LocalRunExecutor.get_instance().signal_cancel(thread_id, run_id)
         await publish_cancel_nudge(thread_id, run_id)
         signalled.add(identity)
+    if activity_error is not None:
+        raise activity_error
+    assert result is not None
     return result
 
 

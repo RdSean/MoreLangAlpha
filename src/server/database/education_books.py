@@ -9,6 +9,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from src.server.database.pool import get_db_connection
+from src.server.database.education_book_activity import append_terminal_activity
 
 if TYPE_CHECKING:
     from src.server.services.education_book_structure import (
@@ -278,7 +279,7 @@ async def _lock_structure_job(cur, *, job_id: str | UUID) -> UUID:
 
     await cur.execute(
         """
-        SELECT job_id FROM education_book_jobs
+        SELECT job_id, cancel_requested_at FROM education_book_jobs
         WHERE job_id = %s
         FOR UPDATE
         """,
@@ -287,6 +288,8 @@ async def _lock_structure_job(cur, *, job_id: str | UUID) -> UUID:
     row = await cur.fetchone()
     if row is None:
         raise LookupError("Structure job was not found")
+    if row["cancel_requested_at"] is not None:
+        raise RuntimeError("Textbook job cancellation was requested")
     return row["job_id"]
 
 
@@ -439,14 +442,13 @@ async def commit_book_structure(
                 """
                 UPDATE education_book_jobs
                 SET status = 'succeeded', succeeded_items = 1,
-                    high_water_seq = high_water_seq + 1,
                     finished_at = NOW(), updated_at = NOW()
                 WHERE job_id = %s
-                RETURNING high_water_seq
+                RETURNING job_id
                 """,
                 (job_id,),
             )
-            event_seq = (await cur.fetchone())["high_water_seq"]
+            await cur.fetchone()
             follow_up = context["follow_up_request"]
             if follow_up is not None:
                 if (
@@ -523,15 +525,23 @@ async def commit_book_structure(
                         """,
                         follow_up_items,
                     )
-            await cur.execute(
-                """
-                INSERT INTO education_book_activity_events (
-                    job_id, seq, dedupe_key, item_id, kind, status, message
-                ) VALUES (%s, %s, 'structure-committed', %s,
-                          'structure', 'succeeded', 'Structure imported')
-                ON CONFLICT (job_id, dedupe_key) DO NOTHING
-                """,
-                (job_id, event_seq, item_id),
+            await append_terminal_activity(
+                cur,
+                job_id=UUID(str(job_id)),
+                dedupe_key="structure-committed",
+                item_id=UUID(str(item_id)),
+                kind="structure",
+                status="succeeded",
+                message="Structure imported",
+            )
+            await append_terminal_activity(
+                cur,
+                job_id=UUID(str(job_id)),
+                dedupe_key=f"job-terminal:{job_id}",
+                item_id=None,
+                kind="job",
+                status="succeeded",
+                message="Job completed",
             )
     return {"structure_id": structure_id}
 

@@ -2,6 +2,15 @@
 
 ## 2026-10-02
 
+### 新增：有界教材活动与跨 worker 浏览器恢复
+
+- 在通用 SSE producer 的可等待消费边界加入可选 observer；教材模块只投影工具开始/结束及显式 `report_progress`，原始模型 delta、思维内容、完整工具参数和结果仍在 compact replay 与持久化之前丢弃，普通聊天 full profile 不变。
+- 新增 PostgreSQL 权威教材活动账本与 `after_seq` 快照分页；订阅 Redis 后再次读取 PG 以关闭 read-before-subscribe 竞态，Redis 只发布不含正文的紧凑唤醒提示，通知丢失或不可用时按 PG 轮询恢复。
+- 普通活动限制为每任务 1000 条、完整公开事件 2 KiB、累计 1 MiB、说明 512 字符；同一进度和预算摘要至少合并 1 秒。预算耗尽后只更新有界摘要；明细写入失败会停止该 attempt 的详细投影，并以 `activity_status=unavailable` 持久暴露给快照和 SSE，而不是静默形成回放缺口。
+- 结构、材料、附加材料、失败、未执行和取消均在业务事务内写 item 终态；job 终态独立记录且不受普通预算限制。取消先持久写入 `cancel_requested_at`，claim、三类成功 finalizer 与 recovery 共用该栅栏；即使回调先落为失败或部分成功，仍会补发真实 runtime 取消信号并最终收敛为 cancelled。取消与迟到回调竞态会移动并覆盖原终态序号，保持每个 item/job 只有当前终态，同时让旧游标收到更新。
+- managed PTC 启动、终态回调、取消与恢复服务均接入活动 observer/唤醒提示；公开 DTO 只返回净化 metadata。验证覆盖 150001 条原始 delta、工具事件压力、长文本、预算写放大、未来游标、权限、Redis 不可用和跨 worker 重连；数据库集成继续仅使用 `langalpha_test`，未向开发库应用 `082`，未改动现有 Docker volume。
+- 最终验证：全量单元测试 `8412 passed, 8 deselected, 1 xpassed`；Task 2/3/4 隔离数据库集成 `32 passed`；修改文件 Ruff、格式检查及 `git diff --check` 通过。独立终审未发现剩余 Critical/Important。
+
 ### 重构：教材处理接入逐项可恢复的正常 PTC 队列
 
 - 将五套教材 managed purpose 与固定教材 subagent 收敛为唯一 `education_book` policy；结构与单知识点材料均走正常 `RunCoordinator`、graph、SSE、checkpoint 和 Docker sandbox，普通 PTC/subagent 能力不受影响。

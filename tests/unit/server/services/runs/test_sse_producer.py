@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from unittest.mock import AsyncMock, call
 
 from src.server.services.runs import stream_writer
 from src.server.services.runs.sse_producer import RunSSEProducer
@@ -101,6 +102,127 @@ async def test_stream_workflow_filters_compact_empty_sentinel():
 
     await stream.aclose()
     assert closed is True
+
+
+@pytest.mark.asyncio
+async def test_compact_stream_awaits_observer_before_filtering_raw_events():
+    observer = AsyncMock()
+    producer = RunSSEProducer(
+        thread_id="thread-1",
+        run_id="run-1",
+        replay_profile="education_compact",
+        event_observer=observer,
+    )
+
+    async def fake_stream(*_args, **_kwargs):
+        yield producer._format_sse_event(
+            "tool_calls",
+            {
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "name": "Read",
+                        "args": {"file_path": "inputs/source/document.md"},
+                    }
+                ]
+            },
+        )
+        yield producer._format_sse_event(
+            "message_chunk",
+            {"content": "private model delta"},
+        )
+        yield producer._format_sse_event("metadata", {"run_id": "run-1"})
+
+    producer._stream_workflow_unfiltered = fake_stream
+
+    frames = [
+        frame
+        async for frame in producer.stream_workflow(
+            graph=object(),
+            input_state={},
+            config={},
+        )
+    ]
+
+    assert len(frames) == 1
+    assert "event: metadata" in frames[0]
+    assert observer.await_args_list == [
+        call(
+            "tool_calls",
+            {
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "name": "Read",
+                        "args": {"file_path": "inputs/source/document.md"},
+                    }
+                ]
+            },
+        ),
+        call("message_chunk", {"content": "private model delta"}),
+        call("metadata", {"run_id": "run-1"}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_observer_failure_never_breaks_workflow_stream():
+    observer = AsyncMock(side_effect=RuntimeError("activity database unavailable"))
+    producer = RunSSEProducer(
+        thread_id="thread-1",
+        run_id="run-1",
+        replay_profile="education_compact",
+        event_observer=observer,
+    )
+
+    async def fake_stream(*_args, **_kwargs):
+        yield producer._format_sse_event("metadata", {"run_id": "run-1"})
+
+    producer._stream_workflow_unfiltered = fake_stream
+
+    frames = [
+        frame
+        async for frame in producer.stream_workflow(
+            graph=object(),
+            input_state={},
+            config={},
+        )
+    ]
+
+    assert len(frames) == 1
+    assert "event: metadata" in frames[0]
+
+
+@pytest.mark.asyncio
+async def test_stream_flushes_stateful_observer_after_final_event():
+    class Observer:
+        def __init__(self):
+            self.events = []
+            self.flush = AsyncMock()
+
+        async def __call__(self, event_type, data):
+            self.events.append((event_type, data))
+
+    observer = Observer()
+    producer = RunSSEProducer(
+        thread_id="thread-1",
+        run_id="run-1",
+        replay_profile="education_compact",
+        event_observer=observer,
+    )
+
+    async def fake_stream(*_args, **_kwargs):
+        yield producer._format_sse_event("metadata", {"run_id": "run-1"})
+
+    producer._stream_workflow_unfiltered = fake_stream
+
+    _frames = [
+        frame
+        async for frame in producer.stream_workflow(
+            graph=object(), input_state={}, config={}
+        )
+    ]
+
+    observer.flush.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

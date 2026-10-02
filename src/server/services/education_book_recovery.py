@@ -9,11 +9,13 @@ from uuid import UUID
 from ptc_agent.agent.managed_execution import education_book_policy
 from src.server.database.education_book_jobs import (
     fail_book_item,
+    list_book_jobs_pending_cancellation,
     list_book_items_for_recovery,
     mark_book_job_cancelled,
     renew_book_item_lease,
 )
-from src.server.database.runs.lifecycle import get_run
+from src.server.database.education_book_activity import BookActivityWriteError
+from src.server.database.runs.lifecycle import get_run, request_run_cancel
 from src.server.services.education_book_jobs import (
     _is_book_infrastructure_error,
     _is_book_item_content_runtime_failure,
@@ -21,6 +23,9 @@ from src.server.services.education_book_jobs import (
     build_execution_task,
     finalize_book_item,
 )
+from src.server.services.education_book_activity import publish_book_activity_hint
+from src.server.services.runs.cancel import publish_cancel_nudge
+from src.server.services.runs.executor import LocalRunExecutor
 from src.server.services.workspace_manager import WorkspaceManager
 
 
@@ -53,6 +58,24 @@ async def recover_completed_book_item(item: Mapping[str, Any]) -> dict[str, Any]
     )
 
 
+async def _signal_cancelled_book_runtime(
+    context: Mapping[str, Any],
+    *,
+    signalled: set[tuple[str, str]],
+) -> None:
+    thread_id = context.get("thread_id")
+    run_id = context.get("run_id")
+    if thread_id is None or run_id is None:
+        return
+    identity = str(thread_id), str(run_id)
+    if identity in signalled:
+        return
+    await request_run_cancel(identity[1], thread_id=identity[0])
+    await LocalRunExecutor.get_instance().signal_cancel(*identity)
+    await publish_cancel_nudge(*identity)
+    signalled.add(identity)
+
+
 async def reconcile_book_jobs_once(
     *,
     worker_id: str,
@@ -62,6 +85,26 @@ async def reconcile_book_jobs_once(
     """Reconcile expired attempts using only PG rows and the runtime ledger."""
 
     reconciled = 0
+    for job in await list_book_jobs_pending_cancellation(limit=limit):
+        try:
+            signalled: set[tuple[str, str]] = set()
+            await _signal_cancelled_book_runtime(job, signalled=signalled)
+            cancelled_job = await mark_book_job_cancelled(
+                job_id=job["job_id"],
+                item_id=job.get("item_id"),
+                attempt_token=job.get("attempt_token"),
+            )
+            for runtime_context in cancelled_job.get("runtime_contexts", []):
+                await _signal_cancelled_book_runtime(
+                    runtime_context,
+                    signalled=signalled,
+                )
+            await publish_book_activity_hint(
+                job["job_id"], cancelled_job.get("high_water_seq")
+            )
+            reconciled += 1
+        except (BookActivityWriteError, RuntimeError):
+            continue
     for item in await list_book_items_for_recovery(limit=limit):
         run_id = item.get("run_id")
         run = await get_run(str(run_id)) if run_id is not None else None
@@ -76,8 +119,16 @@ async def reconcile_book_jobs_once(
             continue
         if status == "completed":
             try:
-                await recover_completed_book_item(item)
+                result = await recover_completed_book_item(item)
+                await publish_book_activity_hint(
+                    item["job_id"],
+                    result.get("high_water_seq")
+                    if isinstance(result, Mapping)
+                    else None,
+                )
                 reconciled += 1
+                continue
+            except BookActivityWriteError:
                 continue
             except Exception as exc:
                 finalization_error = exc
@@ -85,10 +136,13 @@ async def reconcile_book_jobs_once(
             finalization_error = None
         if status == "cancelled":
             try:
-                await mark_book_job_cancelled(
+                cancelled_job = await mark_book_job_cancelled(
                     job_id=item["job_id"],
                     item_id=item["item_id"],
                     attempt_token=item["attempt_token"],
+                )
+                await publish_book_activity_hint(
+                    item["job_id"], cancelled_job.get("high_water_seq")
                 )
                 reconciled += 1
             except RuntimeError:
@@ -96,7 +150,7 @@ async def reconcile_book_jobs_once(
                 pass
             continue
         try:
-            await fail_book_item(
+            failed_job = await fail_book_item(
                 item_id=item["item_id"],
                 attempt_token=item["attempt_token"],
                 safe_error="Managed textbook runtime ended before business commit",
@@ -109,6 +163,9 @@ async def reconcile_book_jobs_once(
                         and _is_book_item_content_runtime_failure(run)
                     )
                 ),
+            )
+            await publish_book_activity_hint(
+                item["job_id"], failed_job.get("high_water_seq")
             )
             reconciled += 1
         except RuntimeError:

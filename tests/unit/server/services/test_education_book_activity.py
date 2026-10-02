@@ -1,0 +1,408 @@
+"""Bounded public activity projection and reconnect contracts."""
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_activity_hint_is_compact_and_contains_no_event_body(monkeypatch):
+    from src.server.services import education_book_activity
+
+    publish = AsyncMock(return_value=1)
+    monkeypatch.setattr(
+        education_book_activity,
+        "get_cache_client",
+        lambda: SimpleNamespace(
+            enabled=True,
+            client=SimpleNamespace(publish=publish),
+        ),
+    )
+    job_id = uuid4()
+
+    await education_book_activity.publish_book_activity_hint(job_id, 42)
+
+    channel, raw_payload = publish.await_args.args
+    payload = json.loads(raw_payload)
+    assert channel == education_book_activity.book_activity_channel(job_id)
+    assert payload == {"job_id": str(job_id), "high_water_seq": 42}
+    assert len(raw_payload.encode("utf-8")) < 2 * 1024
+    assert "message" not in payload
+    assert "metadata" not in payload
+
+
+@pytest.mark.asyncio
+async def test_observer_projects_only_tool_identity_and_never_arguments_or_results():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock(
+        side_effect=[
+            {"outcome": "stored", "high_water_seq": 1},
+            {"outcome": "stored", "high_water_seq": 2},
+        ]
+    )
+    publish = AsyncMock()
+    job_id = uuid4()
+    item_id = uuid4()
+    attempt_token = uuid4()
+    observer = BookActivityObserver(
+        job_id=job_id,
+        item_id=item_id,
+        attempt_token=attempt_token,
+        append=append,
+        publish=publish,
+    )
+
+    await observer(
+        "tool_calls",
+        {
+            "tool_calls": [
+                {
+                    "id": "call-secret",
+                    "name": "Read",
+                    "args": {"file_path": "inputs/source/private-answer.md"},
+                }
+            ]
+        },
+    )
+    await observer(
+        "tool_call_result",
+        {
+            "tool_call_id": "call-secret",
+            "status": "success",
+            "content": "the complete private source and model output",
+        },
+    )
+
+    assert append.await_count == 2
+    start = append.await_args_list[0].kwargs
+    finish = append.await_args_list[1].kwargs
+    assert start["kind"] == finish["kind"] == "tool"
+    assert start["status"] == "running"
+    assert finish["status"] == "succeeded"
+    serialized = repr([start, finish])
+    assert "private-answer" not in serialized
+    assert "complete private source" not in serialized
+    assert start["metadata"] == {
+        "tool_call_id": "call-secret",
+        "tool_name": "Read",
+    }
+    assert publish.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_observer_drops_all_raw_model_deltas_under_pressure():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock()
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        append=append,
+        publish=AsyncMock(),
+    )
+
+    for index in range(150_001):
+        await observer(
+            "message_chunk",
+            {"content": f"private reasoning delta {index}"},
+        )
+
+    append.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_public_progress_is_truncated_and_rate_limited():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock(return_value={"outcome": "stored", "high_water_seq": 1})
+    clock_values = iter((10.0, 10.25, 11.01))
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        append=append,
+        publish=AsyncMock(),
+        monotonic=lambda: next(clock_values),
+    )
+    event = {
+        "artifact_type": "report_progress",
+        "artifact_id": "stage-reading",
+        "payload": {"message": "x" * 900, "stage": "reading"},
+    }
+
+    await observer("artifact", event)
+    await observer("artifact", event)
+    await observer("artifact", event)
+
+    assert append.await_count == 2
+    assert all(len(call.kwargs["message"]) <= 512 for call in append.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_observer_stops_projecting_details_after_budget_exhaustion():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock(
+        return_value={"outcome": "budget_exhausted", "high_water_seq": None}
+    )
+    record_drops = AsyncMock(return_value={"outcome": "stored", "high_water_seq": 2})
+    publish = AsyncMock()
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        append=append,
+        record_drops=record_drops,
+        publish=publish,
+        monotonic=lambda: 10.0,
+    )
+
+    for index in range(5_000):
+        await observer(
+            "tool_calls",
+            {"tool_calls": [{"id": f"call-{index}", "name": "Read"}]},
+        )
+
+    append.assert_awaited_once()
+    assert len(observer._tool_names) == 1
+    record_drops.assert_not_awaited()
+
+    await observer.flush()
+
+    record_drops.assert_awaited_once_with(
+        job_id=observer.job_id,
+        item_id=observer.item_id,
+        attempt_token=observer.attempt_token,
+        dropped_count=4_999,
+    )
+    publish.assert_awaited_once_with(observer.job_id, 2)
+
+
+@pytest.mark.asyncio
+async def test_observer_stops_retrying_detail_writes_after_repository_failure():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock(side_effect=RuntimeError("activity database unavailable"))
+    mark_unavailable = AsyncMock(
+        return_value={"outcome": "stored", "high_water_seq": 4}
+    )
+    publish = AsyncMock()
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        append=append,
+        mark_unavailable=mark_unavailable,
+        publish=publish,
+    )
+    event = {"tool_calls": [{"id": "call-1", "name": "Read"}]}
+
+    with pytest.raises(RuntimeError, match="activity database unavailable"):
+        await observer("tool_calls", event)
+    await observer("tool_calls", event)
+
+    append.assert_awaited_once()
+    mark_unavailable.assert_awaited_once_with(
+        job_id=observer.job_id,
+        item_id=observer.item_id,
+        attempt_token=observer.attempt_token,
+    )
+    publish.assert_awaited_once_with(observer.job_id, 4)
+
+
+@pytest.mark.asyncio
+async def test_observer_retries_unavailable_marker_during_final_flush():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock(side_effect=RuntimeError("activity database unavailable"))
+    mark_unavailable = AsyncMock(
+        side_effect=[
+            RuntimeError("activity status unavailable"),
+            {"outcome": "stored", "high_water_seq": 4},
+        ]
+    )
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        append=append,
+        mark_unavailable=mark_unavailable,
+        publish=AsyncMock(),
+    )
+
+    with pytest.raises(RuntimeError, match="activity database unavailable"):
+        await observer("tool_calls", {"tool_calls": [{"id": "call-1", "name": "Read"}]})
+    await observer.flush()
+
+    assert mark_unavailable.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_budget_exhaustion_counts_remaining_calls_in_the_same_event():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock(
+        return_value={"outcome": "budget_exhausted", "high_water_seq": 1}
+    )
+    record_drops = AsyncMock(return_value={"outcome": "stored", "high_water_seq": 2})
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        append=append,
+        record_drops=record_drops,
+        publish=AsyncMock(),
+        monotonic=lambda: 10.0,
+    )
+
+    await observer(
+        "tool_calls",
+        {
+            "tool_calls": [
+                {"id": "call-1", "name": "Read"},
+                {"id": "call-2", "name": "Bash"},
+                {"id": "call-3", "name": "ExecuteCode"},
+            ]
+        },
+    )
+    await observer.flush()
+
+    append.assert_awaited_once()
+    assert record_drops.await_args.kwargs["dropped_count"] == 2
+
+
+class _PageRepository:
+    def __init__(self, pages):
+        self.pages = list(pages)
+        self.calls = []
+
+    async def get_book_activity_page(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.pages) == 1:
+            return self.pages[0]
+        return self.pages.pop(0)
+
+
+def _page(*, seqs: list[int], high_water: int, status: str):
+    return {
+        "job_id": str(uuid4()),
+        "status": status,
+        "activity_status": "available",
+        "events": [{"seq": seq} for seq in seqs],
+        "high_water_seq": high_water,
+        "cursor_expired": False,
+        "has_more": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_stream_subscribes_then_rereads_pg_to_close_notification_race():
+    from src.server.services.education_book_activity import BookActivityService
+
+    initial = _page(seqs=[1], high_water=1, status="running")
+    caught_up = {
+        **_page(seqs=[2], high_water=2, status="succeeded"),
+        "job_id": initial["job_id"],
+    }
+    repository = _PageRepository([initial, caught_up])
+
+    @asynccontextmanager
+    async def subscribe(_channel):
+        async def wait(_timeout):
+            return ("timeout", None)
+
+        yield wait
+
+    service = BookActivityService(repository=repository, subscribe=subscribe)
+
+    pages = [
+        page
+        async for page in service.pages(
+            job_id=initial["job_id"],
+            parent_user_id="parent-1",
+            after_seq=0,
+        )
+    ]
+
+    assert [[event["seq"] for event in page["events"]] for page in pages] == [
+        [1],
+        [2],
+    ]
+    assert repository.calls[1]["after_seq"] == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_recovers_from_redis_unavailable_using_pg_reread():
+    from src.server.services.education_book_activity import BookActivityService
+
+    initial = _page(seqs=[], high_water=0, status="running")
+    terminal = {
+        **_page(seqs=[1, 2], high_water=2, status="failed"),
+        "job_id": initial["job_id"],
+    }
+    repository = _PageRepository([initial, terminal])
+
+    @asynccontextmanager
+    async def unavailable(_channel):
+        yield None
+
+    service = BookActivityService(repository=repository, subscribe=unavailable)
+
+    pages = [
+        page
+        async for page in service.pages(
+            job_id=initial["job_id"],
+            parent_user_id="parent-1",
+            after_seq=0,
+        )
+    ]
+
+    assert pages[-1]["status"] == "failed"
+    assert [event["seq"] for event in pages[-1]["events"]] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_stream_yields_activity_availability_change_without_a_new_event():
+    from src.server.services.education_book_activity import BookActivityService
+
+    initial = _page(seqs=[], high_water=0, status="running")
+    unavailable = {
+        **initial,
+        "activity_status": "unavailable",
+    }
+    terminal = {
+        **unavailable,
+        "status": "failed",
+    }
+    repository = _PageRepository([initial, unavailable, terminal])
+
+    @asynccontextmanager
+    async def subscribe(_channel):
+        async def wait(_timeout):
+            return ("hint", None)
+
+        yield wait
+
+    service = BookActivityService(repository=repository, subscribe=subscribe)
+    pages = [
+        page
+        async for page in service.pages(
+            job_id=initial["job_id"],
+            parent_user_id="parent-1",
+            after_seq=0,
+        )
+    ]
+
+    assert [page["activity_status"] for page in pages] == [
+        "available",
+        "unavailable",
+        "unavailable",
+    ]

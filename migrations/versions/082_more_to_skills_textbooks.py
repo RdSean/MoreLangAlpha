@@ -249,7 +249,10 @@ def _create_jobs_and_materials() -> None:
             cancelled_items INTEGER NOT NULL DEFAULT 0 CHECK (cancelled_items >= 0),
             not_run_items INTEGER NOT NULL DEFAULT 0 CHECK (not_run_items >= 0),
             high_water_seq BIGINT NOT NULL DEFAULT 0 CHECK (high_water_seq >= 0),
+            activity_status VARCHAR(24) NOT NULL DEFAULT 'available'
+                CHECK (activity_status IN ('available', 'unavailable')),
             safe_error TEXT,
+            cancel_requested_at TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             started_at TIMESTAMPTZ,
             finished_at TIMESTAMPTZ,

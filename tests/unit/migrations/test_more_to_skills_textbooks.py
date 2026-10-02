@@ -144,6 +144,9 @@ def test_migration_rebuilds_textbook_and_learning_references(monkeypatch) -> Non
 def test_migration_enforces_job_fencing_and_material_cas(monkeypatch) -> None:
     sql = _upgrade_sql(monkeypatch)
 
+    assert "activity_status VARCHAR(24) NOT NULL DEFAULT 'available'" in sql
+    assert "CHECK (activity_status IN ('available', 'unavailable'))" in sql
+    assert "cancel_requested_at TIMESTAMPTZ" in sql
     assert (
         "CREATE UNIQUE INDEX uq_education_book_jobs_one_active "
         "ON education_book_jobs (textbook_id) "

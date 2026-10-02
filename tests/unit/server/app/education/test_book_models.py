@@ -1,16 +1,46 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
 
 from src.server.app.education.book_models import (
+    BookActivityEventResponse,
+    BookActivityPageResponse,
     BookJobCreateRequest,
     BookSourceSliceResponse,
     CreateBookRequest,
     KnowledgePointProjectionResponse,
 )
+
+
+def test_activity_event_exposes_only_projected_metadata() -> None:
+    event = BookActivityEventResponse(
+        seq=1,
+        job_id="9998bb1a-687a-4d45-815d-5b1dd6ed2f17",
+        item_id=UUID("86f03a73-7604-4097-905b-768e6ad0f644"),
+        kind="tool",
+        status="running",
+        message="Running Read",
+        metadata={"tool_name": "Read", "tool_call_id": "call-1"},
+        created_at=datetime.now(timezone.utc),
+    )
+
+    assert event.metadata == {"tool_name": "Read", "tool_call_id": "call-1"}
+
+
+def test_activity_page_exposes_unavailable_state() -> None:
+    page = BookActivityPageResponse(
+        job_id="9998bb1a-687a-4d45-815d-5b1dd6ed2f17",
+        events=[],
+        high_water_seq=0,
+        cursor_expired=False,
+        activity_status="unavailable",
+    )
+
+    assert page.activity_status == "unavailable"
 
 
 def test_create_book_request_freezes_one_completed_parse_artifact() -> None:

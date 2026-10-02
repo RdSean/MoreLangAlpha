@@ -582,7 +582,23 @@ async def test_structure_import_and_material_finalization_are_atomic_and_idempot
             job = await cur.fetchone()
             assert job["status"] == "succeeded"
             assert job["succeeded_items"] == 1
-            assert job["high_water_seq"] == 1
+            assert job["high_water_seq"] == 2
+            await cur.execute(
+                """
+                SELECT kind, status, metadata->>'budget_class' AS budget_class
+                FROM education_book_activity_events
+                WHERE job_id = %s ORDER BY seq
+                """,
+                (material_job["job_id"],),
+            )
+            activity = await cur.fetchall()
+            assert [
+                (event["kind"], event["status"], event["budget_class"])
+                for event in activity
+            ] == [
+                ("material", "succeeded", "terminal"),
+                ("job", "succeeded", "terminal"),
+            ]
             await cur.execute(
                 """
                 SELECT materials.content_key, materials.generation,
@@ -975,5 +991,6 @@ async def test_structure_commit_appends_after_existing_activity_events(
     assert [(row["seq"], row["dedupe_key"]) for row in events] == [
         (1, "runtime-started"),
         (2, "structure-committed"),
+        (3, f"job-terminal:{created['job_id']}"),
     ]
-    assert job["high_water_seq"] == 2
+    assert job["high_water_seq"] == 3

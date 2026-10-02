@@ -6,8 +6,10 @@ handles timeouts. Keepalives are emitted by the SSE consumer (stream_from_log).
 """
 
 import asyncio
+from collections import deque
 import copy
 from contextlib import aclosing
+import inspect
 import json
 import logging
 import re
@@ -405,6 +407,7 @@ class RunSSEProducer:
         merged_stream_chunk_max_bytes: int = MERGED_STREAM_CHUNK_MAX_BYTES_DEFAULT,
         agent_config: Optional[Any] = None,
         replay_profile: Literal["full", "education_compact"] = "full",
+        event_observer: Optional[Any] = None,
     ):
         """Initialize the workflow stream handler.
 
@@ -425,6 +428,9 @@ class RunSSEProducer:
         self.workflow_timeout = workflow_timeout or WORKFLOW_TIMEOUT
         self.agent_config = agent_config
         self.replay_profile = replay_profile
+        self.event_observer = event_observer
+        self._event_observer_active = False
+        self._pending_event_observations: deque[tuple[str, dict[str, Any]]] = deque()
 
         # Cache for tool usage result (for cross-context access)
         self._tool_usage_result: Optional[Dict[str, int]] = None
@@ -549,16 +555,43 @@ class RunSSEProducer:
         config: dict,
     ) -> AsyncGenerator[str, None]:
         """Yield only non-empty frames from the selected replay profile."""
-        async with aclosing(
-            self._stream_workflow_unfiltered(
-                graph,
-                input_state,
-                config,
-            )
-        ) as stream:
-            async for event in stream:
-                if event:
-                    yield event
+        self._event_observer_active = self.event_observer is not None
+        try:
+            async with aclosing(
+                self._stream_workflow_unfiltered(
+                    graph,
+                    input_state,
+                    config,
+                )
+            ) as stream:
+                async for event in stream:
+                    await self._drain_event_observations()
+                    if event:
+                        yield event
+        finally:
+            await self._drain_event_observations()
+            await self._flush_event_observer()
+            self._event_observer_active = False
+
+    async def _drain_event_observations(self) -> None:
+        while self._pending_event_observations:
+            event_type, data = self._pending_event_observations.popleft()
+            try:
+                await self.event_observer(event_type, data)
+            except Exception:
+                logger.exception("Run event observer failed")
+
+    async def _flush_event_observer(self) -> None:
+        if self.event_observer is None or inspect.getattr_static(
+            self.event_observer, "flush", None
+        ) is None:
+            return
+        try:
+            result = self.event_observer.flush()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.exception("Run event observer flush failed")
 
     async def _stream_workflow_unfiltered(
         self,
@@ -1843,6 +1876,9 @@ class RunSSEProducer:
         Returns:
             SSE-formatted string (id: seq\\nevent: type\\ndata: json\\n\\n)
         """
+        if self._event_observer_active:
+            self._pending_event_observations.append((event_type, dict(data)))
+
         if (
             self.replay_profile == "education_compact"
             and event_type not in _EDUCATION_COMPACT_REPLAY_EVENT_TYPES

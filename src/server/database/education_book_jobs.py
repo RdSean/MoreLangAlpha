@@ -9,6 +9,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from src.server.database.pool import get_db_connection
+from src.server.database.education_book_activity import append_terminal_activity
 
 if TYPE_CHECKING:
     from src.server.services.education_book_structure import MoreToSkillsIdentity
@@ -32,6 +33,7 @@ async def claim_next_book_item(
                 SELECT jobs.job_id
                 FROM education_book_jobs AS jobs
                 WHERE jobs.status IN ('queued', 'running')
+                  AND jobs.cancel_requested_at IS NULL
                   AND EXISTS (
                       SELECT 1
                       FROM education_book_job_items AS items
@@ -102,7 +104,8 @@ async def claim_next_book_item(
                 UPDATE education_book_jobs
                 SET status = 'running', started_at = COALESCE(started_at, NOW()),
                     finished_at = NULL, updated_at = NOW()
-                WHERE job_id = %s AND status IN ('queued', 'running')
+                WHERE job_id = %s
+                  AND status IN ('queued', 'running', 'failed', 'not_run')
                 """,
                 (item["job_id"],),
             )
@@ -139,6 +142,45 @@ async def claim_next_book_item(
             )
             claimed = await cur.fetchone()
             return dict(claimed) if claimed is not None else None
+
+
+async def request_book_job_cancel(*, job_id: str | UUID) -> dict[str, Any] | None:
+    """Persist a business cancel fence and return the runtime now under it."""
+
+    async with get_db_connection() as conn, conn.transaction():
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                UPDATE education_book_jobs
+                SET cancel_requested_at = COALESCE(cancel_requested_at, NOW()),
+                    updated_at = NOW()
+                WHERE job_id = %s AND status IN ('queued', 'running')
+                RETURNING job_id, cancel_requested_at
+                """,
+                (job_id,),
+            )
+            job = await cur.fetchone()
+            if job is None:
+                return None
+            await cur.execute(
+                """
+                SELECT items.item_id, items.attempt_token,
+                       items.managed_thread_id AS thread_id, items.run_id
+                FROM education_book_job_items AS items
+                WHERE items.job_id = %s AND items.status = 'running'
+                ORDER BY items.position
+                LIMIT 1
+                """,
+                (job_id,),
+            )
+            item = await cur.fetchone()
+            return {
+                **dict(job),
+                "item_id": item["item_id"] if item is not None else None,
+                "attempt_token": (item["attempt_token"] if item is not None else None),
+                "thread_id": item["thread_id"] if item is not None else None,
+                "run_id": item["run_id"] if item is not None else None,
+            }
 
 
 async def get_book_job_cancel_context(*, job_id: str | UUID) -> dict[str, Any] | None:
@@ -268,11 +310,46 @@ async def list_book_items_for_recovery(*, limit: int = 100) -> list[dict[str, An
                 LEFT JOIN education_book_structures AS structures
                   ON structures.structure_id = points.structure_id
                 WHERE items.status = 'running'
+                  AND jobs.cancel_requested_at IS NULL
                   AND (
                       items.lease_expires_at IS NULL
                       OR items.lease_expires_at <= NOW()
                   )
                 ORDER BY items.updated_at, items.item_id
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def list_book_jobs_pending_cancellation(
+    *, limit: int = 100
+) -> list[dict[str, Any]]:
+    """Return active jobs whose durable business cancellation needs settling."""
+
+    if limit <= 0:
+        return []
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT jobs.job_id, items.item_id, items.attempt_token,
+                       items.thread_id, items.run_id
+                FROM education_book_jobs AS jobs
+                LEFT JOIN LATERAL (
+                    SELECT item_id, attempt_token,
+                           managed_thread_id AS thread_id, run_id
+                    FROM education_book_job_items
+                    WHERE job_id = jobs.job_id AND status = 'running'
+                    ORDER BY position
+                    LIMIT 1
+                ) AS items ON TRUE
+                WHERE jobs.cancel_requested_at IS NOT NULL
+                  AND jobs.status IN (
+                      'queued', 'running', 'failed', 'partially_succeeded'
+                  )
+                ORDER BY jobs.cancel_requested_at, jobs.job_id
                 LIMIT %s
                 """,
                 (limit,),
@@ -321,12 +398,17 @@ async def list_book_items_for_terminal_cleanup(
             return [dict(row) for row in await cur.fetchall()]
 
 
-async def _lock_book_job_for_item(cur, *, item_id: str | UUID) -> UUID:
+async def _lock_book_job_for_item(
+    cur,
+    *,
+    item_id: str | UUID,
+    reject_cancel_requested: bool = False,
+) -> UUID:
     """Lock the owning job before any terminal item mutation."""
 
     await cur.execute(
         """
-        SELECT jobs.job_id
+        SELECT jobs.job_id, jobs.cancel_requested_at
         FROM education_book_jobs AS jobs
         JOIN education_book_job_items AS items ON items.job_id = jobs.job_id
         WHERE items.item_id = %s
@@ -337,6 +419,8 @@ async def _lock_book_job_for_item(cur, *, item_id: str | UUID) -> UUID:
     row = await cur.fetchone()
     if row is None:
         raise LookupError("Book job item was not found")
+    if reject_cancel_requested and row["cancel_requested_at"] is not None:
+        raise RuntimeError("Textbook job cancellation was requested")
     return row["job_id"]
 
 
@@ -374,9 +458,13 @@ async def fail_book_item(
                     SET status = 'not_run', safe_error = %s,
                         finished_at = NOW(), updated_at = NOW()
                     WHERE job_id = %s AND status = 'queued'
+                    RETURNING item_id
                     """,
                     ("Stopped after an infrastructure failure", job_id),
                 )
+                not_run_item_ids = [row["item_id"] for row in await cur.fetchall()]
+            else:
+                not_run_item_ids = []
             await cur.execute(
                 """
                 SELECT
@@ -403,7 +491,7 @@ async def fail_book_item(
                 UPDATE education_book_jobs
                 SET status = %s, succeeded_items = %s, failed_items = %s,
                     cancelled_items = %s, not_run_items = %s,
-                    safe_error = %s, high_water_seq = high_water_seq + 1,
+                    safe_error = %s,
                     finished_at = CASE WHEN %s THEN NOW() ELSE NULL END,
                     updated_at = NOW()
                 WHERE job_id = %s
@@ -421,22 +509,43 @@ async def fail_book_item(
                 ),
             )
             job = await cur.fetchone()
-            await cur.execute(
-                """
-                INSERT INTO education_book_activity_events (
-                    job_id, seq, dedupe_key, item_id, kind, status, message
-                ) VALUES (%s, %s, %s, %s, 'item', 'failed', %s)
-                ON CONFLICT (job_id, dedupe_key) DO NOTHING
-                """,
-                (
-                    job_id,
-                    job["high_water_seq"],
-                    f"item-failed:{item_id}:{attempt_token}",
-                    item_id,
-                    safe_error,
-                ),
+            last_seq = await append_terminal_activity(
+                cur,
+                job_id=job_id,
+                dedupe_key=f"item-failed:{item_id}:{attempt_token}",
+                item_id=UUID(str(item_id)),
+                kind="item",
+                status="failed",
+                message=safe_error,
             )
-            return dict(job)
+            for not_run_item_id in not_run_item_ids:
+                last_seq = await append_terminal_activity(
+                    cur,
+                    job_id=job_id,
+                    dedupe_key=f"item-not-run:{not_run_item_id}",
+                    item_id=not_run_item_id,
+                    kind="item",
+                    status="not_run",
+                    message="Item was not run after an infrastructure failure",
+                )
+            if terminal:
+                last_seq = await append_terminal_activity(
+                    cur,
+                    job_id=job_id,
+                    dedupe_key=f"job-terminal:{job_id}",
+                    item_id=None,
+                    kind="job",
+                    status=status,
+                    message=(
+                        "Job completed with errors"
+                        if status == "partially_succeeded"
+                        else "Job failed"
+                    ),
+                )
+            result = dict(job)
+            if last_seq is not None:
+                result["high_water_seq"] = last_seq
+            return result
 
 
 async def retry_book_job(
@@ -581,16 +690,25 @@ async def mark_book_job_cancelled(
                 raise RuntimeError("Textbook job is no longer active")
             await cur.execute(
                 """
-                SELECT item_id, attempt_token,
+                SELECT item_id, status, attempt_token,
                        managed_thread_id AS thread_id, run_id
                 FROM education_book_job_items
-                WHERE job_id = %s AND status = 'running'
+                WHERE job_id = %s
+                  AND status IN ('queued', 'running', 'failed', 'not_run')
                 ORDER BY position
                 FOR UPDATE
                 """,
                 (job_id,),
             )
-            runtime_contexts = [dict(row) for row in await cur.fetchall()]
+            cancelled_items = [dict(row) for row in await cur.fetchall()]
+            runtime_contexts = [
+                {
+                    key: row[key]
+                    for key in ("item_id", "attempt_token", "thread_id", "run_id")
+                }
+                for row in cancelled_items
+                if row["status"] == "running"
+            ]
             await cur.execute(
                 """
                 UPDATE education_book_job_items
@@ -619,7 +737,7 @@ async def mark_book_job_cancelled(
                 UPDATE education_book_jobs
                 SET status = 'cancelled', succeeded_items = %s,
                     failed_items = %s, cancelled_items = %s,
-                    not_run_items = %s, high_water_seq = high_water_seq + 1,
+                    not_run_items = %s,
                     finished_at = NOW(), updated_at = NOW()
                 WHERE job_id = %s
                   AND status IN (
@@ -638,7 +756,31 @@ async def mark_book_job_cancelled(
             job = await cur.fetchone()
             if job is None:
                 raise RuntimeError("Textbook job is no longer active")
+            last_seq = None
+            for cancelled_item in cancelled_items:
+                last_seq = await append_terminal_activity(
+                    cur,
+                    job_id=UUID(str(job_id)),
+                    dedupe_key=f"item-cancelled:{cancelled_item['item_id']}",
+                    item_id=cancelled_item["item_id"],
+                    kind="item",
+                    status="cancelled",
+                    message="Item cancelled",
+                    supersede=True,
+                )
+            last_seq = await append_terminal_activity(
+                cur,
+                job_id=UUID(str(job_id)),
+                dedupe_key=f"job-terminal:{job_id}",
+                item_id=None,
+                kind="job",
+                status="cancelled",
+                message="Job cancelled",
+                supersede=True,
+            )
             result = dict(job)
+            if last_seq is not None:
+                result["high_water_seq"] = last_seq
             result["runtime_contexts"] = runtime_contexts
             return result
 
@@ -1068,7 +1210,11 @@ async def finalize_supplementary(
 
     async with get_db_connection() as conn, conn.transaction():
         async with conn.cursor(row_factory=dict_row) as cur:
-            job_id = await _lock_book_job_for_item(cur, item_id=item_id)
+            job_id = await _lock_book_job_for_item(
+                cur,
+                item_id=item_id,
+                reject_cancel_requested=True,
+            )
             await cur.execute(
                 """
                 SELECT * FROM education_book_job_items
@@ -1137,11 +1283,10 @@ async def finalize_supplementary(
                 UPDATE education_book_jobs
                 SET status = %s, succeeded_items = %s, failed_items = %s,
                     cancelled_items = %s, not_run_items = %s,
-                    high_water_seq = high_water_seq + 1,
                     finished_at = CASE WHEN %s THEN NOW() ELSE NULL END,
                     updated_at = NOW()
                 WHERE job_id = %s
-                RETURNING high_water_seq
+                RETURNING job_id
                 """,
                 (
                     status,
@@ -1153,22 +1298,30 @@ async def finalize_supplementary(
                     item["job_id"],
                 ),
             )
-            seq = (await cur.fetchone())["high_water_seq"]
-            await cur.execute(
-                """
-                INSERT INTO education_book_activity_events (
-                    job_id, seq, dedupe_key, item_id, kind, status, message
-                ) VALUES (%s, %s, %s, %s, 'supplementary', 'succeeded',
-                          'Supplementary files committed')
-                ON CONFLICT (job_id, dedupe_key) DO NOTHING
-                """,
-                (
-                    item["job_id"],
-                    seq,
-                    f"supplementary-committed:{item_id}",
-                    item_id,
-                ),
+            await cur.fetchone()
+            await append_terminal_activity(
+                cur,
+                job_id=item["job_id"],
+                dedupe_key=f"supplementary-committed:{item_id}",
+                item_id=UUID(str(item_id)),
+                kind="supplementary",
+                status="succeeded",
+                message="Supplementary files committed",
             )
+            if terminal:
+                await append_terminal_activity(
+                    cur,
+                    job_id=item["job_id"],
+                    dedupe_key=f"job-terminal:{item['job_id']}",
+                    item_id=None,
+                    kind="job",
+                    status=status,
+                    message=(
+                        "Job completed"
+                        if status == "succeeded"
+                        else "Job completed with errors"
+                    ),
+                )
             return dict(result_snapshot)
 
 
@@ -1185,7 +1338,11 @@ async def finalize_material(
 
     async with get_db_connection() as conn, conn.transaction():
         async with conn.cursor(row_factory=dict_row) as cur:
-            job_id = await _lock_book_job_for_item(cur, item_id=item_id)
+            job_id = await _lock_book_job_for_item(
+                cur,
+                item_id=item_id,
+                reject_cancel_requested=True,
+            )
             await cur.execute(
                 """
                 SELECT items.*, jobs.textbook_id, jobs.depth, jobs.requirements
@@ -1319,13 +1476,12 @@ async def finalize_material(
             await cur.execute(
                 """
                 UPDATE education_book_jobs
-                SET high_water_seq = high_water_seq + 1,
-                    status = %s, succeeded_items = %s, failed_items = %s,
+                SET status = %s, succeeded_items = %s, failed_items = %s,
                     cancelled_items = %s, not_run_items = %s,
                     finished_at = CASE WHEN %s THEN NOW() ELSE NULL END,
                     updated_at = NOW()
                 WHERE job_id = %s
-                RETURNING high_water_seq
+                RETURNING job_id
                 """,
                 (
                     terminal_status,
@@ -1337,16 +1493,30 @@ async def finalize_material(
                     item["job_id"],
                 ),
             )
-            seq = (await cur.fetchone())["high_water_seq"]
-            await cur.execute(
-                """
-                INSERT INTO education_book_activity_events (
-                    job_id, seq, dedupe_key, item_id, kind, status, message
-                ) VALUES (%s, %s, %s, %s, 'material', 'succeeded',
-                          'Material committed')
-                """,
-                (item["job_id"], seq, f"material-committed:{item_id}", item_id),
+            await cur.fetchone()
+            await append_terminal_activity(
+                cur,
+                job_id=item["job_id"],
+                dedupe_key=f"material-committed:{item_id}",
+                item_id=UUID(str(item_id)),
+                kind="material",
+                status="succeeded",
+                message="Material committed",
             )
+            if counts["active"] == 0:
+                await append_terminal_activity(
+                    cur,
+                    job_id=item["job_id"],
+                    dedupe_key=f"job-terminal:{item['job_id']}",
+                    item_id=None,
+                    kind="job",
+                    status=terminal_status,
+                    message=(
+                        "Job completed"
+                        if terminal_status == "succeeded"
+                        else "Job completed with errors"
+                    ),
+                )
             await cur.execute(
                 """
                 UPDATE education_textbooks SET updated_at = NOW()
