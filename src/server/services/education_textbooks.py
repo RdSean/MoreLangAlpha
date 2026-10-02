@@ -584,7 +584,10 @@ async def list_learning_assignments(*, student_user_id: str) -> list[dict[str, A
     membership = await get_membership_for_user(student_user_id)
     if not membership or membership["role"] != "student":
         raise TextbookPermissionError("Only a student can access learning assignments")
-    return await list_student_textbook_assignments(student_user_id=student_user_id)
+    assignments = await list_student_textbook_assignments(
+        student_user_id=student_user_id
+    )
+    return [{**row, "textbook_id": str(row["textbook_id"])} for row in assignments]
 
 
 async def get_student_structure(

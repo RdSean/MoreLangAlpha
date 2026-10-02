@@ -299,7 +299,7 @@ async def test_student_learning_reads_resolve_assignment_to_current_book(monkeyp
         knowledge_point_id=str(KNOWLEDGE_POINT_ID),
     )
 
-    assert listed == [assignment]
+    assert listed == [{**assignment, "textbook_id": str(TEXTBOOK_ID)}]
     assert loaded_structure == {
         **structure,
         "assignment_id": ASSIGNMENT_ID,

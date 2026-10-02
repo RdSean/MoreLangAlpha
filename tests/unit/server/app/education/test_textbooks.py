@@ -32,6 +32,49 @@ MANAGED_JOB_ID = UUID("9998bb1a-687a-4d45-815d-5b1dd6ed2f17")
 KNOWLEDGE_POINT_ID = UUID("4c3f4d0c-a508-4bff-a89f-a3a584a2fe86")
 
 
+@pytest.mark.asyncio
+async def test_student_learning_list_projects_postgres_textbook_uuid(
+    client, monkeypatch
+):
+    from src.server.services import education_textbooks as textbooks
+
+    client._transport.app.dependency_overrides[get_current_user_id] = (
+        lambda: "student-1"
+    )
+    assignment_id = uuid4()
+    structure_id = uuid4()
+    monkeypatch.setattr(
+        textbooks,
+        "get_membership_for_user",
+        AsyncMock(return_value={"role": "student"}),
+    )
+    monkeypatch.setattr(
+        textbooks,
+        "list_student_textbook_assignments",
+        AsyncMock(
+            return_value=[
+                {
+                    "assignment_id": assignment_id,
+                    "textbook_id": UUID(TEXTBOOK["textbook_id"]),
+                    "textbook_title": TEXTBOOK["title"],
+                    "structure_id": structure_id,
+                    "knowledge_point_count": 4,
+                    "completed_knowledge_point_count": 1,
+                    "created_at": datetime.now(timezone.utc),
+                }
+            ]
+        ),
+    )
+
+    response = await client.get("/api/v1/education/learning")
+
+    assert response.status_code == 200
+    assert response.json()[0]["textbook_id"] == TEXTBOOK["textbook_id"]
+    assert response.json()[0]["assignment_id"] == str(assignment_id)
+    assert response.json()[0]["structure_id"] == str(structure_id)
+    assert response.json()[0]["completed_knowledge_point_count"] == 1
+
+
 def _source_candidate() -> dict:
     now = datetime.now(timezone.utc)
     return {
