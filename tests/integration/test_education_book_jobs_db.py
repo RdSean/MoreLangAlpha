@@ -6,6 +6,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 import pytest
+import psycopg
 
 from src.server.services.education_book_structure import MoreToSkillsIdentity
 from src.server.services.education_book_structure import ParsedBookStructure
@@ -25,20 +26,18 @@ CURRENT_IDENTITY = MoreToSkillsIdentity(
 )
 
 
-def _parsed_two_points() -> ParsedBookStructure:
-    points = (
+def _parsed_points(count: int = 2) -> ParsedBookStructure:
+    points = tuple(
         {
-            "id": "u01-k01",
-            "title": "First",
-            "anchor": {"start_line": 1, "end_line": 10},
+            "id": f"u01-k{position:02d}",
+            "title": f"Point {position}",
+            "anchor": {
+                "start_line": (position - 1) * 10 + 1,
+                "end_line": position * 10,
+            },
             "nodes": [],
-        },
-        {
-            "id": "u01-k02",
-            "title": "Second",
-            "anchor": {"start_line": 11, "end_line": 20},
-            "nodes": [],
-        },
+        }
+        for position in range(1, count + 1)
     )
     return ParsedBookStructure(
         document={
@@ -63,6 +62,10 @@ def _parsed_two_points() -> ParsedBookStructure:
         ),
         warnings=(),
     )
+
+
+def _parsed_two_points() -> ParsedBookStructure:
+    return _parsed_points()
 
 
 def _parsed_empty() -> ParsedBookStructure:
@@ -212,6 +215,108 @@ async def test_claim_next_item_persists_attempt_execution_and_lease(
     assert claimed["lease_owner"] == "worker-a"
     assert isinstance(claimed["lease_expires_at"], datetime)
     assert await claim_next_book_item(worker_id="worker-b", lease_seconds=60) is None
+
+
+async def test_expired_live_attempt_is_reconciled_by_another_worker_without_reclaim(
+    patched_get_db_connection,
+    seed_user,
+    test_db_uri,
+) -> None:
+    from src.server.database.conversation import create_thread
+    from src.server.database.education_book_jobs import (
+        bind_book_item_runtime,
+        claim_next_book_item,
+    )
+    from src.server.database.runs import lifecycle as lifecycle_db
+    from src.server.database.workspace import create_workspace
+    from src.server.services.education_book_recovery import reconcile_book_jobs_once
+
+    created = await _seed_book(
+        patched_get_db_connection, parent_user_id=seed_user["user_id"]
+    )
+    claimed = await claim_next_book_item(worker_id="worker-a", lease_seconds=60)
+    assert claimed is not None
+
+    workspace = await create_workspace(
+        user_id=seed_user["user_id"],
+        name="Managed book recovery",
+        description="integration test",
+        config={"managed_execution": {"kind": "education_book"}},
+        status="creating",
+    )
+    thread_id = str(uuid4())
+    await create_thread(
+        conversation_thread_id=thread_id,
+        workspace_id=str(workspace["workspace_id"]),
+        current_status="completed",
+        msg_type="ptc",
+        title="Managed book recovery",
+        platform="education",
+        metadata={"managed_execution": {"kind": "education_book"}},
+    )
+    run_id = str(uuid4())
+    await lifecycle_db.start_run(
+        run_id=run_id,
+        thread_id=thread_id,
+        request_key=run_id,
+        metadata={"managed_execution": {"kind": "education_book"}},
+        user_id=None,
+    )
+    await bind_book_item_runtime(
+        item_id=claimed["item_id"],
+        attempt_token=claimed["attempt_token"],
+        workspace_id=workspace["workspace_id"],
+        thread_id=thread_id,
+        run_id=run_id,
+    )
+
+    async with (
+        await psycopg.AsyncConnection.connect(test_db_uri, autocommit=True) as worker_a,
+        await psycopg.AsyncConnection.connect(test_db_uri, autocommit=True) as observer,
+    ):
+        worker_a_pid = (
+            await (await worker_a.execute("SELECT pg_backend_pid()")).fetchone()
+        )[0]
+        observer_pid = (
+            await (await observer.execute("SELECT pg_backend_pid()")).fetchone()
+        )[0]
+        assert worker_a_pid != observer_pid
+        await worker_a.execute(
+            """
+            UPDATE education_book_job_items
+            SET lease_expires_at = NOW() - INTERVAL '1 second'
+            WHERE item_id = %s AND attempt_token = %s
+            """,
+            (claimed["item_id"], claimed["attempt_token"]),
+        )
+
+        reconciled = await reconcile_book_jobs_once(
+            worker_id="worker-b",
+            lease_seconds=60,
+        )
+
+        row = await (
+            await observer.execute(
+                """
+                SELECT status, attempt, attempt_token, execution_id,
+                       lease_owner, lease_expires_at > NOW()
+                FROM education_book_job_items WHERE item_id = %s
+                """,
+                (claimed["item_id"],),
+            )
+        ).fetchone()
+
+    assert reconciled == 0
+    assert row == (
+        "running",
+        1,
+        claimed["attempt_token"],
+        claimed["execution_id"],
+        "worker-b",
+        True,
+    )
+    assert await claim_next_book_item(worker_id="worker-c", lease_seconds=60) is None
+    assert created["item_id"] == claimed["item_id"]
 
 
 async def test_durable_cancel_intent_fences_a_queued_job_until_recovery(
@@ -417,6 +522,160 @@ async def test_partial_success_remains_recoverable_after_cancel_fence_rejection(
     assert cancelled["status"] == "cancelled"
 
 
+async def test_batch_content_failure_keeps_old_material_and_continues_remaining_items(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_jobs import (
+        claim_next_book_item,
+        create_materials_job,
+        fail_book_item,
+        finalize_material,
+        record_candidate_object,
+        retry_book_job,
+    )
+    from src.server.database.education_books import (
+        commit_book_structure,
+        get_current_structure,
+        get_managed_material_for_parent,
+    )
+
+    created = await _seed_book(
+        patched_get_db_connection, parent_user_id=seed_user["user_id"]
+    )
+    structure_claim = await claim_next_book_item(
+        worker_id="structure-worker", lease_seconds=60
+    )
+    assert structure_claim is not None
+    await commit_book_structure(
+        textbook_id=created["textbook_id"],
+        job_id=created["job_id"],
+        item_id=created["item_id"],
+        attempt_token=structure_claim["attempt_token"],
+        parsed=_parsed_points(4),
+        validated_identity=IDENTITY,
+    )
+    structure = await get_current_structure(textbook_id=created["textbook_id"])
+    assert structure is not None
+    points = structure["knowledge_points"]
+
+    async def commit_material(claimed: dict, digest_char: str) -> dict:
+        content_key = (
+            f"education/{created['household_id']}/textbooks/"
+            f"{created['textbook_id']}/materials/{claimed['knowledge_point_id']}/"
+            f"attempts/{claimed['attempt_token']}/{digest_char * 64}.md"
+        )
+        await record_candidate_object(
+            item_id=claimed["item_id"],
+            attempt_token=claimed["attempt_token"],
+            content_key=content_key,
+        )
+        return await finalize_material(
+            item_id=claimed["item_id"],
+            attempt_token=claimed["attempt_token"],
+            content_key=content_key,
+            content_sha256=digest_char * 64,
+            size_bytes=100,
+            generation_params={"test": "batch-content-failure"},
+        )
+
+    old_job = await create_materials_job(
+        textbook_id=created["textbook_id"],
+        requested_by_user_id=seed_user["user_id"],
+        knowledge_point_ids=[points[2]["knowledge_point_id"]],
+        depth="lesson",
+        requirements=None,
+        replace_existing=False,
+        include_supplementary=False,
+        idempotency_key="old-third-material",
+        identity=IDENTITY,
+    )
+    old_claim = await claim_next_book_item(worker_id="worker-a", lease_seconds=60)
+    assert old_claim is not None
+    old_material = await commit_material(old_claim, "a")
+    assert old_material["source_job_id"] == str(old_job["job_id"])
+
+    batch = await create_materials_job(
+        textbook_id=created["textbook_id"],
+        requested_by_user_id=seed_user["user_id"],
+        knowledge_point_ids=[point["knowledge_point_id"] for point in points],
+        depth="lesson",
+        requirements=None,
+        replace_existing=True,
+        include_supplementary=False,
+        idempotency_key="replace-four-materials",
+        identity=IDENTITY,
+    )
+
+    for index, digest_char in enumerate(("b", "c")):
+        claimed = await claim_next_book_item(
+            worker_id=f"worker-{index + 1}", lease_seconds=60
+        )
+        assert claimed is not None
+        assert claimed["knowledge_point_id"] == points[index]["knowledge_point_id"]
+        committed = await commit_material(claimed, digest_char)
+        readable = await get_managed_material_for_parent(
+            parent_user_id=seed_user["user_id"],
+            textbook_id=created["textbook_id"],
+            knowledge_point_id=points[index]["knowledge_point_id"],
+        )
+        assert readable is not None
+        assert readable["content_key"] == committed["content_key"]
+
+    third = await claim_next_book_item(worker_id="worker-3", lease_seconds=60)
+    assert third is not None
+    assert third["knowledge_point_id"] == points[2]["knowledge_point_id"]
+    failed = await fail_book_item(
+        item_id=third["item_id"],
+        attempt_token=third["attempt_token"],
+        safe_error="Generated material was invalid",
+        stop_remaining=False,
+    )
+    assert failed["status"] == "running"
+    assert failed["succeeded_items"] == 2
+    assert failed["failed_items"] == 1
+    preserved = await get_managed_material_for_parent(
+        parent_user_id=seed_user["user_id"],
+        textbook_id=created["textbook_id"],
+        knowledge_point_id=points[2]["knowledge_point_id"],
+    )
+    assert preserved is not None
+    assert preserved["content_key"] == old_material["content_key"]
+
+    fourth = await claim_next_book_item(worker_id="worker-4", lease_seconds=60)
+    assert fourth is not None
+    assert fourth["knowledge_point_id"] == points[3]["knowledge_point_id"]
+    await commit_material(fourth, "d")
+
+    async with patched_get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT status, succeeded_items, failed_items,
+                       cancelled_items, not_run_items
+                FROM education_book_jobs WHERE job_id = %s
+                """,
+                (batch["job_id"],),
+            )
+            final_job = await cur.fetchone()
+    assert final_job == {
+        "status": "partially_succeeded",
+        "succeeded_items": 3,
+        "failed_items": 1,
+        "cancelled_items": 0,
+        "not_run_items": 0,
+    }
+
+    retried = await retry_book_job(
+        source_job_id=batch["job_id"],
+        requested_by_user_id=seed_user["user_id"],
+        idempotency_key="retry-only-third-material",
+        identity=IDENTITY,
+    )
+    assert len(retried["items"]) == 1
+    assert retried["items"][0]["knowledge_point_id"] == points[2]["knowledge_point_id"]
+
+
 async def test_supplementary_finalizer_rejects_a_durable_cancel_intent(
     patched_get_db_connection,
     seed_user,
@@ -533,6 +792,150 @@ async def test_terminal_candidate_cleanup_uses_only_recorded_keys(
         content_key=candidate_key,
     )
     assert await list_book_items_for_terminal_cleanup() == []
+
+
+async def test_material_attempt_recovers_idempotently_after_upload_and_transaction_failures(
+    patched_get_db_connection,
+    seed_user,
+    monkeypatch,
+) -> None:
+    from src.server.database import education_book_jobs as job_db
+    from src.server.services import education_book_storage as storage
+
+    _created, _job, claimed = await _seed_claimed_material_job(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+        include_supplementary=False,
+    )
+    markdown = b"# Durable lesson\n"
+    objects: dict[str, bytes] = {}
+    upload_count = 0
+
+    async def job_summary() -> dict:
+        async with patched_get_db_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT status, succeeded_items, failed_items,
+                           cancelled_items, not_run_items,
+                           (SELECT count(*) FROM education_book_activity_events
+                            WHERE job_id = jobs.job_id
+                              AND metadata->>'budget_class' = 'terminal'
+                           ) AS terminal_events
+                    FROM education_book_jobs AS jobs WHERE job_id = %s
+                    """,
+                    (claimed["job_id"],),
+                )
+                return await cur.fetchone()
+
+    async def upload(key, content, _content_type, *, max_size):
+        nonlocal upload_count
+        assert len(content) <= max_size
+        upload_count += 1
+        if upload_count == 1:
+            return False
+        objects[key] = content
+        return True
+
+    async def read(key):
+        return objects.get(key)
+
+    monkeypatch.setattr(storage, "_upload", upload)
+    monkeypatch.setattr(storage, "_read", read)
+
+    with pytest.raises(storage.BookStorageError, match="could not be stored"):
+        await storage.store_material(
+            item_id=claimed["item_id"],
+            attempt_token=claimed["attempt_token"],
+            markdown=markdown,
+            generation_params={"depth": "lesson"},
+        )
+
+    original_append = job_db.append_terminal_activity
+
+    async def fail_terminal_activity(*_args, **_kwargs):
+        raise RuntimeError("forced terminal activity transaction failure")
+
+    monkeypatch.setattr(job_db, "append_terminal_activity", fail_terminal_activity)
+    with pytest.raises(RuntimeError, match="forced terminal activity"):
+        await storage.store_material(
+            item_id=claimed["item_id"],
+            attempt_token=claimed["attempt_token"],
+            markdown=markdown,
+            generation_params={"depth": "lesson"},
+        )
+
+    async with patched_get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT status, candidate_objects,
+                       (SELECT count(*) FROM education_book_materials
+                        WHERE source_item_id = items.item_id) AS material_count
+                FROM education_book_job_items AS items WHERE item_id = %s
+                """,
+                (claimed["item_id"],),
+            )
+            rolled_back = await cur.fetchone()
+    assert rolled_back["status"] == "running"
+    assert len(rolled_back["candidate_objects"]) == 1
+    assert rolled_back["material_count"] == 0
+    assert await job_summary() == {
+        "status": "running",
+        "succeeded_items": 0,
+        "failed_items": 0,
+        "cancelled_items": 0,
+        "not_run_items": 0,
+        "terminal_events": 0,
+    }
+
+    monkeypatch.setattr(job_db, "append_terminal_activity", original_append)
+    committed = await storage.store_material(
+        item_id=claimed["item_id"],
+        attempt_token=claimed["attempt_token"],
+        markdown=markdown,
+        generation_params={"depth": "lesson"},
+    )
+    committed_summary = await job_summary()
+    repeated = await job_db.finalize_material(
+        item_id=claimed["item_id"],
+        attempt_token=claimed["attempt_token"],
+        content_key=committed["content_key"],
+        content_sha256=committed["content_sha256"],
+        size_bytes=committed["size_bytes"],
+        generation_params={"depth": "lesson"},
+    )
+
+    assert repeated == committed
+    assert (
+        await job_summary()
+        == committed_summary
+        == {
+            "status": "succeeded",
+            "succeeded_items": 1,
+            "failed_items": 0,
+            "cancelled_items": 0,
+            "not_run_items": 0,
+            "terminal_events": 2,
+        }
+    )
+    assert committed["generation"] == 1
+    assert upload_count == 3
+    async with patched_get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT status, candidate_objects,
+                       (SELECT count(*) FROM education_book_materials
+                        WHERE source_item_id = items.item_id) AS material_count
+                FROM education_book_job_items AS items WHERE item_id = %s
+                """,
+                (claimed["item_id"],),
+            )
+            settled = await cur.fetchone()
+    assert settled["status"] == "succeeded"
+    assert settled["candidate_objects"] == rolled_back["candidate_objects"]
+    assert settled["material_count"] == 1
 
 
 async def test_bind_runtime_ids_is_fenced_by_the_current_attempt(

@@ -207,6 +207,26 @@ describe('projectBookActivity', () => {
 });
 
 describe('watchBookActivity', () => {
+  it('finishes every retained page before stopping a completed job replay', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(sseResponse(page([event(1, 'tool', 'material-1', 'Read')], {
+        status: 'succeeded', high_water_seq: 2, has_more: true,
+      })))
+      .mockResolvedValueOnce(sseResponse(page([event(2, 'job', null, 'Job completed')], {
+        status: 'succeeded', high_water_seq: 2,
+      })));
+    vi.stubGlobal('fetch', fetchMock);
+    const received: number[] = [];
+
+    await watchBookActivity('job-1', {
+      reconnectDelayMs: 0,
+      onPage: (snapshot) => { received.push(...snapshot.events.map((entry) => entry.seq)); },
+    });
+
+    expect(received).toEqual([1, 2]);
+    expect(fetchMock.mock.calls[1][0]).toContain('after_seq=1');
+  });
+
   it('reconnects from the greatest event sequence successfully merged', async () => {
     const fetchMock = vi
       .fn()

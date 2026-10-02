@@ -281,6 +281,7 @@ export function useBookActivity(
   jobId: string | undefined,
   textbookId: string | undefined,
   enabled = true,
+  streamEnabled = true,
 ) {
   const queryClient = useQueryClient();
   const job = useBookJob(jobId, enabled);
@@ -290,6 +291,14 @@ export function useBookActivity(
   const [streamError, setStreamError] = useState<unknown>(null);
   const visible = usePageVisibility();
   const terminal = TERMINAL_MANAGED_BOOK_STATUSES.has(job.data?.status ?? 'queued');
+  const snapshotJobId = job.data?.job_id;
+
+  useEffect(() => {
+    if (!enabled || !textbookId || !snapshotJobId) return;
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.education.textbook(textbookId),
+    });
+  }, [enabled, textbookId, queryClient, snapshotJobId, job.data?.status, job.data?.succeeded_items]);
 
   useEffect(() => {
     eventsRef.current = [];
@@ -299,7 +308,7 @@ export function useBookActivity(
   }, [jobId]);
 
   useEffect(() => {
-    if (!enabled || !jobId || !visible || terminal) return;
+    if (!enabled || !jobId || !visible || (terminal && !streamEnabled)) return;
     const abortController = new AbortController();
     let disposed = false;
     const jobKey = queryKeys.education.bookJob(jobId);
@@ -315,7 +324,15 @@ export function useBookActivity(
       })
       : Promise.resolve();
 
-    const fallbackTimer = window.setInterval(() => scheduler.notify(), 5_000);
+    if (!terminal) scheduler.notify();
+    const fallbackTimer = terminal ? undefined : window.setInterval(() => scheduler.notify(), 5_000);
+    if (!streamEnabled) {
+      return () => {
+        disposed = true;
+        window.clearInterval(fallbackTimer);
+        scheduler.dispose();
+      };
+    }
     const afterSeq = eventsRef.current.at(-1)?.seq ?? 0;
     void educationApi.watchBookActivity(jobId, {
       afterSeq,
@@ -367,7 +384,7 @@ export function useBookActivity(
       window.clearInterval(fallbackTimer);
       scheduler.dispose();
     };
-  }, [enabled, jobId, queryClient, terminal, textbookId, visible]);
+  }, [enabled, jobId, queryClient, terminal, textbookId, visible, streamEnabled]);
 
   return {
     ...job,

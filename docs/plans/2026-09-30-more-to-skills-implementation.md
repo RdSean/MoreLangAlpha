@@ -24,7 +24,9 @@ Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skill
 
 ### 当前检查点（2026-10-02）
 
-Task 1–7 与 Task 4A 已交付。Task 7 已向开发库应用 `082_more_to_skills_textbooks`，并按升级前导出的私人资源清单清理旧教材；详细范围、保护计数、检查证据和未验收项见[切换记录](2026-10-02-more-to-skills-cutover-results.md)。Task 8 的真实模型生成、故障注入和完整学生权限/多 worker/浏览器链路仍待执行，不能将本次清理等同于整个重构验收通过。
+Task 1–7 与 Task 4A 已交付。Task 7 已向开发库应用 `082_more_to_skills_textbooks`，并按升级前导出的私人资源清单清理旧教材；详细范围、保护计数、检查证据和未验收项见[切换记录](2026-10-02-more-to-skills-cutover-results.md)。Task 8 已开始但仍有故障注入、完整学生权限/多 worker/浏览器链路未覆盖，不能将清理或局部真实加工成功等同于整个重构验收通过。
+
+Task 8 已开始：真实模型结构和中间知识点讲义提交成功，语义阶段可回放，实际批量默认跳过已有讲义与 runtime 取消已验证；补齐 PostgreSQL 四项部分失败、独立连接 reconcile、事务回滚恢复与浏览器分页/静默/前台/关闭活动恢复测试。真实验收发现的服务收尾、UUID 投影和客户端缓存/终态分页问题已修正。详细证据及未完成边界见 [Task 8 记录](2026-10-02-more-to-skills-task8-results.md)，仍不得标记完整验收完成。
 
 本机依赖继续沿用 `codex/library-textbook-assets` 的 `.env`/`agent_config.yaml`，对象存储以 `.env` 的 `localhost:9000` 为准，不使用可能变化的办公室 LAN 地址。5177/8000 由本 worktree 启动，基础设施原挂载与 volumes 保留。
 

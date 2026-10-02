@@ -156,7 +156,7 @@ async function consumeBookActivityStream(options: ConsumeBookActivityStreamOptio
     if (freshEvents.length > 0) {
       lastProcessedSeq = Math.max(...freshEvents.map((entry) => entry.seq));
     }
-    terminal = TERMINAL_BOOK_JOB_STATUSES.has(page.status);
+    terminal = TERMINAL_BOOK_JOB_STATUSES.has(page.status) && !page.has_more;
   }
 
   try {

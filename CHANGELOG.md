@@ -2,6 +2,16 @@
 
 ## 2026-10-02
 
+### 完善：教材真实链路与活动恢复验收
+
+- 修复 375px 长标题撑开隐式网格；前台恢复立即同步 job，活动关闭或查看旧 job 时继续同步当前任务；提交状态/数量变化刷新教材结构、材料与工作台缓存，不让新讲义停留在不可读状态。
+- 首次打开已完成任务仍回放活动，终态分页在 `has_more=false` 后才结束。新增真实保持打开的 mock SSE、500 事件中途断流/重叠去重、静默或 unavailable、迟到响应、关闭面板后提交可读及移动长内容验收。
+- 新增真实 PostgreSQL 四项部分失败批量、双连接/另一 worker 身份 reconcile 与上传后事务回滚恢复用例；明确不代表 OS 进程接管、真实 MinIO 中断或 COMMIT ACK 丢失。
+- 用户指定账号的现有模型实际完成结构与第三个知识点讲义，前两项无讲义仍成功，真实活动观察到 structure/material 各四类语义阶段。原文图片在桌面/375px 可读，讲义引用脚注、邻近章节与练习且描述图像，但未嵌图；未将此写为讲义图片渲染通过。
+- 实际工作台批量默认只生成缺少讲义的 3 项；真实 UI 取消确认当前 runtime 取消、其余 attempt=0、已成功讲义仍可读。重复材料请求明确 409、无第二个 run，不误记为幂等复用。
+- 验证：最终教材 PostgreSQL `42 passed`、后端全量 `7916 passed`；前端聚焦 `38 passed`、工作台 Chromium `9 passed`、build/typecheck/critical path（356.4 kB gz）与改动文件 ESLint 通过。前端全量 `2581 passed, 1 failed`，仍是无关 Plugins storage-throws 既有失败；更宽文档移动 E2E 的间歇 body inspection 失败和聚焦复验结果如实保留。
+- 总 Task 8/语义 Task 6 仍在进行中；完整故障、学生 cookie 权限、多 worker 和组合容量边界见 `docs/plans/2026-10-02-more-to-skills-task8-results.md`。5177/8000 与 LAN HTTP 200 保留，配置和基础设施 volumes 未变，私人夹具/凭据/日志不提交。
+
 ### 修复：真实教材结构提交与活动回放契约
 
 - 真实 PostgreSQL 活动页在公开投影处将事件 `job_id` 转为字符串，修复 SSE 严格 DTO 校验返回 500；保留 UUID 数据库类型、公开 DTO 和既有分页/游标协议。

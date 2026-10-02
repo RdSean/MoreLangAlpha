@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PropsWithChildren } from 'react';
+import { queryKeys } from '@/lib/queryKeys';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as educationApi from '../api';
 import {
@@ -101,6 +102,54 @@ describe('createCoalescedRefreshScheduler', () => {
 });
 
 describe('useBookActivity', () => {
+  it('loads retained activity when first opening an already completed job', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const completed = { ...runningJob(), status: 'succeeded' as const, succeeded_items: 1 };
+    client.setQueryData(queryKeys.education.bookJob('job-1'), completed);
+    vi.spyOn(educationApi, 'getBookJob').mockResolvedValue(completed);
+    const watch = vi.spyOn(educationApi, 'watchBookActivity').mockImplementation(async (_jobId, options) => {
+      await options.onPage({ ...activityPage(), status: 'succeeded' });
+    });
+    const view = renderHook(() => useBookActivity('job-1', 'book-1'), { wrapper: wrapper(client) });
+
+    await waitFor(() => expect(view.result.current.events).toHaveLength(1));
+    expect(watch).toHaveBeenCalledTimes(1);
+    view.unmount();
+  });
+
+  it('refreshes immediately on foreground restore even if the activity stream never connects', async () => {
+    let visibility: DocumentVisibilityState = 'visible';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+    const getJob = vi.spyOn(educationApi, 'getBookJob').mockResolvedValue(runningJob());
+    const watch = vi.spyOn(educationApi, 'watchBookActivity').mockImplementation((_jobId, options) => (
+      new Promise((resolve) => options.signal?.addEventListener('abort', () => resolve()))
+    ));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
+    const view = renderHook(
+      () => useBookActivity('job-1', 'book-1', true),
+      { wrapper: wrapper(client) },
+    );
+    await waitFor(() => expect(view.result.current.data).toBeDefined());
+
+    await act(async () => {
+      visibility = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    const callsBeforeRestore = getJob.mock.calls.length;
+    getJob.mockResolvedValue({ ...runningJob(), succeeded_items: 1 });
+    await act(async () => {
+      visibility = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    await waitFor(() => {
+      expect(getJob.mock.calls.length).toBeGreaterThan(callsBeforeRestore);
+      expect(view.result.current.data?.succeeded_items).toBe(1);
+    }, { timeout: 500 });
+    expect(watch).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
+
   it('aborts the stream when the subscription unmounts', async () => {
     vi.spyOn(educationApi, 'getBookJob').mockResolvedValue(runningJob());
     let subscribedSignal: AbortSignal | undefined;

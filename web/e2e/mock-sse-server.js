@@ -10,6 +10,7 @@ process.on('unhandledRejection', (err) => {
 
 let scenarios = {};
 let requestLog = [];
+const openTextbookStreams = new Set();
 
 const server = http.createServer(async (req, res) => {
   const corsHeaders = {
@@ -32,7 +33,7 @@ const server = http.createServer(async (req, res) => {
   // ── Control endpoints (called by tests) ──
   if (req.url === '/__scenario' && req.method === 'POST') {
     const body = await readBody(req);
-    const { method, path, events, delay, status, errorBody, once, json, responses } = JSON.parse(body);
+    const { method, path, events, delay, status, errorBody, once, json, responses, keepOpen } = JSON.parse(body);
     const key = `${method || 'GET'} ${path}`;
     scenarios[key] = {
       events: events || [],
@@ -43,12 +44,15 @@ const server = http.createServer(async (req, res) => {
       json,
       responses,
       responseIndex: 0,
+      keepOpen: Boolean(keepOpen),
     };
     res.writeHead(200);
     res.end('ok');
     return;
   }
   if (req.url === '/__reset' && req.method === 'POST') {
+    for (const response of openTextbookStreams) response.end();
+    openTextbookStreams.clear();
     scenarios = {};
     requestLog = [];
     res.writeHead(200);
@@ -126,12 +130,18 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ── SSE streaming response ──
+  const keepTextbookOpen = scenario.keepOpen && /^\/api\/v1\/education\/book-jobs\/[^/]+\/events$/.test(urlPath);
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
     ...corsHeaders,
   });
+  if (keepTextbookOpen) {
+    openTextbookStreams.add(res);
+    res.on('close', () => openTextbookStreams.delete(res));
+    res.flushHeaders();
+  }
 
   for (let i = 0; i < scenario.events.length; i++) {
     const ev = scenario.events[i];
@@ -146,7 +156,7 @@ const server = http.createServer(async (req, res) => {
       await new Promise((r) => setTimeout(r, scenario.delay));
     }
   }
-  res.end();
+  if (!keepTextbookOpen) res.end();
   } catch (err) {
     console.error('Mock SSE server request error:', err.message);
     if (!res.headersSent) {

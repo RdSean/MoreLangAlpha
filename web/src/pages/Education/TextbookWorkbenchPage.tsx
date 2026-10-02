@@ -144,6 +144,8 @@ export default function TextbookWorkbenchPage() {
   const visibleActivityJob = activity.data?.job_id === activityJobId ? activity.data : undefined;
   const activeJob = workbench.data?.current_job ?? workbench.data?.recent_job;
   const currentJob = workbench.data?.current_job;
+  const monitoredJobId = currentJob?.job_id !== activityJobId ? currentJob?.job_id : undefined;
+  useBookActivity(monitoredJobId, textbookId, Boolean(monitoredJobId), false);
   const recoverableJob = workbench.data?.recent_job
     && ['failed', 'partially_succeeded', 'cancelled'].includes(workbench.data.recent_job.status)
     ? workbench.data.recent_job
