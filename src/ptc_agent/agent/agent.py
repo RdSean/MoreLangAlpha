@@ -113,6 +113,7 @@ from ptc_agent.agent.tools import (
     create_glob_tool,
     create_grep_tool,
     create_preview_url_tool,
+    create_report_progress_tool,
     create_show_widget_tool,
     TodoWrite,
 )
@@ -197,6 +198,10 @@ def _build_managed_policy_tools(
     if policy.enable_widgets:
         show_widget_tool = create_show_widget_tool(backend)
 
+    report_progress_tool = None
+    if policy.enable_progress_reporting:
+        report_progress_tool = create_report_progress_tool()
+
     tools = [TodoWrite]
     tools.extend(
         tool
@@ -206,6 +211,7 @@ def _build_managed_policy_tools(
             bash_output_tool,
             preview_url_tool,
             show_widget_tool,
+            report_progress_tool,
         )
         if tool is not None
     )

@@ -2,6 +2,12 @@
 
 ## 2026-10-02
 
+### 新增：托管 PTC 受限语义进度工具
+
+- 新增只接受短 stage 标识符的 `report_progress` 工具，将受控语义阶段写入 LangGraph custom stream；非法输入和 stream writer 故障返回固定继续说明，不中断 Agent。
+- `ManagedExecutionPolicy` 新增默认关闭的进度能力，仅教材托管策略显式启用；普通 PTC、Flash 和其他 managed policy 的工具面保持不变。
+- 验证：进度工具与教材策略聚焦单元测试 `28 passed`，相关 Ruff 和 `git diff --check` 通过。
+
 ### 文档：修正语义进度恢复协议与实施依赖
 
 - 区分服务端活动高水位与客户端实际消费游标，明确分页断线、空页、缓存丢失及过期游标的回放规则，避免跳过尚未收到的活动。

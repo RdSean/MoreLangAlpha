@@ -23,6 +23,7 @@ from .file_ops import create_filesystem_tools
 from .glob import create_glob_tool
 from .grep import create_grep_tool
 from .preview_url import create_preview_url_tool
+from .report_progress import create_report_progress_tool
 from .show_widget import create_show_widget_tool
 from .think import think_tool
 
@@ -56,6 +57,8 @@ __all__ = [
     "create_grep_tool",
     # Preview URL
     "create_preview_url_tool",
+    # Managed progress
+    "create_report_progress_tool",
     # Show Widget
     "create_show_widget_tool",
     # Research
@@ -75,4 +78,3 @@ __all__ = [
     "validate_single_in_progress",
     "validate_todo_list_dict",
 ]
-

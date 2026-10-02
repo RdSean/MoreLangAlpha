@@ -82,6 +82,7 @@ class ManagedExecutionPolicy:
     enable_bash: bool = True
     enable_preview: bool = False
     enable_widgets: bool = False
+    enable_progress_reporting: bool = False
     allow_subagents: bool = False
 
 
@@ -96,6 +97,7 @@ def education_book_policy(execution_id: str) -> ManagedExecutionPolicy:
         enable_bash=True,
         enable_preview=True,
         enable_widgets=True,
+        enable_progress_reporting=True,
         allow_subagents=False,
     )
 

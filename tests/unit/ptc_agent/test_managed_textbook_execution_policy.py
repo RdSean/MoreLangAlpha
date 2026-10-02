@@ -23,6 +23,7 @@ def test_education_book_policy_is_the_only_textbook_execution_policy():
     assert policy.enable_bash is True
     assert policy.enable_preview is True
     assert policy.enable_widgets is True
+    assert policy.enable_progress_reporting is True
     assert policy.allow_subagents is False
     assert not hasattr(policy, "purpose")
     for old_factory in (
@@ -149,6 +150,7 @@ def test_managed_policy_tool_surface_keeps_normal_bash_and_execute_code(monkeypa
         "create_bash_output_tool",
         "create_preview_url_tool",
         "create_show_widget_tool",
+        "create_report_progress_tool",
     ):
         monkeypatch.setattr(agent_module, name, factory(name))
 
@@ -169,12 +171,44 @@ def test_managed_policy_tool_surface_keeps_normal_bash_and_execute_code(monkeypa
         "create_bash_output_tool",
         "create_preview_url_tool",
         "create_show_widget_tool",
+        "create_report_progress_tool",
     }
     bash_call = next(
         kwargs for name, kwargs in created if name == "create_execute_bash_tool"
     )
     assert bash_call["command_validator"] is None
     assert bash_call["fixed_working_dir"] == policy.filesystem_root
+
+
+def test_managed_policy_progress_tool_is_opt_in(monkeypatch):
+    agent_module = import_module("ptc_agent.agent.agent")
+    managed_execution = import_module("ptc_agent.agent.managed_execution")
+    created = []
+
+    monkeypatch.setattr(
+        agent_module,
+        "create_report_progress_tool",
+        lambda: created.append("report_progress") or SimpleNamespace(
+            tool_name="report_progress"
+        ),
+    )
+    policy = managed_execution.ManagedExecutionPolicy(
+        allowed_skill_names=frozenset(),
+        filesystem_root=f"/managed/textbook-job/{EXECUTION_ID}",
+        enable_bash=False,
+    )
+
+    tools, _execute_code_tool, _bash_tool = agent_module._build_managed_policy_tools(
+        policy,
+        backend=object(),
+        mcp_registry=object(),
+        thread_id="thread-1",
+        workspace_id="workspace-1",
+        on_signed_url=None,
+    )
+
+    assert created == []
+    assert all(getattr(tool, "tool_name", None) != "report_progress" for tool in tools)
 
 
 @pytest.mark.parametrize(
