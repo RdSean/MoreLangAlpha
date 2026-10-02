@@ -29,7 +29,7 @@
 
 ### 当前检查点（2026-10-02）
 
-本计划 Task 1–5 已交付，Task 6 随总 Task 8 进行中。真实结构与材料 Agent 均已上报受限语义阶段并经 PostgreSQL/SSE 回放；补齐终态首次读取及分页、关闭面板后的任务快照同步、静默 SSE、前台恢复、迟到响应隔离和移动长文本验证。技能目录不变，不新增进度表。完整 Redis/150001 delta 组合容量、OS worker 接管、正常 cookie 学生授权链与普通产品 live 回归仍未覆盖，见 [Task 8 记录](2026-10-02-more-to-skills-task8-results.md)；不可将聚焦测试通过等同本计划 Task 6 全部完成。
+本计划 Task 1–5 已交付，Task 6 随总 Task 8 进行中。真实结构与材料 Agent 均已上报受限语义阶段并经 PostgreSQL/SSE 回放；补齐终态首次读取及分页、关闭面板后的任务快照同步、静默 SSE、前台恢复、迟到响应隔离和移动长文本验证。专用学生的正常 cookie 学习、真实模型追问及跨家庭/撤销授权链已补验，并修复学生 UUID 公开响应及类型化讲义 directive 的保存问题。技能目录不变，不新增进度表。完整 Redis/150001 delta 组合容量、OS worker 接管与普通产品 live 回归仍未覆盖，见 [Task 8 记录](2026-10-02-more-to-skills-task8-results.md)；不可将聚焦测试通过等同本计划 Task 6 全部完成。
 
 ## Task 1：建立无业务身份的 PTC 进度工具
 

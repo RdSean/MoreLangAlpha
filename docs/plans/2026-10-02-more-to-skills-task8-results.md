@@ -4,11 +4,11 @@
 
 ## 结论与范围
 
-Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验收通过声明。已完成真实模型结构提交、中间知识点首次讲义、真实语义阶段回放、批量默认跳过与真实取消，以及一组 PostgreSQL 故障边界和浏览器恢复验证。
+Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验收通过声明。已完成真实模型结构提交、中间知识点首次讲义、真实语义阶段回放、批量默认跳过与真实取消、一组 PostgreSQL 故障边界和浏览器恢复验证，以及专用学生普通 cookie 的学习与撤销链。
 
 继续沿用原分支 `.env` / `agent_config.yaml`，两份配置字节一致；S3 使用 `localhost:9000`。本轮没有重复迁移 082、清理旧教材、删除基础设施容器或改动 volumes。真实加工只操作新增的专用验收教材，家长账号由用户指定，服务解析其已有模型配置，未复制凭据或修改账号设置。
 
-浏览器与 HTTP 模型验收使用现有 OSS 可信后台身份入口；不是普通 cookie 登录、安全认证或学生完整链路的证据。账号状态、模型凭据、测试登录态、生成夹具和私人日志均不入库到 Git。
+上一批家长浏览器与 HTTP 教材加工验收使用现有 OSS 可信后台身份入口，不是家长普通 cookie 登录的证据。本批学生使用正常登录端点与浏览器登录表单，不携带后台身份请求头；家长分配与撤销仍使用已获授权的 OSS 入口。账号状态、模型凭据、测试登录态、生成夹具和私人日志均不入库到 Git。
 
 ## 真实行为
 
@@ -34,6 +34,22 @@ Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验�
 
 上述修复均先观察红测试再实现，通过独立代码审查。more-to-skills 目录与技能摘要没有改变。
 
+## 学生 Cookie 链路补验
+
+本批在指定家长家庭与原独立验收家庭各创建一名明确标记的专用验收学生，不使用或修改已有学生凭据。仅把专用算术教材分配给新增学生。
+
+- HTTP `/auth/login` 与实际浏览器登录表单均取得正常学生身份。后续学生请求仅使用会话 cookie，无 `X-Dispatch` / `X-User-Id`。
+- 普通 cookie 学生列表首次返回 500：PostgreSQL 的 `textbook_id` 为 UUID，响应模型要求字符串。教育服务改为公开投影字符串；新增路由测试调用真实服务与响应校验，修复前重现相同异常，修复后列表可读。
+- 学生成功读取当前结构、已有讲义、69 行冻结原文及授权图片；写入并读取已学进度、批注、划重点、追问，修改批注后生成的节点总结包含对应内容。总结来自确定性学习素材汇总，不冒充模型分析。
+- 同一 assignment 两次读取 chat-space 得到同一线程。真实 cookie Flash 追问返回模型正文，家长可读取该 assignment 转录。
+- 核对真实 query metadata 发现裸字典教材 directive 被类型化序列化器跳过。教育模块改为返回标准 `DirectiveContext`，沿用普通聊天保存与解析机制。新增 request copy → metadata serializer → directive parser 红/绿回归；真实模型复验确认 PG 保存服务端讲义，丢弃浏览器 sentinel，上次任务账本为 completed。未修复前的追问不算完整持久化上下文证据。
+- 跨家庭学生对结构、讲义、原文、图片、笔记与 chat-space 六类读取均得到 404；家长尝试分配外家庭学生也得到 404。未接受跨家庭授权。
+- 撤销后教材从学生列表移除，上述六类读取、进度/笔记/总结三类写入及带 assignment 的追问均得到 404；移除教育上下文后复用原学习线程也得到 403，不能降级为普通 Flash 来绕过撤销。
+- 临时重新授权后，用真实浏览器保存批注并生成包含该批注的总结；通过 HTTP 再次确认两者已落库。桌面与 375px 的原文图片 `complete && naturalWidth > 0`，移动学习页与总结页 `scrollWidth == innerWidth == 375`，私人截图已目视核对。
+- 最终再次撤销专用验收授权，旧学习页和总结页刷新显示不可用。撤销按现有契约级联移除专用 assignment 的进度/笔记/总结和学习空间映射，保留测试聊天线程；未删除普通学生、工作区、聊天、图书馆源或基础设施数据。新增验收账号仍保留且无教材授权，私人凭据未提交。
+
+本批两处产品修复的独立审查均无发现。以上是新增学生的实际链路证据，不替代家长 cookie 一键添加、完整普通产品 live 回归或故障压力矩阵。
+
 ## 验收矩阵
 
 | 场景 | 已有证据 | 尚未覆盖的边界 |
@@ -49,8 +65,8 @@ Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验�
 | 关闭浏览器/换 worker | 两个独立 PG 连接，过期 lease/live ledger 经另一 worker 身份 reconcile 不重领；浏览器重连 | OS 进程终止/真正跨进程接管 |
 | Redis/150001 delta | PG 活动行数/字节预算与省略摘要；既有 compact projector 单元回归 | 实际 Redis 网络故障、150001 delta 的 PG/Redis/浏览器组合压力 |
 | 节点/长文/图片/深链 | 真实原文图像与中间 KP；375px/长标题/512字符/读者滚动/相对链接 E2E | 更多真实节点及长文阅读位置回程 |
-| 学生与图书馆反查 | PG assignment/progress/note/chat-space/document-usage 回归 | 正常 cookie 的学生笔记/总结/追问全链 |
-| 撤销/跨家庭 | PG ACL/撤销和门面单元测试 | 图片和聊天上下文的真实 cookie 撤销链 |
+| 学生与图书馆反查 | PG assignment/progress/note/chat-space/document-usage；真实学生 cookie 进度/笔记/总结/模型追问及家长转录；浏览器保存笔记/总结 | 家长正常 cookie 的图书馆一键添加 |
+| 撤销/跨家庭 | PG ACL；真实学生 cookie 原文/讲义/图片/笔记/chat-space 跨家庭拒绝，撤销后读取/写入/追问拒绝，旧 thread 无上下文复用拒绝；浏览器旧页不可用 | 授权撤销与在途模型提交同时竞态的 live 故障注入 |
 | 旧路由/catalog | Task 7 切换清单、PG head catalog、退役路由单元回归 | 无新增清理；沿用 Task 7 证据 |
 | 普通产品回归 | 全量后端 unit、前端 unit、真实 managed Docker capability smoke、普通文档 E2E | 普通 PTC/Flash/MCP/subagent/checkpoint/家庭作业完整 live 回归 |
 
@@ -65,5 +81,8 @@ Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验�
 - `pnpm build`（包含 typecheck）及 critical path：通过，`356.4 kB gz`。改动前端 ESLint 0 error/0 warning；`make lint` 0 error/55 既有 warning。
 - 改动后端文件 Ruff/format、`git diff --check` 通过。更宽的 `ruff check src tests` 有 56 条无关旧测试错误，format 全目录有 870 个既有待格式化文件，未扩大改动。
 - 5177 与 8000 保持 `0.0.0.0` 监听，LAN 页面及 health HTTP 200；不关闭用户前后端服务。
+- 学生链路两处修复后重新运行后端全量：`7918 passed, 8 deselected, 1 xpassed, 33 warnings`；本批学生/转录/thread 保护聚焦 `43 passed`。`xpassed` 按实际输出记录，不把它写为新的正常通过用例。
+- 重新运行 `TEST_DB_NAME=langalpha_test` 教材三套 PostgreSQL 集成：`42 passed`。首次漏指定 `-m integration` 的命令仅 `13 deselected`，未计为通过；之后显式运行全部三套。
+- 两处改动文件 Ruff/格式、独立审查与 `git diff --check` 通过；本批没有改前端代码，既有前端全量失败仍按上面的原始记录保留。配置字节一致，localhost/LAN 5177 与 8000 再次 HTTP 200。
 
-下一批优先补真实多 worker/断流故障及学生 cookie 权限链，再补组合容量测试和普通产品 live 回归。未完成矩阵行不得在总计划或语义计划标记完成。
+下一批优先补真实多 worker/断流故障，再补组合容量测试和普通产品 live 回归。未完成矩阵行不得在总计划或语义计划标记完成。
