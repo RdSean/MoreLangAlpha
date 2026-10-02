@@ -12,6 +12,10 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from src.server.database import education_book_activity as activity_repository
+from src.server.services.education_book_progress import (
+    progress_contract,
+    progress_message,
+)
 from src.server.services.workspace_status_pubsub import (
     ChannelWaitFn,
     subscribe_to_channel,
@@ -20,6 +24,7 @@ from src.utils.cache.redis_cache import get_cache_client
 
 
 logger = logging.getLogger(__name__)
+_MAX_TRACKED_TOOL_CALLS = 2_048
 
 
 def book_activity_channel(job_id: str | UUID) -> str:
@@ -60,6 +65,7 @@ class BookActivityObserver:
         job_id: str | UUID,
         item_id: str | UUID,
         attempt_token: UUID,
+        item_kind: str,
         append: AppendFn = activity_repository.append_book_activity_event,
         record_drops: AppendFn = activity_repository.record_book_activity_drops,
         mark_unavailable: AppendFn = activity_repository.mark_book_activity_unavailable,
@@ -71,12 +77,15 @@ class BookActivityObserver:
         self.job_id = UUID(str(job_id))
         self.item_id = UUID(str(item_id))
         self.attempt_token = attempt_token
+        progress_contract({"kind": item_kind})
+        self.item_kind = item_kind
         self._append = append
         self._record_drops = record_drops
         self._mark_unavailable = mark_unavailable
         self._publish = publish
         self._monotonic = monotonic
         self._tool_names: dict[str, str] = {}
+        self._suppressed_tool_ids: dict[str, None] = {}
         self._progress_at: dict[str, float] = {}
         self._details_disabled = False
         self._unavailable_report_pending = False
@@ -108,7 +117,10 @@ class BookActivityObserver:
             name = str(tool_call.get("name") or "")
             if not call_id or not name:
                 continue
-            self._tool_names[call_id] = name
+            if name == "report_progress":
+                self._remember_bounded(self._suppressed_tool_ids, call_id, None)
+                continue
+            self._remember_bounded(self._tool_names, call_id, name)
             await self._store(
                 dedupe_key=f"tool-start:{self.item_id}:{self.attempt_token}:{call_id}",
                 kind="tool",
@@ -117,11 +129,7 @@ class BookActivityObserver:
                 metadata={"tool_call_id": call_id, "tool_name": name},
             )
             if self._budget_exhausted:
-                remaining = sum(
-                    1
-                    for call in calls[index + 1 :]
-                    if isinstance(call, Mapping) and call.get("id") and call.get("name")
-                )
+                remaining = self._observe_omitted_tool_calls(calls[index + 1 :])
                 await self._queue_drops(remaining)
                 break
 
@@ -129,7 +137,10 @@ class BookActivityObserver:
         call_id = str(data.get("tool_call_id") or "")
         if not call_id:
             return
-        name = self._tool_names.get(call_id, "Tool")
+        if call_id in self._suppressed_tool_ids:
+            self._suppressed_tool_ids.pop(call_id, None)
+            return
+        name = self._tool_names.pop(call_id, "Tool")
         failed = str(data.get("status") or "").lower() in {"error", "failed"}
         await self._store(
             dedupe_key=f"tool-finish:{self.item_id}:{self.attempt_token}:{call_id}",
@@ -140,29 +151,63 @@ class BookActivityObserver:
         )
 
     async def _observe_public_progress(self, data: Mapping[str, Any]) -> None:
-        if data.get("artifact_type") != "report_progress":
+        progress = self._accept_progress(data)
+        if progress is None:
             return
-        payload = data.get("payload")
-        if not isinstance(payload, Mapping):
-            return
-        event_key = str(data.get("artifact_id") or payload.get("event_key") or "")
-        message = str(payload.get("message") or "").strip()
-        if not event_key or not message:
-            return
-        now = self._monotonic()
-        previous = self._progress_at.get(event_key)
-        if previous is not None and now - previous < 1.0:
-            return
-        self._progress_at[event_key] = now
+        stage, message, now = progress
         await self._store(
             dedupe_key=(
-                f"progress:{self.item_id}:{self.attempt_token}:{event_key}:{int(now)}"
+                f"progress:{self.item_id}:{self.attempt_token}:{stage}:{int(now)}"
             ),
             kind="progress",
-            status=str(payload.get("status") or "running")[:32],
-            message=message[:512],
-            metadata={"stage": str(payload.get("stage") or "")[:128]},
+            status="running",
+            message=message,
+            metadata={"stage": stage},
         )
+
+    def _accept_progress(
+        self, data: Mapping[str, Any]
+    ) -> tuple[str, str, float] | None:
+        if data.get("artifact_type") != "report_progress":
+            return None
+        payload = data.get("payload")
+        if not isinstance(payload, Mapping):
+            return None
+        stage = payload.get("stage")
+        if not isinstance(stage, str) or data.get("artifact_id") != stage:
+            return None
+        message = progress_message(stage, item_kind=self.item_kind)
+        if message is None:
+            return None
+        now = self._monotonic()
+        previous = self._progress_at.get(stage)
+        if previous is not None and now - previous < 1.0:
+            return None
+        self._progress_at[stage] = now
+        return stage, message, now
+
+    @staticmethod
+    def _remember_bounded(mapping: dict[str, Any], key: str, value: Any) -> None:
+        if key not in mapping and len(mapping) >= _MAX_TRACKED_TOOL_CALLS:
+            mapping.pop(next(iter(mapping)))
+        mapping[key] = value
+
+    def _observe_omitted_tool_calls(self, calls: object) -> int:
+        if not isinstance(calls, list):
+            return 0
+        dropped = 0
+        for tool_call in calls:
+            if not isinstance(tool_call, Mapping):
+                continue
+            call_id = str(tool_call.get("id") or "")
+            name = str(tool_call.get("name") or "")
+            if not call_id or not name:
+                continue
+            if name == "report_progress":
+                self._remember_bounded(self._suppressed_tool_ids, call_id, None)
+            else:
+                dropped += 1
+        return dropped
 
     async def _store(self, **event: Any) -> None:
         try:
@@ -197,27 +242,23 @@ class BookActivityObserver:
         if self._last_drop_flush_at is None or now - self._last_drop_flush_at >= 1.0:
             await self._flush_drops(now=now)
 
-    @staticmethod
-    def _projected_event_count(event_type: str, data: Mapping[str, Any]) -> int:
+    def _projected_event_count(
+        self, event_type: str, data: Mapping[str, Any]
+    ) -> int:
         if event_type == "tool_calls":
-            calls = data.get("tool_calls")
-            if not isinstance(calls, list):
-                return 0
-            return sum(
-                1
-                for call in calls
-                if isinstance(call, Mapping) and call.get("id") and call.get("name")
-            )
+            return self._observe_omitted_tool_calls(data.get("tool_calls"))
         if event_type == "tool_call_result":
-            return int(bool(data.get("tool_call_id")))
-        if event_type != "artifact" or data.get("artifact_type") != "report_progress":
-            return 0
-        payload = data.get("payload")
-        return int(
-            isinstance(payload, Mapping)
-            and bool(data.get("artifact_id") or payload.get("event_key"))
-            and bool(str(payload.get("message") or "").strip())
-        )
+            call_id = str(data.get("tool_call_id") or "")
+            if not call_id:
+                return 0
+            if call_id in self._suppressed_tool_ids:
+                self._suppressed_tool_ids.pop(call_id, None)
+                return 0
+            self._tool_names.pop(call_id, None)
+            return 1
+        if event_type == "artifact":
+            return int(self._accept_progress(data) is not None)
+        return 0
 
     async def _flush_drops(self, *, now: float) -> None:
         if self._pending_drops == 0:

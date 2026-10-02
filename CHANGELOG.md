@@ -2,6 +2,13 @@
 
 ## 2026-10-02
 
+### 新增：教材语义阶段的严格活动投影
+
+- `BookActivityObserver` 绑定 item kind，仅接受 artifact ID 与 payload stage 一致且属于该 item 白名单的阶段；公开文案和 running 状态均由服务端生成，模型自由文案、状态和跨 item 阶段被忽略。
+- 隐藏 `report_progress` 自身的工具开始/结束活动，普通 Read/Bash 等工具摘要保持；工具关联记录在结果到达后释放并设置容量上限。
+- 正常写入和预算耗尽后的省略摘要共用阶段节流与噪声过滤，非法阶段不消耗预算，合法阶段缺失、重复或写入失败不改变 job/item 状态。
+- 验证：活动/job/SSE producer 单元回归 `60 passed`；`langalpha_test` PostgreSQL 活动流集成 `8 passed`，覆盖合法阶段持久化、跨 item 拒绝及 after_seq 回放；相关 Ruff 和 `git diff --check` 通过。
+
 ### 新增：教材托管任务语义阶段契约
 
 - 教育服务定义 structure、material、supplementary 三类固定阶段及中文公开文案，并向每个 `task.json.progress` 写入当前 item 的工具名与允许阶段。

@@ -55,6 +55,7 @@ async def test_observer_projects_only_tool_identity_and_never_arguments_or_resul
         job_id=job_id,
         item_id=item_id,
         attempt_token=attempt_token,
+        item_kind="material",
         append=append,
         publish=publish,
     )
@@ -105,6 +106,7 @@ async def test_observer_drops_all_raw_model_deltas_under_pressure():
         job_id=uuid4(),
         item_id=uuid4(),
         attempt_token=uuid4(),
+        item_kind="material",
         append=append,
         publish=AsyncMock(),
     )
@@ -119,7 +121,7 @@ async def test_observer_drops_all_raw_model_deltas_under_pressure():
 
 
 @pytest.mark.asyncio
-async def test_public_progress_is_truncated_and_rate_limited():
+async def test_public_progress_uses_scoped_server_message_and_is_rate_limited():
     from src.server.services.education_book_activity import BookActivityObserver
 
     append = AsyncMock(return_value={"outcome": "stored", "high_water_seq": 1})
@@ -128,14 +130,20 @@ async def test_public_progress_is_truncated_and_rate_limited():
         job_id=uuid4(),
         item_id=uuid4(),
         attempt_token=uuid4(),
+        item_kind="structure",
         append=append,
         publish=AsyncMock(),
         monotonic=lambda: next(clock_values),
     )
     event = {
         "artifact_type": "report_progress",
-        "artifact_id": "stage-reading",
-        "payload": {"message": "x" * 900, "stage": "reading"},
+        "artifact_id": "structure_organizing",
+        "status": "succeeded",
+        "payload": {
+            "message": "model-controlled message",
+            "stage": "structure_organizing",
+            "status": "failed",
+        },
     }
 
     await observer("artifact", event)
@@ -143,7 +151,104 @@ async def test_public_progress_is_truncated_and_rate_limited():
     await observer("artifact", event)
 
     assert append.await_count == 2
-    assert all(len(call.kwargs["message"]) <= 512 for call in append.await_args_list)
+    assert all(
+        call.kwargs["message"] == "正在整理章节层级"
+        for call in append.await_args_list
+    )
+    assert all(call.kwargs["status"] == "running" for call in append.await_args_list)
+    assert all(
+        call.kwargs["metadata"] == {"stage": "structure_organizing"}
+        for call in append.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event",
+    (
+        {
+            "artifact_type": "report_progress",
+            "artifact_id": "structure_organizing",
+            "payload": {"message": "legacy free text"},
+        },
+        {
+            "artifact_type": "report_progress",
+            "artifact_id": "material_writing",
+            "payload": {"stage": "material_writing"},
+        },
+        {
+            "artifact_type": "report_progress",
+            "artifact_id": "unknown_stage",
+            "payload": {"stage": "unknown_stage"},
+        },
+        {
+            "artifact_type": "report_progress",
+            "artifact_id": "custom-event-key",
+            "payload": {"stage": "structure_reading"},
+        },
+    ),
+)
+async def test_public_progress_ignores_untrusted_or_cross_item_events(event):
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock()
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        item_kind="structure",
+        append=append,
+        publish=AsyncMock(),
+    )
+
+    await observer("artifact", event)
+
+    append.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_progress_tool_start_and_result_are_hidden_from_tool_activity():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock(
+        side_effect=[
+            {"outcome": "stored", "high_water_seq": 1},
+            {"outcome": "stored", "high_water_seq": 2},
+        ]
+    )
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        item_kind="material",
+        append=append,
+        publish=AsyncMock(),
+    )
+
+    await observer(
+        "tool_calls",
+        {
+            "tool_calls": [
+                {"id": "progress-1", "name": "report_progress"},
+                {"id": "read-1", "name": "Read"},
+            ]
+        },
+    )
+    await observer(
+        "tool_call_result",
+        {"tool_call_id": "progress-1", "status": "success"},
+    )
+    await observer(
+        "tool_call_result",
+        {"tool_call_id": "read-1", "status": "success"},
+    )
+
+    assert [call.kwargs["message"] for call in append.await_args_list] == [
+        "Running Read",
+        "Finished Read",
+    ]
+    assert observer._tool_names == {}
+    assert observer._suppressed_tool_ids == {}
 
 
 @pytest.mark.asyncio
@@ -159,6 +264,7 @@ async def test_observer_stops_projecting_details_after_budget_exhaustion():
         job_id=uuid4(),
         item_id=uuid4(),
         attempt_token=uuid4(),
+        item_kind="material",
         append=append,
         record_drops=record_drops,
         publish=publish,
@@ -199,6 +305,7 @@ async def test_observer_stops_retrying_detail_writes_after_repository_failure():
         job_id=uuid4(),
         item_id=uuid4(),
         attempt_token=uuid4(),
+        item_kind="material",
         append=append,
         mark_unavailable=mark_unavailable,
         publish=publish,
@@ -233,6 +340,7 @@ async def test_observer_retries_unavailable_marker_during_final_flush():
         job_id=uuid4(),
         item_id=uuid4(),
         attempt_token=uuid4(),
+        item_kind="material",
         append=append,
         mark_unavailable=mark_unavailable,
         publish=AsyncMock(),
@@ -257,6 +365,7 @@ async def test_budget_exhaustion_counts_remaining_calls_in_the_same_event():
         job_id=uuid4(),
         item_id=uuid4(),
         attempt_token=uuid4(),
+        item_kind="material",
         append=append,
         record_drops=record_drops,
         publish=AsyncMock(),
@@ -277,6 +386,70 @@ async def test_budget_exhaustion_counts_remaining_calls_in_the_same_event():
 
     append.assert_awaited_once()
     assert record_drops.await_args.kwargs["dropped_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_budget_exhaustion_filters_progress_noise_and_invalid_stages():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock(
+        return_value={"outcome": "budget_exhausted", "high_water_seq": 1}
+    )
+    record_drops = AsyncMock(return_value={"outcome": "stored", "high_water_seq": 2})
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        item_kind="structure",
+        append=append,
+        record_drops=record_drops,
+        publish=AsyncMock(),
+        monotonic=lambda: 10.0,
+    )
+
+    await observer(
+        "tool_calls", {"tool_calls": [{"id": "read-1", "name": "Read"}]}
+    )
+    await observer(
+        "tool_calls",
+        {"tool_calls": [{"id": "progress-1", "name": "report_progress"}]},
+    )
+    await observer(
+        "artifact",
+        {
+            "artifact_type": "report_progress",
+            "artifact_id": "structure_reading",
+            "payload": {"stage": "structure_reading"},
+        },
+    )
+    await observer(
+        "artifact",
+        {
+            "artifact_type": "report_progress",
+            "artifact_id": "material_writing",
+            "payload": {"stage": "material_writing"},
+        },
+    )
+    await observer(
+        "artifact",
+        {
+            "artifact_type": "report_progress",
+            "artifact_id": "structure_reading",
+            "payload": {"stage": "structure_reading"},
+        },
+    )
+    await observer(
+        "tool_call_result",
+        {"tool_call_id": "progress-1", "status": "success"},
+    )
+    await observer.flush()
+
+    record_drops.assert_awaited_once_with(
+        job_id=observer.job_id,
+        item_id=observer.item_id,
+        attempt_token=observer.attempt_token,
+        dropped_count=1,
+    )
 
 
 class _PageRepository:

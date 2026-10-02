@@ -217,6 +217,73 @@ async def test_activity_page_exposes_durable_unavailable_status(
     assert page["events"] == []
 
 
+async def test_scoped_progress_persists_server_message_and_replays_by_seq(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_book_activity import get_book_activity_page
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    item = await _seed_running_item(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+    )
+    observer = BookActivityObserver(
+        job_id=item["job_id"],
+        item_id=item["item_id"],
+        attempt_token=item["attempt_token"],
+        item_kind="structure",
+        publish=AsyncMock(),
+        monotonic=lambda: 10.0,
+    )
+
+    await observer(
+        "artifact",
+        {
+            "artifact_type": "report_progress",
+            "artifact_id": "structure_organizing",
+            "status": "succeeded",
+            "payload": {
+                "stage": "structure_organizing",
+                "message": "untrusted model text",
+            },
+        },
+    )
+    await observer(
+        "artifact",
+        {
+            "artifact_type": "report_progress",
+            "artifact_id": "material_writing",
+            "payload": {"stage": "material_writing"},
+        },
+    )
+
+    page = await get_book_activity_page(
+        job_id=item["job_id"],
+        parent_user_id=seed_user["user_id"],
+        after_seq=0,
+        limit=100,
+    )
+    assert page is not None
+    assert len(page["events"]) == 1
+    event = page["events"][0]
+    assert event["kind"] == "progress"
+    assert event["status"] == "running"
+    assert event["message"] == "正在整理章节层级"
+    assert event["metadata"] == {"stage": "structure_organizing"}
+    assert page["high_water_seq"] == event["seq"]
+
+    caught_up = await get_book_activity_page(
+        job_id=item["job_id"],
+        parent_user_id=seed_user["user_id"],
+        after_seq=event["seq"],
+        limit=100,
+    )
+    assert caught_up is not None
+    assert caught_up["events"] == []
+    assert caught_up["high_water_seq"] == event["seq"]
+
+
 async def test_event_size_limit_counts_the_complete_public_envelope(
     patched_get_db_connection,
     seed_user,
@@ -279,6 +346,7 @@ async def test_budget_summary_coalesces_dropped_updates_for_one_second(
         job_id=item["job_id"],
         item_id=item["item_id"],
         attempt_token=item["attempt_token"],
+        item_kind="structure",
         publish=AsyncMock(),
         monotonic=lambda: 10.0,
     )

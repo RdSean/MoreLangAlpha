@@ -768,6 +768,7 @@ async def launch_book_item(
             job_id=item["job_id"],
             item_id=item["item_id"],
             attempt_token=UUID(identity["attempt_token"]),
+            item_kind=str(item["kind"]),
         )
         handler = RunSSEProducer(
             thread_id=thread_id,

@@ -1003,6 +1003,7 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
         job_id=CLAIMED["job_id"],
         item_id=CLAIMED["item_id"],
         attempt_token=CLAIMED["attempt_token"],
+        item_kind="structure",
     )
     assert handler_kwargs["event_observer"] is observer
     assert launched == {
