@@ -14,6 +14,7 @@ export interface BookGenerationValues {
 interface BookGenerationFormProps {
   existingMaterial?: boolean;
   targetCount?: number;
+  existingCount?: number;
   allowSupplementary?: boolean;
   pending?: boolean;
   onSubmit: (values: BookGenerationValues) => void | Promise<void>;
@@ -29,6 +30,7 @@ const DEPTHS: Array<{ value: BookMaterialDepth; label: string }> = [
 export function BookGenerationForm({
   existingMaterial = false,
   targetCount = 1,
+  existingCount = existingMaterial ? 1 : 0,
   allowSupplementary = false,
   pending = false,
   onSubmit,
@@ -39,6 +41,14 @@ export function BookGenerationForm({
   const [requirements, setRequirements] = useState('');
   const [replaceExisting, setReplaceExisting] = useState(existingMaterial);
   const [includeSupplementary, setIncludeSupplementary] = useState(false);
+  const missingCount = Math.max(0, targetCount - existingCount);
+  const replacementLabel = targetCount > 1
+    ? `重新生成所选 ${targetCount} 份（将替换 ${existingCount} 份已有讲义）`
+    : '重新生成讲义（生成失败时仍保留旧讲义）';
+  const heading = replaceExisting
+    ? targetCount > 1 ? `重新生成所选 ${targetCount} 份讲义` : '重新生成讲义'
+    : existingCount > 0 ? `生成未生成的 ${missingCount} 份讲义`
+      : targetCount > 1 ? `生成 ${targetCount} 份讲义` : '生成讲义';
 
   return (
     <form
@@ -56,7 +66,7 @@ export function BookGenerationForm({
       <div className="flex items-start justify-between gap-4">
         <div>
           <h3 className="text-sm font-semibold text-foreground">
-            {existingMaterial ? '重新生成讲义' : targetCount > 1 ? `生成 ${targetCount} 份讲义` : '生成讲义'}
+            {heading}
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">本次参数提交后不可修改。</p>
         </div>
@@ -104,9 +114,9 @@ export function BookGenerationForm({
         onChange={(event) => setRequirements(event.target.value)}
       />
 
-      {(existingMaterial || allowSupplementary) && (
+      {(existingCount > 0 || allowSupplementary) && (
         <div className="mt-3 grid gap-2 text-sm">
-          {existingMaterial && (
+          {existingCount > 0 && (
             <label className="flex min-h-10 items-center gap-2">
               <input
                 type="checkbox"
@@ -114,7 +124,7 @@ export function BookGenerationForm({
                 onChange={(event) => setReplaceExisting(event.target.checked)}
                 className="size-4"
               />
-              替换已有讲义（生成失败时仍保留旧讲义）
+              {replacementLabel}
             </label>
           )}
           {allowSupplementary && (
@@ -133,7 +143,7 @@ export function BookGenerationForm({
 
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel} disabled={pending}>取消</Button>
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" disabled={pending || (!replaceExisting && missingCount === 0)}>
           {pending
             ? <LoaderCircle className="mr-2 size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
             : <Sparkles className="mr-2 size-4" aria-hidden="true" />}

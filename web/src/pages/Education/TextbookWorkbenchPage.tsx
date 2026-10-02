@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Activity, ArrowLeft, Menu, Users } from 'lucide-react';
+import { Activity, ArrowLeft, Menu, RotateCcw, StopCircle, Users } from 'lucide-react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { BookActivityPanel } from './components/BookActivityPanel';
 import { BookNavigator } from './components/BookNavigator';
 import { BookReader } from './components/BookReader';
-import type { BookGenerationValues } from './components/BookGenerationForm';
+import {
+  BookGenerationForm,
+  type BookGenerationValues,
+} from './components/BookGenerationForm';
 import {
   useBookActivity,
   useManagedBookMutations,
@@ -38,6 +41,7 @@ export default function TextbookWorkbenchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
+  const [batchFormOpen, setBatchFormOpen] = useState(false);
   const [batchSelection, setBatchSelection] = useState<Set<string>>(new Set());
   const workbench = useTextbookWorkbench(textbookId);
   const structure = useManagedBookStructure(
@@ -126,12 +130,20 @@ export default function TextbookWorkbenchPage() {
   const activity = useBookActivity(activityJobId, textbookId, Boolean(activityJobId));
   const visibleActivityJob = activity.data?.job_id === activityJobId ? activity.data : undefined;
   const activeJob = workbench.data?.current_job ?? workbench.data?.recent_job;
+  const currentJob = workbench.data?.current_job;
+  const recoverableJob = workbench.data?.recent_job
+    && ['failed', 'partially_succeeded', 'cancelled'].includes(workbench.data.recent_job.status)
+    ? workbench.data.recent_job
+    : undefined;
 
   const selectionTitle = selectedKnowledgePoint?.title ?? selectedNode?.title;
-  const selectedDatabaseIds = useMemo(
-    () => [...batchSelection],
-    [batchSelection],
+  const selectedTargets = useMemo(
+    () => structure.data?.knowledge_points.filter(
+      (entry) => batchSelection.has(entry.knowledge_point_id),
+    ) ?? [],
+    [batchSelection, structure.data?.knowledge_points],
   );
+  const existingSelectedCount = selectedTargets.filter((entry) => entry.material_available).length;
 
   const updateSearch = (update: (next: URLSearchParams) => void, replace = false) => {
     const next = new URLSearchParams(searchParams);
@@ -179,6 +191,17 @@ export default function TextbookWorkbenchPage() {
     updateSearch((next) => next.set('activity', job.job_id));
   };
 
+  const cancelCurrentJob = async () => {
+    if (!currentJob) return;
+    await mutations.cancelJob.mutateAsync(currentJob.job_id);
+  };
+
+  const retryUnfinished = async () => {
+    if (!recoverableJob) return;
+    const job = await mutations.retryJob.mutateAsync(recoverableJob.job_id);
+    updateSearch((next) => next.set('activity', job.job_id));
+  };
+
   if (workbench.isLoading || structure.isLoading) {
     return <main className="grid h-full place-items-center bg-background"><p className="text-sm text-muted-foreground">正在加载教材工作台…</p></main>;
   }
@@ -208,6 +231,28 @@ export default function TextbookWorkbenchPage() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+          {currentJob && (
+            <Button
+              variant="outline"
+              className="min-h-11 px-3"
+              disabled={mutations.cancelJob.isPending}
+              onClick={() => void cancelCurrentJob()}
+            >
+              <StopCircle className="size-4 sm:mr-2" aria-hidden="true" />
+              <span>取消本次生成</span>
+            </Button>
+          )}
+          {!currentJob && recoverableJob && (
+            <Button
+              variant="outline"
+              className="min-h-11 px-3"
+              disabled={mutations.retryJob.isPending}
+              onClick={() => void retryUnfinished()}
+            >
+              <RotateCcw className="size-4 sm:mr-2" aria-hidden="true" />
+              <span>重试未完成项</span>
+            </Button>
+          )}
           <Button variant="ghost" className="min-h-11 px-3" disabled={!activeJob} onClick={() => activeJob && updateSearch((next) => next.set('activity', activeJob.job_id))}>
             <Activity className="size-4 sm:mr-2" aria-hidden="true" />
             <span className="hidden sm:inline">活动</span>
@@ -229,7 +274,14 @@ export default function TextbookWorkbenchPage() {
               onSelectKnowledgePoint={selectKnowledgePoint}
               onSelectNode={selectNode}
               batchMode={batchMode}
-              onBatchModeChange={setBatchMode}
+              batchDisabled={Boolean(currentJob)}
+              onBatchModeChange={(enabled) => {
+                setBatchMode(enabled);
+                if (!enabled) {
+                  setBatchFormOpen(false);
+                  setBatchSelection(new Set());
+                }
+              }}
               selectedKnowledgePointIds={batchSelection}
               onBatchSelectionChange={setBatchSelection}
             />
@@ -237,26 +289,45 @@ export default function TextbookWorkbenchPage() {
           </div>
         )}
 
-        <section className="min-h-0 min-w-0">
-          {structure.data && selectionTitle ? (
-            <BookReader
-              key={`${selectedKnowledgePoint?.skill_kp_id ?? selectedNode?.id}`}
-              title={selectionTitle}
-              view={readerView}
-              material={selectedKnowledgePoint ? material.data : undefined}
-              source={source.data}
-              loading={source.isLoading || material.isLoading}
-              generationPending={mutations.createJob.isPending}
-              onViewChange={(view) => updateSearch((next) => next.set('view', view))}
-              onGenerate={selectedKnowledgePoint
-                ? (values) => startGeneration([selectedKnowledgePoint], values)
-                : undefined}
+        <section className="flex min-h-0 min-w-0 flex-col">
+          {batchFormOpen && selectedTargets.length > 0 && (
+            <BookGenerationForm
+              targetCount={selectedTargets.length}
+              existingCount={existingSelectedCount}
+              pending={mutations.createJob.isPending}
+              onCancel={() => setBatchFormOpen(false)}
+              onSubmit={async (values) => {
+                const targets = values.replaceExisting
+                  ? selectedTargets
+                  : selectedTargets.filter((entry) => !entry.material_available);
+                await startGeneration(targets, values);
+                setBatchFormOpen(false);
+                setBatchMode(false);
+                setBatchSelection(new Set());
+              }}
             />
-          ) : workbench.data.structure_status === 'ready' ? (
-            <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground">未提取到知识点，可从原书目录阅读教材。</div>
-          ) : (
-            <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground">{statusText}</div>
           )}
+          <div className="min-h-0 flex-1">
+            {structure.data && selectionTitle ? (
+              <BookReader
+                key={`${selectedKnowledgePoint?.skill_kp_id ?? selectedNode?.id}`}
+                title={selectionTitle}
+                view={readerView}
+                material={selectedKnowledgePoint ? material.data : undefined}
+                source={source.data}
+                loading={source.isLoading || material.isLoading}
+                generationPending={mutations.createJob.isPending}
+                onViewChange={(view) => updateSearch((next) => next.set('view', view))}
+                onGenerate={selectedKnowledgePoint && !currentJob
+                  ? (values) => startGeneration([selectedKnowledgePoint], values)
+                  : undefined}
+              />
+            ) : workbench.data.structure_status === 'ready' ? (
+              <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground">未提取到知识点，可从原书目录阅读教材。</div>
+            ) : (
+              <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground">{statusText}</div>
+            )}
+          </div>
         </section>
 
         {visibleActivityJob && (
@@ -271,19 +342,14 @@ export default function TextbookWorkbenchPage() {
         )}
       </div>
 
-      {batchMode && selectedDatabaseIds.length > 0 && (
+      {batchMode && !batchFormOpen && !currentJob && selectedTargets.length > 0 && (
         <div className="textbook-workbench-batch" role="region" aria-label="批量生成">
-          <span className="text-sm">已选择 {selectedDatabaseIds.length} 个知识点</span>
+          <span className="text-sm">已选择 {selectedTargets.length} 个知识点</span>
           <Button
             className="min-h-11"
             onClick={() => {
-              const targets = structure.data?.knowledge_points.filter((entry) => batchSelection.has(entry.knowledge_point_id)) ?? [];
-              void startGeneration(targets, {
-                depth: 'lesson',
-                requirements: null,
-                replaceExisting: false,
-                includeSupplementary: false,
-              });
+              setBatchFormOpen(true);
+              setNavigatorOpen(false);
             }}
           >
             生成所选讲义

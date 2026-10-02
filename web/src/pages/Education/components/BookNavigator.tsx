@@ -22,6 +22,7 @@ interface BookNavigatorProps {
   onSelectNode?: (nodeId: string) => void;
   batchMode?: boolean;
   onBatchModeChange?: (enabled: boolean) => void;
+  batchDisabled?: boolean;
   selectedKnowledgePointIds?: ReadonlySet<string>;
   onBatchSelectionChange?: (knowledgePointIds: Set<string>) => void;
 }
@@ -116,6 +117,7 @@ export function BookNavigator({
   onSelectNode,
   batchMode = false,
   onBatchModeChange,
+  batchDisabled = false,
   selectedKnowledgePointIds = new Set(),
   onBatchSelectionChange,
 }: BookNavigatorProps) {
@@ -282,6 +284,7 @@ export function BookNavigator({
             type="button"
             className="flex min-h-11 w-full items-center justify-center gap-2 rounded-md border text-sm font-medium hover:bg-[var(--color-bg-hover)]"
             onClick={() => onBatchModeChange?.(!batchMode)}
+            disabled={batchDisabled}
           >
             <BookOpen className="size-4" aria-hidden="true" />
             {batchMode ? '退出批量选择' : '批量选择'}

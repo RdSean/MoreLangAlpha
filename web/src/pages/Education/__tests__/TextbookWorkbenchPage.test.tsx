@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BookGenerationForm } from '../components/BookGenerationForm';
 import { BookReader } from '../components/BookReader';
 import TextbookWorkbenchPage from '../TextbookWorkbenchPage';
 import type {
@@ -42,6 +43,8 @@ const readyMaterial: KnowledgePointMaterial = {
 
 const pageState = vi.hoisted(() => ({
   createJob: vi.fn(),
+  cancelJob: vi.fn(),
+  retryJob: vi.fn(),
   workbench: {
     textbook_id: 'book-1',
     title: 'Reading Explorer 3',
@@ -163,8 +166,40 @@ vi.mock('../queries', () => ({
   useBookActivity: () => ({ data: undefined, events: [], connectionState: 'connected' }),
   useManagedBookMutations: () => ({
     createJob: { mutateAsync: pageState.createJob, isPending: false },
+    cancelJob: { mutateAsync: pageState.cancelJob, isPending: false },
+    retryJob: { mutateAsync: pageState.retryJob, isPending: false },
   }),
 }));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  pageState.workbench.current_job = null;
+  pageState.workbench.recent_job = null;
+  pageState.createJob.mockResolvedValue({ job_id: 'job-created' });
+  pageState.cancelJob.mockResolvedValue({ job_id: 'job-active' });
+  pageState.retryJob.mockResolvedValue({ job_id: 'job-retry' });
+});
+
+describe('BookGenerationForm', () => {
+  it('defaults a mixed batch to missing lessons and names the replacement count', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <BookGenerationForm
+        targetCount={3}
+        existingCount={1}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: '生成未生成的 2 份讲义' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '重新生成所选 3 份（将替换 1 份已有讲义）' })).not.toBeChecked();
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ replaceExisting: false }));
+  });
+});
 
 describe('BookReader', () => {
   it('shows source first when no lesson exists and submits generation inline', async () => {
@@ -287,5 +322,73 @@ describe('TextbookWorkbenchPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Vocabulary Index' })).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: '生成讲义' })).not.toBeInTheDocument();
+  });
+
+  it('opens batch settings and skips selected knowledge points that already have material', async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+
+    await user.click(screen.getByRole('button', { name: '批量选择' }));
+    await user.click(screen.getByRole('checkbox', { name: '选择 Sports and Fitness 全部知识点' }));
+    await user.click(screen.getByRole('button', { name: '生成所选讲义' }));
+
+    expect(screen.getByRole('heading', { name: '生成未生成的 1 份讲义' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+
+    expect(pageState.createJob).toHaveBeenCalledWith({
+      textbookId: 'book-1',
+      input: expect.objectContaining({
+        knowledge_point_ids: ['kp-db-1'],
+        replace_existing: false,
+      }),
+    });
+  });
+
+  it('cancels an active job and retries only the server-defined unfinished items', async () => {
+    const user = userEvent.setup();
+    pageState.workbench.current_job = {
+      job_id: 'job-active',
+      kind: 'materials',
+      status: 'running',
+      total_items: 2,
+      succeeded_items: 1,
+      failed_items: 0,
+      cancelled_items: 0,
+      not_run_items: 0,
+      high_water_seq: 3,
+      activity_status: 'available',
+      created_at: '2026-10-02T06:00:00Z',
+      started_at: '2026-10-02T06:00:01Z',
+      finished_at: null,
+      safe_error: null,
+    };
+    const view = renderWorkbench();
+
+    await user.click(screen.getByRole('button', { name: '取消本次生成' }));
+    expect(pageState.cancelJob).toHaveBeenCalledWith('job-active');
+
+    view.unmount();
+    pageState.workbench.current_job = null;
+    pageState.workbench.recent_job = {
+      job_id: 'job-partial',
+      kind: 'materials',
+      status: 'partially_succeeded',
+      total_items: 2,
+      succeeded_items: 1,
+      failed_items: 1,
+      cancelled_items: 0,
+      not_run_items: 0,
+      high_water_seq: 8,
+      activity_status: 'available',
+      created_at: '2026-10-02T06:00:00Z',
+      started_at: '2026-10-02T06:00:01Z',
+      finished_at: '2026-10-02T06:10:00Z',
+      safe_error: null,
+    };
+    renderWorkbench();
+
+    await user.click(screen.getByRole('button', { name: '重试未完成项' }));
+    expect(pageState.retryJob).toHaveBeenCalledWith('job-partial');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('activity=job-retry'));
   });
 });
