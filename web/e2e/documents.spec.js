@@ -171,69 +171,46 @@ const artifacts = [
   },
 ];
 
-const formalAssets = {
+const textbookAssets = {
   textbookId: 'textbook-A1b2C3d4E5f6',
-  versionId: 'version-A1b2C3d4E5f6',
-  processingJobId: 'processing-job-A1b2C3d4E5f6',
-  teachingJobId: 'teaching-job-A1b2C3d4E5f6',
-  teachingPackageId: 'teaching-package-A1b2C3d4E5f6',
-  publicationId: 'publication-A1b2C3d4E5f6',
-  assignmentId: 'assignment-A1b2C3d4E5f6',
-  chapterId: 'chapter-A1b2C3d4E5f6',
+  structureId: 'structure-A1b2C3d4E5f6',
+  jobId: 'book-job-A1b2C3d4E5f6',
+  knowledgePointId: 'knowledge-point-A1b2C3d4E5f6',
   title: 'Algebra Reader',
   completedAt: '2026-09-05T00:03:00Z',
 };
 
 const completedParseJobCandidate = {
-  producer_job_id: 'job-A1b2C3d4E5f6',
   document_id: document.document_id,
+  parse_job_id: 'job-A1b2C3d4E5f6',
   primary_artifact_id: 'art-A1b2C3d4E5f6',
   filename: document.original_filename,
   media_type: document.media_type,
-  format: document.document_format,
   parser_id: 'anydoc-local',
   parser_name: 'AnyDoc Local',
-  parser_version: '0.2.4',
-  parse_completed_at: formalAssets.completedAt,
+  completed_at: textbookAssets.completedAt,
+  content_sha256: 'a'.repeat(64),
   size_bytes: document.source_size_bytes,
-  artifact_count: artifacts.length,
+  image_count: 1,
 };
 
-const formalTextbookSource = {
-  legacy: false,
-  position: 1,
-  document_id: document.document_id,
-  producer_job_id: completedParseJobCandidate.producer_job_id,
-  primary_artifact_id: completedParseJobCandidate.primary_artifact_id,
-  filename: completedParseJobCandidate.filename,
-  media_type: completedParseJobCandidate.media_type,
-  format: completedParseJobCandidate.format,
-  parser_id: completedParseJobCandidate.parser_id,
-  parser_name: completedParseJobCandidate.parser_name,
-  parser_version: completedParseJobCandidate.parser_version,
-  parse_completed_at: completedParseJobCandidate.parse_completed_at,
-  primary_sha256: 'a'.repeat(64),
-  document_deleted: false,
-  document_accessible: true,
+const frozenTextbookSource = {
+  ...completedParseJobCandidate,
+  frozen_at: '2026-09-05T00:04:00Z',
 };
 
-function documentTeachingUsage(isPublished = false) {
+function documentTeachingUsage() {
   return {
     document_id: document.document_id,
-    producer_job_id: completedParseJobCandidate.producer_job_id,
+    parse_job_id: completedParseJobCandidate.parse_job_id,
     primary_artifact_id: completedParseJobCandidate.primary_artifact_id,
-    textbook_id: formalAssets.textbookId,
-    textbook_title: formalAssets.title,
-    content_version_id: formalAssets.versionId,
-    content_version_sequence: 1,
-    artifact_position: 1,
-    teaching_package_id: formalAssets.teachingPackageId,
-    teaching_package_sequence: 1,
-    status: 'review',
-    publication_id: isPublished ? formalAssets.publicationId : null,
-    is_published: isPublished,
-    has_asset_manifest: true,
-    created_at: formalAssets.completedAt,
+    textbook_id: textbookAssets.textbookId,
+    textbook_title: textbookAssets.title,
+    source_filename: completedParseJobCandidate.filename,
+    source_completed_at: completedParseJobCandidate.completed_at,
+    structure_status: 'ready',
+    materials: { ready: 0, total: 1 },
+    updated_at: '2026-09-05T00:05:00Z',
   };
 }
 
@@ -260,39 +237,6 @@ function isRelevantApiPath(pathname) {
   return pathname.startsWith('/api/v1/documents')
     || pathname.startsWith('/api/v1/document-')
     || pathname.startsWith('/api/v1/education');
-}
-
-async function dismissTeachingRunDialog(page, dialog) {
-  if (test.info().project.name === 'documents-mobile') {
-    await dialog.evaluate((element) => {
-      const handle = element.querySelector('.cursor-grab');
-      if (!(handle instanceof HTMLElement)) {
-        throw new Error('Teaching run dialog drag handle is missing');
-      }
-      const touchAt = (clientY) => new Touch({
-        identifier: 1,
-        target: handle,
-        clientX: 24,
-        clientY,
-      });
-      const start = touchAt(100);
-      const end = touchAt(260);
-      const event = (type, touches) => new TouchEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        touches,
-        targetTouches: touches,
-        changedTouches: touches,
-      });
-      handle.dispatchEvent(event('touchstart', [start]));
-      handle.dispatchEvent(event('touchmove', [end]));
-      handle.dispatchEvent(event('touchend', []));
-    });
-  } else {
-    await page.keyboard.press('Escape');
-  }
-  await expect(dialog).toBeHidden();
 }
 
 async function mockDocumentLibrary(page, artifactItems = artifacts) {
@@ -352,69 +296,102 @@ async function mockDocumentLibrary(page, artifactItems = artifacts) {
   };
 }
 
-async function mockLibraryTextbookFormalAssets(page) {
+async function mockLibraryTextbookWorkbench(page) {
   let textbookCreated = false;
-  let processingState = 'none';
-  let teachingState = 'none';
-  let assigned = false;
-  let startPayload;
-  let publishRequest;
-  let assignmentRequest;
+  let createRequest;
   const teachingUsageRequests = [];
-  const teachingUsagePackageIds = [];
-  const assetRequests = [];
-  const chapter = {
-    chapter_id: formalAssets.chapterId,
-    position: 1,
-    slug: '01-foundations',
-    title: '代数基础',
-    page_start: 1,
-    page_end: 12,
-    markdown: '# 代数基础\n\n冻结后的图书馆 Markdown。',
-    teaching_material: '# 学习目标\n\n理解变量与方程。',
-    questions: [{
-      question_id: 'question-A1b2C3d4E5f6',
+  const structure = {
+    textbook_id: textbookAssets.textbookId,
+    structure_id: textbookAssets.structureId,
+    schema_version: '2.1.0',
+    warnings: [],
+    structure: {
+      schema_version: '2.1.0',
+      book: { title: textbookAssets.title },
+      source: { path: 'source.md', total_lines: 24 },
+      coverage: {},
+      nodes: [{
+        id: 'unit-algebra',
+        title: '代数基础',
+        anchor: { start_line: 1, end_line: 24 },
+        children: [],
+      }],
+    },
+    knowledge_points: [{
+      knowledge_point_id: textbookAssets.knowledgePointId,
+      skill_kp_id: 'variables-and-equations',
       position: 1,
-      prompt: '方程中字母通常表示什么？',
-      options: { A: '变量', B: '标点' },
-      correct_option: 'A',
-      explanation: '字母通常表示变量。',
-      knowledge_point: '变量',
+      title: '变量与方程',
+      unit_skill_node_id: 'unit-algebra',
+      node_skill_ids: [],
+      start_line: 4,
+      end_line: 12,
+      content_file: null,
+      material_available: false,
     }],
   };
-  const textbookDetail = () => ({
-    textbook_id: formalAssets.textbookId,
-    household_id: parent.household_id,
-    title: formalAssets.title,
-    slug: 'algebra-reader',
-    versions: processingState === 'none' ? [] : [{
-      version_id: formalAssets.versionId,
-      sequence: 1,
-      status: processingState === 'queued' ? 'processing' : processingState === 'review' ? 'review' : 'published',
-      processing_job_id: formalAssets.processingJobId,
-      processing_job_status: processingState === 'queued' ? 'queued' : 'completed',
-      chapter_count: processingState === 'queued' ? 0 : 1,
-      is_published: processingState === 'published',
-      publication_id: processingState === 'published' ? formalAssets.publicationId : null,
-      teaching_packages: teachingState === 'none' ? [] : [{
-        teaching_package_id: formalAssets.teachingPackageId,
-        job_id: formalAssets.teachingJobId,
-        sequence: 1,
-        status: teachingState === 'running' ? 'generating_teaching' : 'review',
-        job_status: teachingState === 'running' ? 'running' : 'completed',
-        chapter_count: teachingState === 'running' ? 0 : 1,
-        question_count: teachingState === 'running' ? 0 : 1,
-      }],
-      sources: [formalTextbookSource],
-      chapters: processingState === 'queued' ? [] : [chapter],
-      assignments: assigned ? [{
-        assignment_id: formalAssets.assignmentId,
-        student_user_id: student.user_id,
-        student_name: student.name,
-      }] : [],
+  const bookJob = {
+    job_id: textbookAssets.jobId,
+    textbook_id: textbookAssets.textbookId,
+    kind: 'structure',
+    status: 'succeeded',
+    total_items: 1,
+    succeeded_items: 1,
+    failed_items: 0,
+    cancelled_items: 0,
+    not_run_items: 0,
+    high_water_seq: 1,
+    activity_status: 'available',
+    created_at: '2026-09-05T00:04:00Z',
+    started_at: '2026-09-05T00:04:01Z',
+    finished_at: '2026-09-05T00:05:00Z',
+    safe_error: null,
+    depth: null,
+    requirements: null,
+    replace_existing: false,
+    include_supplementary: false,
+    items: [{
+      item_id: 'book-job-item-A1b2C3d4E5f6',
+      kind: 'structure',
+      position: 1,
+      knowledge_point_id: null,
+      skill_kp_id: null,
+      status: 'succeeded',
+      attempt: 1,
+      safe_error: null,
+      started_at: '2026-09-05T00:04:01Z',
+      finished_at: '2026-09-05T00:05:00Z',
+    }],
+  };
+  const workbench = {
+    textbook_id: textbookAssets.textbookId,
+    title: textbookAssets.title,
+    structure_status: 'ready',
+    materials: { ready: 0, total: 1 },
+    current_job: null,
+    recent_job: bookJob,
+    current_structure_id: textbookAssets.structureId,
+    assigned_student_count: 0,
+    updated_at: '2026-09-05T00:05:00Z',
+    source: frozenTextbookSource,
+  };
+
+  await configureSSE({
+    method: 'GET',
+    path: `/api/v1/education/book-jobs/${textbookAssets.jobId}/events`,
+    events: [{
+      event: 'snapshot',
+      data: {
+        job_id: textbookAssets.jobId,
+        status: 'succeeded',
+        events: [],
+        high_water_seq: 1,
+        activity_status: 'available',
+        cursor_expired: false,
+        has_more: false,
+      },
     }],
   });
-
   await mockDocumentLibrary(page);
   await mockAPI(page, {
     'GET /users/me': {
@@ -431,165 +408,48 @@ async function mockLibraryTextbookFormalAssets(page) {
       contentType: 'application/pdf',
       body: sourcePdf,
     }),
-    'GET /auth/members': [parent, student],
-    'GET /education/dictionaries': {
-      timezone: 'Asia/Tokyo',
-      subjects: [],
-      grade_levels: [],
-      practice_sources: [],
-    },
-    'GET /education/tasks': [],
-    'GET /education/textbook-parse-jobs/completed': (route) => fulfillJSON(route, [completedParseJobCandidate]),
+    'GET /education/textbook-sources': (route) => fulfillJSON(route, {
+      items: [completedParseJobCandidate],
+    }),
     [`GET /documents/${document.document_id}/teaching-usage`]: (route) => {
       teachingUsageRequests.push(new URL(route.request().url()).pathname);
-      const usage = documentTeachingUsage(processingState === 'published');
-      teachingUsagePackageIds.push(usage.teaching_package_id);
       return fulfillJSON(route, {
-        items: [usage],
+        items: textbookCreated ? [documentTeachingUsage()] : [],
       });
     },
-    'GET /education/textbooks': (route) => fulfillJSON(route, textbookCreated ? [{
-      textbook_id: formalAssets.textbookId,
-      household_id: parent.household_id,
-      title: formalAssets.title,
-      slug: 'algebra-reader',
-      latest_version_sequence: processingState === 'none' ? null : 1,
-      latest_version_status: processingState === 'none' ? null : processingState === 'queued' ? 'processing' : processingState === 'review' ? 'review' : 'published',
-      chapter_count: processingState === 'queued' || processingState === 'none' ? 0 : 1,
-      assignment_count: assigned ? 1 : 0,
-    }] : []),
     'POST /education/textbooks': async (route) => {
+      createRequest = route.request().postDataJSON();
       textbookCreated = true;
       await fulfillJSON(route, {
-        textbook_id: formalAssets.textbookId,
-        household_id: parent.household_id,
-        title: route.request().postDataJSON().title,
-        slug: 'algebra-reader',
-        chapter_count: 0,
-        assignment_count: 0,
+        textbook_id: textbookAssets.textbookId,
+        job_id: textbookAssets.jobId,
       }, 201);
     },
-    [`GET /education/textbooks/${formalAssets.textbookId}`]: (route) => fulfillJSON(route, textbookDetail()),
-    [`POST /education/textbooks/${formalAssets.textbookId}/processing`]: async (route) => {
-      startPayload = route.request().postDataJSON();
-      processingState = 'queued';
-      await fulfillJSON(route, {
-        job_id: formalAssets.processingJobId,
-        version_id: formalAssets.versionId,
-        status: 'queued',
-      }, 201);
-    },
-    [`POST /education/textbook-processing/${formalAssets.processingJobId}/run`]: async (route) => {
-      processingState = 'review';
-      await fulfillJSON(route, {
-        job_id: formalAssets.processingJobId,
-        version_id: formalAssets.versionId,
-        status: 'completed',
-      });
-    },
-    [`POST /education/textbook-versions/${formalAssets.versionId}/teaching-packages`]: async (route) => {
-      teachingState = 'running';
-      await fulfillJSON(route, {
-        job_id: formalAssets.teachingJobId,
-        teaching_package_id: formalAssets.teachingPackageId,
-        content_version_id: formalAssets.versionId,
-        status: 'running',
-        phase: 'generating_teaching',
-        attempt_count: 1,
-        completed_chapter_count: 0,
-        total_chapter_count: 1,
-        actions: ['cancel'],
-        events: [],
-        attempts: [],
-      }, 202);
-    },
-    [`GET /education/teaching-jobs/${formalAssets.teachingJobId}`]: (route) => fulfillJSON(route, {
-      job_id: formalAssets.teachingJobId,
-      teaching_package_id: formalAssets.teachingPackageId,
-      content_version_id: formalAssets.versionId,
-      status: teachingState === 'running' ? 'running' : 'completed',
-      phase: teachingState === 'running' ? 'generating_teaching' : 'review',
-      attempt_count: 1,
-      completed_chapter_count: teachingState === 'running' ? 0 : 1,
-      total_chapter_count: 1,
-      actions: teachingState === 'running' ? ['cancel'] : [],
-      events: teachingState === 'running' ? [] : [{
-        sequence: 1,
-        phase: 'validating_bundle',
-        summary: '正式教学资产已通过校验',
-      }],
-      attempts: [{
-        attempt_id: 'attempt-A1b2C3d4E5f6',
-        root_run_id: 'root-run-A1b2C3d4E5f6',
-        status: teachingState === 'running' ? 'running' : 'completed',
-      }],
+    [`GET /education/textbooks/${textbookAssets.textbookId}`]: (route) => fulfillJSON(route, workbench),
+    [`GET /education/textbooks/${textbookAssets.textbookId}/structure`]: (route) => fulfillJSON(route, structure),
+    [`GET /education/textbooks/${textbookAssets.textbookId}/source`]: (route) => fulfillJSON(route, {
+      textbook_id: textbookAssets.textbookId,
+      start_line: 1,
+      end_line: 24,
+      total_lines: 24,
+      markdown: '# 代数基础\n\n变量可以表示未知数。\n\n方程描述两个表达式相等。',
     }),
-    [`GET /education/teaching-packages/${formalAssets.teachingPackageId}/assets`]: (route) => {
-      assetRequests.push(new URL(route.request().url()).pathname);
-      return fulfillJSON(route, {
-        teaching_package_id: formalAssets.teachingPackageId,
-        format: 'langalpha-family-teaching-assets/v2',
-        concept_index: { size_bytes: 120, concept_count: 3 },
-        coverage_audit: { size_bytes: 80, status: 'complete' },
-        chapters: [{
-          chapter_id: formalAssets.chapterId,
-          position: chapter.position,
-          title: chapter.title,
-          coverage_status: 'complete',
-          concept_count: 3,
-          assets: [
-            { kind: 'knowledge', size_bytes: 20 },
-            { kind: 'toolkit', size_bytes: 30 },
-            { kind: 'practice', size_bytes: 40 },
-          ],
-        }],
-      });
-    },
-    [`GET /education/teaching-packages/${formalAssets.teachingPackageId}/chapters/${formalAssets.chapterId}/assets/toolkit`]: (route) => {
-      assetRequests.push(new URL(route.request().url()).pathname);
-      return fulfillJSON(route, {
-        teaching_package_id: formalAssets.teachingPackageId,
-        chapter_id: formalAssets.chapterId,
-        kind: 'toolkit',
-        content: '# 代数工具包\n\n正式资产不依赖 sandbox。',
-      });
-    },
-    [`POST /education/textbooks/${formalAssets.textbookId}/versions/${formalAssets.versionId}/publish`]: async (route) => {
-      const body = route.request().postDataJSON();
-      publishRequest = {
-        textbook_id: formalAssets.textbookId,
-        version_id: formalAssets.versionId,
-        teaching_package_id: body.teaching_package_id,
-      };
-      processingState = 'published';
-      await fulfillJSON(route, {
-        publication_id: formalAssets.publicationId,
-        version_id: formalAssets.versionId,
-        teaching_package_id: formalAssets.teachingPackageId,
-      }, 201);
-    },
-    [`POST /education/textbook-publications/${formalAssets.publicationId}/assignments`]: async (route) => {
-      const body = route.request().postDataJSON();
-      assignmentRequest = {
-        publication_id: formalAssets.publicationId,
-        student_user_id: body.student_user_id,
-      };
-      assigned = true;
-      await fulfillJSON(route, {
-        assignment_id: formalAssets.assignmentId,
-        publication_id: formalAssets.publicationId,
-        student_user_id: route.request().postDataJSON().student_user_id,
-      }, 201);
-    },
+    [`GET /education/textbooks/${textbookAssets.textbookId}/knowledge-points/${textbookAssets.knowledgePointId}/material`]: (route) => fulfillJSON(route, {
+      textbook_id: textbookAssets.textbookId,
+      knowledge_point_id: textbookAssets.knowledgePointId,
+      skill_kp_id: 'variables-and-equations',
+      material_available: false,
+      markdown: null,
+      generated_at: null,
+      depth: null,
+      requirements: null,
+      content_sha256: null,
+    }),
+    [`GET /education/book-jobs/${textbookAssets.jobId}`]: (route) => fulfillJSON(route, bookJob),
   });
 
   return {
-    assetRequests: () => assetRequests,
-    assignmentRequest: () => assignmentRequest,
-    startPayload: () => startPayload,
-    finishTeaching: () => { teachingState = 'review'; },
-    publishRequest: () => publishRequest,
-    teachingUsagePackageIds: () => teachingUsagePackageIds,
+    createRequest: () => createRequest,
     teachingUsageRequests: () => teachingUsageRequests,
   };
 }
@@ -730,8 +590,8 @@ test('keeps the completion action visible when a parse produces many artifacts',
   expect(buttonBox.y + buttonBox.height).toBeLessThanOrEqual(viewport.height);
 });
 
-test('library textbook formal assets mock flow renders without runtime', async ({ page }) => {
-  const state = await mockLibraryTextbookFormalAssets(page);
+test('library textbook workbench mock flow renders without runtime', async ({ page }) => {
+  const state = await mockLibraryTextbookWorkbench(page);
   let sandboxAvailable = true;
   const sandboxRequests = [];
   const networkFindings = [];
@@ -767,7 +627,7 @@ test('library textbook formal assets mock flow renders without runtime', async (
       networkFindings.push(`response ${url.pathname}: ${String(error)}`);
     }));
   });
-  // If either formal-asset view starts depending on runtime state, it will get
+  // If either the document usage view or textbook workbench starts depending on runtime state, it will get
   // a 503 here and the zero-request assertion will also fail.
   await page.route('**/api/v1/workspaces/*/sandbox/stats', (route) => {
     const url = new URL(route.request().url());
@@ -799,91 +659,54 @@ test('library textbook formal assets mock flow renders without runtime', async (
   await page.getByRole('tab', { name: '解析结果' }).click();
   await expect(page.getByText('Algebra foundations')).toBeVisible();
 
-  await page.goto('/education');
-  await page.getByRole('link', { name: '家庭教材库' }).click();
-  await page.getByRole('button', { name: '新建教材' }).click();
-  await page.getByLabel('教材名称').fill(formalAssets.title);
-  await page.getByRole('button', { name: '创建教材' }).click();
-  await page.getByRole('button', { name: '开始加工' }).click();
-  await page.getByRole('checkbox', { name: document.original_filename }).check();
-  await page.getByRole('button', { name: '创建加工任务' }).click();
-  await expect.poll(state.startPayload).toEqual({
-    source_parse_job_ids: [completedParseJobCandidate.producer_job_id],
+  await page.getByRole('button', { name: '用作教材' }).click();
+  const sourceDialog = page.getByRole('dialog', { name: '选择教材来源' });
+  await expect(sourceDialog.getByRole('radio', { name: /algebra-textbook\.pdf/ })).toBeChecked();
+  await sourceDialog.getByLabel('教材名称').fill(textbookAssets.title);
+  await sourceDialog.getByRole('button', { name: '添加并分析' }).click();
+
+  await expect(page).toHaveURL((url) => (
+    url.pathname === `/textbooks/${textbookAssets.textbookId}`
+    && url.searchParams.get('activity') === textbookAssets.jobId
+    && url.searchParams.get('kp') === 'variables-and-equations'
+    && url.searchParams.get('view') === 'source'
+  ));
+  await expect(page.getByText(textbookAssets.title, { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '变量与方程' })).toBeVisible();
+  await expect(page.getByText('变量可以表示未知数。')).toBeVisible();
+  await expect(page.getByRole('complementary', { name: '教材处理活动' })).toBeVisible();
+  await expect.poll(state.createRequest).toEqual({
+    parse_job_id: completedParseJobCandidate.parse_job_id,
+    primary_artifact_id: completedParseJobCandidate.primary_artifact_id,
+    title: textbookAssets.title,
+    idempotency_key: expect.any(String),
   });
-
-  await expect(page.getByRole('button', { name: '执行本地加工' })).toBeVisible();
-  await page.getByRole('tab', { name: '来源' }).click();
-  await expect(page.getByText(document.original_filename)).toBeVisible();
-  await expect(page.getByText(/AnyDoc Local 0.2.4/)).toBeVisible();
-  await expect(page.getByRole('link', { name: `查看 ${document.original_filename}` })).toHaveAttribute(
-    'href',
-    `/documents/${document.document_id}`,
-  );
-
-  await page.getByRole('button', { name: '执行本地加工' }).click();
-  await page.getByRole('button', { name: '生成教学包' }).click();
-  await expect(page.getByText('教学包正在加工')).toBeVisible();
-  const teachingRunDialog = page.getByRole('dialog', { name: '教材教学包运行' });
-  await expect(teachingRunDialog).toBeVisible();
-  await dismissTeachingRunDialog(page, teachingRunDialog);
-  state.finishTeaching();
-  await page.reload();
-
-  await page.getByRole('tab', { name: '知识资产' }).click();
-  await expect(page.getByText('覆盖审计通过')).toBeVisible();
-  await page.getByRole('button', { name: '查看工具包' }).click();
-  await expect(page.getByText('正式资产不依赖 sandbox。')).toBeVisible();
 
   sandboxAvailable = false;
   await page.goto(`/documents/${document.document_id}`);
   await page.getByRole('tab', { name: '教材资产' }).click();
-  await expect(page.getByRole('link', { name: formalAssets.title })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: textbookAssets.title })).toHaveAttribute(
     'href',
-    `/education/textbooks/${formalAssets.textbookId}`,
+    `/textbooks/${textbookAssets.textbookId}`,
   );
-  await expect(page.getByText('教学包 #1')).toBeVisible();
-  await expect(page.getByRole('link', { name: '查看正式教材资产' })).toBeVisible();
+  await expect(page.getByText('结构已就绪')).toBeVisible();
+  await expect(page.getByText('讲义 0 / 1')).toBeVisible();
+  await expect(page.getByRole('link', { name: '打开教材' })).toBeVisible();
 
-  await page.getByRole('link', { name: '查看正式教材资产' }).click();
-  await expect(page.getByRole('heading', { name: formalAssets.title })).toBeVisible();
-  await page.getByRole('tab', { name: '知识资产' }).click();
-  await page.getByRole('button', { name: '查看工具包' }).click();
-  await expect(page.getByText('正式资产不依赖 sandbox。')).toBeVisible();
+  await page.getByRole('link', { name: '打开教材' }).click();
+  await expect(page).toHaveURL((url) => (
+    url.pathname === `/textbooks/${textbookAssets.textbookId}`
+    && !url.searchParams.has('activity')
+    && url.searchParams.get('kp') === 'variables-and-equations'
+    && url.searchParams.get('view') === 'source'
+  ));
+  await expect(page.getByText(textbookAssets.title, { exact: true })).toBeVisible();
   await expect(page.locator('body')).not.toContainText(/storage_key|snapshot_prefix|bundle_prefix|sandbox_path|minio/i);
-
-  await page.getByRole('button', { name: '发布版本' }).click();
-  await expect(page.getByText('已发布')).toBeVisible();
-  await page.getByRole('button', { name: '分配学生' }).click();
-  await page.getByRole('combobox').selectOption(student.user_id);
-  await page.getByRole('button', { name: '分配教材' }).click();
-  await page.getByRole('tab', { name: '学生' }).click();
-  await expect(page.getByRole('button', { name: `查看记录：${student.name}` })).toBeVisible();
-
-  await page.goto(`/documents/${document.document_id}`);
-  await page.getByRole('tab', { name: '教材资产' }).click();
-  await expect(page.getByText('已发布')).toBeVisible();
-  await expect(page.getByRole('link', { name: '查看正式教材资产' })).toBeVisible();
 
   expect(state.teachingUsageRequests().length).toBeGreaterThan(0);
   for (const path of state.teachingUsageRequests()) {
     expect(path).toBe(`/api/v1/documents/${document.document_id}/teaching-usage`);
   }
-  for (const packageId of state.teachingUsagePackageIds()) {
-    expect(packageId).toBe(formalAssets.teachingPackageId);
-  }
-  expect(new Set(state.assetRequests())).toEqual(new Set([
-    `/api/v1/education/teaching-packages/${formalAssets.teachingPackageId}/assets`,
-    `/api/v1/education/teaching-packages/${formalAssets.teachingPackageId}/chapters/${formalAssets.chapterId}/assets/toolkit`,
-  ]));
-  expect(state.publishRequest()).toEqual({
-    textbook_id: formalAssets.textbookId,
-    version_id: formalAssets.versionId,
-    teaching_package_id: formalAssets.teachingPackageId,
-  });
-  expect(state.assignmentRequest()).toEqual({
-    publication_id: formalAssets.publicationId,
-    student_user_id: student.user_id,
-  });
   expect(sandboxRequests).toEqual([]);
 
   await page.waitForLoadState('networkidle');
@@ -891,14 +714,16 @@ test('library textbook formal assets mock flow renders without runtime', async (
   const requiredInspectedPaths = [
     `/api/v1/documents/${document.document_id}`,
     `/api/v1/documents/${document.document_id}/teaching-usage`,
-    `/api/v1/education/teaching-packages/${formalAssets.teachingPackageId}/assets`,
-    `/api/v1/education/teaching-packages/${formalAssets.teachingPackageId}/chapters/${formalAssets.chapterId}/assets/toolkit`,
+    '/api/v1/education/textbook-sources',
+    '/api/v1/education/textbooks',
+    `/api/v1/education/textbooks/${textbookAssets.textbookId}`,
+    `/api/v1/education/textbooks/${textbookAssets.textbookId}/structure`,
   ];
   for (const path of requiredInspectedPaths) {
     expect(inspectedResponsePaths).toContain(path);
   }
-  expect(inspectedBodyCounts.requests).toBeGreaterThanOrEqual(20);
-  expect(inspectedBodyCounts.responses).toBeGreaterThanOrEqual(20);
+  expect(inspectedBodyCounts.requests).toBeGreaterThanOrEqual(10);
+  expect(inspectedBodyCounts.responses).toBeGreaterThanOrEqual(10);
   expect(networkFindings).toEqual([]);
 });
 

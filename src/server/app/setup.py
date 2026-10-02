@@ -1150,7 +1150,7 @@ app.include_router(
 )  # /api/v1/education/tasks/* - Homework workflow
 app.include_router(
     education_textbooks_router
-)  # /api/v1/education/textbooks + learning - Versioned textbook learning
+)  # /api/v1/education/textbooks + learning - Current textbook workbench
 app.include_router(users_router)  # /api/v1/users/* - User management
 app.include_router(
     user_events_router

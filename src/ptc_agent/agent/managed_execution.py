@@ -162,12 +162,6 @@ def _validate_managed_textbook_path(
         relative = candidate_path.relative_to(root)
     except ValueError:
         return None, "managed teaching candidate path is not allowed"
-    if relative == PurePosixPath(".langalpha/progress.jsonl"):
-        return (
-            None,
-            "managed progress stream is append-only through the staged helper; "
-            "use python .langalpha/progress.py",
-        )
     if len(relative.parts) < 2 or relative.parts[0] not in {"work", "outputs"}:
         return None, "managed teaching candidate path is not allowed"
     return relative, None

@@ -1,4 +1,4 @@
-"""Shared managed-run assembly for book-to-skill education jobs."""
+"""Shared normal PTC graph assembly for managed textbook jobs."""
 
 from __future__ import annotations
 

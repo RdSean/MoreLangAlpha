@@ -145,7 +145,7 @@ describe('useNavigationData — stable thread ordering', () => {
         { workspace_id: 'ws-1' },
         {
           workspace_id: 'managed-1',
-          config: { managed_execution: { kind: 'education_teaching', job_id: 'job-1' } },
+          config: { managed_execution: { kind: 'education_book', job_id: 'job-1' } },
         },
         { workspace_id: 'ws-2' },
       ],

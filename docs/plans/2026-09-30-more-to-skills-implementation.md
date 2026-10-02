@@ -22,6 +22,12 @@ Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skill
 
 每项经过相应行为检查后补最小回归、中文 CHANGELOG 和原子提交。实现新模块时不添加旧 schema 兼容读取，不留下永久 feature flag。删除范围必须满足清理清单，而不是“最少改几行能跑”。
 
+### 当前检查点（2026-10-02）
+
+Task 1–7 与 Task 4A 已交付。Task 7 已向开发库应用 `082_more_to_skills_textbooks`，并按升级前导出的私人资源清单清理旧教材；详细范围、保护计数、检查证据和未验收项见[切换记录](2026-10-02-more-to-skills-cutover-results.md)。Task 8 的真实模型生成、故障注入和完整学生权限/多 worker/浏览器链路仍待执行，不能将本次清理等同于整个重构验收通过。
+
+本机依赖继续沿用 `codex/library-textbook-assets` 的 `.env`/`agent_config.yaml`，对象存储以 `.env` 的 `localhost:9000` 为准，不使用可能变化的办公室 LAN 地址。5177/8000 由本 worktree 启动，基础设施原挂载与 volumes 保留。
+
 ## Task 1：固定新契约和对外 API
 
 **Files**

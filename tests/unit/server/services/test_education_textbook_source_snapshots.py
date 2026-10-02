@@ -15,7 +15,7 @@ from src.server.services import education_textbook_source_snapshots as snapshots
 
 
 HOUSEHOLD_ID = "6eebf7fb-9579-4c5d-825a-2e595b7f1b18"
-VERSION_ID = "f5761267-11d1-4977-8107-e2671c99a2f0"
+TEXTBOOK_ID = "f5761267-11d1-4977-8107-e2671c99a2f0"
 PRODUCER_JOB_ID = "job-A1b2C3d4E5f6"
 DOCUMENT_ID = "doc-A1b2C3d4E5f6"
 PRIMARY_ARTIFACT_ID = "art-A1b2C3d4E5f6"
@@ -77,12 +77,8 @@ def _configure_store(
     uploads: dict[str, bytes] = {}
     deleted: list[str] = []
     write_count = 0
-    monkeypatch.setattr(
-        snapshots, "get_owned_parse_job", AsyncMock(return_value=job)
-    )
-    monkeypatch.setattr(
-        snapshots, "list_artifacts", AsyncMock(return_value=artifacts)
-    )
+    monkeypatch.setattr(snapshots, "get_owned_parse_job", AsyncMock(return_value=job))
+    monkeypatch.setattr(snapshots, "list_artifacts", AsyncMock(return_value=artifacts))
 
     async def read_object(key: str) -> bytes | None:
         if readback_overrides is not None and key in readback_overrides:
@@ -120,18 +116,23 @@ def _configure_store(
     return uploads, deleted
 
 
-def test_snapshot_prefix_uses_the_pregenerated_version_and_safe_components():
+def test_snapshot_prefix_rejects_legacy_version_layout():
+    with pytest.raises(TypeError):
+        snapshots.build_snapshot_prefix(
+            household_id=HOUSEHOLD_ID,
+            textbook_slug="reading-explorer-3",
+            version_id=TEXTBOOK_ID,
+            position=1,
+        )
+
+
+def test_snapshot_prefix_uses_the_single_source_book_identity():
     prefix = snapshots.build_snapshot_prefix(
         household_id=HOUSEHOLD_ID,
-        textbook_slug="reading-explorer-3",
-        version_id=VERSION_ID,
-        position=1,
+        textbook_id=TEXTBOOK_ID,
     )
 
-    assert prefix == (
-        f"education/{HOUSEHOLD_ID}/reading-explorer-3/source-bundles/"
-        f"{VERSION_ID}/01/"
-    )
+    assert prefix == (f"education/{HOUSEHOLD_ID}/textbooks/{TEXTBOOK_ID}/source/")
 
 
 @pytest.mark.asyncio
@@ -169,16 +170,12 @@ async def test_completed_owned_bundle_preserves_paths_hashes_and_manifest(monkey
         document_id=DOCUMENT_ID,
         producer_job_id=PRODUCER_JOB_ID,
         household_id=HOUSEHOLD_ID,
-        textbook_slug="reading-explorer-3",
-        version_id=VERSION_ID,
-        position=1,
+        textbook_id=TEXTBOOK_ID,
     )
 
     prefix = snapshots.build_snapshot_prefix(
         household_id=HOUSEHOLD_ID,
-        textbook_slug="reading-explorer-3",
-        version_id=VERSION_ID,
-        position=1,
+        textbook_id=TEXTBOOK_ID,
     )
     assert set(uploads) == {
         f"{prefix}artifacts/document.md",
@@ -240,17 +237,13 @@ async def test_snapshot_rejects_incomplete_parse_jobs(monkeypatch, status):
         objects={},
     )
 
-    with pytest.raises(
-        snapshots.TextbookSourceSnapshotError, match="not completed"
-    ):
+    with pytest.raises(snapshots.TextbookSourceSnapshotError, match="not completed"):
         await snapshots.freeze_parse_job_source(
             owner_user_id="parent-1",
             document_id=DOCUMENT_ID,
             producer_job_id=PRODUCER_JOB_ID,
             household_id=HOUSEHOLD_ID,
-            textbook_slug="reading-explorer-3",
-            version_id=VERSION_ID,
-            position=1,
+            textbook_id=TEXTBOOK_ID,
         )
 
 
@@ -269,9 +262,7 @@ async def test_snapshot_rejects_missing_or_foreign_parse_jobs(monkeypatch):
             document_id=DOCUMENT_ID,
             producer_job_id=PRODUCER_JOB_ID,
             household_id=HOUSEHOLD_ID,
-            textbook_slug="reading-explorer-3",
-            version_id=VERSION_ID,
-            position=1,
+            textbook_id=TEXTBOOK_ID,
         )
 
 
@@ -302,9 +293,7 @@ async def test_snapshot_requires_exactly_one_markdown_primary_artifact(monkeypat
             document_id=DOCUMENT_ID,
             producer_job_id=PRODUCER_JOB_ID,
             household_id=HOUSEHOLD_ID,
-            textbook_slug="reading-explorer-3",
-            version_id=VERSION_ID,
-            position=1,
+            textbook_id=TEXTBOOK_ID,
         )
 
 
@@ -325,17 +314,13 @@ async def test_snapshot_rejects_a_bundle_without_a_primary_artifact(monkeypatch)
         objects={},
     )
 
-    with pytest.raises(
-        snapshots.TextbookSourceSnapshotError, match="exactly one"
-    ):
+    with pytest.raises(snapshots.TextbookSourceSnapshotError, match="exactly one"):
         await snapshots.freeze_parse_job_source(
             owner_user_id="parent-1",
             document_id=DOCUMENT_ID,
             producer_job_id=PRODUCER_JOB_ID,
             household_id=HOUSEHOLD_ID,
-            textbook_slug="reading-explorer-3",
-            version_id=VERSION_ID,
-            position=1,
+            textbook_id=TEXTBOOK_ID,
         )
 
 
@@ -361,9 +346,7 @@ async def test_snapshot_rejects_unsupported_primary_format(monkeypatch):
             document_id=DOCUMENT_ID,
             producer_job_id=PRODUCER_JOB_ID,
             household_id=HOUSEHOLD_ID,
-            textbook_slug="reading-explorer-3",
-            version_id=VERSION_ID,
-            position=1,
+            textbook_id=TEXTBOOK_ID,
         )
 
 
@@ -400,16 +383,12 @@ async def test_snapshot_preserves_a_source_manifest_under_artifacts(monkeypatch)
         document_id=DOCUMENT_ID,
         producer_job_id=PRODUCER_JOB_ID,
         household_id=HOUSEHOLD_ID,
-        textbook_slug="reading-explorer-3",
-        version_id=VERSION_ID,
-        position=1,
+        textbook_id=TEXTBOOK_ID,
     )
 
     prefix = snapshots.build_snapshot_prefix(
         household_id=HOUSEHOLD_ID,
-        textbook_slug="reading-explorer-3",
-        version_id=VERSION_ID,
-        position=1,
+        textbook_id=TEXTBOOK_ID,
     )
     assert f"{prefix}artifacts/manifest.json" in uploads
     assert f"{prefix}manifest.json" in uploads
@@ -433,9 +412,7 @@ async def test_snapshot_failure_when_destination_hash_differs_cleans_exact_key(
     )
     prefix = snapshots.build_snapshot_prefix(
         household_id=HOUSEHOLD_ID,
-        textbook_slug="reading-explorer-3",
-        version_id=VERSION_ID,
-        position=1,
+        textbook_id=TEXTBOOK_ID,
     )
     destination_key = f"{prefix}artifacts/document.md"
     uploads, deleted = _configure_store(
@@ -446,17 +423,13 @@ async def test_snapshot_failure_when_destination_hash_differs_cleans_exact_key(
         readback_overrides={destination_key: b"tampered"},
     )
 
-    with pytest.raises(
-        snapshots.TextbookSourceSnapshotError, match="verification"
-    ):
+    with pytest.raises(snapshots.TextbookSourceSnapshotError, match="verification"):
         await snapshots.freeze_parse_job_source(
             owner_user_id="parent-1",
             document_id=DOCUMENT_ID,
             producer_job_id=PRODUCER_JOB_ID,
             household_id=HOUSEHOLD_ID,
-            textbook_slug="reading-explorer-3",
-            version_id=VERSION_ID,
-            position=1,
+            textbook_id=TEXTBOOK_ID,
         )
 
     assert list(uploads) == [destination_key]
@@ -492,9 +465,7 @@ async def test_snapshot_upload_just_below_document_cap_succeeds(monkeypatch):
         document_id=DOCUMENT_ID,
         producer_job_id=PRODUCER_JOB_ID,
         household_id=HOUSEHOLD_ID,
-        textbook_slug="reading-explorer-3",
-        version_id=VERSION_ID,
-        position=1,
+        textbook_id=TEXTBOOK_ID,
     )
 
     assert uploads
@@ -533,9 +504,7 @@ async def test_snapshot_upload_above_document_cap_is_rejected(monkeypatch):
             document_id=DOCUMENT_ID,
             producer_job_id=PRODUCER_JOB_ID,
             household_id=HOUSEHOLD_ID,
-            textbook_slug="reading-explorer-3",
-            version_id=VERSION_ID,
-            position=1,
+            textbook_id=TEXTBOOK_ID,
         )
 
     assert uploads == {}
@@ -580,21 +549,17 @@ async def test_snapshot_cancellation_cleans_the_completed_write(monkeypatch):
             document_id=DOCUMENT_ID,
             producer_job_id=PRODUCER_JOB_ID,
             household_id=HOUSEHOLD_ID,
-            textbook_slug="reading-explorer-3",
-            version_id=VERSION_ID,
-            position=1,
+            textbook_id=TEXTBOOK_ID,
         )
 
     assert list(uploads) == [
         (
-            f"education/{HOUSEHOLD_ID}/reading-explorer-3/source-bundles/"
-            f"{VERSION_ID}/01/artifacts/document.md"
+            f"education/{HOUSEHOLD_ID}/textbooks/{TEXTBOOK_ID}/source/artifacts/document.md"
         )
     ]
     assert deleted == [
         (
-            f"education/{HOUSEHOLD_ID}/reading-explorer-3/source-bundles/"
-            f"{VERSION_ID}/01/artifacts/images/figure.png"
+            f"education/{HOUSEHOLD_ID}/textbooks/{TEXTBOOK_ID}/source/artifacts/images/figure.png"
         ),
         next(iter(uploads)),
     ]
@@ -613,9 +578,7 @@ async def test_snapshot_cancellation_waits_for_blocked_upload_then_deletes_key(
     )
     prefix = snapshots.build_snapshot_prefix(
         household_id=HOUSEHOLD_ID,
-        textbook_slug="reading-explorer-3",
-        version_id=VERSION_ID,
-        position=1,
+        textbook_id=TEXTBOOK_ID,
     )
     destination_key = f"{prefix}artifacts/document.md"
     started = threading.Event()
@@ -648,7 +611,9 @@ async def test_snapshot_cancellation_waits_for_blocked_upload_then_deletes_key(
         "list_artifacts",
         AsyncMock(return_value=[primary]),
     )
-    monkeypatch.setattr(snapshots, "_read_object", AsyncMock(return_value=primary_bytes))
+    monkeypatch.setattr(
+        snapshots, "_read_object", AsyncMock(return_value=primary_bytes)
+    )
     monkeypatch.setattr(snapshots, "upload_bytes", blocking_upload)
     monkeypatch.setattr(snapshots, "delete_object", record_delete)
     monkeypatch.setattr(
@@ -663,9 +628,7 @@ async def test_snapshot_cancellation_waits_for_blocked_upload_then_deletes_key(
             document_id=DOCUMENT_ID,
             producer_job_id=PRODUCER_JOB_ID,
             household_id=HOUSEHOLD_ID,
-            textbook_slug="reading-explorer-3",
-            version_id=VERSION_ID,
-            position=1,
+            textbook_id=TEXTBOOK_ID,
         )
     )
     assert await asyncio.to_thread(started.wait, 1)
@@ -715,19 +678,15 @@ async def test_snapshot_failure_deletes_only_exact_uploaded_keys(monkeypatch):
             document_id=DOCUMENT_ID,
             producer_job_id=PRODUCER_JOB_ID,
             household_id=HOUSEHOLD_ID,
-            textbook_slug="reading-explorer-3",
-            version_id=VERSION_ID,
-            position=1,
+            textbook_id=TEXTBOOK_ID,
         )
 
     assert list(uploads) == [
         (
-            f"education/{HOUSEHOLD_ID}/reading-explorer-3/source-bundles/"
-            f"{VERSION_ID}/01/artifacts/document.md"
+            f"education/{HOUSEHOLD_ID}/textbooks/{TEXTBOOK_ID}/source/artifacts/document.md"
         ),
         (
-            f"education/{HOUSEHOLD_ID}/reading-explorer-3/source-bundles/"
-            f"{VERSION_ID}/01/artifacts/images/figure.png"
+            f"education/{HOUSEHOLD_ID}/textbooks/{TEXTBOOK_ID}/source/artifacts/images/figure.png"
         ),
     ]
     assert deleted == list(reversed(list(uploads)))

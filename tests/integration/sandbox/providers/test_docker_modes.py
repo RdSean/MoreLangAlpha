@@ -15,15 +15,17 @@ import pytest_asyncio
 from ptc_agent.config.core import DockerConfig
 from ptc_agent.core.sandbox.providers.docker import DockerProvider, DockerRuntime
 from ptc_agent.core.sandbox.runtime import RuntimeState
-from src.server.services.education_teaching_storage import progress_helper_source
 
 pytestmark = [
     pytest.mark.asyncio(loop_scope="class"),
     pytest.mark.skipif(
-        "docker" not in os.getenv(
+        "docker"
+        not in os.getenv(
             "SANDBOX_TEST_PROVIDERS",
             os.getenv("SANDBOX_TEST_PROVIDER", "memory"),
-        ).lower().split(","),
+        )
+        .lower()
+        .split(","),
         reason="Docker tests require docker in SANDBOX_TEST_PROVIDERS",
     ),
 ]
@@ -39,10 +41,14 @@ class TestTarMode:
 
     @pytest_asyncio.fixture(scope="class", loop_scope="class")
     async def runtime(self):
-        provider = DockerProvider(DockerConfig(
-            image=os.environ.get("DOCKER_SANDBOX_IMAGE", "langalpha-sandbox:latest"),
-            dev_mode=False,
-        ))
+        provider = DockerProvider(
+            DockerConfig(
+                image=os.environ.get(
+                    "DOCKER_SANDBOX_IMAGE", "langalpha-sandbox:latest"
+                ),
+                dev_mode=False,
+            )
+        )
         rt = await provider.create(
             env_vars={"TEST_VAR": "tar_test"},
             managed_security=True,
@@ -94,9 +100,7 @@ class TestTarMode:
         )
         assert result.exit_code == 0
 
-        await runtime.upload_file(
-            b"x", f"{runtime.working_dir}/nested/b/file.txt"
-        )
+        await runtime.upload_file(b"x", f"{runtime.working_dir}/nested/b/file.txt")
         result = await runtime.exec(
             f"test $(stat -c %u {runtime.working_dir}/nested/b) -eq {uid} && "
             f"test $(stat -c %g {runtime.working_dir}/nested/b) -eq {gid} && "
@@ -115,14 +119,12 @@ class TestTarMode:
         await runtime.upload_file(b"x", f"{upload_root}/nested/file.txt")
 
         after = await runtime.exec("stat -c '%a %u %g' /tmp")
-        owner = await runtime.exec(
-            f"stat -c '%u %g' {upload_root}/nested"
-        )
+        owner = await runtime.exec(f"stat -c '%u %g' {upload_root}/nested")
         assert before.stdout == after.stdout
         assert owner.exit_code == 0
         await runtime.exec(f"rm -rf {upload_root}")
 
-    async def test_managed_textbook_smoke_commands_and_progress(
+    async def test_managed_textbook_smoke_commands_and_read_only_inputs(
         self, runtime: DockerRuntime
     ):
         root = f"/managed/textbook-job/{uuid4()}"
@@ -140,26 +142,12 @@ class TestTarMode:
         )
         await runtime.ensure_directory(f"{root}/inputs", mode=0o555)
         await runtime.seal_directory_read_only(f"{root}/inputs")
-        await runtime.upload_file(
-            progress_helper_source(),
-            f"{root}/.langalpha/progress.py",
-        )
-        await runtime.upload_file(b"", f"{root}/.langalpha/progress.jsonl")
-        await runtime.seal_file_append_only(
-            f"{root}/.langalpha/progress.jsonl"
-        )
-
-        event = (
-            '{"event_key":"chapter_analysis:completed:smoke",'
-            '"stage":"chapter_analysis","status":"completed"}'
-        )
         result = await runtime.exec(
             f"cd {root} && "
             "mkdir -p outputs/book-skill/chapters/unit-1 && "
             "printf 'scratch\\n' > work/scratch.txt && "
             "printf '# Reading A\\n' > "
             "outputs/book-skill/chapters/unit-1/reading-a.md && "
-            f"python3 .langalpha/progress.py '{event}' && "
             "ls outputs/book-skill/chapters/unit-1 && "
             "wc -c work/scratch.txt && "
             "head -n 1 outputs/book-skill/chapters/unit-1/reading-a.md && "
@@ -177,16 +165,6 @@ class TestTarMode:
         ):
             denied = await runtime.exec(f"printf 'bad\\n' > {target}")
             assert denied.exit_code != 0
-
-        progress = await runtime.exec(
-            f"tail -n 1 {root}/.langalpha/progress.jsonl"
-        )
-        assert progress.exit_code == 0
-        assert '"event_key":"chapter_analysis:completed:smoke"' in progress.stdout
-        overwritten = await runtime.exec(
-            f"printf 'replaced\\n' > {root}/.langalpha/progress.jsonl"
-        )
-        assert overwritten.exit_code != 0
 
     async def test_code_run_basic(self, runtime: DockerRuntime):
         """code_run should execute Python and return stdout."""
@@ -227,11 +205,15 @@ class TestBindMountMode:
     @pytest_asyncio.fixture(scope="class", loop_scope="class")
     async def runtime_and_dir(self, tmp_path_factory):
         host_dir = str(tmp_path_factory.mktemp("bind_sandbox"))
-        provider = DockerProvider(DockerConfig(
-            image=os.environ.get("DOCKER_SANDBOX_IMAGE", "langalpha-sandbox:latest"),
-            dev_mode=True,
-            host_work_dir=host_dir,
-        ))
+        provider = DockerProvider(
+            DockerConfig(
+                image=os.environ.get(
+                    "DOCKER_SANDBOX_IMAGE", "langalpha-sandbox:latest"
+                ),
+                dev_mode=True,
+                host_work_dir=host_dir,
+            )
+        )
         rt = await provider.create(env_vars={"TEST_VAR": "bind_test"})
         yield rt, host_dir
         try:
@@ -291,10 +273,14 @@ class TestChartCapture:
 
     @pytest_asyncio.fixture(scope="class", loop_scope="class")
     async def runtime(self):
-        provider = DockerProvider(DockerConfig(
-            image=os.environ.get("DOCKER_SANDBOX_IMAGE", "langalpha-sandbox:latest"),
-            dev_mode=False,
-        ))
+        provider = DockerProvider(
+            DockerConfig(
+                image=os.environ.get(
+                    "DOCKER_SANDBOX_IMAGE", "langalpha-sandbox:latest"
+                ),
+                dev_mode=False,
+            )
+        )
         rt = await provider.create()
         yield rt
         try:
@@ -362,10 +348,14 @@ class TestPreviewUrl:
 
     @pytest_asyncio.fixture(scope="class", loop_scope="class")
     async def runtime(self):
-        provider = DockerProvider(DockerConfig(
-            image=os.environ.get("DOCKER_SANDBOX_IMAGE", "langalpha-sandbox:latest"),
-            dev_mode=False,
-        ))
+        provider = DockerProvider(
+            DockerConfig(
+                image=os.environ.get(
+                    "DOCKER_SANDBOX_IMAGE", "langalpha-sandbox:latest"
+                ),
+                dev_mode=False,
+            )
+        )
         rt = await provider.create()
         yield rt
         try:
@@ -414,10 +404,14 @@ class TestSessions:
 
     @pytest_asyncio.fixture(scope="class", loop_scope="class")
     async def runtime(self):
-        provider = DockerProvider(DockerConfig(
-            image=os.environ.get("DOCKER_SANDBOX_IMAGE", "langalpha-sandbox:latest"),
-            dev_mode=False,
-        ))
+        provider = DockerProvider(
+            DockerConfig(
+                image=os.environ.get(
+                    "DOCKER_SANDBOX_IMAGE", "langalpha-sandbox:latest"
+                ),
+                dev_mode=False,
+            )
+        )
         rt = await provider.create()
         yield rt
         try:

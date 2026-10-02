@@ -48,10 +48,8 @@ from src.server.services.education_book_structure import (
     TrustedBookSource,
     get_more_to_skills_identity,
     get_projected_current_structure,
+    load_more_to_skills_files,
     parse_book_structure,
-)
-from src.server.services.education_teaching_storage import (
-    stage_managed_teaching_skills,
 )
 from src.server.services.education_managed_runs import (
     build_managed_education_graph,
@@ -465,6 +463,25 @@ def _safe_snapshot_relative_path(value: object) -> str:
     return path.as_posix()
 
 
+async def stage_book_skill(
+    execution_id: str,
+    sandbox: Any,
+    *,
+    expected_skill_sha256: str,
+    expected_schema_sha256: str,
+) -> None:
+    """Stage only the fixed repository skill, then make its catalog read-only."""
+    files = load_more_to_skills_files(
+        expected_skill_sha256=expected_skill_sha256,
+        expected_schema_sha256=expected_schema_sha256,
+    )
+    root = f"/managed/textbook-job/{UUID(execution_id)}/.agents/skills/more-to-skills"
+    for relative, content in files.items():
+        if not await sandbox.aupload_file_bytes(f"{root}/{relative}", content):
+            raise RuntimeError("Could not stage the managed textbook skill")
+    await sandbox.seal_directory_read_only(root)
+
+
 async def stage_book_execution(
     *,
     item: Mapping[str, Any],
@@ -478,10 +495,9 @@ async def stage_book_execution(
     prefix = str(item.get("source_snapshot_prefix") or "")
     if not prefix.startswith("education/") or ".." in prefix:
         raise ValueError("Textbook source snapshot prefix is invalid")
-    await stage_managed_teaching_skills(
+    await stage_book_skill(
         execution_id,
         sandbox,
-        skill_names=("more-to-skills",),
         expected_skill_sha256=str(item.get("skill_sha256") or ""),
         expected_schema_sha256=str(item.get("schema_sha256") or ""),
     )

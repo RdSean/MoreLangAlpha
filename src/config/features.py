@@ -94,17 +94,6 @@ FEATURES: dict[str, FeatureSpec] = {
             "behavior and pricing may change."
         ),
     ),
-    "education_structure_lessons": FeatureSpec(
-        key="education_structure_lessons",
-        label="Textbook structures and lessons",
-        description=(
-            "Adds reviewable textbook Unit structures, per-knowledge-point "
-            "Markdown lessons, publication snapshots, and student learning "
-            "assets."
-        ),
-        enabled=True,
-        gate=FeatureGate.NONE,
-    ),
 }
 
 

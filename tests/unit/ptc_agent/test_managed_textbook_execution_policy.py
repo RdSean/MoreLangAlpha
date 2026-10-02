@@ -188,9 +188,8 @@ def test_managed_policy_progress_tool_is_opt_in(monkeypatch):
     monkeypatch.setattr(
         agent_module,
         "create_report_progress_tool",
-        lambda: created.append("report_progress") or SimpleNamespace(
-            tool_name="report_progress"
-        ),
+        lambda: created.append("report_progress")
+        or SimpleNamespace(tool_name="report_progress"),
     )
     policy = managed_execution.ManagedExecutionPolicy(
         allowed_skill_names=frozenset(),
@@ -308,9 +307,7 @@ async def test_managed_sandbox_precreates_write_zones_and_read_only_inputs(monke
     assert (f"{policy.filesystem_root}/inputs", 0o555) in runtime.directories
     assert (f"{policy.filesystem_root}/work", 0o755) in runtime.directories
     assert (f"{policy.filesystem_root}/outputs", 0o755) in runtime.directories
-    assert runtime.uploads == [
-        (b"", f"{policy.filesystem_root}/.langalpha/progress.jsonl")
-    ]
+    assert runtime.uploads == []
 
 
 def test_managed_agent_has_no_fixed_textbook_subagent_registration():

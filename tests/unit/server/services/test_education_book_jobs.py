@@ -580,9 +580,7 @@ async def test_stage_execution_reads_only_declared_snapshot_objects_and_seals_in
             }
         ),
     )
-    monkeypatch.setattr(
-        education_book_jobs, "stage_managed_teaching_skills", stage_skill
-    )
+    monkeypatch.setattr(education_book_jobs, "stage_book_skill", stage_skill)
 
     class Sandbox:
         def __init__(self):
@@ -609,7 +607,6 @@ async def test_stage_execution_reads_only_declared_snapshot_objects_and_seals_in
     stage_skill.assert_awaited_once_with(
         str(CLAIMED["execution_id"]),
         sandbox,
-        skill_names=("more-to-skills",),
         expected_skill_sha256=CLAIMED["skill_sha256"],
         expected_schema_sha256=CLAIMED["schema_sha256"],
     )
@@ -716,9 +713,7 @@ async def test_stage_material_uses_projected_structure_and_previous_context_fall
     monkeypatch.setattr(
         education_book_jobs, "get_projected_current_structure", projection
     )
-    monkeypatch.setattr(
-        education_book_jobs, "stage_managed_teaching_skills", AsyncMock()
-    )
+    monkeypatch.setattr(education_book_jobs, "stage_book_skill", AsyncMock())
 
     class Sandbox:
         def __init__(self):
@@ -822,9 +817,7 @@ async def test_stage_supplementary_uses_projected_structure_and_current_material
         "get_projected_current_structure",
         AsyncMock(return_value=projected),
     )
-    monkeypatch.setattr(
-        education_book_jobs, "stage_managed_teaching_skills", AsyncMock()
-    )
+    monkeypatch.setattr(education_book_jobs, "stage_book_skill", AsyncMock())
 
     class Sandbox:
         def __init__(self):

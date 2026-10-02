@@ -21,9 +21,7 @@ and the skills it owns are the directories under its `skills/` -- the same
 layout an uploaded package arrives in, so nothing about reading one depends on
 whether it shipped in the image.
 
-The `langalpha_local` bundle currently includes two book-processing skills:
-
-- `book-to-skill` creates reusable knowledge skills from books and documents.
+The `langalpha_local` bundle ships one book-processing skill:
 - `more-to-skills` creates a recursive source-anchored book structure and
   independently generated knowledge-point materials. Managed textbook jobs use
   this repository-owned copy and record its skill and schema digests.

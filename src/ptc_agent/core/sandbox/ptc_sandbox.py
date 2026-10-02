@@ -467,10 +467,6 @@ class PTCSandbox:
         if verification.exit_code != 0:
             raise RuntimeError("Managed textbook writable directories are unavailable")
 
-        await self.runtime.upload_file(
-            b"",
-            f"{root}/.langalpha/progress.jsonl",
-        )
         logger.info("Managed textbook sandbox ready", sandbox_id=self.sandbox_id)
 
     async def ensure_directories(

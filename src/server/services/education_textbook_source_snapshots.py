@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -29,7 +28,6 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from src.server.services.education_book_structure import MoreToSkillsIdentity
 
-_SAFE_COMPONENT = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,254}$")
 _MARKDOWN_MEDIA_TYPE = "text/markdown"
 _MARKDOWN_FORMATS = frozenset({"gfm", "markdown"})
 
@@ -53,32 +51,11 @@ def _uuid_component(value: str, label: str) -> str:
         raise ValueError(f"{label} must be a UUID") from exc
 
 
-def _safe_component(value: str, label: str) -> str:
-    if ".." in value or not _SAFE_COMPONENT.fullmatch(value):
-        raise ValueError(f"{label} must be a safe path component")
-    return value
-
-
-def build_snapshot_prefix(
-    *,
-    household_id: str,
-    textbook_id: str | None = None,
-    textbook_slug: str | None = None,
-    version_id: str | None = None,
-    position: int | None = None,
-) -> str:
-    """Derive a private source prefix, preferring the single-source book layout."""
+def build_snapshot_prefix(*, household_id: str, textbook_id: str) -> str:
+    """Derive the sole private single-source book layout."""
     household = _uuid_component(household_id, "household_id")
-    if textbook_id is not None:
-        textbook = _uuid_component(textbook_id, "textbook_id")
-        return f"education/{household}/textbooks/{textbook}/source/"
-    if textbook_slug is None or version_id is None or position is None:
-        raise ValueError("textbook_id is required")
-    version = _uuid_component(version_id, "version_id")
-    slug = _safe_component(textbook_slug, "textbook_slug")
-    if position < 1 or position > 99:
-        raise ValueError("position must be between 1 and 99")
-    return f"education/{household}/{slug}/source-bundles/{version}/{position:02d}/"
+    textbook = _uuid_component(textbook_id, "textbook_id")
+    return f"education/{household}/textbooks/{textbook}/source/"
 
 
 def _validated_relative_path(value: str) -> str:
@@ -148,18 +125,12 @@ async def freeze_parse_job_source(
     document_id: str,
     producer_job_id: str,
     household_id: str,
-    textbook_id: str | None = None,
-    textbook_slug: str | None = None,
-    version_id: str | None = None,
-    position: int | None = None,
+    textbook_id: str,
 ) -> FrozenTextbookSource:
     """Copy one completed parse bundle and return only safe queueing metadata."""
     prefix = build_snapshot_prefix(
         household_id=household_id,
         textbook_id=textbook_id,
-        textbook_slug=textbook_slug,
-        version_id=version_id,
-        position=position,
     )
     job = await get_owned_parse_job(
         owner_user_id=owner_user_id,

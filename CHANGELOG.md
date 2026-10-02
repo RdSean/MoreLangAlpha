@@ -2,6 +2,16 @@
 
 ## 2026-10-02
 
+### 重构：教材旧链退役并完成开发库一次切换
+
+- 删除旧教材 SQL 模块、20 个旧加工/审阅/进度/资产服务及其专用测试，移除版本、候选确认、讲义审批、发布 API/DTO、旧配置开关与 `book-to-skill` 分发注册。新教材继续使用单页工作台和当前授权，普通 PTC/Flash/MCP/subagent/checkpoint、家庭作业与图书馆源数据保留。
+- 暂存技能不再依赖个人目录或旧教学资产适配器；`skill_sha256` 改为实际暂存目录的确定性路径/内容 manifest 摘要，工具脚本变化也会在上传前被拒绝，完整上传后只读封存。旧 JSONL helper 特例、version/position 快照目录和根路径 fallback 删除。
+- 082 在破坏旧资源归属账本前拒绝活动旧任务/run、旧学习空间和旧 managed workspace；隔离 PostgreSQL 验证阻止升级后数据/revision 不变，并验证 081 升级与空库 head catalog 一致。对象清理脚本支持新教材准确 source/materials/supplementary 前缀，拒绝 household/textbooks 根范围。
+- 已按用户授权与升级前私人清单，将开发库 081 升级至 082，删除 3 本旧教材、33 个精确旧托管 workspace/thread 及其运行消息/checkpoint、32 个无挂载旧 sandbox 容器、355 个教材派生对象（37,590,655 字节）和 17 个旧线程 Redis 回放缓存。旧对象未启用版本保存且未做内容备份，删除不可恢复；未使用 prune/FLUSHDB，基础设施容器及 volumes 保留，23 项图书馆/家庭作业/普通会话保护计数未变。详细范围与未完成验收见 `docs/plans/2026-10-02-more-to-skills-cutover-results.md`。
+- 验证：最终后端 unit `7914 passed, 8 deselected, 1 xfailed`；教材 PostgreSQL 集成 `39 passed`；真实 managed Docker `1 passed`；前端 typecheck/build/关键路径检查通过（356.4 kB gz）。前端全量 unit 为 `2578 passed, 1 failed`，聚焦复查同一 Plugins `connectReturn` storage-throws 既有失败，教材及相关导航用例通过；未借本次清理修复无关插件行为。
+- CI 教材浏览器 fixtures 已切换到当前工作台、学生讲义与授权契约；移除退役加工/教学包/审批/发布断言，保留家庭作业和普通文档测试。最终统一 Playwright 聚焦复验 `12 passed`（含桌面、375px 与 documents-mobile），三份改动 E2E 的 ESLint/语法检查通过；非教材解析方法选择、作业创建、附件重交三个浏览器基线失败未改，未宣称全量 E2E 通过。
+- 5177/8000 继续由本 worktree 监听，LAN HTTP 均为 200；存储按用户确认沿用原 `.env` 的 `localhost:9000`。Task 8 的真实模型、故障注入、多 worker 与完整权限/浏览器链路验收仍未完成。
+
 ### 重构：图书馆教材使用查询切换到当前教材模型
 
 - 文档教学使用反查改为直接连接 `documents` 与新 `education_textbooks` 冻结来源字段；结构状态来自当前结构和最近 structure job，讲义 N/M 来自当前 KP/material 记录，不再 JOIN version、旧 structure、publication 或多来源 position。

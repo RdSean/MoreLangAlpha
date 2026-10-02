@@ -32,51 +32,59 @@ test('legacy textbook structure routes explain the one-workbench reset', async (
   await expect(page.getByRole('link', { name: '返回教材列表' })).toHaveAttribute('href', '/textbooks');
 });
 
-test('student opens a published knowledge-point lesson', async ({ page }) => {
+test('student opens the current knowledge-point lesson', async ({ page }) => {
   await mockAPI(page, {
     'GET /auth/me': student,
     'GET /education/learning/assignment-1/structure': {
       assignment_id: 'assignment-1',
-      publication_id: 'publication-1',
       textbook_id: 'textbook-1',
       textbook_title: 'Reading Explorer 3',
-      textbook_slug: 're3',
-      version_sequence: 1,
       structure_id: 'structure-1',
-      structure_sequence: 1,
-      units: [
-        {
-          unit_id: 'unit-1',
-          position: 1,
-          slug: 'unit-1-sports',
+      schema_version: '2.1.0',
+      warnings: [],
+      structure: {
+        schema_version: '2.1.0',
+        book: { title: 'Reading Explorer 3' },
+        source: { path: 'source.md', total_lines: 80 },
+        coverage: {},
+        nodes: [{
+          id: 'unit-1',
           title: 'Unit 1: Sports and Fitness',
-          summary: 'Sports and fitness',
-          unit_type: 'teaching',
-          knowledge_points: [
-            {
-              knowledge_point_id: 'kp-1',
-              position: 1,
-              slug: 'world-game',
-              title: '世界运动',
-              summary: '',
-              has_lesson: true,
-            },
-          ],
-        },
-      ],
+          anchor: { start_line: 1, end_line: 80 },
+          children: [],
+        }],
+      },
+      knowledge_points: [{
+        knowledge_point_id: 'kp-1',
+        skill_kp_id: 'world-game',
+        position: 1,
+        title: '世界运动',
+        unit_skill_node_id: 'unit-1',
+        node_skill_ids: [],
+        start_line: 10,
+        end_line: 20,
+        content_file: 'materials/kp-1.md',
+        material_available: true,
+      }],
+    },
+    'GET /education/textbooks/textbook-1/source': {
+      textbook_id: 'textbook-1',
+      start_line: 1,
+      end_line: 32,
+      total_lines: 80,
+      markdown: '# Unit 1: Sports and Fitness\n\nFootball is played around the world.',
     },
     'GET /education/learning/assignment-1/knowledge-points/kp-1': {
       assignment_id: 'assignment-1',
+      textbook_id: 'textbook-1',
       knowledge_point_id: 'kp-1',
-      knowledge_point_title: '世界运动',
-      unit_id: 'unit-1',
-      unit_title: 'Unit 1',
-      revision_id: 'revision-1',
-      revision: 1,
-      format: 'markdown',
+      skill_kp_id: 'world-game',
+      material_available: true,
+      markdown: '# 世界运动\n\n足球是一项简单的运动。',
+      generated_at: '2026-10-02T08:00:00Z',
+      depth: 'lesson',
+      requirements: null,
       content_sha256: 'd'.repeat(64),
-      size_bytes: 20,
-      content_markdown: '# 世界运动\n\n足球是一项简单的运动。',
     },
     'GET /education/learning/assignment-1/items': [],
     'GET /education/learning/assignment-1/chat-space': {
@@ -86,13 +94,13 @@ test('student opens a published knowledge-point lesson', async ({ page }) => {
     },
   });
 
-  await page.goto('/education/learn/assignment-1/knowledge/kp-1');
+  await page.goto('/education/learn/assignment-1?kp=world-game&view=material');
 
   await expect(page.getByRole('heading', { name: '世界运动' }).first()).toBeVisible();
   await expect(page.getByText('足球是一项简单的运动。')).toBeVisible();
   if ((page.viewportSize()?.width ?? 0) < 1024) {
-    await page.getByRole('button', { name: '笔记' }).click();
-    await expect(page.getByRole('heading', { name: '便携笔记本' })).toBeVisible();
+    await page.getByRole('button', { name: '打开学习笔记' }).click();
+    await expect(page.getByRole('heading', { name: '学习笔记' })).toBeVisible();
   } else {
     await expect(page.getByRole('region', { name: '学习笔记' })).toBeVisible();
   }

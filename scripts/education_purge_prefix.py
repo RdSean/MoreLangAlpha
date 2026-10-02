@@ -1,4 +1,4 @@
-"""Delete objects for explicitly selected textbook prefixes.
+"""Delete derived objects for explicitly selected current or legacy textbooks.
 
 Each prefix must identify one textbook. The script intentionally does not
 accept ``education/`` or a household prefix because homework attachments share
@@ -19,10 +19,12 @@ from src.utils.storage import delete_object, list_object_keys
 
 _TEXTBOOK_PREFIX_RE = re.compile(
     r"^education/[0-9A-Za-z][0-9A-Za-z.-]*/"
-    r"[0-9A-Za-z][0-9A-Za-z._-]*/$"
+    r"(?:textbooks/)?[0-9A-Za-z][0-9A-Za-z._-]*/$"
 )
 _TEXTBOOK_OBJECT_RE = re.compile(
-    r"^(?P<prefix>education/[^/]+/[^/]+/)(?:v[0-9]+/|source-bundles/)"
+    r"^education/[0-9A-Za-z][0-9A-Za-z.-]*/(?:"
+    r"textbooks/[0-9A-Za-z][0-9A-Za-z._-]*/(?:source|materials|supplementary)/"
+    r"|[0-9A-Za-z][0-9A-Za-z._-]*/(?:v[0-9]+/|source-bundles/))"
 )
 
 
@@ -36,9 +38,13 @@ def _is_textbook_object(key: str) -> bool:
 
 def _normalize_prefix(prefix: str) -> str:
     normalized = prefix.rstrip("/") + "/"
-    if not _TEXTBOOK_PREFIX_RE.fullmatch(normalized):
+    if (
+        not _TEXTBOOK_PREFIX_RE.fullmatch(normalized)
+        or normalized.split("/")[-2] == "textbooks"
+    ):
         raise PurgeSafetyError(
-            "Prefix must match education/<household>/<textbook>/"
+            "Prefix must match education/<household>/textbooks/<textbook>/ "
+            "or legacy education/<household>/<textbook>/"
         )
     return normalized
 
@@ -50,15 +56,11 @@ def purge_education_textbook_prefixes(
     list_keys: Callable[[str], Iterable[str]],
     delete_key: Callable[[str], bool],
 ) -> dict[str, int]:
-    """Return counts while deleting only canonical textbook object keys."""
+    """Return counts while deleting only allow-listed textbook derived keys."""
     normalized_prefixes = sorted({_normalize_prefix(prefix) for prefix in prefixes})
     if not normalized_prefixes:
         raise PurgeSafetyError("At least one textbook prefix is required")
-    keys = [
-        key
-        for prefix in normalized_prefixes
-        for key in list_keys(prefix)
-    ]
+    keys = [key for prefix in normalized_prefixes for key in list_keys(prefix)]
     selected = [
         key
         for key in keys
@@ -90,7 +92,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--prefix",
         action="append",
         required=True,
-        help="Exact education/<household>/<textbook>/ prefix. Repeat for each textbook.",
+        help="Exact education/<household>/textbooks/<textbook>/ prefix (or legacy slug prefix). Repeat for each textbook.",
     )
     parser.add_argument(
         "--apply",

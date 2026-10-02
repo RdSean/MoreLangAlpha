@@ -19,6 +19,51 @@ def _execute(sql: str) -> None:
     execute_textbook_ddl(sql)
 
 
+def _guard_legacy_cutover() -> None:
+    _execute("LOCK TABLE workspaces IN SHARE ROW EXCLUSIVE MODE")
+    _execute(
+        """
+        LOCK TABLE education_generation_jobs, education_generation_attempts,
+            education_processing_jobs, education_learning_spaces
+        IN ACCESS EXCLUSIVE MODE
+        """
+    )
+    _execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM education_generation_jobs
+                WHERE status NOT IN ('completed', 'failed', 'cancelled')
+            ) OR EXISTS (
+                SELECT 1 FROM education_processing_jobs
+                WHERE status NOT IN ('completed', 'failed')
+            ) OR EXISTS (
+                SELECT 1 FROM education_generation_attempts AS attempts
+                JOIN conversation_responses AS responses
+                  ON responses.conversation_response_id = attempts.root_run_id
+                WHERE responses.status = 'in_progress'
+            ) THEN
+                RAISE EXCEPTION 'Stop legacy textbook jobs before applying 082';
+            END IF;
+            IF EXISTS (SELECT 1 FROM education_learning_spaces) THEN
+                RAISE EXCEPTION 'Retire legacy learning threads before applying 082';
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM workspaces
+                WHERE config->'managed_execution'->>'kind' IN (
+                    'education_teaching', 'education_structure',
+                    'education_lesson', 'education_book_assets',
+                    'education_book_pipeline'
+                )
+            ) THEN
+                RAISE EXCEPTION 'Retire legacy textbook workspaces before applying 082';
+            END IF;
+        END $$
+        """
+    )
+
+
 def _rename_retained_tables() -> None:
     for table in (
         "education_learning_spaces",
@@ -499,6 +544,7 @@ def _create_learning_tables() -> None:
 
 
 def upgrade() -> None:
+    _guard_legacy_cutover()
     _rename_retained_tables()
     _drop_legacy_tables()
     _create_textbooks()

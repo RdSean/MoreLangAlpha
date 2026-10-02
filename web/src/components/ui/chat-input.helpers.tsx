@@ -43,7 +43,7 @@ export const BUILTIN_SLASH_COMMANDS = [
  * happens to be written in.
  */
 const FEATURED_SLASH_COMMANDS: ReadonlySet<string> = new Set([
-  'book-to-skill',
+  'more-to-skills',
   'the-knowledge-guy',
 ]);
 

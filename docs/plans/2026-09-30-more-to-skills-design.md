@@ -130,7 +130,7 @@
 
 ## 5. 源文件、skill 与 PTC 边界
 
-仓库打包 plugins/langalpha_local/skills/more-to-skills/，保留上游 MIT 署名；运行不依赖宿主机个人目录。固定 skill/schema 的内容摘要随任务保存。同名技能版本被修改也能区分。
+仓库打包 plugins/langalpha_local/skills/more-to-skills/，保留上游 MIT 署名；运行不依赖宿主机个人目录。固定 skill/schema 的内容摘要随任务保存。`skill_sha256` 覆盖实际暂存目录中排序后的相对路径和文件内容摘要，包括说明、工具脚本与资源；`schema_sha256` 另行标识结构协议。同名技能版本的任一暂存文件被修改也能区分，排队后的任务在上传前拒绝身份不符的目录。
 
 图书馆现有解析 bundle 是输入。复用快照服务的安全读取、摘要校验和必要私有归档逻辑，改掉旧 version_id/多来源 position 约定；不重复 OCR，也不重新生成图片。源快照保持 Markdown 原始字节和图片相对布局，后续图书馆再次解析不改变已绑定教材。
 

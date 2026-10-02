@@ -14,6 +14,7 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg.rows import dict_row
 import pytest
 from sqlalchemy.engine import URL
+from sqlalchemy.exc import DatabaseError
 
 from src.server.services.education_book_structure import (
     MoreToSkillsIdentity,
@@ -375,6 +376,71 @@ async def test_empty_to_head_matches_081_to_082_catalog(
         )
     try:
         await asyncio.to_thread(_run_alembic, db_url, "081_book_pipeline_checkpoint")
+        async with await psycopg.AsyncConnection.connect(
+            make_conninfo(**temp_params), autocommit=True
+        ) as legacy:
+            household_id, textbook_id, version_id, job_id = [uuid4() for _ in range(4)]
+            async with legacy.transaction():
+                await legacy.execute(
+                    "INSERT INTO users (user_id) VALUES ('cutover-parent')"
+                )
+                await legacy.execute(
+                    "INSERT INTO education_households (household_id, name, model_owner_user_id) VALUES (%s, 'Cutover', 'cutover-parent')",
+                    (household_id,),
+                )
+                await legacy.execute(
+                    "INSERT INTO education_memberships (household_id, user_id, role, display_name) VALUES (%s, 'cutover-parent', 'parent', 'Parent')",
+                    (household_id,),
+                )
+                await legacy.execute(
+                    "INSERT INTO education_textbooks (textbook_id, household_id, title, slug, created_by_user_id) VALUES (%s, %s, 'Old book', 'old-book', 'cutover-parent')",
+                    (textbook_id, household_id),
+                )
+                await legacy.execute(
+                    "INSERT INTO education_textbook_versions (version_id, textbook_id, sequence, status, created_by_user_id) VALUES (%s, %s, 1, 'processing', 'cutover-parent')",
+                    (version_id, textbook_id),
+                )
+                await legacy.execute(
+                    "INSERT INTO education_processing_jobs (job_id, version_id, status) VALUES (%s, %s, 'queued')",
+                    (job_id, version_id),
+                )
+        with pytest.raises(DatabaseError, match="Stop legacy textbook jobs"):
+            await asyncio.to_thread(_run_alembic, db_url, "head")
+        async with await psycopg.AsyncConnection.connect(
+            make_conninfo(**temp_params), autocommit=True
+        ) as legacy:
+            assert (
+                await (
+                    await legacy.execute("SELECT version_num FROM alembic_version")
+                ).fetchone()
+            )[0] == "081_book_pipeline_checkpoint"
+            assert (
+                await (
+                    await legacy.execute("SELECT count(*) FROM education_textbooks")
+                ).fetchone()
+            )[0] == 1
+            await legacy.execute(
+                "UPDATE education_processing_jobs SET status = 'completed' WHERE job_id = %s",
+                (job_id,),
+            )
+            workspace_id = uuid4()
+            await legacy.execute(
+                "INSERT INTO workspaces (workspace_id, user_id, name, config) VALUES (%s, 'cutover-parent', 'Legacy managed textbook', %s::jsonb)",
+                (workspace_id, '{"managed_execution":{"kind":"education_structure"}}'),
+            )
+        with pytest.raises(DatabaseError, match="Retire legacy textbook workspaces"):
+            await asyncio.to_thread(_run_alembic, db_url, "head")
+        async with await psycopg.AsyncConnection.connect(
+            make_conninfo(**temp_params), autocommit=True
+        ) as legacy:
+            assert (
+                await (
+                    await legacy.execute("SELECT version_num FROM alembic_version")
+                ).fetchone()
+            )[0] == "081_book_pipeline_checkpoint"
+            await legacy.execute(
+                "DELETE FROM workspaces WHERE workspace_id = %s", (workspace_id,)
+            )
         await asyncio.to_thread(_run_alembic, db_url, "head")
         async with await psycopg.AsyncConnection.connect(
             make_conninfo(**temp_params),

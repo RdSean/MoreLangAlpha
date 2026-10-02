@@ -56,32 +56,27 @@ async def read_snapshot_artifact_bytes(
     max_bytes: int | None = None,
     read_bytes: Callable[[str], bytes | None] | None = None,
 ) -> tuple[bytes, str]:
-    """Read current layout first, then legacy root layout, verifying the selected bytes."""
+    """Read only the canonical artifacts layout and verify the selected bytes."""
     prefix = validated_snapshot_prefix(snapshot_prefix)
     relative = validated_snapshot_relative_path(relative_path)
     current_relative = (
         relative if relative.startswith("artifacts/") else f"artifacts/{relative}"
     )
-    legacy_relative = relative.removeprefix("artifacts/")
-    candidates = list(dict.fromkeys((current_relative, legacy_relative)))
-    reader = read_bytes or get_bytes
-    for candidate in candidates:
-        key = f"{prefix}{candidate}"
-        content = await asyncio.to_thread(reader, key)
-        if content is None:
-            continue
-        if (
-            not isinstance(content, bytes)
-            or not content
-            or (max_bytes is not None and len(content) > max_bytes)
-        ):
-            raise TextbookSnapshotReadError("A textbook snapshot object is invalid")
-        if hashlib.sha256(content).hexdigest() != expected_sha256:
-            raise TextbookSnapshotDigestError(
-                "A textbook snapshot object digest does not match"
-            )
-        return content, key
-    raise TextbookSnapshotReadError("A textbook snapshot object is unavailable")
+    key = f"{prefix}{current_relative}"
+    content = await asyncio.to_thread(read_bytes or get_bytes, key)
+    if content is None:
+        raise TextbookSnapshotReadError("A textbook snapshot object is unavailable")
+    if (
+        not isinstance(content, bytes)
+        or not content
+        or (max_bytes is not None and len(content) > max_bytes)
+    ):
+        raise TextbookSnapshotReadError("A textbook snapshot object is invalid")
+    if hashlib.sha256(content).hexdigest() != expected_sha256:
+        raise TextbookSnapshotDigestError(
+            "A textbook snapshot object digest does not match"
+        )
+    return content, key
 
 
 def safe_asset_manifest_entry(value: Any) -> dict[str, str] | None:
@@ -104,11 +99,7 @@ def safe_asset_manifest_entry(value: Any) -> dict[str, str] | None:
     except TextbookSnapshotReadError:
         return None
     fields["relative_path"] = relative_path.removeprefix("artifacts/")
-    if not all(
-        fields[field]
-        for field in fields
-        if field != "relative_path"
-    ):
+    if not all(fields[field] for field in fields if field != "relative_path"):
         return None
     if len(fields["sha256"]) != 64 or any(
         character not in "0123456789abcdef" for character in fields["sha256"]

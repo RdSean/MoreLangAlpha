@@ -59,6 +59,28 @@ def test_migration_follows_checkpoint_head() -> None:
     assert migration["down_revision"] == "081_book_pipeline_checkpoint"
 
 
+def test_migration_refuses_live_work_or_unretired_learning_threads(monkeypatch):
+    sql = _upgrade_sql(monkeypatch)
+
+    assert "RAISE EXCEPTION 'Stop legacy textbook jobs before applying 082'" in sql
+    assert "FROM education_generation_attempts" in sql
+    assert "responses.status = 'in_progress'" in sql
+    protection = sql.index(
+        "RAISE EXCEPTION 'Retire legacy learning threads before applying 082'"
+    )
+    assert protection < sql.index(
+        "DROP TABLE IF EXISTS education_learning_spaces_legacy_082"
+    )
+    assert "UPDATE conversation_threads" not in sql
+
+
+def test_migration_refuses_unretired_legacy_managed_workspaces(monkeypatch):
+    sql = _upgrade_sql(monkeypatch)
+    assert "config->'managed_execution'->>'kind'" in sql
+    assert "Retire legacy textbook workspaces before applying 082" in sql
+    assert sql.index("Retire legacy textbook workspaces") < sql.index("DROP TABLE")
+
+
 def test_migration_replaces_old_pipeline_with_six_book_tables(monkeypatch) -> None:
     sql = _upgrade_sql(monkeypatch)
 

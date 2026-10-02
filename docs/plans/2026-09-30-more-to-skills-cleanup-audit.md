@@ -5,6 +5,8 @@
 
 配套：[设计](2026-09-30-more-to-skills-design.md)、[实施计划](2026-09-30-more-to-skills-implementation.md)。
 
+2026-10-02 实际切换范围与验证记录见[Task 7 切换记录](2026-10-02-more-to-skills-cutover-results.md)。本文保留原审计要求；F.5 的全链路行为验收归 Task 8，尚不能宣称整份最终验收全部通过。
+
 ## A. 旧页面与路由：删除页面，不套壳改名
 
 | 当前组件（web/src/pages/Education/） | 最终处理 |

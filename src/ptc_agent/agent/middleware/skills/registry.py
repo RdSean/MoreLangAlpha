@@ -429,17 +429,6 @@ SKILL_REGISTRY: dict[str, SkillDefinition] = {
     # the sandbox-relative name: the sync flattens every source into
     # ``.agents/skills/``, and the bundle that carries the files never appears
     # here.
-    "book-to-skill": SkillDefinition(
-        name="book-to-skill",
-        description=(
-            "Convert a document into a project-local knowledge skill with "
-            "chapter-level study material."
-        ),
-        tools=[],
-        skill_md_path="skills/book-to-skill/SKILL.md",
-        exposure="ptc",
-        command="book-to-skill",
-    ),
     "more-to-skills": SkillDefinition(
         name="more-to-skills",
         description=(

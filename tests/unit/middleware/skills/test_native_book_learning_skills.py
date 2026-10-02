@@ -13,10 +13,9 @@ from ptc_agent.agent.middleware.skills.registry import (
     list_skills,
 )
 from ptc_agent.config.agent import SkillsConfig
-from src.server.services import education_generation_progress
 
 
-NATIVE_BOOK_SKILLS = ("book-to-skill",)
+NATIVE_BOOK_SKILLS = ("more-to-skills",)
 REPO_ROOT = Path(__file__).resolve().parents[4]
 #: This deployment's own skills travel as a bundle, so the host sources are
 #: the bundles followed by the operator's directory.
@@ -50,118 +49,9 @@ def test_native_book_learning_skill_uses_the_sandbox_skills_runtime_root():
     assert sandbox_dirs == {"/home/workspace/.agents/skills"}
     assert str(LOCAL_BUNDLE) in [source for source, _ in sources]
 
-    book_to_skill = (LOCAL_BUNDLE / "book-to-skill/SKILL.md").read_text(
+    more_to_skills = (LOCAL_BUNDLE / "more-to-skills/SKILL.md").read_text(
         encoding="utf-8"
     )
 
-    assert "book-to-skill" in book_to_skill
-    assert "SKILL.md" in book_to_skill
-
-
-def test_book_to_skill_managed_overlay_declares_full_pipeline_contract():
-    """The managed adapter must stay aligned with the service package contract."""
-    overlay = (LOCAL_BUNDLE / "book-to-skill/reference/langalpha-managed.md").read_text(
-        encoding="utf-8"
-    )
-
-    assert "Steps 0-9" in overlay
-    assert "outputs/book_package.json" in overlay
-    assert "outputs/content_tree.json" in overlay
-    assert "outputs/knowledge_points.json" in overlay
-    assert "outputs/assets_manifest.json" in overlay
-    assert ".langalpha/progress.jsonl" in overlay
-    assert "python .langalpha/progress.py" in overlay
-    assert "Do not write" in overlay
-    assert "rejects every direct `Write`/`Edit` attempt" in overlay
-    assert "shell chaining" in overlay
-    assert "char_start" in overlay and "char_end" in overlay
-    assert "line_start" in overlay and "line_end" in overlay
-    assert "source_id" in overlay
-    assert "multiple sources" in overlay
-    assert "content_chapter_id" in overlay
-    assert "quote" in overlay and "not used for locating" in overlay
-    assert "Reading" in overlay and "not required" in overlay
-    assert "network" in overlay and "MCP" in overlay
-
-
-def test_book_to_skill_managed_overlay_declares_tool_and_zone_matrix():
-    overlay = (LOCAL_BUNDLE / "book-to-skill/reference/langalpha-managed.md").read_text(
-        encoding="utf-8"
-    )
-
-    assert "Read/Glob/Grep" in overlay
-    assert "Write/Edit" in overlay and "`work/` and `outputs/`" in overlay
-    assert "ordinary sandbox Bash" in overlay
-    assert "ExecuteCode" in overlay
-    assert "Web" in overlay
-    assert "Preview/Widget" in overlay
-    assert "MCP/Vault" in overlay and "disabled" in overlay
-    assert "probe/diagnostic" in overlay
-    assert "checkpoint_review" in overlay
-
-
-def test_book_to_skill_managed_overlay_dispatches_callers_mode():
-    """Full-pipeline rules must not overwrite the legacy analyze pass."""
-    overlay = (LOCAL_BUNDLE / "book-to-skill/reference/langalpha-managed.md").read_text(
-        encoding="utf-8"
-    )
-
-    assert "mode=analyze-pass" in overlay
-    assert "Steps 0-3" in overlay
-    assert "outputs/structure.json" in overlay
-    assert "langalpha-managed-textbook-structure/v2" in overlay
-    assert "mode=full-pipeline" in overlay
-    assert "mode=full-pipeline-continuation" in overlay
-    assert "Steps 0-9" in overlay
-    assert "Steps 4-9" in overlay
-    assert "do not repeat Steps 0-3" in overlay
-    assert "mode dispatch" in overlay.lower()
-    example = (
-        '{"event_key":"chapter_analysis:completed:job-version",'
-        '"stage":"chapter_analysis","status":"completed"}'
-    )
-    assert example in overlay
-    parsed = education_generation_progress.parse_progress_json_line(example)
-    assert parsed["event_key"] == "chapter_analysis:completed:job-version"
-    assert parsed["stage"] == "chapter_analysis"
-    assert parsed["status"] == "completed"
-    assert "before Steps 4-9" in overlay
-
-
-def test_book_to_skill_analyze_mode_keeps_the_v2_structure_schema():
-    overlay = (LOCAL_BUNDLE / "book-to-skill/reference/langalpha-managed.md").read_text(
-        encoding="utf-8"
-    )
-
-    assert "mode=analyze-pass" in overlay
-    assert "Steps 0-3" in overlay
-    assert "outputs/structure.json" in overlay
-    assert "langalpha-managed-textbook-structure/v2" in overlay
-    for field in (
-        '"units"',
-        '"readings"',
-        '"slot"',
-        '"title"',
-        '"summary"',
-        '"line_start"',
-        '"line_end"',
-    ):
-        assert field in overlay
-    assert "reading_a" in overlay
-    assert "reading_b" in overlay
-    assert "boundary" in overlay.lower()
-
-
-def test_book_to_skill_managed_overlay_declares_progress_contract():
-    overlay = (LOCAL_BUNDLE / "book-to-skill/reference/langalpha-managed.md").read_text(
-        encoding="utf-8"
-    )
-
-    assert "queued | running | completed | failed | skipped" in overlay
-    assert "event_key" in overlay
-    assert "stage" in overlay
-    assert "status" in overlay
-    assert "model reasoning" in overlay
-    assert "raw tool arguments" in overlay
-    assert "credentials" in overlay
-    assert "raw book passages" in overlay
+    assert "more-to-skills" in more_to_skills
+    assert "SKILL.md" in more_to_skills

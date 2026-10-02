@@ -84,13 +84,57 @@ class MoreToSkillsIdentity:
 
 
 def get_more_to_skills_identity() -> MoreToSkillsIdentity:
-    """Return digests for the repository-owned instructions and schema."""
+    """Return digests for the entire staged repository catalog and schema."""
 
+    files = _read_more_to_skills_catalog()
     return MoreToSkillsIdentity(
         version=_MORE_TO_SKILLS_VERSION,
-        skill_sha256=hashlib.sha256(_SKILL_PATH.read_bytes()).hexdigest(),
-        schema_sha256=hashlib.sha256(_SCHEMA_PATH.read_bytes()).hexdigest(),
+        skill_sha256=_catalog_digest(files),
+        schema_sha256=hashlib.sha256(
+            files["schemas/book-structure.schema.json"]
+        ).hexdigest(),
     )
+
+
+def _catalog_digest(files: Mapping[str, bytes]) -> str:
+    manifest = [
+        (path, hashlib.sha256(content).hexdigest())
+        for path, content in sorted(files.items())
+    ]
+    return hashlib.sha256(
+        json.dumps(manifest, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    ).hexdigest()
+
+
+def _read_more_to_skills_catalog() -> dict[str, bytes]:
+    suffixes = {".css", ".html", ".json", ".md", ".py", ".toml"}
+    return {
+        path.relative_to(_SKILL_ROOT).as_posix(): path.read_bytes()
+        for path in sorted(_SKILL_ROOT.rglob("*"))
+        if path.is_file()
+        and not path.is_symlink()
+        and path.suffix.lower() in suffixes
+        and not any(
+            part.startswith(".") or part == "__pycache__"
+            for part in path.relative_to(_SKILL_ROOT).parts
+        )
+    }
+
+
+def load_more_to_skills_files(
+    *, expected_skill_sha256: str, expected_schema_sha256: str
+) -> dict[str, bytes]:
+    """Read the repository catalog and verify exactly the bytes to be staged."""
+    files = _read_more_to_skills_catalog()
+    if (
+        _catalog_digest(files) != expected_skill_sha256
+        or hashlib.sha256(
+            files.get("schemas/book-structure.schema.json", b"")
+        ).hexdigest()
+        != expected_schema_sha256
+    ):
+        raise ValueError("Managed textbook skill does not match the frozen identity")
+    return files
 
 
 def _reject_constant(value: str) -> None:
