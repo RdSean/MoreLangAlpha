@@ -15,49 +15,64 @@ vi.mock('../queries', () => ({
   useStudentTextbookStructure: () => ({
     data: {
       assignment_id: 'assignment-1',
-      publication_id: 'publication-1',
       textbook_id: 'textbook-1',
       textbook_title: 'Reading Explorer 3',
-      textbook_slug: 're3',
-      version_sequence: 1,
       structure_id: 'structure-1',
-      structure_sequence: 1,
-      units: [
+      schema_version: '2.1.0',
+      warnings: [],
+      structure: {
+        schema_version: '2.1.0',
+        book: { title: 'Reading Explorer 3' },
+        source: { path: 'source.md', total_lines: 100 },
+        coverage: {},
+        nodes: [
+          {
+            id: 'unit-1',
+            title: 'Unit 1: Sports and Fitness',
+            anchor: { start_line: 1, end_line: 80 },
+            children: [],
+          },
+        ],
+      },
+      knowledge_points: [
         {
-          unit_id: 'unit-1',
+          knowledge_point_id: 'kp-db-1',
+          skill_kp_id: 'world-game',
           position: 1,
-          slug: 'unit-1',
-          title: 'Unit 1: Sports and Fitness',
-          summary: 'Sports and fitness',
-          unit_type: 'teaching',
-          knowledge_points: [
-            {
-              knowledge_point_id: 'kp-1',
-              position: 1,
-              slug: 'world-game',
-              title: '世界运动',
-              summary: '',
-              has_lesson: true,
-            },
-          ],
+          title: '世界运动',
+          unit_skill_node_id: 'unit-1',
+          node_skill_ids: [],
+          start_line: 10,
+          end_line: 20,
+          content_file: 'materials/kp-db-1.md',
+          material_available: true,
         },
       ],
     },
     isLoading: false,
   }),
-  useStudentKnowledgePointLesson: () => ({
+  useStudentKnowledgePointMaterial: () => ({
     data: {
       assignment_id: 'assignment-1',
-      knowledge_point_id: 'kp-1',
-      knowledge_point_title: '世界运动',
-      unit_id: 'unit-1',
-      unit_title: 'Unit 1',
-      revision_id: 'revision-1',
-      revision: 1,
-      format: 'markdown',
+      textbook_id: 'textbook-1',
+      knowledge_point_id: 'kp-db-1',
+      skill_kp_id: 'world-game',
+      material_available: true,
+      markdown: '# 世界运动\n',
+      generated_at: '2026-10-02T08:00:00Z',
+      depth: 'lesson',
+      requirements: null,
       content_sha256: 'a'.repeat(64),
-      size_bytes: 20,
-      content_markdown: '# 世界运动\n',
+    },
+    isLoading: false,
+  }),
+  useManagedBookSourceSlice: () => ({
+    data: {
+      textbook_id: 'textbook-1',
+      start_line: 1,
+      end_line: 32,
+      total_lines: 100,
+      markdown: '# Unit 1: Sports and Fitness\n\nOriginal text.',
     },
     isLoading: false,
   }),
@@ -73,23 +88,22 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/education/learn/:assignmentId" element={<StudentTextbookLearningPage />} />
-        <Route path="/education/learn/:assignmentId/units/:unitId" element={<StudentTextbookLearningPage />} />
-        <Route path="/education/learn/:assignmentId/knowledge/:knowledgePointId" element={<StudentTextbookLearningPage />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 describe('StudentTextbookLearningPage', () => {
-  it('renders Unit overview and knowledge-point links', () => {
-    renderAt('/education/learn/assignment-1/units/unit-1');
+  it('reads a source node by its Skill node ID', () => {
+    renderAt('/education/learn/assignment-1?node=unit-1&view=source');
 
-    expect(screen.getByRole('heading', { name: 'Unit 1: Sports and Fitness' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '1. 世界运动已发布' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Unit 1: Sports and Fitness' })).toBeInTheDocument();
+    expect(screen.getByTestId('student-markdown')).toHaveTextContent('Original text.');
+    expect(screen.queryByText(/结构 v|已发布/)).not.toBeInTheDocument();
   });
 
-  it('renders a published lesson and follow-up composer', () => {
-    renderAt('/education/learn/assignment-1/knowledge/kp-1');
+  it('maps a Skill KP URL to the current material and database KP UUID', () => {
+    renderAt('/education/learn/assignment-1?kp=world-game&view=material');
 
     expect(screen.getByRole('heading', { name: '世界运动' })).toBeInTheDocument();
     expect(screen.getByTestId('student-markdown')).toHaveTextContent('# 世界运动');

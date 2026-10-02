@@ -641,49 +641,13 @@ export interface LessonGenerationStatus {
   content_asset_available: boolean;
 }
 
-export interface StudentKnowledgePoint {
-  knowledge_point_id: string;
-  position: number;
-  slug: string;
-  title: string;
-  summary: string;
-  has_lesson: boolean;
-}
-
-export interface StudentStructureUnit {
-  unit_id: string;
-  position: number;
-  slug: string;
-  title: string;
-  summary: string;
-  unit_type: string;
-  knowledge_points: StudentKnowledgePoint[];
-}
-
-export interface StudentTextbookStructure {
+export interface StudentTextbookStructure extends BookStructure {
   assignment_id: string;
-  publication_id: string;
-  textbook_id: string;
   textbook_title: string;
-  textbook_slug: string;
-  version_sequence: number;
-  structure_id: string;
-  structure_sequence: number;
-  units: StudentStructureUnit[];
 }
 
-export interface StudentKnowledgePointLesson {
+export interface StudentKnowledgePointMaterial extends KnowledgePointMaterial {
   assignment_id: string;
-  knowledge_point_id: string;
-  knowledge_point_title: string;
-  unit_id: string;
-  unit_title: string;
-  revision_id: string;
-  revision: number;
-  format: 'markdown';
-  content_sha256: string;
-  size_bytes: number;
-  content_markdown: string;
 }
 
 export type LearningItemKind = 'question' | 'highlight' | 'note' | 'summary';
@@ -691,7 +655,7 @@ export type LearningItemKind = 'question' | 'highlight' | 'note' | 'summary';
 export interface LearningItem {
   item_id: string;
   assignment_id: string;
-  unit_id?: string | null;
+  skill_node_id?: string | null;
   knowledge_point_id?: string | null;
   kind: LearningItemKind;
   content: string;
@@ -897,17 +861,12 @@ export interface TextbookAssignment {
 
 export interface LearningAssignment {
   assignment_id: string;
-  publication_id: string;
+  textbook_id: string;
   textbook_title: string;
-  textbook_slug: string;
-  version_sequence: number;
-  chapter_count: number;
-  completed_chapter_count: number;
+  structure_id: string | null;
+  knowledge_point_count: number;
+  completed_knowledge_point_count: number;
   created_at?: string;
-}
-
-export interface StudentLearning extends Omit<LearningAssignment, 'chapter_count' | 'completed_chapter_count'> {
-  chapters: TextbookChapter[];
 }
 
 export interface LearningAnswer {

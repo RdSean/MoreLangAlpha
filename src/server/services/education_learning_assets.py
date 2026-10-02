@@ -1,4 +1,4 @@
-"""Student-owned progress, notebook items, and deterministic unit summaries."""
+"""Student-owned progress, notebook items, and deterministic node summaries."""
 
 from __future__ import annotations
 
@@ -6,12 +6,12 @@ from collections import defaultdict
 from collections.abc import Mapping
 from typing import Any
 
-from src.server.database.education_textbooks import (
+from src.server.database.education_learning import (
     create_learning_item,
     delete_learning_item,
     list_learning_items,
+    upsert_learning_progress,
     update_learning_item,
-    upsert_kp_progress,
 )
 from src.server.services.education_textbooks import (
     TextbookNotFoundError,
@@ -26,7 +26,7 @@ _PROGRESS_STATUSES = frozenset(
 )
 
 
-async def _published_structure(
+async def _current_structure(
     *, student_user_id: str, assignment_id: str
 ) -> dict[str, Any]:
     return await get_student_structure(
@@ -35,27 +35,36 @@ async def _published_structure(
     )
 
 
-def _find_unit(structure: Mapping[str, Any], unit_id: str) -> Mapping[str, Any]:
-    for unit in structure.get("units", []):
-        if isinstance(unit, Mapping) and str(unit.get("unit_id")) == unit_id:
-            return unit
-    raise TextbookNotFoundError("Published Unit not found")
+def _find_node(nodes: object, skill_node_id: str) -> Mapping[str, Any]:
+    if not isinstance(nodes, list):
+        raise TextbookNotFoundError("Textbook node not found")
+    for node in nodes:
+        if not isinstance(node, Mapping):
+            continue
+        if str(node.get("id")) == skill_node_id:
+            return node
+        try:
+            return _find_node(node.get("children"), skill_node_id)
+        except TextbookNotFoundError:
+            continue
+    raise TextbookNotFoundError("Textbook node not found")
+
+
+def _structure_nodes(structure: Mapping[str, Any]) -> object:
+    document = structure.get("structure")
+    return document.get("nodes") if isinstance(document, Mapping) else None
 
 
 def _find_knowledge_point(
     structure: Mapping[str, Any], knowledge_point_id: str
 ) -> Mapping[str, Any]:
-    for unit in structure.get("units", []):
-        if not isinstance(unit, Mapping):
-            continue
-        for point in unit.get("knowledge_points", []):
-            if (
-                isinstance(point, Mapping)
-                and str(point.get("knowledge_point_id"))
-                == knowledge_point_id
-            ):
-                return point
-    raise TextbookNotFoundError("Published knowledge point not found")
+    for point in structure.get("knowledge_points", []):
+        if (
+            isinstance(point, Mapping)
+            and str(point.get("knowledge_point_id")) == knowledge_point_id
+        ):
+            return point
+    raise TextbookNotFoundError("Current knowledge point not found")
 
 
 async def update_learning_progress(
@@ -67,12 +76,12 @@ async def update_learning_progress(
 ) -> dict[str, Any]:
     if status not in _PROGRESS_STATUSES:
         raise TextbookTransitionError("Learning progress status is invalid")
-    structure = await _published_structure(
+    structure = await _current_structure(
         student_user_id=student_user_id,
         assignment_id=assignment_id,
     )
     _find_knowledge_point(structure, knowledge_point_id)
-    progress = await upsert_kp_progress(
+    progress = await upsert_learning_progress(
         student_user_id=student_user_id,
         assignment_id=assignment_id,
         knowledge_point_id=knowledge_point_id,
@@ -87,17 +96,21 @@ async def get_learning_items(
     *,
     student_user_id: str,
     assignment_id: str,
-    unit_id: str | None = None,
+    skill_node_id: str | None = None,
     knowledge_point_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    await _published_structure(
+    structure = await _current_structure(
         student_user_id=student_user_id,
         assignment_id=assignment_id,
     )
+    if skill_node_id is not None:
+        _find_node(_structure_nodes(structure), skill_node_id)
+    if knowledge_point_id is not None:
+        _find_knowledge_point(structure, knowledge_point_id)
     return await list_learning_items(
         student_user_id=student_user_id,
         assignment_id=assignment_id,
-        unit_id=unit_id,
+        skill_node_id=skill_node_id,
         knowledge_point_id=knowledge_point_id,
     )
 
@@ -106,7 +119,7 @@ async def add_learning_item(
     *,
     student_user_id: str,
     assignment_id: str,
-    unit_id: str | None,
+    skill_node_id: str | None,
     knowledge_point_id: str | None,
     kind: str,
     content: str,
@@ -117,18 +130,19 @@ async def add_learning_item(
     normalized = content.strip()
     if not normalized:
         raise TextbookTransitionError("Learning item content is required")
-    structure = await _published_structure(
+    structure = await _current_structure(
         student_user_id=student_user_id,
         assignment_id=assignment_id,
     )
-    if unit_id is not None:
-        _find_unit(structure, unit_id)
+    if skill_node_id is not None:
+        _find_node(_structure_nodes(structure), skill_node_id)
     if knowledge_point_id is not None:
         _find_knowledge_point(structure, knowledge_point_id)
     item = await create_learning_item(
         student_user_id=student_user_id,
         assignment_id=assignment_id,
-        unit_id=unit_id,
+        expected_structure_id=str(structure["structure_id"]),
+        skill_node_id=skill_node_id,
         knowledge_point_id=knowledge_point_id,
         kind=kind,
         content=normalized,
@@ -142,6 +156,7 @@ async def add_learning_item(
 async def edit_learning_item(
     *,
     student_user_id: str,
+    assignment_id: str,
     item_id: str,
     content: str,
     source_anchor: Mapping[str, Any] | None,
@@ -151,6 +166,7 @@ async def edit_learning_item(
         raise TextbookTransitionError("Learning item content is required")
     item = await update_learning_item(
         student_user_id=student_user_id,
+        assignment_id=assignment_id,
         item_id=item_id,
         content=normalized,
         source_anchor=source_anchor,
@@ -161,34 +177,40 @@ async def edit_learning_item(
 
 
 async def remove_learning_item(
-    *, student_user_id: str, item_id: str
+    *, student_user_id: str, assignment_id: str, item_id: str
 ) -> None:
     if not await delete_learning_item(
         student_user_id=student_user_id,
+        assignment_id=assignment_id,
         item_id=item_id,
     ):
         raise TextbookNotFoundError("Learning item not found")
 
 
-async def generate_unit_summary(
+async def generate_node_summary(
     *,
     student_user_id: str,
     assignment_id: str,
-    unit_id: str,
+    skill_node_id: str,
 ) -> dict[str, Any]:
-    structure = await _published_structure(
+    structure = await _current_structure(
         student_user_id=student_user_id,
         assignment_id=assignment_id,
     )
-    unit = _find_unit(structure, unit_id)
+    node = _find_node(_structure_nodes(structure), skill_node_id)
     items = await list_learning_items(
         student_user_id=student_user_id,
         assignment_id=assignment_id,
-        unit_id=unit_id,
+        skill_node_id=skill_node_id,
     )
     point_titles = {
         str(point["knowledge_point_id"]): str(point["title"])
-        for point in unit.get("knowledge_points", [])
+        for point in structure.get("knowledge_points", [])
+        if isinstance(point, Mapping)
+        and (
+            str(point.get("unit_skill_node_id") or "") == skill_node_id
+            or skill_node_id in point.get("node_skill_ids", [])
+        )
     }
     grouped: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for item in items:
@@ -196,11 +218,11 @@ async def generate_unit_summary(
             continue
         grouped[str(item.get("knowledge_point_id") or "")].append(item)
 
-    lines = [f"# {unit['title']} · 个性化总结", ""]
+    lines = [f"# {node['title']} · 个性化总结", ""]
     if not items:
-        lines.extend(["这个 Unit 还没有追问、划重点或批注。", ""])
+        lines.extend(["本节还没有追问、划重点或批注。", ""])
     for knowledge_point_id, entries in grouped.items():
-        title = point_titles.get(knowledge_point_id, "单元补充")
+        title = point_titles.get(knowledge_point_id, "本节补充")
         lines.extend([f"## {title}", ""])
         for kind, label in (
             ("question", "追问"),
@@ -221,12 +243,13 @@ async def generate_unit_summary(
     summary = await create_learning_item(
         student_user_id=student_user_id,
         assignment_id=assignment_id,
-        unit_id=unit_id,
+        expected_structure_id=str(structure["structure_id"]),
+        skill_node_id=skill_node_id,
         knowledge_point_id=None,
         kind="summary",
         content=content,
         source_anchor=None,
     )
     if not summary:
-        raise TextbookNotFoundError("Unit summary target not found")
+        raise TextbookNotFoundError("Textbook node summary target not found")
     return summary

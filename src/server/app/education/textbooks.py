@@ -105,7 +105,7 @@ from src.server.services.education_book_pipeline_jobs import (
 from src.server.services.education_learning_assets import (
     add_learning_item,
     edit_learning_item,
-    generate_unit_summary,
+    generate_node_summary,
     get_learning_items,
     remove_learning_item,
     update_learning_progress,
@@ -1188,14 +1188,14 @@ async def update_student_kp_progress(
 async def list_student_learning_items(
     assignment_id: UUID,
     user_id: CurrentUserId,
-    unit_id: UUID | None = None,
+    skill_node_id: str | None = None,
     knowledge_point_id: UUID | None = None,
 ):
     try:
         return await get_learning_items(
             student_user_id=user_id,
             assignment_id=str(assignment_id),
-            unit_id=str(unit_id) if unit_id else None,
+            skill_node_id=skill_node_id,
             knowledge_point_id=(
                 str(knowledge_point_id) if knowledge_point_id else None
             ),
@@ -1219,7 +1219,7 @@ async def create_student_learning_item(
         return await add_learning_item(
             student_user_id=user_id,
             assignment_id=str(assignment_id),
-            unit_id=str(body.unit_id) if body.unit_id else None,
+            skill_node_id=body.skill_node_id,
             knowledge_point_id=str(knowledge_point_id),
             kind=body.kind,
             content=body.content,
@@ -1239,10 +1239,10 @@ async def update_student_learning_item(
     body: UpdateLearningItemRequest,
     user_id: CurrentUserId,
 ):
-    del assignment_id
     try:
         return await edit_learning_item(
             student_user_id=user_id,
+            assignment_id=str(assignment_id),
             item_id=str(item_id),
             content=body.content,
             source_anchor=body.source_anchor,
@@ -1260,10 +1260,10 @@ async def delete_student_learning_item(
     item_id: UUID,
     user_id: CurrentUserId,
 ):
-    del assignment_id
     try:
         await remove_learning_item(
             student_user_id=user_id,
+            assignment_id=str(assignment_id),
             item_id=str(item_id),
         )
         return {"deleted": True}
@@ -1272,20 +1272,20 @@ async def delete_student_learning_item(
 
 
 @router.post(
-    "/learning/{assignment_id}/units/{unit_id}/summaries",
+    "/learning/{assignment_id}/nodes/{skill_node_id}/summaries",
     response_model=LearningItemResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_student_unit_summary(
+async def create_student_node_summary(
     assignment_id: UUID,
-    unit_id: UUID,
+    skill_node_id: str,
     user_id: CurrentUserId,
 ):
     try:
-        return await generate_unit_summary(
+        return await generate_node_summary(
             student_user_id=user_id,
             assignment_id=str(assignment_id),
-            unit_id=str(unit_id),
+            skill_node_id=skill_node_id,
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc

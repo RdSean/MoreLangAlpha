@@ -61,7 +61,7 @@ export default function StudentLessonFollowUp({
   return (
     <section className="border-t pt-6" style={{ borderColor: 'var(--color-border-muted)' }}>
       <h2 className="text-sm font-semibold">继续追问</h2>
-      <p className="mt-1 text-sm text-muted-foreground">回答只依据当前已发布知识点课程。</p>
+      <p className="mt-1 text-sm text-muted-foreground">回答只依据当前知识点讲义。</p>
       <label className="sr-only" htmlFor="knowledge-point-question">问题</label>
       <textarea
         id="knowledge-point-question"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -337,3 +338,217 @@ async def upsert_learning_item(
             if row is None:
                 raise ValueError("Knowledge point must belong to the assigned textbook")
             return dict(row)
+
+
+async def upsert_learning_progress(
+    *,
+    student_user_id: str,
+    assignment_id: str | UUID,
+    knowledge_point_id: str | UUID,
+    status: str,
+) -> dict[str, Any] | None:
+    """Upsert progress only for a knowledge point in the current assigned book."""
+
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                INSERT INTO education_learning_kp_progress (
+                    assignment_id, textbook_id, knowledge_point_id, status,
+                    started_at, completed_at, updated_at
+                )
+                SELECT assignments.assignment_id, assignments.textbook_id,
+                       points.knowledge_point_id, %s,
+                       CASE WHEN %s = 'learning' THEN NOW() ELSE NULL END,
+                       CASE WHEN %s IN ('read', 'review_recommended')
+                            THEN NOW() ELSE NULL END,
+                       NOW()
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = assignments.textbook_id
+                JOIN education_book_knowledge_points AS points
+                  ON points.textbook_id = assignments.textbook_id
+                 AND points.structure_id = textbooks.current_structure_id
+                 AND points.knowledge_point_id = %s
+                WHERE assignments.assignment_id = %s
+                  AND assignments.student_user_id = %s
+                ON CONFLICT (assignment_id, knowledge_point_id) DO UPDATE
+                SET status = EXCLUDED.status,
+                    started_at = COALESCE(
+                        education_learning_kp_progress.started_at,
+                        EXCLUDED.started_at
+                    ),
+                    completed_at = COALESCE(
+                        EXCLUDED.completed_at,
+                        education_learning_kp_progress.completed_at
+                    ),
+                    updated_at = NOW()
+                RETURNING assignment_id, textbook_id, knowledge_point_id,
+                          status, started_at, completed_at, updated_at
+                """,
+                (
+                    status,
+                    status,
+                    status,
+                    knowledge_point_id,
+                    assignment_id,
+                    student_user_id,
+                ),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def list_learning_items(
+    *,
+    student_user_id: str,
+    assignment_id: str | UUID,
+    skill_node_id: str | None = None,
+    knowledge_point_id: str | UUID | None = None,
+) -> list[dict[str, Any]]:
+    """List student-owned learning items within one current assignment."""
+
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT items.item_id, items.assignment_id, items.skill_node_id,
+                       items.knowledge_point_id, items.kind, items.content,
+                       items.source_anchor, items.created_at, items.updated_at
+                FROM education_learning_items AS items
+                JOIN education_textbook_assignments AS assignments
+                  ON assignments.assignment_id = items.assignment_id
+                 AND assignments.textbook_id = items.textbook_id
+                WHERE items.assignment_id = %s
+                  AND assignments.student_user_id = %s
+                  AND (%s::text IS NULL OR items.skill_node_id = %s)
+                  AND (%s::uuid IS NULL OR items.knowledge_point_id = %s)
+                ORDER BY items.created_at DESC, items.item_id
+                """,
+                (
+                    assignment_id,
+                    student_user_id,
+                    skill_node_id,
+                    skill_node_id,
+                    knowledge_point_id,
+                    knowledge_point_id,
+                ),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def create_learning_item(
+    *,
+    student_user_id: str,
+    assignment_id: str | UUID,
+    expected_structure_id: str | UUID,
+    skill_node_id: str | None,
+    knowledge_point_id: str | UUID | None,
+    kind: str,
+    content: str,
+    source_anchor: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Create an item only while its validated current structure is still active."""
+
+    item_id = uuid4()
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                INSERT INTO education_learning_items (
+                    item_id, assignment_id, textbook_id, skill_node_id,
+                    knowledge_point_id, kind, content, source_anchor
+                )
+                SELECT %s, assignments.assignment_id, assignments.textbook_id,
+                       %s, %s, %s, %s, %s
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = assignments.textbook_id
+                 AND textbooks.current_structure_id = %s
+                LEFT JOIN education_book_knowledge_points AS points
+                  ON points.textbook_id = assignments.textbook_id
+                 AND points.structure_id = textbooks.current_structure_id
+                 AND points.knowledge_point_id = %s
+                WHERE assignments.assignment_id = %s
+                  AND assignments.student_user_id = %s
+                  AND (%s::uuid IS NULL OR points.knowledge_point_id IS NOT NULL)
+                RETURNING item_id, assignment_id, skill_node_id,
+                          knowledge_point_id, kind, content, source_anchor,
+                          created_at, updated_at
+                """,
+                (
+                    item_id,
+                    skill_node_id,
+                    knowledge_point_id,
+                    kind,
+                    content,
+                    Jsonb(source_anchor) if source_anchor is not None else None,
+                    expected_structure_id,
+                    knowledge_point_id,
+                    assignment_id,
+                    student_user_id,
+                    knowledge_point_id,
+                ),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def update_learning_item(
+    *,
+    student_user_id: str,
+    assignment_id: str | UUID,
+    item_id: str | UUID,
+    content: str,
+    source_anchor: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                UPDATE education_learning_items AS items
+                SET content = %s, source_anchor = %s, updated_at = NOW()
+                FROM education_textbook_assignments AS assignments
+                WHERE items.item_id = %s
+                  AND items.assignment_id = %s
+                  AND assignments.assignment_id = items.assignment_id
+                  AND assignments.textbook_id = items.textbook_id
+                  AND assignments.student_user_id = %s
+                RETURNING items.item_id, items.assignment_id,
+                          items.skill_node_id, items.knowledge_point_id,
+                          items.kind, items.content, items.source_anchor,
+                          items.created_at, items.updated_at
+                """,
+                (
+                    content,
+                    Jsonb(source_anchor) if source_anchor is not None else None,
+                    item_id,
+                    assignment_id,
+                    student_user_id,
+                ),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def delete_learning_item(
+    *,
+    student_user_id: str,
+    assignment_id: str | UUID,
+    item_id: str | UUID,
+) -> bool:
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                DELETE FROM education_learning_items AS items
+                USING education_textbook_assignments AS assignments
+                WHERE items.item_id = %s
+                  AND items.assignment_id = %s
+                  AND assignments.assignment_id = items.assignment_id
+                  AND assignments.textbook_id = items.textbook_id
+                  AND assignments.student_user_id = %s
+                """,
+                (item_id, assignment_id, student_user_id),
+            )
+            return cur.rowcount > 0

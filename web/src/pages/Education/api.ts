@@ -15,7 +15,7 @@ import type {
   LearningItem,
   LearningItemKind,
   ParentLearningTranscript,
-  StudentKnowledgePointLesson,
+  StudentKnowledgePointMaterial,
   StudentTextbookStructure,
   SubmitEducationTaskInput,
 } from './types';
@@ -459,18 +459,18 @@ export async function getStudentTextbookStructure(assignmentId: string): Promise
   return data;
 }
 
-export async function getStudentKnowledgePointLesson(assignmentId: string, knowledgePointId: string): Promise<StudentKnowledgePointLesson> {
-  const { data } = await api.get<StudentKnowledgePointLesson>(`/api/v1/education/learning/${assignmentId}/knowledge-points/${knowledgePointId}`);
+export async function getStudentKnowledgePointMaterial(assignmentId: string, knowledgePointId: string): Promise<StudentKnowledgePointMaterial> {
+  const { data } = await api.get<StudentKnowledgePointMaterial>(`/api/v1/education/learning/${assignmentId}/knowledge-points/${knowledgePointId}`);
   return data;
 }
 
 export async function listStudentLearningItems(
   assignmentId: string,
-  filters: { unitId?: string; knowledgePointId?: string } = {},
+  filters: { skillNodeId?: string; knowledgePointId?: string } = {},
 ): Promise<LearningItem[]> {
   const { data } = await api.get<LearningItem[]>(`/api/v1/education/learning/${assignmentId}/items`, {
     params: {
-      unit_id: filters.unitId,
+      skill_node_id: filters.skillNodeId,
       knowledge_point_id: filters.knowledgePointId,
     },
   });
@@ -481,14 +481,14 @@ export async function createStudentLearningItem(
   assignmentId: string,
   knowledgePointId: string,
   input: {
-    unitId?: string;
+    skillNodeId?: string;
     kind: Exclude<LearningItemKind, 'summary'>;
     content: string;
     sourceAnchor?: Record<string, unknown> | null;
   },
 ): Promise<LearningItem> {
   const { data } = await api.post<LearningItem>(`/api/v1/education/learning/${assignmentId}/knowledge-points/${knowledgePointId}/items`, {
-    unit_id: input.unitId,
+    skill_node_id: input.skillNodeId,
     kind: input.kind,
     content: input.content,
     source_anchor: input.sourceAnchor,
@@ -512,8 +512,8 @@ export async function deleteStudentLearningItem(assignmentId: string, itemId: st
   await api.delete(`/api/v1/education/learning/${assignmentId}/items/${itemId}`);
 }
 
-export async function generateStudentUnitSummary(assignmentId: string, unitId: string): Promise<LearningItem> {
-  const { data } = await api.post<LearningItem>(`/api/v1/education/learning/${assignmentId}/units/${unitId}/summaries`);
+export async function generateStudentNodeSummary(assignmentId: string, skillNodeId: string): Promise<LearningItem> {
+  const { data } = await api.post<LearningItem>(`/api/v1/education/learning/${assignmentId}/nodes/${encodeURIComponent(skillNodeId)}/summaries`);
   return data;
 }
 

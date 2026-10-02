@@ -278,7 +278,7 @@ export function BookNavigator({
         )}
       </div>
 
-      {view === 'knowledge' && structure.knowledge_points.length > 0 && (
+      {view === 'knowledge' && structure.knowledge_points.length > 0 && onBatchModeChange && (
         <div className="border-t p-3">
           <button
             type="button"

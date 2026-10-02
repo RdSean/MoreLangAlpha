@@ -13,13 +13,17 @@ vi.mock('../components/EducationMarkdown', () => ({
 vi.mock('../queries', () => ({
   useStudentTextbookStructure: () => ({
     data: {
-      units: [
+      structure: {
+        nodes: [
+          { id: 'unit-1', title: 'Unit 1', anchor: { start_line: 1, end_line: 20 }, children: [] },
+        ],
+      },
+      knowledge_points: [
         {
-          unit_id: 'unit-1',
-          title: 'Unit 1',
-          knowledge_points: [
-            { knowledge_point_id: 'kp-1', title: '世界运动' },
-          ],
+          knowledge_point_id: 'kp-1',
+          unit_skill_node_id: 'unit-1',
+          title: '世界运动',
+          skill_kp_id: 'world-game',
         },
       ],
     },
@@ -55,7 +59,7 @@ vi.mock('../queries', () => ({
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={['/education/learn/assignment-1/summary?unit=unit-1']}>
+    <MemoryRouter initialEntries={['/education/learn/assignment-1/summary?node=unit-1']}>
       <Routes>
         <Route path="/education/learn/:assignmentId/summary" element={<PersonalizedSummaryPage />} />
       </Routes>
@@ -81,7 +85,7 @@ describe('PersonalizedSummaryPage', () => {
 
     await waitFor(() => expect(summarize).toHaveBeenCalledWith({
       assignmentId: 'assignment-1',
-      unitId: 'unit-1',
+      skillNodeId: 'unit-1',
     }));
   });
 });

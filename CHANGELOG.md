@@ -2,6 +2,13 @@
 
 ## 2026-10-02
 
+### 重构：学生笔记、进度与总结切换到新节点模型
+
+- 学生学习页直接复用教材工作台的 Skill node/KP 导航、授权原文切片与阅读器；URL 保存 Skill KP ID 或 node ID，服务请求和进度写入使用当前结构映射出的数据库 KP UUID。移除版本号和“已发布”措辞，未生成讲义时直接展示原文。
+- 学习进度与笔记 CRUD 改接 082 的 `textbook_id + knowledge_point_id` 和 `skill_node_id` 字段；新增、修改、删除同时校验学生、assignment、当前结构与教材归属，跨 assignment URL 不能修改 item。
+- 个性化总结按递归 Skill 节点及其当前 KP 汇总，不再构造旧 Unit DTO；学生列表展示当前知识点完成数，旧 `/units/...` 与 `/knowledge/...` 学生阅读路由已移除。
+- 验证：Education 前端回归 `84 passed`，学生相关后端回归 `56 passed`，`langalpha_test` 082 集成 `11 passed`；前端类型检查、聚焦 ESLint、生产构建与关键路径检查及后端 Ruff 通过。未向开发数据库应用 `082`，未改动 Docker volume。
+
 ### 重构：学生教材读取切换到当前结构与讲义
 
 - 学生学习列表与稳定 assignment URL 改为读取 `education_textbook_assignments` 的教材授权；结构和讲义复用新教材门面的当前成功内容，不再通过 publication、version 或 revision 冻结链路。

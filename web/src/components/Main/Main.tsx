@@ -58,8 +58,6 @@ function Main() {
         <Route path="/textbooks/:textbookId/versions/:versionId/candidates" element={<LegacyTextbookReset />} />
         <Route path="/textbooks/:textbookId/versions/:versionId/knowledge/:knowledgePointId" element={<LegacyTextbookReset />} />
         <Route path="/education/learn/:assignmentId" element={<StudentTextbookLearning />} />
-        <Route path="/education/learn/:assignmentId/units/:unitId" element={<StudentTextbookLearning />} />
-        <Route path="/education/learn/:assignmentId/knowledge/:knowledgePointId" element={<StudentTextbookLearning />} />
         <Route path="/education/learn/:assignmentId/summary" element={<PersonalizedSummary />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

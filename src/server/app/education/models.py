@@ -902,7 +902,7 @@ class StudentKnowledgePointLessonResponse(BaseModel):
 class LearningItemResponse(BaseModel):
     item_id: UUID
     assignment_id: UUID
-    unit_id: UUID | None = None
+    skill_node_id: str | None = None
     knowledge_point_id: UUID | None = None
     kind: Literal["question", "highlight", "note", "summary"]
     content: str
@@ -912,17 +912,10 @@ class LearningItemResponse(BaseModel):
 
 
 class CreateLearningItemRequest(BaseModel):
-    unit_id: UUID | None = None
-    knowledge_point_id: UUID | None = None
+    skill_node_id: str | None = Field(default=None, min_length=1, max_length=255)
     kind: Literal["question", "highlight", "note"]
     content: str = Field(min_length=1, max_length=20_000)
     source_anchor: dict[str, Any] | None = None
-
-    @model_validator(mode="after")
-    def validate_target(self) -> "CreateLearningItemRequest":
-        if self.unit_id is None and self.knowledge_point_id is None:
-            raise ValueError("a Unit or knowledge point is required")
-        return self
 
 
 class UpdateLearningItemRequest(BaseModel):

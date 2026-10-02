@@ -5,26 +5,34 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.server.services import education_learning_assets
+from src.server.services.education_textbooks import TextbookNotFoundError
 
 
 STRUCTURE = {
-    "units": [
+    "structure_id": "structure-1",
+    "structure": {
+        "nodes": [
+            {
+                "id": "unit-1",
+                "title": "Unit 1",
+                "children": [],
+            }
+        ]
+    },
+    "knowledge_points": [
         {
-            "unit_id": "unit-1",
-            "title": "Unit 1",
-            "knowledge_points": [
-                {
-                    "knowledge_point_id": "kp-1",
-                    "title": "世界运动",
-                }
-            ],
+            "knowledge_point_id": "kp-1",
+            "skill_kp_id": "world-game",
+            "unit_skill_node_id": "unit-1",
+            "node_skill_ids": [],
+            "title": "世界运动",
         }
-    ]
+    ],
 }
 
 
 @pytest.mark.asyncio
-async def test_add_learning_item_requires_published_target(monkeypatch):
+async def test_add_learning_item_requires_current_target(monkeypatch):
     monkeypatch.setattr(
         education_learning_assets,
         "get_student_structure",
@@ -46,7 +54,7 @@ async def test_add_learning_item_requires_published_target(monkeypatch):
     item = await education_learning_assets.add_learning_item(
         student_user_id="student-1",
         assignment_id="assignment-1",
-        unit_id="unit-1",
+        skill_node_id="unit-1",
         knowledge_point_id="kp-1",
         kind="highlight",
         content="  重点  ",
@@ -55,6 +63,7 @@ async def test_add_learning_item_requires_published_target(monkeypatch):
 
     assert item["item_id"] == "item-1"
     assert create.await_args.kwargs["content"] == "重点"
+    assert create.await_args.kwargs["skill_node_id"] == "unit-1"
 
 
 @pytest.mark.asyncio
@@ -95,10 +104,10 @@ async def test_generate_summary_uses_only_own_items(monkeypatch):
         create,
     )
 
-    summary = await education_learning_assets.generate_unit_summary(
+    summary = await education_learning_assets.generate_node_summary(
         student_user_id="student-1",
         assignment_id="assignment-1",
-        unit_id="unit-1",
+        skill_node_id="unit-1",
     )
 
     assert summary["kind"] == "summary"
@@ -106,3 +115,30 @@ async def test_generate_summary_uses_only_own_items(monkeypatch):
     assert "## 世界运动" in content
     assert "记住 simple 是核心" in content
     assert "It's a simple game." in content
+    assert create.await_args.kwargs["skill_node_id"] == "unit-1"
+
+
+@pytest.mark.asyncio
+async def test_list_learning_items_rejects_targets_outside_current_structure(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        education_learning_assets,
+        "get_student_structure",
+        AsyncMock(return_value=STRUCTURE),
+    )
+    list_items = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        education_learning_assets,
+        "list_learning_items",
+        list_items,
+    )
+
+    with pytest.raises(TextbookNotFoundError, match="knowledge point"):
+        await education_learning_assets.get_learning_items(
+            student_user_id="student-1",
+            assignment_id="assignment-1",
+            knowledge_point_id="kp-outside-current-structure",
+        )
+
+    list_items.assert_not_awaited()

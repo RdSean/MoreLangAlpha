@@ -839,13 +839,18 @@ async def test_material_job_idempotency_is_concurrency_safe(
     assert first["items"][0]["item_id"] == second["items"][0]["item_id"]
 
 
-async def test_learning_items_reject_knowledge_points_from_another_textbook(
+async def test_learning_progress_and_items_use_current_assignment_targets(
     patched_get_db_connection,
     seed_user,
 ) -> None:
     from src.server.database.education_learning import (
         assign_textbook,
+        create_learning_item,
+        delete_learning_item,
+        list_learning_items,
+        update_learning_item,
         upsert_learning_item,
+        upsert_learning_progress,
     )
 
     student_id = f"student-{uuid4().hex}"
@@ -866,7 +871,7 @@ async def test_learning_items_reject_knowledge_points_from_another_textbook(
                 """,
                 (household_id, student_id, "Student"),
             )
-    first_book, _, _ = await _create_committed_book(
+    first_book, _, first_snapshot = await _create_committed_book(
         parent_user_id=seed_user["user_id"], household_id=household_id
     )
     _, _, second_snapshot = await _create_committed_book(
@@ -876,6 +881,54 @@ async def test_learning_items_reject_knowledge_points_from_another_textbook(
         textbook_id=str(first_book["textbook_id"]),
         student_user_id=student_id,
         assigned_by_user_id=seed_user["user_id"],
+    )
+
+    knowledge_point_id = first_snapshot["knowledge_points"][0]["knowledge_point_id"]
+    progress = await upsert_learning_progress(
+        student_user_id=student_id,
+        assignment_id=assignment["assignment_id"],
+        knowledge_point_id=knowledge_point_id,
+        status="read",
+    )
+    assert progress is not None
+    assert progress["textbook_id"] == first_book["textbook_id"]
+    assert progress["status"] == "read"
+
+    item = await create_learning_item(
+        student_user_id=student_id,
+        assignment_id=assignment["assignment_id"],
+        expected_structure_id=first_snapshot["structure_id"],
+        skill_node_id="unit-1",
+        knowledge_point_id=knowledge_point_id,
+        kind="note",
+        content="Student note",
+        source_anchor={"start_line": 2, "end_line": 4},
+    )
+    assert item is not None
+    assert item["skill_node_id"] == "unit-1"
+    listed = await list_learning_items(
+        student_user_id=student_id,
+        assignment_id=assignment["assignment_id"],
+        skill_node_id="unit-1",
+    )
+    assert [row["item_id"] for row in listed] == [item["item_id"]]
+    updated = await update_learning_item(
+        student_user_id=student_id,
+        assignment_id=assignment["assignment_id"],
+        item_id=item["item_id"],
+        content="Updated note",
+        source_anchor=None,
+    )
+    assert updated is not None
+    assert updated["content"] == "Updated note"
+    assert await delete_learning_item(
+        student_user_id=student_id,
+        assignment_id=assignment["assignment_id"],
+        item_id=item["item_id"],
+    )
+    assert not await list_learning_items(
+        student_user_id=student_id,
+        assignment_id=assignment["assignment_id"],
     )
 
     with pytest.raises(ValueError, match="assigned textbook"):

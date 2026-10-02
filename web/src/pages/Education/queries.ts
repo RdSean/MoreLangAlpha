@@ -458,13 +458,13 @@ export function useStudentTextbookStructure(assignmentId: string | undefined) {
   });
 }
 
-export function useStudentKnowledgePointLesson(
+export function useStudentKnowledgePointMaterial(
   assignmentId: string | undefined,
   knowledgePointId: string | undefined,
 ) {
   return useQuery({
     queryKey: queryKeys.education.assignmentKnowledgePoint(assignmentId ?? '', knowledgePointId ?? ''),
-    queryFn: () => educationApi.getStudentKnowledgePointLesson(assignmentId ?? '', knowledgePointId ?? ''),
+    queryFn: () => educationApi.getStudentKnowledgePointMaterial(assignmentId ?? '', knowledgePointId ?? ''),
     enabled: Boolean(assignmentId && knowledgePointId),
     staleTime: 30_000,
   });
@@ -472,7 +472,7 @@ export function useStudentKnowledgePointLesson(
 
 export function useStudentLearningItems(
   assignmentId: string | undefined,
-  filters: { unitId?: string; knowledgePointId?: string } = {},
+  filters: { skillNodeId?: string; knowledgePointId?: string } = {},
   enabled = true,
 ) {
   return useQuery({
@@ -495,7 +495,7 @@ export function useLearningAssetMutations() {
       }: {
         assignmentId: string;
         knowledgePointId: string;
-        unitId?: string;
+        skillNodeId?: string;
         kind: 'question' | 'highlight' | 'note';
         content: string;
         sourceAnchor?: Record<string, unknown> | null;
@@ -513,8 +513,8 @@ export function useLearningAssetMutations() {
       onSuccess: invalidate,
     }),
     summarize: useMutation({
-      mutationFn: ({ assignmentId, unitId }: { assignmentId: string; unitId: string }) =>
-        educationApi.generateStudentUnitSummary(assignmentId, unitId),
+      mutationFn: ({ assignmentId, skillNodeId }: { assignmentId: string; skillNodeId: string }) =>
+        educationApi.generateStudentNodeSummary(assignmentId, skillNodeId),
       onSuccess: invalidate,
     }),
     progress: useMutation({

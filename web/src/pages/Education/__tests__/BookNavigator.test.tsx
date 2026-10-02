@@ -83,6 +83,7 @@ describe('BookNavigator', () => {
     expect(screen.getByRole('heading', { name: '未分组' })).toBeInTheDocument();
     expect(screen.getByText('足球如何成为全球运动')).toBeInTheDocument();
     expect(screen.getByLabelText('足球如何成为全球运动，已生成讲义')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '批量选择' })).not.toBeInTheDocument();
   });
 
   it('selects by skill KP id while retaining the database UUID in the structure', () => {
