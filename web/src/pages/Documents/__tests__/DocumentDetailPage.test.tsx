@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   artifacts: {} as Record<string, unknown>,
   teachingUsage: {} as Record<string, unknown>,
   fetchArtifactText: vi.fn(),
+  sourceDialogOpen: false,
 }));
 
 vi.mock('../hooks', () => ({
@@ -32,6 +33,12 @@ vi.mock('@/pages/ChatAgent/components/viewers/PreviewViewer', () => ({
     <div data-testid="preview-viewer" data-dragging={String(Boolean(isDragging))}>Preview viewer</div>
   ),
 }));
+vi.mock('@/pages/Education/components/BookSourceDialog', () => ({
+  BookSourceDialog: ({ open }: { open: boolean }) => {
+    state.sourceDialogOpen = open;
+    return open ? <div role="dialog" aria-label="教材来源" /> : null;
+  },
+}));
 
 import DocumentDetailPage from '../DocumentDetailPage';
 
@@ -49,21 +56,15 @@ const document = {
 
 const usage = (overrides: Record<string, unknown> = {}) => ({
   document_id: 'doc-1',
-  producer_job_id: 'job-1',
+  parse_job_id: 'job-1',
   primary_artifact_id: 'art-markdown',
   textbook_id: 'textbook-1',
   textbook_title: 'Reading Explorer 3',
-  content_version_id: 'version-1',
-  content_version_sequence: 2,
-  artifact_position: 1,
-  structure_id: 'structure-1',
-  structure_sequence: 1,
-  structure_status: 'review',
-  book_asset_prefix: null,
-  publication_id: null,
-  is_published: false,
-  has_asset_manifest: true,
-  created_at: '2026-09-16T12:00:00Z',
+  source_filename: 'lesson.pdf',
+  source_completed_at: '2026-09-16T12:00:00Z',
+  structure_status: 'ready',
+  materials: { ready: 4, total: 7 },
+  updated_at: '2026-10-02T12:00:00Z',
   ...overrides,
 });
 
@@ -117,6 +118,7 @@ beforeEach(() => {
   };
   state.teachingUsage = { data: [], isLoading: false, isError: false, refetch: vi.fn() };
   state.fetchArtifactText.mockResolvedValue('# Lesson');
+  state.sourceDialogOpen = false;
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: true,
     arrayBuffer: async () => new ArrayBuffer(8),
@@ -136,6 +138,16 @@ describe('DocumentDetailPage', () => {
     expect(screen.getByTestId('preview-viewer')).toHaveAttribute('data-dragging', 'false');
   });
 
+  it('opens the shared source picker for a completed document', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: '用作教材' }));
+
+    expect(screen.getByRole('dialog', { name: '教材来源' })).toBeInTheDocument();
+    expect(state.sourceDialogOpen).toBe(true);
+  });
+
   it('shows parsed Markdown with artifact-backed images', async () => {
     state.fetchArtifactText.mockResolvedValue('![figure](figure.png)');
     const user = userEvent.setup();
@@ -147,23 +159,17 @@ describe('DocumentDetailPage', () => {
     expect(state.fetchArtifactText).toHaveBeenCalledWith('art-markdown');
   });
 
-  it('shows review and publication-backed published usages and links formal assets to textbook detail', async () => {
+  it('shows fixed sources and committed material counts with workbench links', async () => {
     state.teachingUsage = {
       data: [
         usage(),
         usage({
           textbook_id: 'textbook-2',
-          textbook_title: 'Published Reader',
-          content_version_id: 'version-2',
-          content_version_sequence: 3,
-          producer_job_id: 'job-2',
+          textbook_title: 'Active Reader',
+          parse_job_id: 'job-2',
           primary_artifact_id: 'art-published',
-          structure_id: 'structure-2',
-          structure_sequence: 2,
-          structure_status: 'review',
-          book_asset_prefix: null,
-          publication_id: 'publication-2',
-          is_published: true,
+          structure_status: 'running',
+          materials: { ready: 1, total: 5 },
         }),
       ],
       isLoading: false,
@@ -179,49 +185,36 @@ describe('DocumentDetailPage', () => {
       'href',
       '/textbooks/textbook-1',
     );
-    expect(screen.getByRole('link', { name: 'Published Reader' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Active Reader' })).toHaveAttribute(
       'href',
       '/textbooks/textbook-2',
     );
-    expect(screen.getByText('内容版本 v2')).toBeInTheDocument();
-    expect(screen.getByText('内容版本 v3')).toBeInTheDocument();
-    expect(screen.getByText('结构版本 v1')).toBeInTheDocument();
-    expect(screen.getByText('结构版本 v2')).toBeInTheDocument();
-    expect(screen.getByText('等待审阅')).toBeInTheDocument();
-    expect(screen.getByText('已发布')).toBeInTheDocument();
+    expect(screen.getByText('结构已就绪')).toBeInTheDocument();
+    expect(screen.getByText('正在分析结构')).toBeInTheDocument();
+    expect(screen.getByText('讲义 4 / 7')).toBeInTheDocument();
+    expect(screen.getByText('讲义 1 / 5')).toBeInTheDocument();
     expect(screen.getByText('解析产物 art-markdown')).toBeInTheDocument();
     expect(screen.getByText('解析任务 job-1')).toBeInTheDocument();
     expect(screen.getByText('解析产物 art-published')).toBeInTheDocument();
     expect(screen.getByText('解析任务 job-2')).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: '查看教材知识包' })).toHaveLength(2);
+    expect(screen.getAllByRole('link', { name: '打开教材' })).toHaveLength(2);
 
     await user.click(screen.getByRole('link', { name: 'Reading Explorer 3' }));
     expect(screen.getByTestId('textbook-route')).toBeInTheDocument();
   });
 
-  it('shows unpackaged, failed, and cancelled usages without asset links', async () => {
+  it('shows failed and queued structure states without publication language', async () => {
     state.teachingUsage = {
       data: [
         usage({
-          structure_id: null,
-          structure_sequence: null,
-          structure_status: null,
-          book_asset_prefix: null,
-          has_asset_manifest: false,
-        }),
-        usage({
           textbook_id: 'textbook-failed',
           textbook_title: 'Failed Reader',
-          structure_id: 'structure-failed',
           structure_status: 'failed',
-          has_asset_manifest: true,
         }),
         usage({
-          textbook_id: 'textbook-cancelled',
-          textbook_title: 'Cancelled Reader',
-          structure_id: 'structure-cancelled',
-          structure_status: 'cancelled',
-          has_asset_manifest: true,
+          textbook_id: 'textbook-queued',
+          textbook_title: 'Queued Reader',
+          structure_status: 'queued',
         }),
       ],
       isLoading: false,
@@ -233,10 +226,9 @@ describe('DocumentDetailPage', () => {
 
     await user.click(screen.getByRole('tab', { name: '教材资产' }));
 
-    expect(screen.getByText('尚未生成结构')).toBeInTheDocument();
     expect(screen.getByText('结构加工失败')).toBeInTheDocument();
-    expect(screen.getByText('结构加工已取消')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: '查看正式教材资产' })).not.toBeInTheDocument();
+    expect(screen.getByText('等待结构分析')).toBeInTheDocument();
+    expect(screen.queryByText(/版本|发布|知识包/)).not.toBeInTheDocument();
   });
 
   it('does not render storage keys, snapshots, sandbox paths, or object URLs', async () => {

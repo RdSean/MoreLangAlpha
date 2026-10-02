@@ -12,11 +12,8 @@ export const routeChunks = {
   createHomework: () => import('../../pages/Education/EducationPage'),
   textbooks: () => import('../../pages/Education/TextbooksPage'),
   textbookLibrary: () => import('../../pages/Education/TextbooksPage'),
-  textbookDetail: () => import('../../pages/Education/TextbookDetailPage'),
-  bookProcessing: () => import('../../pages/Education/BookProcessingPage'),
-  textbookStructure: () => import('../../pages/Education/TextbookStructurePage'),
-  knowledgePointReview: () => import('../../pages/Education/KnowledgePointReviewPage'),
-  knowledgePointLessonReview: () => import('../../pages/Education/KnowledgePointLessonReviewPage'),
+  textbookWorkbench: () => import('../../pages/Education/TextbookWorkbenchPage'),
+  legacyTextbookReset: () => import('../../pages/Education/LegacyTextbookRouteReset'),
   studentTextbookLearning: () => import('../../pages/Education/StudentTextbookLearningPage'),
   personalizedSummary: () => import('../../pages/Education/PersonalizedSummaryPage'),
   settings: () => import('../../pages/Settings/Settings'),
@@ -29,6 +26,11 @@ export function preloadRouteChunk(pathname: string): void {
   const segment = segments[0] || 'dashboard';
   if (segment === 'documents' && segments[1]) {
     void routeChunks.documentDetail().catch(() => {});
+    return;
+  }
+  if (segment === 'textbooks' && segments[1]) {
+    const legacy = segments.includes('versions');
+    void (legacy ? routeChunks.legacyTextbookReset() : routeChunks.textbookWorkbench()).catch(() => {});
     return;
   }
   void (chunkFor[segment] ?? routeChunks.dashboard)().catch(() => {});

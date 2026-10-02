@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, FileText, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowLeft, BookOpenCheck, FileText, Loader2, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { BookSourceDialog } from '@/pages/Education/components/BookSourceDialog';
 import { useDocument } from './hooks';
 import DocumentContentPane, { type DocumentContentTab } from './components/DocumentContentPane';
 import TeachingUsagePanel from './components/TeachingUsagePanel';
@@ -20,9 +21,11 @@ const TABS: Array<{ id: DocumentDetailTab; labelKey: string }> = [
 
 export default function DocumentDetailPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { documentId } = useParams();
   const documentRecord = useDocument(documentId);
   const [activeTab, setActiveTab] = useState<DocumentDetailTab>('source');
+  const [sourceDialogOpen, setSourceDialogOpen] = useState(false);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
@@ -106,6 +109,12 @@ export default function DocumentDetailPage() {
                 )}
               </div>
             </div>
+            {document.parse_status === 'completed' && (
+              <Button type="button" onClick={() => setSourceDialogOpen(true)}>
+                <BookOpenCheck className="mr-2 size-4" aria-hidden="true" />
+                用作教材
+              </Button>
+            )}
           </div>
         </header>
 
@@ -150,6 +159,14 @@ export default function DocumentDetailPage() {
           )}
         </section>
       </div>
+      <BookSourceDialog
+        open={sourceDialogOpen}
+        defaultDocumentId={documentId}
+        onOpenChange={setSourceDialogOpen}
+        onCreated={({ textbook_id: textbookId, job_id: jobId }) => {
+          navigate(`/textbooks/${encodeURIComponent(textbookId)}?activity=${encodeURIComponent(jobId)}`);
+        }}
+      />
     </main>
   );
 }

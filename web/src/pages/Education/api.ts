@@ -1,6 +1,39 @@
 import { api } from '@/api/client';
-import type { BookPipelineJob, BookPipelineProgress, CompletedParseJob, CreateBookPipelineJobInput, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointCandidate, KnowledgePointCandidateReview, KnowledgePointLesson, KnowledgePointSourcePreview, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, LessonGenerationStatus, MergeKnowledgePointCandidatesInput, ParentLearningTranscript, SplitKnowledgePointCandidateInput, StructureGenerationJob, StructureGenerationProgress, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit, UpdateKnowledgePointCandidateInput } from './types';
-import type { BookActivityEvent, BookActivityPage, BookJob, BookJobStatus } from './types';
+import type {
+  CreateEducationTaskInput,
+  EducationAsset,
+  EducationHomeworkDictionaries,
+  EducationMember,
+  EducationTask,
+  EducationTaskCalendar,
+  EducationTaskCalendarRequest,
+  EducationTaskDetail,
+  EducationTaskReview,
+  EducationTaskSubmission,
+  LearningAssignment,
+  LearningChatSpace,
+  LearningItem,
+  LearningItemKind,
+  ParentLearningTranscript,
+  StudentKnowledgePointLesson,
+  StudentTextbookStructure,
+  SubmitEducationTaskInput,
+} from './types';
+import type {
+  BookActivityEvent,
+  BookActivityPage,
+  BookJob,
+  BookJobStatus,
+  BookSourceSlice,
+  BookSourceCandidate,
+  BookStructure,
+  CreateBookJobInput,
+  CreateManagedTextbookInput,
+  CreateManagedTextbookResponse,
+  KnowledgePointMaterial,
+  ManagedTextbookSummary,
+  TextbookWorkbench,
+} from './types';
 
 const TERMINAL_BOOK_JOB_STATUSES = new Set<BookJobStatus>([
   'succeeded',
@@ -165,6 +198,89 @@ export async function getBookJob(jobId: string): Promise<BookJob> {
   return data;
 }
 
+export async function listManagedTextbooks(): Promise<ManagedTextbookSummary[]> {
+  const { data } = await api.get<ManagedTextbookSummary[]>('/api/v1/education/textbooks');
+  return data;
+}
+
+export async function listManagedBookSources(): Promise<BookSourceCandidate[]> {
+  const { data } = await api.get<{ items: BookSourceCandidate[] }>(
+    '/api/v1/education/textbook-sources',
+  );
+  return data.items;
+}
+
+export async function createManagedTextbook(
+  input: CreateManagedTextbookInput,
+): Promise<CreateManagedTextbookResponse> {
+  const { data } = await api.post<CreateManagedTextbookResponse>(
+    '/api/v1/education/textbooks',
+    input,
+  );
+  return data;
+}
+
+export async function getTextbookWorkbench(textbookId: string): Promise<TextbookWorkbench> {
+  const { data } = await api.get<TextbookWorkbench>(
+    `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}`,
+  );
+  return data;
+}
+
+export async function getManagedBookStructure(textbookId: string): Promise<BookStructure> {
+  const { data } = await api.get<BookStructure>(
+    `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/structure`,
+  );
+  return data;
+}
+
+export async function getManagedBookSourceSlice(
+  textbookId: string,
+  startLine: number,
+  endLine: number,
+): Promise<BookSourceSlice> {
+  const { data } = await api.get<BookSourceSlice>(
+    `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/source`,
+    { params: { start_line: startLine, end_line: endLine } },
+  );
+  return data;
+}
+
+export async function getManagedKnowledgePointMaterial(
+  textbookId: string,
+  knowledgePointId: string,
+): Promise<KnowledgePointMaterial> {
+  const { data } = await api.get<KnowledgePointMaterial>(
+    `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/knowledge-points/${encodeURIComponent(knowledgePointId)}/material`,
+  );
+  return data;
+}
+
+export async function createManagedBookJob(
+  textbookId: string,
+  input: CreateBookJobInput,
+): Promise<BookJob> {
+  const { data } = await api.post<BookJob>(
+    `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/jobs`,
+    input,
+  );
+  return data;
+}
+
+export async function cancelManagedBookJob(jobId: string): Promise<BookJob> {
+  const { data } = await api.post<BookJob>(
+    `/api/v1/education/book-jobs/${encodeURIComponent(jobId)}/cancel`,
+  );
+  return data;
+}
+
+export async function retryManagedBookJob(jobId: string): Promise<BookJob> {
+  const { data } = await api.post<BookJob>(
+    `/api/v1/education/book-jobs/${encodeURIComponent(jobId)}/retry`,
+  );
+  return data;
+}
+
 export async function watchBookActivity(
   jobId: string,
   options: WatchBookActivityOptions,
@@ -299,220 +415,6 @@ export async function listEducationAssets(): Promise<EducationAsset[]> {
 export async function getEducationAssetDownloadUrl(assetId: string): Promise<string> {
   const { data } = await api.get<{ url: string }>(`/api/v1/education/assets/${assetId}/download`);
   return data.url;
-}
-
-export async function listTextbooks(): Promise<TextbookLibraryItem[]> {
-  const { data } = await api.get<TextbookLibraryItem[]>('/api/v1/education/textbooks');
-  return data;
-}
-
-export async function getTextbook(textbookId: string): Promise<TextbookDetail> {
-  const { data } = await api.get<TextbookDetail>(`/api/v1/education/textbooks/${textbookId}`);
-  return data;
-}
-
-export async function getLatestTextbookStructure(versionId: string): Promise<TextbookStructure | null> {
-  const { data } = await api.get<TextbookStructure | null>(`/api/v1/education/textbook-versions/${versionId}/structure`);
-  return data;
-}
-
-export async function getKnowledgePointCandidateReview(
-  structureId: string,
-): Promise<KnowledgePointCandidateReview> {
-  const { data } = await api.get<KnowledgePointCandidateReview>(
-    `/api/v1/education/structures/${structureId}/candidates`,
-  );
-  return data;
-}
-
-export async function updateKnowledgePointCandidate(
-  candidateId: string,
-  input: UpdateKnowledgePointCandidateInput,
-): Promise<KnowledgePointCandidate> {
-  const { data } = await api.patch<KnowledgePointCandidate>(
-    `/api/v1/education/candidates/${candidateId}`,
-    input,
-  );
-  return data;
-}
-
-export async function acceptKnowledgePointCandidates(
-  candidateIds: string[],
-): Promise<KnowledgePointCandidate[]> {
-  const { data } = await api.post<KnowledgePointCandidate[]>(
-    '/api/v1/education/candidates/accept',
-    { candidate_ids: candidateIds },
-  );
-  return data;
-}
-
-export async function rejectKnowledgePointCandidates(
-  candidateIds: string[],
-): Promise<KnowledgePointCandidate[]> {
-  const { data } = await api.post<KnowledgePointCandidate[]>(
-    '/api/v1/education/candidates/reject',
-    { candidate_ids: candidateIds },
-  );
-  return data;
-}
-
-export async function mergeKnowledgePointCandidates(
-  input: MergeKnowledgePointCandidatesInput,
-): Promise<KnowledgePointCandidate[]> {
-  const { data } = await api.post<KnowledgePointCandidate[]>(
-    '/api/v1/education/candidates/merge',
-    input,
-  );
-  return data;
-}
-
-export async function splitKnowledgePointCandidate(
-  input: SplitKnowledgePointCandidateInput,
-): Promise<KnowledgePointCandidate[]> {
-  const { data } = await api.post<KnowledgePointCandidate[]>(
-    '/api/v1/education/candidates/split',
-    input,
-  );
-  return data;
-}
-
-export async function createBookPipelineJob(
-  versionId: string,
-  input: CreateBookPipelineJobInput,
-): Promise<BookPipelineJob> {
-  const { data } = await api.post<BookPipelineJob>(
-    `/api/v1/education/textbook-versions/${versionId}/book-pipeline-jobs`,
-    input,
-  );
-  return data;
-}
-
-export async function cancelBookPipelineJob(
-  jobId: string,
-): Promise<BookPipelineJob> {
-  const { data } = await api.post<BookPipelineJob>(
-    `/api/v1/education/book-pipeline-jobs/${jobId}/cancel`,
-  );
-  return data;
-}
-
-export async function getBookPipelineJobProgress(
-  jobId: string,
-): Promise<BookPipelineProgress> {
-  const { data } = await api.get<BookPipelineProgress>(
-    `/api/v1/education/jobs/${jobId}/progress`,
-  );
-  return data;
-}
-
-export async function createTextbookStructure(versionId: string, profile?: Record<string, unknown>): Promise<StructureGenerationJob> {
-  const { data } = await api.post<StructureGenerationJob>(`/api/v1/education/textbook-versions/${versionId}/structures`, profile ? { profile } : {});
-  return data;
-}
-
-export async function getStructureGenerationJob(generationJobId: string): Promise<StructureGenerationJob> {
-  const { data } = await api.get<StructureGenerationJob>(`/api/v1/education/structure-generation-jobs/${generationJobId}`);
-  return data;
-}
-
-export async function getStructureGenerationProgress(generationJobId: string): Promise<StructureGenerationProgress> {
-  const { data } = await api.get<StructureGenerationProgress>(`/api/v1/education/structure-generation-jobs/${generationJobId}/progress`);
-  return data;
-}
-
-export async function resumeStructureGenerationJob(generationJobId: string): Promise<StructureGenerationJob> {
-  const { data } = await api.post<StructureGenerationJob>(`/api/v1/education/structure-generation-jobs/${generationJobId}/resume`);
-  return data;
-}
-
-export async function generateBookAssets(structureId: string): Promise<StructureGenerationJob> {
-  const { data } = await api.post<StructureGenerationJob>(`/api/v1/education/textbook-structures/${structureId}/book-assets`);
-  return data;
-}
-
-export async function updateTextbookStructure(structureId: string, units: TextbookStructureUnit[]): Promise<TextbookStructure> {
-  const { data } = await api.put<TextbookStructure>(`/api/v1/education/textbook-structures/${structureId}`, { units });
-  return data;
-}
-
-export async function acceptTextbookStructure(structureId: string): Promise<TextbookStructure> {
-  const { data } = await api.post<TextbookStructure>(`/api/v1/education/textbook-structures/${structureId}/review`);
-  return data;
-}
-
-export async function generateKnowledgePointLesson(knowledgePointId: string, autoGrading = false, prompt = ''): Promise<StructureGenerationJob> {
-  const { data } = await api.post<StructureGenerationJob>(`/api/v1/education/knowledge-points/${knowledgePointId}/lessons`, { auto_grading: autoGrading, prompt });
-  return data;
-}
-
-export async function getKnowledgePointLesson(lessonId: string): Promise<KnowledgePointLesson> {
-  const { data } = await api.get<KnowledgePointLesson>(`/api/v1/education/knowledge-point-lessons/${lessonId}`);
-  return data;
-}
-
-export async function getKnowledgePointLessonByPoint(knowledgePointId: string): Promise<KnowledgePointLesson | null> {
-  const { data } = await api.get<KnowledgePointLesson | null>(`/api/v1/education/knowledge-points/${knowledgePointId}/lesson`);
-  return data;
-}
-
-export async function getKnowledgePointSourcePreview(knowledgePointId: string): Promise<KnowledgePointSourcePreview> {
-  const { data } = await api.get<KnowledgePointSourcePreview>(`/api/v1/education/knowledge-points/${knowledgePointId}/source-preview`);
-  return data;
-}
-
-export async function getLessonGenerationStatus(knowledgePointId: string): Promise<LessonGenerationStatus> {
-  const { data } = await api.get<LessonGenerationStatus>(`/api/v1/education/knowledge-points/${knowledgePointId}/lesson-generation`);
-  return data;
-}
-
-export async function createKnowledgePointLessonRevision(lessonId: string, contentMarkdown: string): Promise<KnowledgePointLesson> {
-  const { data } = await api.post<KnowledgePointLesson>(`/api/v1/education/knowledge-point-lessons/${lessonId}/revisions`, { content_markdown: contentMarkdown });
-  return data;
-}
-
-export async function approveKnowledgePointLesson(lessonId: string, revisionId: string): Promise<KnowledgePointLesson> {
-  const { data } = await api.post<KnowledgePointLesson>(`/api/v1/education/knowledge-point-lessons/${lessonId}/review`, { revision_id: revisionId });
-  return data;
-}
-
-export async function publishTextbookStructure(versionId: string, structureId: string): Promise<{ publication_id: string; version_id: string; structure_id: string }> {
-  const { data } = await api.post<{ publication_id: string; version_id: string; structure_id: string }>(`/api/v1/education/textbook-versions/${versionId}/structure-publications`, { structure_id: structureId });
-  return data;
-}
-
-export async function createTextbook(input: { title: string }): Promise<TextbookLibraryItem> {
-  const { data } = await api.post<TextbookLibraryItem>('/api/v1/education/textbooks', input);
-  return data;
-}
-
-export async function startTextbookProcessing(textbookId: string, sourceAssetIds: string[]): Promise<TextbookProcessingJob> {
-  const { data } = await api.post<TextbookProcessingJob>(`/api/v1/education/textbooks/${textbookId}/processing`, { source_asset_ids: sourceAssetIds });
-  return data;
-}
-
-export async function listCompletedParseJobs(): Promise<CompletedParseJob[]> {
-  const { data } = await api.get<CompletedParseJob[]>('/api/v1/education/textbook-parse-jobs/completed');
-  return data;
-}
-
-export async function startTextbookProcessingFromParseJobs(textbookId: string, sourceParseJobIds: string[]): Promise<TextbookProcessingJob> {
-  const { data } = await api.post<TextbookProcessingJob>(`/api/v1/education/textbooks/${textbookId}/processing`, { source_parse_job_ids: sourceParseJobIds });
-  return data;
-}
-
-export async function runTextbookProcessing(jobId: string): Promise<TextbookProcessingJob> {
-  const { data } = await api.post<TextbookProcessingJob>(`/api/v1/education/textbook-processing/${jobId}/run`);
-  return data;
-}
-
-export async function retryTextbookProcessing(jobId: string): Promise<TextbookProcessingJob> {
-  const { data } = await api.post<TextbookProcessingJob>(`/api/v1/education/textbook-processing/${jobId}/retry`);
-  return data;
-}
-
-export async function assignTextbookPublication(publicationId: string, studentUserId: string): Promise<TextbookAssignment> {
-  const { data } = await api.post<TextbookAssignment>(`/api/v1/education/textbook-publications/${publicationId}/assignments`, { student_user_id: studentUserId });
-  return data;
 }
 
 export async function listLearningAssignments(): Promise<LearningAssignment[]> {

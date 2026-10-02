@@ -9,16 +9,11 @@ interface TeachingUsagePanelProps {
   documentId: string;
 }
 
-type DisplayStatus = DocumentStructureStatus | 'published';
-
-const PACKAGE_STATUS_KEYS: Record<DisplayStatus, string> = {
+const STRUCTURE_STATUS_KEYS: Record<DocumentStructureStatus, string> = {
   queued: 'queued',
   running: 'active',
-  review: 'review',
-  accepted: 'review',
-  published: 'published',
+  ready: 'ready',
   failed: 'failed',
-  cancelled: 'cancelled',
 };
 
 export default function TeachingUsagePanel({ documentId }: TeachingUsagePanelProps) {
@@ -59,7 +54,7 @@ export default function TeachingUsagePanel({ documentId }: TeachingUsagePanelPro
     <section className="documents-teaching-usage" aria-label={t('documents.detail.teachingUsage.label')}>
       <ol className="documents-teaching-usage-list">
         {usages.data.map((usage) => (
-          <TeachingUsageItem key={`${usage.content_version_id}:${usage.structure_id ?? 'unstructured'}:${usage.artifact_position}`} usage={usage} />
+          <TeachingUsageItem key={usage.textbook_id} usage={usage} />
         ))}
       </ol>
     </section>
@@ -69,10 +64,7 @@ export default function TeachingUsagePanel({ documentId }: TeachingUsagePanelPro
 function TeachingUsageItem({ usage }: { usage: DocumentTeachingUsage }) {
   const { t } = useTranslation();
   const textbookPath = `/textbooks/${encodeURIComponent(usage.textbook_id)}`;
-  const canOpenAssets = usage.has_asset_manifest
-    && (usage.structure_status === 'review' || usage.structure_status === 'accepted' || usage.is_published);
-  const displayStatus: DisplayStatus | null = usage.is_published ? 'published' : (usage.structure_status ?? null);
-  const statusKey = displayStatus ? PACKAGE_STATUS_KEYS[displayStatus] : null;
+  const statusKey = STRUCTURE_STATUS_KEYS[usage.structure_status];
 
   return (
     <li className="documents-teaching-usage-item">
@@ -82,38 +74,23 @@ function TeachingUsageItem({ usage }: { usage: DocumentTeachingUsage }) {
             {usage.textbook_title}
           </Link>
           <div className="documents-teaching-usage-meta">
-            <span>{t('documents.detail.teachingUsage.contentVersion', { sequence: usage.content_version_sequence })}</span>
-            <span>{t('documents.detail.teachingUsage.sourcePosition', { position: usage.artifact_position })}</span>
+            <span>{usage.source_filename}</span>
             <span>{t('documents.detail.teachingUsage.artifact', { id: usage.primary_artifact_id })}</span>
-            <span>{t('documents.detail.teachingUsage.job', { id: usage.producer_job_id })}</span>
+            <span>{t('documents.detail.teachingUsage.job', { id: usage.parse_job_id })}</span>
           </div>
         </div>
-        <span className={`documents-teaching-usage-status${statusKey ? ` is-${statusKey}` : ''}`}>
-          {statusKey
-            ? t(`documents.detail.teachingUsage.status.${statusKey}`)
-            : t('documents.detail.teachingUsage.unstructured')}
+        <span className={`documents-teaching-usage-status is-${statusKey}`}>
+          {t(`documents.detail.teachingUsage.status.${statusKey}`)}
         </span>
       </div>
 
-      {usage.structure_id ? (
-        <div className="documents-teaching-usage-package">
-          <span>
-            {usage.structure_sequence == null
-              ? t('documents.detail.teachingUsage.structure')
-              : t('documents.detail.teachingUsage.structureSequence', { sequence: usage.structure_sequence })}
-          </span>
-          {canOpenAssets && (
-            <Link className="documents-teaching-usage-asset-link" to={textbookPath}>
-              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-              {t('documents.detail.teachingUsage.viewAssets')}
-            </Link>
-          )}
-        </div>
-      ) : (
-        <p className="documents-teaching-usage-note">
-          {t('documents.detail.teachingUsage.unstructuredNote')}
-        </p>
-      )}
+      <div className="documents-teaching-usage-package">
+        <span>{t('documents.detail.teachingUsage.materials', usage.materials)}</span>
+        <Link className="documents-teaching-usage-asset-link" to={textbookPath}>
+          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          {t('documents.detail.teachingUsage.openTextbook')}
+        </Link>
+      </div>
     </li>
   );
 }

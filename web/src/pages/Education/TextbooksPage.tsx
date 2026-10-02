@@ -1,72 +1,94 @@
-import { useState } from 'react';
-import { BookOpenCheck, ChevronRight, Plus } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { useTextbookLibrary, useTextbookMutations } from './queries';
-import type {
-  BookPipelineJobStatus,
-  TextbookLibraryItem,
-  TextbookVersionStatus,
-} from './types';
+import { Activity, BookOpenCheck, ChevronRight, Library } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { useManagedTextbookLibrary } from './queries';
+import type { BookStructureStatus } from './types';
 
-const statusLabels: Record<TextbookVersionStatus, string> = {
-  draft: '草稿', processing: '加工中', review: '待审阅', published: '已发布', failed: '加工失败',
+const STRUCTURE_STATUS: Record<BookStructureStatus, string> = {
+  queued: '等待结构分析',
+  running: '正在分析结构',
+  ready: '结构已就绪',
+  failed: '结构分析失败',
 };
-
-const bookPipelineStatusLabels: Record<BookPipelineJobStatus, string> = {
-  queued: '加工中',
-  preparing: '加工中',
-  running: '加工中',
-  validating: '加工中',
-  awaiting_review: '待审阅',
-  completed: '待审阅',
-  failed: '加工失败',
-  cancelled: '已取消',
-};
-
-function libraryStatus(textbook: TextbookLibraryItem) {
-  const processing = textbook.latest_processing_job_status;
-  if (processing) return bookPipelineStatusLabels[processing];
-  return textbook.latest_version_status
-    ? statusLabels[textbook.latest_version_status]
-    : '草稿';
-}
-
-function CreateTextbookDialog() {
-  const [title, setTitle] = useState('');
-  const [open, setOpen] = useState(false);
-  const navigate = useNavigate();
-  const mutations = useTextbookMutations();
-  const create = async () => {
-    const textbook = await mutations.create.mutateAsync({ title });
-    setTitle('');
-    setOpen(false);
-    navigate(`/textbooks/${textbook.textbook_id}`);
-  };
-  return <Dialog open={open} onOpenChange={setOpen}>
-    <DialogTrigger asChild><Button><Plus className="mr-2 size-4" aria-hidden="true" />新建教材</Button></DialogTrigger>
-    <DialogContent variant="centered" className="max-w-md">
-      <DialogHeader><DialogTitle>新建家庭教材</DialogTitle></DialogHeader>
-      <form className="grid gap-4" onSubmit={(event) => { event.preventDefault(); void create(); }}>
-        <label className="grid gap-1.5 text-sm font-medium">教材名称<Input value={title} onChange={(event) => setTitle(event.target.value)} autoFocus required /></label>
-        <DialogFooter><Button type="submit" disabled={!title.trim() || mutations.create.isPending}>{mutations.create.isPending ? '正在创建' : '创建教材'}</Button></DialogFooter>
-      </form>
-    </DialogContent>
-  </Dialog>;
-}
 
 export default function TextbooksPage() {
-  const library = useTextbookLibrary();
+  const library = useManagedTextbookLibrary();
   const textbooks = library.data ?? [];
-  return <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="textbook-library-page">
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-      <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-end sm:justify-between" style={{ borderColor: 'var(--color-border-muted)' }}>
-        <div><p className="font-mono text-xs" style={{ color: 'var(--color-text-tertiary)' }}>TEXTBOOK WORKFLOW</p><h1 className="title-font mt-2 text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>教材加工</h1><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>从图书馆选择 Markdown，依次完成结构、知识点课程和发布。</p></div>
-        <CreateTextbookDialog />
-      </header>
-      {library.isLoading ? <p className="py-8 text-sm text-muted-foreground">正在加载教材…</p> : textbooks.length === 0 ? <section className="border py-12 text-center" style={{ borderColor: 'var(--color-border-muted)' }}><BookOpenCheck className="mx-auto size-6" style={{ color: 'var(--color-text-tertiary)' }} /><p className="mt-3 text-sm" style={{ color: 'var(--color-text-secondary)' }}>尚未创建教材。</p></section> : <div className="overflow-x-auto border-y" style={{ borderColor: 'var(--color-border-muted)' }}><table className="w-full min-w-[680px] text-left text-sm"><thead className="font-mono text-xs" style={{ color: 'var(--color-text-tertiary)' }}><tr><th scope="col" className="px-3 py-3 font-medium">教材</th><th scope="col" className="px-3 py-3 font-medium">当前版本</th><th scope="col" className="px-3 py-3 font-medium">状态</th><th scope="col" className="px-3 py-3 font-medium">章节</th><th scope="col" className="px-3 py-3 font-medium">学生</th><th scope="col" className="px-3 py-3"><span className="sr-only">打开教材</span></th></tr></thead><tbody>{textbooks.map((textbook) => <tr key={textbook.textbook_id} className="border-t" style={{ borderColor: 'var(--color-border-muted)' }}><td className="px-3 py-4 font-medium" style={{ color: 'var(--color-text-primary)' }}>{textbook.title}</td><td className="px-3 py-4 font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>{textbook.latest_version_sequence ? `v${textbook.latest_version_sequence}` : '未加工'}</td><td className="px-3 py-4"><span className="border px-2 py-1 font-mono text-[11px]" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-secondary)' }}>{libraryStatus(textbook)}</span></td><td className="px-3 py-4" style={{ color: 'var(--color-text-secondary)' }}>{textbook.chapter_count} 章</td><td className="px-3 py-4" style={{ color: 'var(--color-text-secondary)' }}>{textbook.assignment_count} 人</td><td className="px-3 py-4 text-right"><Link to={`/textbooks/${textbook.textbook_id}`} aria-label={`打开 ${textbook.title}`} className="inline-flex size-10 items-center justify-center" style={{ color: 'var(--color-text-secondary)' }}><ChevronRight className="size-4" /></Link></td></tr>)}</tbody></table></div>}
-    </div>
-  </main>;
+
+  return (
+    <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="textbook-library-page">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-end sm:justify-between" style={{ borderColor: 'var(--color-border-muted)' }}>
+          <div>
+            <h1 className="text-2xl font-semibold text-foreground">教材</h1>
+            <p className="mt-1 text-sm text-muted-foreground">阅读原文与讲义，生成内容和查看处理活动都在教材工作台完成。</p>
+          </div>
+          <Link
+            to="/documents?useAsTextbook=1"
+            className="inline-flex min-h-10 self-start items-center justify-center rounded-md bg-[var(--color-btn-primary-bg)] px-4 py-2 text-sm font-medium text-[var(--color-btn-primary-text)] hover:opacity-90 sm:self-auto"
+          >
+            <Library className="mr-2 size-4" aria-hidden="true" />
+            从图书馆添加
+          </Link>
+        </header>
+
+        {library.isLoading ? (
+          <p className="py-8 text-sm text-muted-foreground">正在加载教材…</p>
+        ) : textbooks.length === 0 ? (
+          <section className="border-y py-12 text-center" style={{ borderColor: 'var(--color-border-muted)' }}>
+            <BookOpenCheck className="mx-auto size-6 text-muted-foreground" aria-hidden="true" />
+            <p className="mt-3 text-sm text-muted-foreground">尚未添加教材。</p>
+            <Link className="mt-4 inline-flex min-h-11 items-center text-sm font-medium underline underline-offset-4" to="/documents?useAsTextbook=1">
+              从图书馆选择来源
+            </Link>
+          </section>
+        ) : (
+          <div className="overflow-x-auto border-y" style={{ borderColor: 'var(--color-border-muted)' }}>
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr>
+                  <th scope="col" className="px-3 py-3 font-medium">教材</th>
+                  <th scope="col" className="px-3 py-3 font-medium">结构</th>
+                  <th scope="col" className="px-3 py-3 font-medium">讲义</th>
+                  <th scope="col" className="px-3 py-3 font-medium">处理活动</th>
+                  <th scope="col" className="px-3 py-3"><span className="sr-only">打开教材</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {textbooks.map((textbook) => (
+                  <tr key={textbook.textbook_id} className="border-t" style={{ borderColor: 'var(--color-border-muted)' }}>
+                    <td className="px-3 py-4 font-medium text-foreground">{textbook.title}</td>
+                    <td className="px-3 py-4 text-muted-foreground">{STRUCTURE_STATUS[textbook.structure_status]}</td>
+                    <td className="px-3 py-4 tabular-nums text-muted-foreground">
+                      {textbook.materials.ready} / {textbook.materials.total}
+                    </td>
+                    <td className="px-3 py-4">
+                      {textbook.current_job ? (
+                        <Link
+                          to={`/textbooks/${textbook.textbook_id}?activity=${textbook.current_job.job_id}`}
+                          className="inline-flex min-h-10 items-center gap-2 rounded-md px-2 text-muted-foreground hover:bg-[var(--color-bg-hover)] hover:text-foreground"
+                          aria-label={`查看 ${textbook.title} 的处理活动`}
+                        >
+                          <Activity className="size-4" aria-hidden="true" />
+                          {textbook.current_job.status === 'queued' ? '等待开始' : '处理中'}
+                        </Link>
+                      ) : <span className="text-muted-foreground">无进行中任务</span>}
+                    </td>
+                    <td className="px-3 py-4 text-right">
+                      <Link
+                        to={`/textbooks/${textbook.textbook_id}`}
+                        aria-label={`打开 ${textbook.title}`}
+                        className="inline-flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--color-bg-hover)] hover:text-foreground"
+                      >
+                        <ChevronRight className="size-4" aria-hidden="true" />
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </main>
+  );
 }

@@ -9,13 +9,7 @@ import type {
   BookActivityEvent,
   BookJob,
   BookJobStatus,
-  CreateBookPipelineJobInput,
   EducationTaskCalendarRequest,
-  MergeKnowledgePointCandidatesInput,
-  SplitKnowledgePointCandidateInput,
-  StructureGenerationJob,
-  TextbookStructureUnit,
-  UpdateKnowledgePointCandidateInput,
 } from './types';
 
 const TERMINAL_MANAGED_BOOK_STATUSES = new Set<BookJobStatus>([
@@ -109,6 +103,110 @@ export function useBookJob(jobId: string | undefined, enabled = true) {
     enabled: Boolean(jobId) && enabled,
     staleTime: 1_000,
   });
+}
+
+export function useManagedTextbookLibrary() {
+  return useQuery({
+    queryKey: queryKeys.education.textbooks(),
+    queryFn: educationApi.listManagedTextbooks,
+    staleTime: 15_000,
+  });
+}
+
+export function useManagedBookSourceCandidates(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.education.bookSources(),
+    queryFn: educationApi.listManagedBookSources,
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+export function useTextbookWorkbench(textbookId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.education.textbookWorkbench(textbookId ?? ''),
+    queryFn: () => educationApi.getTextbookWorkbench(textbookId ?? ''),
+    enabled: Boolean(textbookId),
+    staleTime: 5_000,
+  });
+}
+
+export function useManagedBookStructure(textbookId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.education.bookStructure(textbookId ?? ''),
+    queryFn: () => educationApi.getManagedBookStructure(textbookId ?? ''),
+    enabled: Boolean(textbookId) && enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useManagedBookSourceSlice(
+  textbookId: string | undefined,
+  startLine: number | undefined,
+  endLine: number | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.education.bookSourceSlice(
+      textbookId ?? '',
+      startLine ?? 0,
+      endLine ?? 0,
+    ),
+    queryFn: () => educationApi.getManagedBookSourceSlice(
+      textbookId ?? '',
+      startLine ?? 0,
+      endLine ?? 0,
+    ),
+    enabled: Boolean(textbookId && startLine && endLine) && enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useManagedKnowledgePointMaterial(
+  textbookId: string | undefined,
+  knowledgePointId: string | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.education.bookMaterial(textbookId ?? '', knowledgePointId ?? ''),
+    queryFn: () => educationApi.getManagedKnowledgePointMaterial(
+      textbookId ?? '',
+      knowledgePointId ?? '',
+    ),
+    enabled: Boolean(textbookId && knowledgePointId) && enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useManagedBookMutations() {
+  const queryClient = useQueryClient();
+  const invalidateBook = (textbookId: string) => Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.education.textbookWorkbench(textbookId) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.education.bookStructure(textbookId) }),
+  ]);
+  return {
+    createTextbook: useMutation({
+      mutationFn: educationApi.createManagedTextbook,
+      onSuccess: () => queryClient.invalidateQueries({
+        queryKey: queryKeys.education.textbooks(),
+      }),
+    }),
+    createJob: useMutation({
+      mutationFn: ({ textbookId, input }: {
+        textbookId: string;
+        input: Parameters<typeof educationApi.createManagedBookJob>[1];
+      }) => educationApi.createManagedBookJob(textbookId, input),
+      onSuccess: (_job, variables) => invalidateBook(variables.textbookId),
+    }),
+    cancelJob: useMutation({
+      mutationFn: educationApi.cancelManagedBookJob,
+      onSuccess: (job) => invalidateBook(job.textbook_id),
+    }),
+    retryJob: useMutation({
+      mutationFn: educationApi.retryManagedBookJob,
+      onSuccess: (job) => invalidateBook(job.textbook_id),
+    }),
+  };
 }
 
 function usePageVisibility() {
@@ -298,32 +396,6 @@ export function useEducationTaskMutations() {
   };
 }
 
-export function useTextbookLibrary() {
-  return useQuery({
-    queryKey: queryKeys.education.textbooks(),
-    queryFn: educationApi.listTextbooks,
-    staleTime: 15_000,
-  });
-}
-
-export function useTextbook(textbookId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.education.textbook(textbookId ?? ''),
-    queryFn: () => educationApi.getTextbook(textbookId ?? ''),
-    enabled: Boolean(textbookId),
-    staleTime: 10_000,
-  });
-}
-
-export function useCompletedParseJobs(enabled: boolean) {
-  return useQuery({
-    queryKey: queryKeys.documents.completedParseJobs(),
-    queryFn: educationApi.listCompletedParseJobs,
-    enabled,
-    staleTime: 10_000,
-  });
-}
-
 export function useLearningAssignments(enabled: boolean) {
   return useQuery({
     queryKey: queryKeys.education.learning(),
@@ -425,248 +497,4 @@ export function useParentLearningTranscript(assignmentId: string | undefined, en
     enabled: Boolean(assignmentId) && enabled,
     staleTime: 10_000,
   });
-}
-
-export function useLatestTextbookStructure(versionId: string | undefined, enabled: boolean) {
-  return useQuery({
-    queryKey: queryKeys.education.textbookStructure(versionId ?? ''),
-    queryFn: () => educationApi.getLatestTextbookStructure(versionId ?? ''),
-    enabled: Boolean(versionId) && enabled,
-    staleTime: 5_000,
-  });
-}
-
-export function useKnowledgePointCandidateReview(
-  structureId: string | undefined,
-  enabled: boolean,
-) {
-  return useQuery({
-    queryKey: queryKeys.education.candidateReview(structureId ?? ''),
-    queryFn: () =>
-      educationApi.getKnowledgePointCandidateReview(structureId ?? ''),
-    enabled: Boolean(structureId) && enabled,
-    staleTime: 5_000,
-  });
-}
-
-export function useKnowledgePointCandidateMutations() {
-  const queryClient = useQueryClient();
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
-  return {
-    accept: useMutation({
-      mutationFn: ({ candidateIds }: { candidateIds: string[] }) =>
-        educationApi.acceptKnowledgePointCandidates(candidateIds),
-      onSuccess: invalidate,
-    }),
-    reject: useMutation({
-      mutationFn: ({ candidateIds }: { candidateIds: string[] }) =>
-        educationApi.rejectKnowledgePointCandidates(candidateIds),
-      onSuccess: invalidate,
-    }),
-    update: useMutation({
-      mutationFn: ({
-        candidateId,
-        ...input
-      }: {
-        candidateId: string;
-      } & UpdateKnowledgePointCandidateInput) =>
-        educationApi.updateKnowledgePointCandidate(candidateId, input),
-      onSuccess: invalidate,
-    }),
-    merge: useMutation({
-      mutationFn: (input: MergeKnowledgePointCandidatesInput) =>
-        educationApi.mergeKnowledgePointCandidates(input),
-      onSuccess: invalidate,
-    }),
-    split: useMutation({
-      mutationFn: (input: SplitKnowledgePointCandidateInput) =>
-        educationApi.splitKnowledgePointCandidate(input),
-      onSuccess: invalidate,
-    }),
-  };
-}
-
-export function useStructureGenerationJob(jobId: string | undefined, enabled: boolean) {
-  const terminal = new Set<StructureGenerationJob['status']>(['completed', 'failed', 'cancelled']);
-  return useQuery({
-    queryKey: queryKeys.education.structureJob(jobId ?? ''),
-    queryFn: () => educationApi.getStructureGenerationJob(jobId ?? ''),
-    enabled: Boolean(jobId) && enabled,
-    staleTime: 2_000,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status && terminal.has(status) ? false : 5_000;
-    },
-    refetchIntervalInBackground: true,
-  });
-}
-
-export function useStructureGenerationProgress(jobId: string | undefined, enabled: boolean) {
-  const terminal = new Set<StructureGenerationJob['status']>(['completed', 'failed', 'cancelled']);
-  return useQuery({
-    queryKey: queryKeys.education.structureJobProgress(jobId ?? ''),
-    queryFn: () => educationApi.getStructureGenerationProgress(jobId ?? ''),
-    enabled: Boolean(jobId) && enabled,
-    staleTime: 2_000,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status as StructureGenerationJob['status'] | undefined;
-      return status && terminal.has(status) ? false : 4_000;
-    },
-    refetchIntervalInBackground: true,
-  });
-}
-
-export function useKnowledgePointLesson(lessonId: string | undefined, enabled: boolean) {
-  return useQuery({
-    queryKey: queryKeys.education.knowledgePointLesson(lessonId ?? ''),
-    queryFn: () => educationApi.getKnowledgePointLesson(lessonId ?? ''),
-    enabled: Boolean(lessonId) && enabled,
-    staleTime: 5_000,
-  });
-}
-
-export function useKnowledgePointLessonByPoint(knowledgePointId: string | undefined, enabled: boolean) {
-  return useQuery({
-    queryKey: queryKeys.education.knowledgePointLessonByPoint(knowledgePointId ?? ''),
-    queryFn: () => educationApi.getKnowledgePointLessonByPoint(knowledgePointId ?? ''),
-    enabled: Boolean(knowledgePointId) && enabled,
-    staleTime: 5_000,
-  });
-}
-
-export function useKnowledgePointSourcePreview(knowledgePointId: string | undefined, enabled: boolean) {
-  return useQuery({
-    queryKey: queryKeys.education.knowledgePointSourcePreview(knowledgePointId ?? ''),
-    queryFn: () => educationApi.getKnowledgePointSourcePreview(knowledgePointId ?? ''),
-    enabled: Boolean(knowledgePointId) && enabled,
-    staleTime: 30_000,
-  });
-}
-
-export function useLessonGenerationStatus(knowledgePointId: string | undefined, enabled: boolean) {
-  return useQuery({
-    queryKey: queryKeys.education.lessonGenerationStatus(knowledgePointId ?? ''),
-    queryFn: () => educationApi.getLessonGenerationStatus(knowledgePointId ?? ''),
-    enabled: Boolean(knowledgePointId) && enabled,
-    staleTime: 2_000,
-    refetchInterval: (query) => (query.state.data?.generating ? 4_000 : false),
-    refetchIntervalInBackground: true,
-  });
-}
-
-export function useTextbookMutations() {
-  const queryClient = useQueryClient();
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
-  return {
-    create: useMutation({ mutationFn: educationApi.createTextbook, onSuccess: invalidate }),
-    start: useMutation({ mutationFn: ({ textbookId, sourceParseJobIds }: { textbookId: string; sourceParseJobIds: string[] }) => educationApi.startTextbookProcessingFromParseJobs(textbookId, sourceParseJobIds), onSuccess: invalidate }),
-    run: useMutation({ mutationFn: educationApi.runTextbookProcessing, onSuccess: invalidate }),
-    retry: useMutation({ mutationFn: educationApi.retryTextbookProcessing, onSuccess: invalidate }),
-    assign: useMutation({ mutationFn: ({ publicationId, studentUserId }: { publicationId: string; studentUserId: string }) => educationApi.assignTextbookPublication(publicationId, studentUserId), onSuccess: invalidate }),
-  };
-}
-
-export function useBookPipelineMutations() {
-  const queryClient = useQueryClient();
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
-  return {
-    create: useMutation({
-      mutationFn: ({
-        versionId,
-        input,
-      }: {
-        versionId: string;
-        input: CreateBookPipelineJobInput;
-      }) => educationApi.createBookPipelineJob(versionId, input),
-      onSuccess: (job) => {
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.education.bookPipelineJobProgress(
-            job.generation_job_id,
-          ),
-        });
-        void invalidate();
-      },
-    }),
-    cancel: useMutation({
-      mutationFn: educationApi.cancelBookPipelineJob,
-      onSuccess: (_job, jobId) => {
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.education.bookPipelineJobProgress(jobId),
-        });
-        void invalidate();
-      },
-    }),
-  };
-}
-
-export function useBookPipelineProgress(
-  jobId: string | undefined,
-  enabled = true,
-) {
-  const stableStatuses = new Set([
-    'awaiting_review',
-    'completed',
-    'failed',
-    'cancelled',
-  ]);
-  return useQuery({
-    queryKey: queryKeys.education.bookPipelineJobProgress(jobId ?? ''),
-    queryFn: () => educationApi.getBookPipelineJobProgress(jobId ?? ''),
-    enabled: Boolean(jobId) && enabled,
-    staleTime: 1_000,
-    refetchInterval: (query) =>
-      stableStatuses.has(query.state.data?.status ?? '') ? false : 2_000,
-    refetchIntervalInBackground: true,
-  });
-}
-
-export function useStructureMutations() {
-  const queryClient = useQueryClient();
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
-  return {
-    create: useMutation({
-      mutationFn: ({ versionId, profile }: { versionId: string; profile?: Record<string, unknown> }) =>
-        educationApi.createTextbookStructure(versionId, profile),
-      onSuccess: invalidate,
-    }),
-    resumeStructure: useMutation({
-      mutationFn: educationApi.resumeStructureGenerationJob,
-      onSuccess: invalidate,
-    }),
-    generateBookAssets: useMutation({
-      mutationFn: educationApi.generateBookAssets,
-      onSuccess: invalidate,
-    }),
-    save: useMutation({
-      mutationFn: ({ structureId, units }: { structureId: string; units: TextbookStructureUnit[] }) =>
-        educationApi.updateTextbookStructure(structureId, units),
-      onSuccess: invalidate,
-    }),
-    accept: useMutation({
-      mutationFn: educationApi.acceptTextbookStructure,
-      onSuccess: invalidate,
-    }),
-    generateLesson: useMutation({
-      mutationFn: ({ knowledgePointId, autoGrading, prompt }: { knowledgePointId: string; autoGrading: boolean; prompt: string }) =>
-        educationApi.generateKnowledgePointLesson(knowledgePointId, autoGrading, prompt),
-      onSuccess: invalidate,
-    }),
-    saveLessonRevision: useMutation({
-      mutationFn: ({ lessonId, contentMarkdown }: { lessonId: string; contentMarkdown: string }) =>
-        educationApi.createKnowledgePointLessonRevision(lessonId, contentMarkdown),
-      onSuccess: invalidate,
-    }),
-    approveLesson: useMutation({
-      mutationFn: ({ lessonId, revisionId }: { lessonId: string; revisionId: string }) =>
-        educationApi.approveKnowledgePointLesson(lessonId, revisionId),
-      onSuccess: invalidate,
-    }),
-    publish: useMutation({
-      mutationFn: ({ versionId, structureId }: { versionId: string; structureId: string }) =>
-        educationApi.publishTextbookStructure(versionId, structureId),
-      onSuccess: invalidate,
-    }),
-  };
 }

@@ -186,22 +186,15 @@
         "loading": "Loading teaching usage…",
         "loadFailed": "Teaching usage could not be loaded.",
         "empty": "This document has not been used to process a textbook.",
-        "contentVersion": "Content version v{{sequence}}",
-        "sourcePosition": "Source {{position}}",
         "artifact": "Parse artifact {{id}}",
         "job": "Parse job {{id}}",
-        "unstructured": "No structure",
-        "unstructuredNote": "No textbook structure has been generated for this content version.",
-        "structure": "Textbook structure",
-        "structureSequence": "Structure v{{sequence}}",
-        "viewAssets": "View knowledge assets",
+        "materials": "Lessons {{ready}} / {{total}}",
+        "openTextbook": "Open textbook",
         "status": {
-          "queued": "Queued",
-          "active": "Processing structure",
-          "review": "Awaiting review",
-          "published": "Published",
-          "failed": "Structure failed",
-          "cancelled": "Structure cancelled"
+          "queued": "Structure queued",
+          "active": "Analyzing structure",
+          "ready": "Structure ready",
+          "failed": "Structure failed"
         }
       }
     },

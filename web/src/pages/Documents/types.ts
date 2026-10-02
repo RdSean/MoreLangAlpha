@@ -47,28 +47,23 @@ export interface DocumentSummary {
 export type DocumentStructureStatus =
   | 'queued'
   | 'running'
-  | 'review'
-  | 'accepted'
-  | 'failed'
-  | 'cancelled';
+  | 'ready'
+  | 'failed';
 
 export interface DocumentTeachingUsage {
   document_id: string;
-  producer_job_id: string;
+  parse_job_id: string;
   primary_artifact_id: string;
   textbook_id: string;
   textbook_title: string;
-  content_version_id: string;
-  content_version_sequence: number;
-  artifact_position: number;
-  structure_id?: string | null;
-  structure_sequence?: number | null;
-  structure_status?: DocumentStructureStatus | null;
-  book_asset_prefix?: string | null;
-  publication_id?: string | null;
-  is_published: boolean;
-  has_asset_manifest: boolean;
-  created_at?: string | null;
+  source_filename: string;
+  source_completed_at: string;
+  structure_status: DocumentStructureStatus;
+  materials: {
+    ready: number;
+    total: number;
+  };
+  updated_at: string;
 }
 
 export interface Inspection {

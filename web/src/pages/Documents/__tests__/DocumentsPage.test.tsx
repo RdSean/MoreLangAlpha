@@ -11,6 +11,11 @@ vi.mock('../components/DocumentPreviewDrawer', () => ({
     open ? <button type="button" aria-label="Close preview" onClick={() => onOpenChange(false)}>Close preview</button> : null
   ),
 }));
+vi.mock('@/pages/Education/components/BookSourceDialog', () => ({
+  BookSourceDialog: ({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) => (
+    open ? <button type="button" aria-label="Close textbook source" onClick={() => onOpenChange(false)}>Source picker</button> : null
+  ),
+}));
 
 import DocumentsPage from '../DocumentsPage';
 
@@ -71,5 +76,14 @@ describe('DocumentsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Close preview' }));
     expect(screen.getByTestId('location-search')).toHaveTextContent('document=doc-1');
     expect(screen.queryByRole('button', { name: 'Close preview' })).not.toBeInTheDocument();
+  });
+
+  it('opens the shared textbook source picker from the library URL', async () => {
+    const user = userEvent.setup();
+    renderPage('/documents?useAsTextbook=1');
+
+    expect(screen.getByRole('button', { name: 'Close textbook source' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Close textbook source' }));
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('useAsTextbook');
   });
 });

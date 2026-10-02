@@ -36,6 +36,12 @@ vi.mock('@/pages/Education/EducationPage', () => ({
 vi.mock('@/pages/Education/TextbooksPage', () => ({
   default: () => <div data-testid="textbook-library-page" />,
 }));
+vi.mock('@/pages/Education/TextbookWorkbenchPage', () => ({
+  default: () => <div data-testid="textbook-workbench-page" />,
+}));
+vi.mock('@/pages/Education/LegacyTextbookRouteReset', () => ({
+  default: () => <div data-testid="legacy-textbook-reset-page" />,
+}));
 vi.mock('@/pages/Education/StudentFlashChat', () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
@@ -86,6 +92,23 @@ describe('generic application routes', () => {
     expect(await screen.findByTestId(pageTestId)).toBeInTheDocument();
   });
 
+  it('opens a textbook directly in the workbench', async () => {
+    renderAt('/textbooks/book-1');
+
+    expect(await screen.findByTestId('textbook-workbench-page')).toBeInTheDocument();
+  });
+
+  it.each([
+    '/textbooks/book-1/versions/version-1/processing',
+    '/textbooks/book-1/versions/version-1/structure',
+    '/textbooks/book-1/versions/version-1/candidates',
+    '/textbooks/book-1/versions/version-1/knowledge/kp-1',
+  ])('resets the retired textbook route %s', async (pathname) => {
+    renderAt(pathname);
+
+    expect(await screen.findByTestId('legacy-textbook-reset-page')).toBeInTheDocument();
+  });
+
   it('preloads the documents route chunk', () => {
     const load = vi.spyOn(routeChunks, 'documents').mockResolvedValue({ default: () => <div /> });
 
@@ -98,6 +121,22 @@ describe('generic application routes', () => {
     const load = vi.spyOn(routeChunks, 'documentDetail').mockResolvedValue({ default: () => <div /> });
 
     preloadRouteChunk('/documents/doc-1');
+
+    expect(load).toHaveBeenCalledOnce();
+  });
+
+  it('preloads the workbench chunk for a nested textbook URL', () => {
+    const load = vi.spyOn(routeChunks, 'textbookWorkbench').mockResolvedValue({ default: () => <div /> });
+
+    preloadRouteChunk('/textbooks/book-1');
+
+    expect(load).toHaveBeenCalledOnce();
+  });
+
+  it('preloads the reset chunk for a retired textbook URL', () => {
+    const load = vi.spyOn(routeChunks, 'legacyTextbookReset').mockResolvedValue({ default: () => <div /> });
+
+    preloadRouteChunk('/textbooks/book-1/versions/version-1/processing');
 
     expect(load).toHaveBeenCalledOnce();
   });

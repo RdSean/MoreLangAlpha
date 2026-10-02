@@ -132,20 +132,15 @@ describe('Documents API', () => {
   it('loads typed teaching usages from the owned document endpoint', async () => {
     const items = [{
       document_id: 'doc-A1b2C3d4E5f6',
-      producer_job_id: 'job-A1b2C3d4E5f6',
+      parse_job_id: 'job-A1b2C3d4E5f6',
       primary_artifact_id: 'art-A1b2C3d4E5f6',
       textbook_id: 'book-A1b2C3d4E5f6',
       textbook_title: 'Reading Explorer 3',
-      content_version_id: 'ver-A1b2C3d4E5f6',
-      content_version_sequence: 2,
-      artifact_position: 1,
-      structure_id: 'structure-A1b2C3d4E5f6',
-      structure_sequence: 1,
-      structure_status: 'review' as const,
-      book_asset_prefix: null,
-      publication_id: 'publication-A1b2C3d4E5f6',
-      is_published: true,
-      has_asset_manifest: true,
+      source_filename: 'lesson.pdf',
+      source_completed_at: '2026-09-16T12:00:00Z',
+      structure_status: 'ready' as const,
+      materials: { ready: 4, total: 7 },
+      updated_at: '2026-10-02T12:00:00Z',
     }];
     mockGet.mockResolvedValue({ data: { items } });
 

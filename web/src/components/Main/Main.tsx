@@ -22,11 +22,8 @@ const Automations = React.lazy(routeChunks.automations);
 const Education = React.lazy(routeChunks.education);
 const CreateHomework = React.lazy(async () => ({ default: (await routeChunks.createHomework()).CreateHomeworkPage }));
 const TextbookLibrary = React.lazy(routeChunks.textbookLibrary);
-const TextbookDetail = React.lazy(routeChunks.textbookDetail);
-const BookProcessing = React.lazy(routeChunks.bookProcessing);
-const TextbookStructure = React.lazy(routeChunks.textbookStructure);
-const KnowledgePointReview = React.lazy(routeChunks.knowledgePointReview);
-const KnowledgePointLessonReview = React.lazy(routeChunks.knowledgePointLessonReview);
+const TextbookWorkbench = React.lazy(routeChunks.textbookWorkbench);
+const LegacyTextbookReset = React.lazy(routeChunks.legacyTextbookReset);
 const StudentTextbookLearning = React.lazy(routeChunks.studentTextbookLearning);
 const PersonalizedSummary = React.lazy(routeChunks.personalizedSummary);
 const Plugins = React.lazy(routeChunks.plugins);
@@ -55,11 +52,11 @@ function Main() {
         <Route path="/education" element={<Education />} />
         <Route path="/education/tasks/new" element={<CreateHomework />} />
         <Route path="/textbooks" element={<TextbookLibrary />} />
-        <Route path="/textbooks/:textbookId" element={<TextbookDetail />} />
-        <Route path="/textbooks/:textbookId/versions/:versionId/processing" element={<BookProcessing />} />
-        <Route path="/textbooks/:textbookId/versions/:versionId/structure" element={<TextbookStructure />} />
-        <Route path="/textbooks/:textbookId/versions/:versionId/candidates" element={<KnowledgePointReview />} />
-        <Route path="/textbooks/:textbookId/versions/:versionId/knowledge/:knowledgePointId" element={<KnowledgePointLessonReview />} />
+        <Route path="/textbooks/:textbookId" element={<TextbookWorkbench />} />
+        <Route path="/textbooks/:textbookId/versions/:versionId/processing" element={<LegacyTextbookReset />} />
+        <Route path="/textbooks/:textbookId/versions/:versionId/structure" element={<LegacyTextbookReset />} />
+        <Route path="/textbooks/:textbookId/versions/:versionId/candidates" element={<LegacyTextbookReset />} />
+        <Route path="/textbooks/:textbookId/versions/:versionId/knowledge/:knowledgePointId" element={<LegacyTextbookReset />} />
         <Route path="/education/learn/:assignmentId" element={<StudentTextbookLearning />} />
         <Route path="/education/learn/:assignmentId/units/:unitId" element={<StudentTextbookLearning />} />
         <Route path="/education/learn/:assignmentId/knowledge/:knowledgePointId" element={<StudentTextbookLearning />} />

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BookSourceDialog } from '@/pages/Education/components/BookSourceDialog';
 import { useDocumentDataset } from './hooks';
 import DatasetGrid from './components/DatasetGrid';
 import DocumentTable, { type DocumentTableFilters } from './components/DocumentTable';
@@ -94,11 +95,13 @@ function DatasetDocuments({
 
 export default function DocumentsPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab: DocumentsTab = searchParams.get('tab') === 'documents' ? 'documents' : 'datasets';
   const selectedDatasetId = searchParams.get('dataset');
   const selectedDocumentId = searchParams.get('document') ?? undefined;
   const wizardOpen = searchParams.get('upload') === '1';
+  const textbookSourceOpen = searchParams.get('useAsTextbook') === '1';
   const datasetPage = positivePage(searchParams.get('datasets_page'));
   const allDocumentsPage = positivePage(searchParams.get('documents_page'));
   const datasetDocumentsPage = positivePage(searchParams.get('dataset_documents_page'));
@@ -235,6 +238,15 @@ export default function DocumentsPage() {
         documentId={selectedDocumentId}
         onOpenChange={(open) => !open && closePreview()}
         onOpenParser={openParserForDocument}
+      />
+      <BookSourceDialog
+        open={textbookSourceOpen}
+        onOpenChange={(open) => {
+          if (!open) updateParams((params) => params.delete('useAsTextbook'));
+        }}
+        onCreated={({ textbook_id: textbookId, job_id: jobId }) => {
+          navigate(`/textbooks/${encodeURIComponent(textbookId)}?activity=${encodeURIComponent(jobId)}`);
+        }}
       />
     </div>
   );

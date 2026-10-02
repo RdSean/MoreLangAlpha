@@ -29,20 +29,15 @@ const deleteDocument = documentsApi.deleteDocument as unknown as ReturnType<type
 function usage(structureStatus: string) {
   return {
     document_id: 'doc-1',
-    producer_job_id: 'job-1',
+    parse_job_id: 'job-1',
     primary_artifact_id: 'art-1',
     textbook_id: 'textbook-1',
     textbook_title: 'Reading Explorer 3',
-    content_version_id: 'version-1',
-    content_version_sequence: 1,
-    artifact_position: 1,
-    structure_id: 'structure-1',
-    structure_sequence: 1,
+    source_filename: 'lesson.pdf',
+    source_completed_at: '2026-09-16T12:00:00Z',
     structure_status: structureStatus,
-    book_asset_prefix: null,
-    publication_id: null,
-    is_published: false,
-    has_asset_manifest: false,
+    materials: { ready: 0, total: 0 },
+    updated_at: '2026-10-02T12:00:00Z',
   };
 }
 
@@ -78,13 +73,13 @@ describe('document teaching usage query', () => {
   it('stops polling once every package status is terminal', async () => {
     vi.useFakeTimers();
     try {
-      getDocumentTeachingUsage.mockResolvedValue([usage('review')]);
+      getDocumentTeachingUsage.mockResolvedValue([usage('ready')]);
 
       const { result } = renderHookWithProviders(() => useDocumentTeachingUsage('doc-1'));
 
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       expect(getDocumentTeachingUsage).toHaveBeenCalledTimes(1);
-      expect(result.current.data?.[0].structure_status).toBe('review');
+      expect(result.current.data?.[0].structure_status).toBe('ready');
 
       await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
       expect(getDocumentTeachingUsage).toHaveBeenCalledTimes(1);

@@ -222,6 +222,138 @@ export interface BookActivityPage {
   has_more: boolean;
 }
 
+export type BookStructureStatus = 'queued' | 'running' | 'ready' | 'failed';
+
+export interface BookMaterialCounts {
+  total: number;
+  ready: number;
+}
+
+export interface FrozenBookSource {
+  document_id: string;
+  parse_job_id: string;
+  primary_artifact_id: string;
+  filename: string;
+  media_type: string;
+  parser_id: string;
+  parser_name: string;
+  completed_at: string;
+  content_sha256: string;
+  size_bytes: number;
+  image_count: number;
+  frozen_at: string;
+}
+
+export type BookSourceCandidate = Omit<FrozenBookSource, 'frozen_at'>;
+
+export interface CreateManagedTextbookInput {
+  parse_job_id: string;
+  primary_artifact_id: string;
+  title: string;
+  idempotency_key: string;
+}
+
+export interface CreateManagedTextbookResponse {
+  textbook_id: string;
+  job_id: string;
+}
+
+export interface ManagedTextbookSummary {
+  textbook_id: string;
+  title: string;
+  structure_status: BookStructureStatus;
+  materials: BookMaterialCounts;
+  current_job: BookJobSummary | null;
+  updated_at: string;
+}
+
+export interface TextbookWorkbench extends ManagedTextbookSummary {
+  source: FrozenBookSource;
+  current_structure_id: string | null;
+  recent_job: BookJobSummary | null;
+  assigned_student_count: number;
+}
+
+export interface BookStructureAnchor {
+  start_line: number;
+  end_line: number;
+}
+
+export interface BookStructureNode {
+  id: string;
+  title: string;
+  anchor: BookStructureAnchor;
+  children?: BookStructureNode[];
+  level?: number;
+  number?: string | null;
+  type?: string;
+  summary?: string | null;
+  content_file?: string | null;
+  [key: string]: unknown;
+}
+
+export interface BookStructureDocument {
+  schema_version: string;
+  book: Record<string, unknown> & { title: string };
+  source: Record<string, unknown> & { path: string; total_lines: number };
+  nodes: BookStructureNode[];
+  coverage: Record<string, unknown>;
+  level_names?: string[];
+  [key: string]: unknown;
+}
+
+export interface KnowledgePointProjection {
+  knowledge_point_id: string;
+  skill_kp_id: string;
+  position: number;
+  title: string;
+  unit_skill_node_id: string | null;
+  node_skill_ids: string[];
+  start_line: number;
+  end_line: number;
+  content_file: string | null;
+  material_available: boolean;
+}
+
+export interface BookStructure {
+  textbook_id: string;
+  structure_id: string;
+  schema_version: string;
+  structure: BookStructureDocument;
+  knowledge_points: KnowledgePointProjection[];
+  warnings: string[];
+}
+
+export interface BookSourceSlice {
+  textbook_id: string;
+  start_line: number;
+  end_line: number;
+  total_lines: number;
+  markdown: string;
+}
+
+export interface KnowledgePointMaterial {
+  textbook_id: string;
+  knowledge_point_id: string;
+  skill_kp_id: string;
+  material_available: boolean;
+  markdown: string | null;
+  generated_at: string | null;
+  depth: BookMaterialDepth | null;
+  requirements: string | null;
+  content_sha256: string | null;
+}
+
+export interface CreateBookJobInput {
+  kind: BookJobKind;
+  knowledge_point_ids: string[];
+  depth: BookMaterialDepth;
+  requirements: string | null;
+  replace_existing: boolean;
+  include_supplementary: boolean;
+  idempotency_key: string;
+}
+
 export type TextbookVersionStatus = 'draft' | 'processing' | 'review' | 'published' | 'failed';
 
 export interface TextbookLibraryItem {
