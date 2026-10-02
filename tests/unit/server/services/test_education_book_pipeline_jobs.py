@@ -183,9 +183,7 @@ async def test_download_book_package_outputs_uses_manifest_declared_assets_only(
                             "node_key": "node-01",
                             "kind": "package",
                             "path": "outputs/book_package.json",
-                            "content_sha256": hashlib.sha256(
-                                package_bytes
-                            ).hexdigest(),
+                            "content_sha256": hashlib.sha256(package_bytes).hexdigest(),
                             "size_bytes": len(package_bytes),
                         },
                     ],
@@ -784,11 +782,7 @@ async def test_finalize_book_pipeline_requires_durable_completed_stages(
 ) -> None:
     settled: dict[str, object] = {}
     events = _completed_pipeline_progress_events()
-    events = [
-        event
-        for event in events
-        if event["stage"] != "chapter_analysis"
-    ]
+    events = [event for event in events if event["stage"] != "chapter_analysis"]
 
     async def fake_settle(**kwargs):
         settled.update(kwargs)
@@ -1379,9 +1373,12 @@ async def test_launch_book_pipeline_uses_shared_runtime_spine(monkeypatch) -> No
 
     assert result == {"root_run_id": started["run_id"]}
     assert captured["handler"]["replay_profile"] == "education_compact"
-    assert staged["session"]["policy"].purpose == "book_pipeline"
-    assert graphed["policy"].purpose == "book_pipeline"
-    assert graphed["managed_kind"] == "education_book_pipeline"
+    assert staged["session"]["policy"].allowed_skill_names == frozenset(
+        {"more-to-skills"}
+    )
+    assert graphed["policy"].filesystem_root.endswith(job["generation_job_id"])
+    assert graphed["operation"] == "structure"
+    assert graphed["execution_id"] == job["generation_job_id"]
     assert graphed["prompt"] == started["query"].content
     assert "只提取学生活动页。" in str(graphed["prompt"])
     full_prompt = str(graphed["prompt"])

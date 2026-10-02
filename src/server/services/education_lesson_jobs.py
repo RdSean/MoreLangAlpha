@@ -11,9 +11,9 @@ import logging
 from typing import Any
 from uuid import UUID, uuid4
 
-from ptc_agent.agent.managed_execution import education_lesson_policy
+from ptc_agent.agent.managed_execution import education_book_policy
 from src.config.settings import (
-    get_education_teaching_workflow_timeout,
+    get_education_book_workflow_timeout,
     get_ptc_recursion_limit,
 )
 from src.server.database.education_textbooks import (
@@ -70,7 +70,7 @@ from src.server.utils.error_sanitization import sanitize_error_text
 
 logger = logging.getLogger(__name__)
 
-_MANAGED_KIND = "education_lesson"
+_MANAGED_KIND = "education_book"
 _PROFILE_VERSION = "kp-lesson-v1"
 MAX_LESSON_GENERATION_ATTEMPTS = 3
 MAX_LESSON_GENERATION_PROMPT_LENGTH = 4_000
@@ -242,24 +242,16 @@ def managed_lesson_prompt(
                     "grade_band": job.get("processing_profile_grade_band"),
                     "language": job.get("processing_profile_language"),
                     "depth": job.get("processing_profile_depth"),
-                    "question_types": job.get(
-                        "processing_profile_question_types"
-                    ),
-                    "prompt_fragment": job.get(
-                        "processing_profile_prompt_fragment"
-                    ),
-                    "allowed_skills": job.get(
-                        "processing_profile_allowed_skills"
-                    ),
+                    "question_types": job.get("processing_profile_question_types"),
+                    "prompt_fragment": job.get("processing_profile_prompt_fragment"),
+                    "allowed_skills": job.get("processing_profile_allowed_skills"),
                 }
             )
             if job.get("processing_profile_id")
             else ""
         )
     )
-    return prompt + _lesson_generation_prompt_guidance(
-        job.get("processing_brief")
-    )
+    return prompt + _lesson_generation_prompt_guidance(job.get("processing_brief"))
 
 
 def build_lesson_source_context(
@@ -308,9 +300,7 @@ def build_lesson_source_context(
             for candidate in raw_sources or []
             if isinstance(candidate, Mapping)
             and str(
-                candidate.get("source_id")
-                or candidate.get("content_chapter_id")
-                or ""
+                candidate.get("source_id") or candidate.get("content_chapter_id") or ""
             )
             == source_id
         ),
@@ -489,9 +479,7 @@ async def _fail_lesson_attempt(
         status=status,
         error_code=error_code,
         error_message=(
-            sanitize_error_text(error_message)
-            if error_message is not None
-            else None
+            sanitize_error_text(error_message) if error_message is not None else None
         ),
     )
 
@@ -654,11 +642,16 @@ async def _dispatch_kp_lesson_root_run(
             session=session,
             thread_id=thread_id,
             run_handle=run_handle,
-            policy=education_lesson_policy(generation_job_id),
+            policy=education_book_policy(generation_job_id),
             agent_config=agent_config,
             prompt=prompt,
             tags=("managed", "education", "lesson"),
-            managed_kind=_MANAGED_KIND,
+            operation="material",
+            textbook_id=generation_job_id,
+            job_id=generation_job_id,
+            item_id=generation_job_id,
+            execution_id=generation_job_id,
+            attempt_token=attempt_id,
         )
         graph_config["recursion_limit"] = get_ptc_recursion_limit()
         running = await mark_generation_attempt_running(
@@ -667,11 +660,13 @@ async def _dispatch_kp_lesson_root_run(
             root_run_id=run_id,
         )
         if running is None:
-            raise RuntimeError("Lesson generation attempt could not enter running state")
+            raise RuntimeError(
+                "Lesson generation attempt could not enter running state"
+            )
         handler = RunSSEProducer(
             thread_id=thread_id,
             run_id=run_id,
-            workflow_timeout=get_education_teaching_workflow_timeout(),
+            workflow_timeout=get_education_book_workflow_timeout(),
             replay_profile="education_compact",
         )
         progress_collector = ManagedProgressCollector(
@@ -835,11 +830,13 @@ async def launch_kp_lesson_generation(
             error_message="单知识点课程生成需要先配置模型服务，再继续运行。",
         )
         raise
-    policy = education_lesson_policy(generation_job_id)
+    policy = education_book_policy(generation_job_id)
     try:
-        session = await WorkspaceManager.get_instance().provision_managed_textbook_session(
-            workspace_id=workspace_id,
-            policy=policy,
+        session = (
+            await WorkspaceManager.get_instance().provision_managed_textbook_session(
+                workspace_id=workspace_id,
+                policy=policy,
+            )
         )
         await stage_managed_teaching_skills(
             generation_job_id,

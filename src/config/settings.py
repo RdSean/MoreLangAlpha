@@ -734,14 +734,24 @@ def get_volcengine_asr_config() -> VolcengineAsrConfig | None:
     )
 
 
-def get_education_teaching_workflow_timeout() -> int:
+def get_education_book_workflow_timeout() -> int:
     """Dedicated wall-clock timeout for one managed textbook PTC root."""
-    return get_infrastructure_config().education_teaching_workflow_timeout
+    return get_infrastructure_config().education_book_workflow_timeout
 
 
-def get_education_teaching_abandoned_timeout() -> int:
+def get_education_book_abandoned_timeout() -> int:
     """Dedicated disconnected-run recovery window for managed textbook work."""
-    return get_infrastructure_config().education_teaching_abandoned_timeout
+    return get_infrastructure_config().education_book_abandoned_timeout
+
+
+def get_education_book_item_lease_seconds() -> int:
+    """Lease duration for one managed textbook item attempt."""
+    return get_infrastructure_config().education_book_item_lease_seconds
+
+
+def get_education_book_job_poll_interval() -> float:
+    """Polling interval for the persisted managed textbook queue."""
+    return get_infrastructure_config().education_book_job_poll_interval
 
 
 def get_channel_gateway_config() -> ChannelGatewayConfig:

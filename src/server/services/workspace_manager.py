@@ -450,8 +450,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         local_sandbox_id = self._session_sandbox_id(session)
         if db_sandbox_id != local_sandbox_id:
             return (
-                f"sandbox identity moved (db={db_sandbox_id}, "
-                f"local={local_sandbox_id})"
+                f"sandbox identity moved (db={db_sandbox_id}, local={local_sandbox_id})"
             )
         return None
 
@@ -643,9 +642,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             )
         except Exception as e:
             egress_bind = RelayBind.REFUSED
-            logger.warning(
-                "[EGRESS] relay binding failed for %s: %s", workspace_id, e
-            )
+            logger.warning("[EGRESS] relay binding failed for %s: %s", workspace_id, e)
 
         await self._install_session_composite(session, resolved, user_id=user_id)
         if egress_bind is RelayBind.SUPERSEDED:
@@ -1157,7 +1154,9 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             await self._clear_session(workspace_id, evict_session=session)
             raise
 
-    async def provision_managed_textbook_session(self, *, workspace_id: str, policy) -> Session:
+    async def provision_managed_textbook_session(
+        self, *, workspace_id: str, policy
+    ) -> Session:
         """Provision a service-owned textbook sandbox without workspace hydration.
 
         Managed education work must not reuse the user-workspace provisioning
@@ -1175,7 +1174,9 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             sandbox = session.sandbox
             sandbox_id = getattr(sandbox, "sandbox_id", None) if sandbox else None
             if not sandbox_id:
-                raise RuntimeError("Managed textbook sandbox is missing its runtime identity")
+                raise RuntimeError(
+                    "Managed textbook sandbox is missing its runtime identity"
+                )
             bound = await try_bind_workspace_sandbox(
                 workspace_id,
                 sandbox_id=sandbox_id,
@@ -1189,6 +1190,40 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         except Exception:
             await self._clear_session(workspace_id, evict_session=session)
             raise
+
+    async def recover_managed_textbook_session(
+        self, *, workspace_id: str, policy
+    ) -> Session:
+        """Reconnect a service-owned textbook sandbox without normal hydration."""
+
+        from ptc_agent.agent.managed_execution import managed_core_config
+
+        async with self._acquire_workspace_lock(workspace_id):
+            cached = self._sessions.get(workspace_id)
+            if cached is not None and cached.sandbox is not None:
+                if cached.sandbox.working_dir != policy.filesystem_root:
+                    raise RuntimeError(
+                        "Managed sandbox root does not match the execution"
+                    )
+                return cached
+            workspace = await db_get_workspace(workspace_id)
+            if workspace is None or not workspace.get("sandbox_id"):
+                raise RuntimeError("Managed textbook sandbox is unavailable")
+            core_config = managed_core_config(self.config.to_core_config(), policy)
+            stale = SessionManager.get_cached_session(workspace_id)
+            if stale is not None:
+                SessionManager.remove_session(workspace_id)
+            session = SessionManager.get_session(workspace_id, core_config)
+            try:
+                await session.reconnect_managed_textbook(
+                    sandbox_id=str(workspace["sandbox_id"]),
+                    policy=policy,
+                )
+            except Exception:
+                SessionManager.remove_session(workspace_id)
+                raise
+            self._sessions[workspace_id] = session
+            return session
 
     async def _recover_sandbox(
         self,
@@ -1564,7 +1599,9 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             f"Migrating workspace {workspace_id} sandbox: {actual_wd} -> {expected_wd}"
         )
 
-        old_sandbox_id = self._session_sandbox_id(session) or workspace.get("sandbox_id")
+        old_sandbox_id = self._session_sandbox_id(session) or workspace.get(
+            "sandbox_id"
+        )
 
         # 1. Backup files to DB (must succeed or we abort — data loss prevention).
         # Strict, because step 2 deletes the sandbox. Migration is opportunistic,
@@ -1596,8 +1633,11 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                 f"Skipping migration for {workspace_id}: no sandbox to replace"
             )
             return None
-        if not transition_already_owned and not await try_claim_workspace_for_replacement(
-            workspace_id, old_sandbox_id
+        if (
+            not transition_already_owned
+            and not await try_claim_workspace_for_replacement(
+                workspace_id, old_sandbox_id
+            )
         ):
             logger.warning(
                 f"Skipping migration for {workspace_id}: could not claim the "
@@ -1679,7 +1719,9 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
         Returns:
             Created workspace record
         """
-        from src.server.services.education_access import require_nonstudent_agent_features
+        from src.server.services.education_access import (
+            require_nonstudent_agent_features,
+        )
 
         await require_nonstudent_agent_features(user_id)
         # 1. Create DB record (no lock needed — DB generates unique ID)
@@ -1838,8 +1880,7 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
                 )
             except Exception as e:
                 logger.warning(
-                    f"[skill_sync] proactive reconcile failed for "
-                    f"{workspace_id}: {e}"
+                    f"[skill_sync] proactive reconcile failed for {workspace_id}: {e}"
                 )
 
         task = asyncio.create_task(_run())
@@ -3442,6 +3483,8 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
     async def delete_workspace(
         self,
         workspace_id: str,
+        *,
+        backup_files: bool = True,
     ) -> bool:
         """
         Delete a workspace and its sandbox.
@@ -3466,10 +3509,12 @@ class WorkspaceManager(WorkspaceEntitlementsMixin):
             durable_sandbox_id = workspace.get("sandbox_id")
 
             try:
-                # Backup files to DB before deleting (if sandbox is accessible)
-                await self._backup_files_to_db(
-                    workspace_id, expected_sandbox_id=durable_sandbox_id
-                )
+                # Managed service workspaces have immutable inputs and committed
+                # outputs elsewhere, so their terminal cleanup skips duplication.
+                if backup_files:
+                    await self._backup_files_to_db(
+                        workspace_id, expected_sandbox_id=durable_sandbox_id
+                    )
 
                 # ``cleanup_session`` only deletes the sandbox this process is
                 # attached to. When that is not the durable one — a stale handle,

@@ -20,8 +20,10 @@ flash_recursion_limit: 500
 
 # Workflow Settings
 workflow_timeout: 21600  # seconds (6 hours) — matches background_execution.abandoned_workflow_timeout
-education_teaching_workflow_timeout: 86400  # seconds (24 hours) — managed textbook PTC root
-education_teaching_abandoned_timeout: 86400  # seconds (24 hours) — browser disconnect recovery
+education_book_workflow_timeout: 86400  # seconds (24 hours) — managed textbook PTC root
+education_book_abandoned_timeout: 86400  # seconds (24 hours) — browser disconnect recovery
+education_book_item_lease_seconds: 120
+education_book_job_poll_interval: 5
 sse_keepalive_interval: 15  # seconds
 
 # Feature Flags (operator-only infra toggles; never exposed to users)

@@ -11,9 +11,9 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from ptc_agent.agent.managed_execution import education_book_pipeline_policy
+from ptc_agent.agent.managed_execution import education_book_policy
 from src.config.settings import (
-    get_education_teaching_workflow_timeout,
+    get_education_book_workflow_timeout,
     get_ptc_recursion_limit,
 )
 from src.server.database.conversation import create_thread
@@ -76,7 +76,7 @@ from src.server.utils.error_sanitization import sanitize_error_text
 
 logger = logging.getLogger(__name__)
 
-_MANAGED_KIND = "education_book_pipeline"
+_MANAGED_KIND = "education_book"
 _REQUIRED_BOOK_PIPELINE_STAGES = (
     "chapter_analysis",
     "content_processing",
@@ -455,11 +455,16 @@ async def _dispatch_book_pipeline_root_run(
             session=session,
             thread_id=thread_id,
             run_handle=run_handle,
-            policy=education_book_pipeline_policy(generation_job_id),
+            policy=education_book_policy(generation_job_id),
             agent_config=agent_config,
             prompt=prompt,
             tags=("managed", "education", "book-pipeline"),
-            managed_kind=_MANAGED_KIND,
+            operation="structure",
+            textbook_id=generation_job_id,
+            job_id=generation_job_id,
+            item_id=generation_job_id,
+            execution_id=generation_job_id,
+            attempt_token=attempt_id,
         )
         graph_config["recursion_limit"] = get_ptc_recursion_limit()
         running = await mark_generation_attempt_running(
@@ -472,7 +477,7 @@ async def _dispatch_book_pipeline_root_run(
         handler = RunSSEProducer(
             thread_id=thread_id,
             run_id=run_id,
-            workflow_timeout=get_education_teaching_workflow_timeout(),
+            workflow_timeout=get_education_book_workflow_timeout(),
             replay_profile="education_compact",
         )
         checkpoint_stop_event = asyncio.Event()
@@ -641,7 +646,7 @@ async def launch_book_pipeline_generation(
         agent_config = await resolve_managed_education_agent_config(
             parent_user_id=parent_user_id
         )
-        policy = education_book_pipeline_policy(generation_job_id)
+        policy = education_book_policy(generation_job_id)
         session = (
             await WorkspaceManager.get_instance().provision_managed_textbook_session(
                 workspace_id=workspace_id,

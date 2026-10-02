@@ -10,8 +10,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from ptc_agent.agent.managed_execution import education_book_asset_policy
-from src.config.settings import get_education_teaching_workflow_timeout
+from ptc_agent.agent.managed_execution import education_book_policy
+from src.config.settings import get_education_book_workflow_timeout
 from src.server.database.conversation import create_thread
 from src.server.database.education_textbooks import (
     claim_generation_job,
@@ -48,7 +48,7 @@ from src.server.utils.error_sanitization import sanitize_error_text
 
 
 logger = logging.getLogger(__name__)
-_MANAGED_KIND = "education_book_assets"
+_MANAGED_KIND = "education_book"
 
 
 def managed_book_assets_prompt(job_id: str) -> str:
@@ -140,9 +140,7 @@ async def _create_asset_workspace(
     )
 
 
-async def _create_asset_thread(
-    *, job_id: str, workspace_id: str
-) -> dict[str, Any]:
+async def _create_asset_thread(*, job_id: str, workspace_id: str) -> dict[str, Any]:
     return await create_thread(
         conversation_thread_id=str(uuid4()),
         workspace_id=workspace_id,
@@ -173,9 +171,7 @@ async def _fail_asset_attempt(
         status=status,
         error_code=error_code,
         error_message=(
-            sanitize_error_text(error_message)
-            if error_message is not None
-            else None
+            sanitize_error_text(error_message) if error_message is not None else None
         ),
     )
 
@@ -278,14 +274,16 @@ async def launch_book_asset_generation(
     if not attempt:
         raise RuntimeError("Book asset generation job was claimed")
     attempt_id = str(attempt["attempt_id"])
-    policy = education_book_asset_policy(generation_job_id)
+    policy = education_book_policy(generation_job_id)
     try:
         agent_config = await resolve_managed_education_agent_config(
             parent_user_id=parent_user_id
         )
-        session = await WorkspaceManager.get_instance().provision_managed_textbook_session(
-            workspace_id=workspace_id,
-            policy=policy,
+        session = (
+            await WorkspaceManager.get_instance().provision_managed_textbook_session(
+                workspace_id=workspace_id,
+                policy=policy,
+            )
         )
         frozen_input = await get_teaching_input_for_parent(
             parent_user_id=parent_user_id,
@@ -360,7 +358,12 @@ async def launch_book_asset_generation(
             agent_config=agent_config,
             prompt=prompt,
             tags=("managed", "education", "book-assets"),
-            managed_kind=_MANAGED_KIND,
+            operation="material",
+            textbook_id=generation_job_id,
+            job_id=generation_job_id,
+            item_id=generation_job_id,
+            execution_id=generation_job_id,
+            attempt_token=attempt_id,
         )
         running = await mark_generation_attempt_running(
             generation_job_id=generation_job_id,
@@ -372,7 +375,7 @@ async def launch_book_asset_generation(
         handler = RunSSEProducer(
             thread_id=thread_id,
             run_id=run_id,
-            workflow_timeout=get_education_teaching_workflow_timeout(),
+            workflow_timeout=get_education_book_workflow_timeout(),
             replay_profile="education_compact",
         )
 

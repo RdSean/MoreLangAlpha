@@ -16,14 +16,16 @@ class BackgroundExecutionConfig(BaseModel):
         default=100, description="Maximum number of concurrent background workflows"
     )
     workflow_result_ttl: int = Field(
-        default=86400, description="Workflow result retention time in seconds (24 hours)"
+        default=86400,
+        description="Workflow result retention time in seconds (24 hours)",
     )
     abandoned_workflow_timeout: int = Field(
         default=3600,
         description="Auto-cleanup timeout for workflows with no active connections (1 hour)",
     )
     cleanup_interval: int = Field(
-        default=300, description="Background cleanup task interval in seconds (5 minutes)"
+        default=300,
+        description="Background cleanup task interval in seconds (5 minutes)",
     )
     enable_intermediate_storage: bool = Field(
         default=True, description="Store intermediate results during execution"
@@ -43,7 +45,8 @@ class BackgroundExecutionConfig(BaseModel):
 
     # Streaming & queue settings
     subagent_task_max_wait: int = Field(
-        default=30, description="Max seconds to wait for subagent task to appear in registry"
+        default=30,
+        description="Max seconds to wait for subagent task to appear in registry",
     )
 
     # Subagent event capture
@@ -64,10 +67,12 @@ class BackgroundExecutionConfig(BaseModel):
 
     # Timeout settings
     sse_drain_timeout: float = Field(
-        default=30.0, description="Seconds to wait for per-task SSE drain before clearing events"
+        default=30.0,
+        description="Seconds to wait for per-task SSE drain before clearing events",
     )
     shutdown_timeout: float = Field(
-        default=50.0, description="Max seconds for graceful shutdown of running workflows"
+        default=50.0,
+        description="Max seconds for graceful shutdown of running workflows",
     )
     checkpoint_flush_timeout: float = Field(
         default=10.0, description="Timeout (seconds) for checkpoint state reads/writes"
@@ -104,7 +109,8 @@ class BackgroundExecutionConfig(BaseModel):
         ),
     )
     wait_for_persistence_timeout: float = Field(
-        default=30.0, description="Max seconds callers block waiting for persistence completion"
+        default=30.0,
+        description="Max seconds callers block waiting for persistence completion",
     )
     stop_drain_timeout: float = Field(
         default=1.5,
@@ -121,9 +127,15 @@ class BackgroundExecutionConfig(BaseModel):
 class RedisTTLConfig(BaseModel):
     """Redis TTL settings for various cache types."""
 
-    results_list: int = Field(default=300, description="Results list cache TTL (5 minutes)")
-    result_detail: int = Field(default=900, description="Result detail cache TTL (15 minutes)")
-    metadata: int = Field(default=900, description="Metadata tags/tickers cache TTL (15 minutes)")
+    results_list: int = Field(
+        default=300, description="Results list cache TTL (5 minutes)"
+    )
+    result_detail: int = Field(
+        default=900, description="Result detail cache TTL (15 minutes)"
+    )
+    metadata: int = Field(
+        default=900, description="Metadata tags/tickers cache TTL (15 minutes)"
+    )
     metadata_summary: int = Field(
         default=600, description="Metadata summary cache TTL (10 minutes)"
     )
@@ -134,7 +146,8 @@ class RedisTTLConfig(BaseModel):
         default_factory=dict, description="Per-interval OHLCV cache TTLs"
     )
     workflow_status: int = Field(
-        default=3600, description="TTL for completed/cancelled workflow status keys (1 hour)"
+        default=3600,
+        description="TTL for completed/cancelled workflow status keys (1 hour)",
     )
     cancel_flag: int = Field(
         default=300, description="TTL for workflow cancel flag (5 minutes)"
@@ -142,7 +155,9 @@ class RedisTTLConfig(BaseModel):
     steering: int = Field(
         default=3600, description="TTL for steering message Redis keys (1 hour)"
     )
-    market_watch: int = Field(default=21600, description="Market watch list TTL in seconds")
+    market_watch: int = Field(
+        default=21600, description="Market watch list TTL in seconds"
+    )
     memo_metadata_inflight: int = Field(
         default=300,
         description=(
@@ -174,7 +189,9 @@ class RedisSWRConfig(BaseModel):
 class RedisConfig(BaseModel):
     """Redis cache configuration."""
 
-    cache_enabled: bool = Field(default=True, description="Enable/disable caching globally")
+    cache_enabled: bool = Field(
+        default=True, description="Enable/disable caching globally"
+    )
     max_connections: int = Field(default=10, description="Connection pool size")
     # Pools are split by connection LIFETIME, not by feature: short cache ops
     # must never queue behind a stream reader parked in XREAD BLOCK, and a
@@ -267,7 +284,8 @@ class FeatureFlagOverride(BaseModel):
     """
 
     enabled: Optional[bool] = Field(
-        default=None, description="Kill switch: false turns the feature off for everyone"
+        default=None,
+        description="Kill switch: false turns the feature off for everyone",
     )
     gate: Optional[Literal["none", "opt_in", "opt_out", "plan"]] = Field(
         default=None,
@@ -486,9 +504,15 @@ class InfrastructureConfig(BaseModel):
 
     # Application Settings
     debug: bool = Field(default=False, description="Debug mode flag")
-    ptc_recursion_limit: int = Field(default=2000, ge=1, le=10000, description="PTC agent recursion limit")
-    flash_recursion_limit: int = Field(default=500, ge=1, le=10000, description="Flash agent recursion limit")
-    workflow_timeout: int = Field(default=21600, description="Workflow timeout in seconds")
+    ptc_recursion_limit: int = Field(
+        default=2000, ge=1, le=10000, description="PTC agent recursion limit"
+    )
+    flash_recursion_limit: int = Field(
+        default=500, ge=1, le=10000, description="Flash agent recursion limit"
+    )
+    workflow_timeout: int = Field(
+        default=21600, description="Workflow timeout in seconds"
+    )
     sse_keepalive_interval: float = Field(
         default=15.0, description="SSE keepalive interval in seconds"
     )
@@ -500,19 +524,31 @@ class InfrastructureConfig(BaseModel):
     redis_warm_on_startup: bool = Field(
         default=True, description="Enable Redis cache warming on startup"
     )
-    langsmith_tracing: bool = Field(default=False, description="Enable LangSmith tracing")
+    langsmith_tracing: bool = Field(
+        default=False, description="Enable LangSmith tracing"
+    )
     market_watch: MarketWatchConfig = Field(default_factory=MarketWatchConfig)
 
     # Local product: managed textbook (education) workflow budgets.
-    education_teaching_workflow_timeout: int = Field(
+    education_book_workflow_timeout: int = Field(
         default=86400,
         ge=1,
         description="Managed textbook PTC root timeout in seconds",
     )
-    education_teaching_abandoned_timeout: int = Field(
+    education_book_abandoned_timeout: int = Field(
         default=86400,
         ge=1,
         description="Managed textbook disconnected-run recovery window in seconds",
+    )
+    education_book_item_lease_seconds: int = Field(
+        default=120,
+        ge=30,
+        description="Lease duration for one managed textbook job item",
+    )
+    education_book_job_poll_interval: float = Field(
+        default=5.0,
+        ge=0.25,
+        description="PostgreSQL textbook queue polling interval in seconds",
     )
 
     # User-facing product features (deployment overrides of the code catalog
@@ -521,7 +557,9 @@ class InfrastructureConfig(BaseModel):
     features: Dict[str, FeatureFlagOverride] = Field(default_factory=dict)
 
     # SSE Event Logging
-    sse_event_log_enabled: bool = Field(default=True, description="Enable SSE event logging")
+    sse_event_log_enabled: bool = Field(
+        default=True, description="Enable SSE event logging"
+    )
     sse_event_log_level: str = Field(default="info", description="SSE event log level")
 
     # General Application Logging

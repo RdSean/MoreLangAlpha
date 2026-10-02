@@ -2,6 +2,18 @@
 
 ## 2026-10-02
 
+### 重构：教材处理接入逐项可恢复的正常 PTC 队列
+
+- 将五套教材 managed purpose 与固定教材 subagent 收敛为唯一 `education_book` policy；结构与单知识点材料均走正常 `RunCoordinator`、graph、SSE、checkpoint 和 Docker sandbox，普通 PTC/subagent 能力不受影响。
+- 新增 PostgreSQL 顺序任务队列和逐 item attempt fencing，持久化 workspace/thread/run/execution 身份、租约与结果；启动暂存期间持续续租，进程退出后按 runtime ledger 恢复，已完成回调可幂等补交。
+- 结构提交持久化“一次添加并分析”的材料 follow-up；每个知识点独立提交，普通内容失败继续后项，运行、凭据、存储及 sandbox 基础设施失败停止余项，completed runtime 的恢复收尾沿用相同分类。取消先写 durable intent 和业务 fence，再停止实际 runtime；终态事务统一按 job、item/textbook 顺序加锁，重试保留结构后续意图、克隆全部未完成项并冻结当前 Skill 身份。
+- 材料执行只暂存当前投影结构、指定知识点及相邻上下文；缺少上一讲义时回退原文锚点，不阻断当前项。附加材料使用显式单独 item 和固定三文件结果，不枚举对象存储。
+- managed sandbox 禁用宿主开发 bind mount、平台 secrets、MCP 和 subagent，只暴露 `more-to-skills`；输入与 Skill 目录暂存后只读，Bash 与 ExecuteCode 仍可在隔离写区运行自编脚本。Docker ExecuteCode 临时文件改用容器 `/tmp`，避免只读 managed root 阻塞执行。
+- 排队和执行分别校验 `more-to-skills` version、`SKILL.md` 与正式 schema 摘要；技能部署更新后旧任务明确失败，新 retry 使用当前身份，实际暂存字节不再与任务记录漂移。
+- 来源暂存按解析服务的真实 manifest 契约读取 `artifacts/<relative_path>`，不再要求 manifest 自带 `artifacts/` 前缀；终态只清理 PostgreSQL 明确登记且属于当前 attempt 的候选对象，上传尚不可见时保留追踪供后续维护重试。
+- 教材队列先向共享 executor 非阻塞预留容量，再 claim、续租和分配 runtime；普通请求不能占用已预留槽位，满载不会持有教材租约或 workspace。所有启动失败和终态路径继续清理候选对象、thread、sandbox 与 service-owned workspace，删除托管 workspace 时不重复持久化其临时文件。
+- 验证：全量单元测试 `8392 passed, 8 deselected, 1 xfailed`，Task 3/runtime/storage 聚焦单元 `181 passed`，PostgreSQL 队列集成 `11 passed`；真实 Docker 能力 smoke 和实际 BYOK 模型读图各 `1 passed`，Ruff check、Ruff format check 与 diff check 通过。数据库集成仅使用 `langalpha_test`，未向当前开发数据库应用 `082`，未重建、删除或忽略现有 PostgreSQL、Redis、MinIO 挂载数据。
+
 ### 重构：建立 more-to-skills 教材数据与存储模型
 
 - 新增不可逆的 `082_more_to_skills_textbooks` 完整切换迁移：重建单来源教材、学生授权与学习引用，建立结构、知识点、当前材料、任务、任务项和有界活动六张新表，并删除旧 version/package/candidate/publication/lesson/generation schema。

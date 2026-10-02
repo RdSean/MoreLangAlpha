@@ -71,7 +71,9 @@ def _parse_proxy_port_range(range_str: str) -> list[int]:
     """Parse a port range string like ``"13000-13009"`` into a list of ints."""
     parts = range_str.strip().split("-")
     if len(parts) != 2:
-        raise ValueError(f"Invalid proxy port range: {range_str!r} (expected 'START-END')")
+        raise ValueError(
+            f"Invalid proxy port range: {range_str!r} (expected 'START-END')"
+        )
     start, end = int(parts[0]), int(parts[1])
     if start > end:
         raise ValueError(f"Invalid proxy port range: start ({start}) > end ({end})")
@@ -121,7 +123,9 @@ class DockerRuntime(SandboxRuntime):
         self._host_port_map: dict[int, int] = host_port_map or {}
         self._port_map: dict[int, int] = {}  # agent port → container proxy port
         self._forwarder_pids: dict[int, str] = {}  # container proxy port → socat PID
-        self._owner_id_cache: tuple[int, int] | None = None  # uid/gid inside the container
+        self._owner_id_cache: tuple[int, int] | None = (
+            None  # uid/gid inside the container
+        )
 
     # -- Properties --
 
@@ -205,11 +209,11 @@ class DockerRuntime(SandboxRuntime):
         encoded = base64.b64encode(wrapper.encode("utf-8")).decode("ascii")
 
         script_name = f"_exec_{uuid.uuid4().hex[:8]}.py"
-        script_path = f"{self._working_dir}/{script_name}"
+        script_path = f"/tmp/{script_name}"
 
         # Write script via exec (avoids tar overhead for a single small file)
         write_cmd = (
-            f"python3 -c \"import base64,sys; "
+            f'python3 -c "import base64,sys; '
             f"sys.stdout.buffer.write(base64.b64decode('{encoded}'))\" "
             f"> {script_path}"
         )
@@ -228,7 +232,7 @@ class DockerRuntime(SandboxRuntime):
             exports = " ".join(f"{k}={_shell_escape(v)}" for k, v in env.items())
             env_prefix = f"export {exports} && "
 
-        stderr_path = f"{self._working_dir}/_stderr_{uuid.uuid4().hex[:8]}.txt"
+        stderr_path = f"/tmp/_stderr_{uuid.uuid4().hex[:8]}.txt"
         run_cmd = f"{env_prefix}python3 {script_path} 2>{stderr_path}"
 
         # Run the code — we parse combined stdout for artifacts
@@ -242,7 +246,9 @@ class DockerRuntime(SandboxRuntime):
         stderr = ""
         if exec_result.exit_code != 0:
             try:
-                cat_result = await self.exec(f"cat {stderr_path} 2>/dev/null", timeout=5)
+                cat_result = await self.exec(
+                    f"cat {stderr_path} 2>/dev/null", timeout=5
+                )
                 if cat_result.exit_code == 0:
                     stderr = cat_result.stdout
             except Exception:
@@ -352,7 +358,11 @@ class DockerRuntime(SandboxRuntime):
         return await self._exec_download(path)
 
     async def list_files(self, directory: str) -> list[dict[str, Any]]:
-        resolved = directory if os.path.isabs(directory) else f"{self._working_dir}/{directory}"
+        resolved = (
+            directory
+            if os.path.isabs(directory)
+            else f"{self._working_dir}/{directory}"
+        )
         result = await self.exec(
             f"find {shlex.quote(resolved)} -maxdepth 1 -mindepth 1 -printf '%f\\t%y\\n' 2>/dev/null || "
             f"ls -1 {shlex.quote(resolved)} 2>/dev/null",
@@ -417,9 +427,7 @@ class DockerRuntime(SandboxRuntime):
 
             # Kill any stale forwarder on this proxy port (survives Python-side
             # reconnects while the container stays running).
-            await self.exec(
-                f"fuser -k {proxy_port}/tcp 2>/dev/null || true", timeout=5
-            )
+            await self.exec(f"fuser -k {proxy_port}/tcp 2>/dev/null || true", timeout=5)
 
             # Start socat forwarder; fall back to Python proxy if socat is not installed
             result = await self.exec(
@@ -476,7 +484,9 @@ class DockerRuntime(SandboxRuntime):
         proxy_port = await self._allocate_proxy_port(port)
         host_port = self._host_port_for(proxy_port)
         # Server-side: resolve host for health checks (may differ from browser URL)
-        base = (self._preview_base_url or await self._resolve_server_side_host()).rstrip("/")
+        base = (
+            self._preview_base_url or await self._resolve_server_side_host()
+        ).rstrip("/")
         return PreviewInfo(url=f"{base}:{host_port}", token="")
 
     _server_side_host: str | None = None  # class-level cache
@@ -539,12 +549,14 @@ class DockerRuntime(SandboxRuntime):
             wrapped = (
                 f"nohup setsid bash -c '"
                 f"echo $$ > {session_dir}/{cmd_id}.pid; "
-                f"eval \"$(echo {encoded} | base64 -d)\"; "
+                f'eval "$(echo {encoded} | base64 -d)"; '
                 f"echo $? > {session_dir}/{cmd_id}.exit"
                 f"' > {session_dir}/{cmd_id}.stdout 2> {session_dir}/{cmd_id}.stderr &"
             )
             await self.exec(wrapped, timeout=10)
-            return SessionCommandResult(cmd_id=cmd_id, exit_code=None, stdout="", stderr="")
+            return SessionCommandResult(
+                cmd_id=cmd_id, exit_code=None, stdout="", stderr=""
+            )
 
         result = await self.exec(command, timeout=timeout)
         return SessionCommandResult(
@@ -593,8 +605,8 @@ class DockerRuntime(SandboxRuntime):
         await self.exec(
             f"for f in {session_dir}/*.pid; do "
             f"  pid=$(cat \"$f\" 2>/dev/null | tr -cd '0-9'); "
-            f"  [ -n \"$pid\" ] && kill -- -\"$pid\" 2>/dev/null; "
-            f"  [ -n \"$pid\" ] && kill \"$pid\" 2>/dev/null; "
+            f'  [ -n "$pid" ] && kill -- -"$pid" 2>/dev/null; '
+            f'  [ -n "$pid" ] && kill "$pid" 2>/dev/null; '
             f"done; rm -rf {session_dir}",
             timeout=10,
         )
@@ -773,7 +785,8 @@ class DockerRuntime(SandboxRuntime):
     async def _exec_download(self, path: str) -> bytes:
         """Download a file via exec + base64 (avoids Docker archive API issues)."""
         result = await self.exec(
-            f"test -f {shlex.quote(path)} && base64 {shlex.quote(path)}", timeout=60,
+            f"test -f {shlex.quote(path)} && base64 {shlex.quote(path)}",
+            timeout=60,
         )
         if result.exit_code != 0:
             raise FileNotFoundError(f"File not found or unreadable: {path}")
@@ -907,10 +920,7 @@ class DockerProvider(SandboxProvider):
         host_port_map: dict[int, int] = {}
         if proxy_ports:
             info = await container_obj.show()
-            port_bindings = (
-                info.get("NetworkSettings", {})
-                .get("Ports", {})
-            )
+            port_bindings = info.get("NetworkSettings", {}).get("Ports", {})
             for cp in proxy_ports:
                 bindings = port_bindings.get(f"{cp}/tcp", [])
                 if bindings and bindings[0].get("HostPort"):
@@ -956,9 +966,7 @@ class DockerProvider(SandboxProvider):
         try:
             container_obj = await client.containers.get(container_name)
         except Exception as e:
-            raise RuntimeError(
-                f"Docker container not found: {container_name}"
-            ) from e
+            raise RuntimeError(f"Docker container not found: {container_name}") from e
 
         info = await container_obj.show()
         mounts = info.get("Mounts", [])

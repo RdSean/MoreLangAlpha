@@ -14,6 +14,7 @@ async def test_finalize_allow_lists_household_model_runtime_metadata():
         metadata={
             "msg_type": "flash",
             "is_byok": True,
+            "terminal_error_type": "langgraph.errors.GraphRecursionError",
             "llm_runtime": {
                 "credential_source": "household",
                 "household_id": "11111111-1111-1111-1111-111111111111",
@@ -40,6 +41,7 @@ async def test_finalize_allow_lists_household_model_runtime_metadata():
         "provider": "deepseek",
         "model_id": "deepseek-chat",
     }
+    assert metadata["terminal_error_type"] == "langgraph.errors.GraphRecursionError"
     assert "family-secret-key" not in str(metadata)
     assert "family.example" not in str(metadata)
 

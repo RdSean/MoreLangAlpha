@@ -119,7 +119,9 @@ class Session:
         if self._agent_md_dirty:
             try:
                 content = (
-                    await self.sandbox.aread_file_text(self.sandbox.normalize_path("agent.md"))
+                    await self.sandbox.aread_file_text(
+                        self.sandbox.normalize_path("agent.md")
+                    )
                     if self.sandbox
                     else None
                 )
@@ -258,7 +260,7 @@ class Session:
         This bypasses the normal session bootstrap entirely: no inherited
         process-global MCP registry, no connection attempts, no workspace asset
         hydration and no standard sandbox setup. The caller supplies a stripped
-        CoreConfig and later stages the two approved Skill contracts itself.
+        CoreConfig and later stages the fixed Skill contract itself.
         """
         if self._initialized:
             raise RuntimeError("Managed session is already initialized")
@@ -279,6 +281,34 @@ class Session:
         logger.debug(
             "Managed textbook session initialized",
             conversation_id=self.conversation_id,
+        )
+
+    async def reconnect_managed_textbook(self, *, sandbox_id: str, policy) -> None:
+        """Reconnect one persisted managed sandbox without ambient hydration."""
+
+        if self._initialized:
+            raise RuntimeError("Managed session is already initialized")
+        self.mcp_registry = MCPRegistry(self.config)
+        self._builtin_mcp_registry = self.mcp_registry
+        self._owns_mcp_registry = True
+        self.sandbox = PTCSandbox(self.config, self.mcp_registry)
+        try:
+            await self.sandbox.reconnect(sandbox_id)
+            if self.sandbox.working_dir != policy.filesystem_root:
+                raise RuntimeError(
+                    "Managed sandbox working directory does not match execution"
+                )
+        except Exception:
+            self.mcp_registry = None
+            self._builtin_mcp_registry = None
+            self._owns_mcp_registry = False
+            self.sandbox = None
+            raise
+        self._initialized = True
+        logger.debug(
+            "Managed textbook session reconnected",
+            conversation_id=self.conversation_id,
+            sandbox_id=sandbox_id,
         )
 
     async def initialize_lazy(

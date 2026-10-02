@@ -14,7 +14,10 @@ import structlog
 
 
 from ptc_agent.config.core import CoreConfig
-from ptc_agent.core.sandbox._defaults import DEFAULT_DEPENDENCIES, SNAPSHOT_PYTHON_VERSION
+from ptc_agent.core.sandbox._defaults import (
+    DEFAULT_DEPENDENCIES,
+    SNAPSHOT_PYTHON_VERSION,
+)
 from ptc_agent.core.sandbox.platform_secrets import build_platform_secret_bindings
 from ptc_agent.core.sandbox.providers import create_provider
 from ptc_agent.core.sandbox.retry import RetryPolicy, async_retry_with_backoff
@@ -73,6 +76,7 @@ class PTCSandbox:
                 "outputs/content",
                 "outputs/chapters",
                 "outputs/knowledge",
+                ".system/code",
                 ".langalpha",
             )
         )
@@ -302,7 +306,6 @@ class PTCSandbox:
                     mcp_packages.append(server.args[1])
         return mcp_packages
 
-
     def _build_sandbox_env_vars(
         self,
         platform_secret_bindings: dict[str, str],
@@ -431,11 +434,13 @@ class PTCSandbox:
         job root. It deliberately does not create standard workspace folders,
         upload internal packages, bind platform secrets, install MCP packages,
         start MCP servers, or sync user resources. The education service stages
-        its frozen inputs and the two allowed Skill files afterwards.
+        its frozen inputs and the allowed Skill files afterwards.
         """
         root = policy.filesystem_root
         if self.config.filesystem.working_directory != root:
-            raise ValueError("Managed sandbox config must use the policy filesystem root")
+            raise ValueError(
+                "Managed sandbox config must use the policy filesystem root"
+            )
 
         self.runtime = await self._runtime_call(
             self.provider.create,
@@ -455,15 +460,12 @@ class PTCSandbox:
         await self.ensure_directories([inputs_directory], mode=0o555)
 
         checks = " && ".join(
-            f"test -d {shlex.quote(directory)} && "
-            f"test -w {shlex.quote(directory)}"
+            f"test -d {shlex.quote(directory)} && test -w {shlex.quote(directory)}"
             for directory in writable_directories
         )
         verification = await self.runtime.exec(checks, timeout=30)
         if verification.exit_code != 0:
-            raise RuntimeError(
-                "Managed textbook writable directories are unavailable"
-            )
+            raise RuntimeError("Managed textbook writable directories are unavailable")
 
         await self.runtime.upload_file(
             b"",
@@ -1135,12 +1137,9 @@ class PTCSandbox:
 
     # ── Unified manifest helpers ────────────────────────────────────────
 
-
     # ── Unified manifest I/O ─────────────────────────────────────────
 
-
     # ── Unified sync entry point ─────────────────────────────────────
-
 
     @staticmethod
     def _token_needs_refresh(
@@ -1171,7 +1170,6 @@ class PTCSandbox:
         if age > threshold:
             return True
         return False
-
 
     @staticmethod
     def _classify_execution_error(
@@ -1269,14 +1267,12 @@ class PTCSandbox:
 
         return rebind
 
-
     # Bound concurrent discovery so a burst of servers can't exhaust the
     # sandbox; one hung server still can't starve others (each runs isolated).
     _DISCOVERY_CONCURRENCY = 4
     # CLI exec ceiling — the in-sandbox client has its own 30s stdio cold-start
     # select timeout; give a little headroom for npx/uvx fetch + JSON write.
     _DISCOVERY_EXEC_TIMEOUT_S = 90
-
 
     @property
     def proxy_domain(self) -> str | None:
@@ -1285,15 +1281,12 @@ class PTCSandbox:
             return None
         return self.runtime.proxy_domain
 
-
     _MAX_BG_SESSIONS = 20
-
 
     @staticmethod
     def _extract_sandbox_id(sandbox: object) -> str:
         """Extract a stable ID string from a sandbox object."""
         return sandbox.id if hasattr(sandbox, "id") else str(id(sandbox))
-
 
     async def cleanup(self) -> None:
         """Clean up and destroy the sandbox."""
@@ -1304,11 +1297,14 @@ class PTCSandbox:
         try:
             if self.runtime:
                 # Clean up all managed sessions (preview + background)
-                all_sessions = [sid for sid, _ in self._preview_sessions.values()] + list(self._bg_sessions.values())
+                all_sessions = [
+                    sid for sid, _ in self._preview_sessions.values()
+                ] + list(self._bg_sessions.values())
                 for sid in dict.fromkeys(all_sessions):  # deduplicate
                     try:
                         await self._runtime_call(
-                            self.runtime.delete_session, sid,
+                            self.runtime.delete_session,
+                            sid,
                             retry_policy=RetryPolicy.SAFE,
                         )
                     except Exception:
@@ -1372,7 +1368,9 @@ class PTCSandbox:
         managed_root: str | None = None,
         disabled: frozenset[str] = frozenset(),
     ) -> dict[str, Any]:
-        return await _assets._compute_skills_module(self, skill_roots, managed_root=managed_root, disabled=disabled)
+        return await _assets._compute_skills_module(
+            self, skill_roots, managed_root=managed_root, disabled=disabled
+        )
 
     async def _compute_sandbox_manifest(
         self,
@@ -1384,7 +1382,15 @@ class PTCSandbox:
         user_id: str | None = None,
         workspace_id: str | None = None,
     ) -> dict[str, Any]:
-        return await _assets._compute_sandbox_manifest(self, skill_roots=skill_roots, managed_skill_root=managed_skill_root, disabled_skills=disabled_skills, tokens=tokens, user_id=user_id, workspace_id=workspace_id)
+        return await _assets._compute_sandbox_manifest(
+            self,
+            skill_roots=skill_roots,
+            managed_skill_root=managed_skill_root,
+            disabled_skills=disabled_skills,
+            tokens=tokens,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        )
 
     async def _read_unified_manifest(self) -> dict[str, Any] | None:
         return await _assets._read_unified_manifest(self)
@@ -1411,7 +1417,18 @@ class PTCSandbox:
         workspace_id: str | None = None,
         on_progress: Callable[[str], None] | None = None,
     ) -> SyncResult:
-        return await _assets.sync_sandbox_assets(self, skill_dirs=skill_dirs, user_skill_dir=user_skill_dir, disabled_skills=disabled_skills, reusing_sandbox=reusing_sandbox, force_refresh=force_refresh, tokens=tokens, user_id=user_id, workspace_id=workspace_id, on_progress=on_progress)
+        return await _assets.sync_sandbox_assets(
+            self,
+            skill_dirs=skill_dirs,
+            user_skill_dir=user_skill_dir,
+            disabled_skills=disabled_skills,
+            reusing_sandbox=reusing_sandbox,
+            force_refresh=force_refresh,
+            tokens=tokens,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            on_progress=on_progress,
+        )
 
     async def _prune_disabled_tool_modules(self) -> None:
         return await _assets._prune_disabled_tool_modules(self)
@@ -1427,7 +1444,9 @@ class PTCSandbox:
         merged_lock: dict[str, Any],
         sandbox_skills_base: str,
     ) -> None:
-        return _assets._build_complete_skills_cache(self, skills_mod, merged_lock, sandbox_skills_base)
+        return _assets._build_complete_skills_cache(
+            self, skills_mod, merged_lock, sandbox_skills_base
+        )
 
     async def _prune_remote_skills(
         self,
@@ -1436,7 +1455,9 @@ class PTCSandbox:
         *,
         existing_lock: dict[str, Any] | None = None,
     ) -> None:
-        return await _assets._prune_remote_skills(self, sandbox_base, local_skill_names, existing_lock=existing_lock)
+        return await _assets._prune_remote_skills(
+            self, sandbox_base, local_skill_names, existing_lock=existing_lock
+        )
 
     async def _upload_skills(
         self,
@@ -1446,8 +1467,13 @@ class PTCSandbox:
         existing_lock: dict[str, Any] | None = None,
         disabled: frozenset[str] = frozenset(),
     ) -> tuple[dict[str, Any] | None, set[str]]:
-        return await _assets._upload_skills(self, local_skills_dirs, manifest=manifest, existing_lock=existing_lock, disabled=disabled)
-
+        return await _assets._upload_skills(
+            self,
+            local_skills_dirs,
+            manifest=manifest,
+            existing_lock=existing_lock,
+            disabled=disabled,
+        )
 
     # -- mcp_setup --
 
@@ -1476,7 +1502,6 @@ class PTCSandbox:
     async def _install_package(self, package: str) -> bool:
         return await _mcp_setup._install_package(self, package)
 
-
     # -- execution --
 
     async def _collect_mcp_trace(self, trace_path: str) -> list[dict]:
@@ -1492,7 +1517,15 @@ class PTCSandbox:
         thread_id: str | None = None,
         _carry_mcp_trace: list[dict] | None = None,
     ) -> ExecutionResult:
-        return await _execution.execute(self, code, timeout, auto_install=auto_install, max_retries=max_retries, thread_id=thread_id, _carry_mcp_trace=_carry_mcp_trace)
+        return await _execution.execute(
+            self,
+            code,
+            timeout,
+            auto_install=auto_install,
+            max_retries=max_retries,
+            thread_id=thread_id,
+            _carry_mcp_trace=_carry_mcp_trace,
+        )
 
     async def execute_bash_command(
         self,
@@ -1503,7 +1536,14 @@ class PTCSandbox:
         background: bool = False,
         thread_id: str | None = None,
     ) -> dict[str, Any]:
-        return await _execution.execute_bash_command(self, command, working_dir, timeout, background=background, thread_id=thread_id)
+        return await _execution.execute_bash_command(
+            self,
+            command,
+            working_dir,
+            timeout,
+            background=background,
+            thread_id=thread_id,
+        )
 
     def _build_trace_env_command(
         self, bash_id: str, full_command: str
@@ -1532,7 +1572,9 @@ class PTCSandbox:
         expires_in: int = 3600,
         startup_timeout: float = 10.0,
     ) -> PreviewInfo:
-        return await _sessions.start_and_get_preview_url(self, command, port, expires_in=expires_in, startup_timeout=startup_timeout)
+        return await _sessions.start_and_get_preview_url(
+            self, command, port, expires_in=expires_in, startup_timeout=startup_timeout
+        )
 
     async def _evict_finished_bg_sessions(self) -> None:
         return await _sessions._evict_finished_bg_sessions(self)
@@ -1551,7 +1593,6 @@ class PTCSandbox:
 
     async def stop_preview_server(self, port: int) -> bool:
         return await _sessions.stop_preview_server(self, port)
-
 
     # -- files --
 
@@ -1609,7 +1650,9 @@ class PTCSandbox:
         *,
         replace_all: bool = False,
     ) -> dict[str, Any]:
-        return await _files.aedit_file_text(self, filepath, old_string, new_string, replace_all=replace_all)
+        return await _files.aedit_file_text(
+            self, filepath, old_string, new_string, replace_all=replace_all
+        )
 
     def _validate_path_allow_denied(self, path: str) -> bool:
         return _files._validate_path_allow_denied(self, path)
@@ -1636,4 +1679,19 @@ class PTCSandbox:
         head_limit: int | None = None,
         offset: int = 0,
     ) -> Any:
-        return await _files.agrep_content(self, pattern, path, output_mode, glob, type, case_insensitive=case_insensitive, show_line_numbers=show_line_numbers, lines_after=lines_after, lines_before=lines_before, lines_context=lines_context, multiline=multiline, head_limit=head_limit, offset=offset)
+        return await _files.agrep_content(
+            self,
+            pattern,
+            path,
+            output_mode,
+            glob,
+            type,
+            case_insensitive=case_insensitive,
+            show_line_numbers=show_line_numbers,
+            lines_after=lines_after,
+            lines_before=lines_before,
+            lines_context=lines_context,
+            multiline=multiline,
+            head_limit=head_limit,
+            offset=offset,
+        )

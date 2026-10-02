@@ -229,12 +229,15 @@ async def stage_managed_teaching_skills(
     sandbox: ManagedTeachingSandbox,
     *,
     skill_names: tuple[str, ...] = _MANAGED_SKILL_NAMES,
+    expected_skill_sha256: str | None = None,
+    expected_schema_sha256: str | None = None,
 ) -> None:
     """Stage selected skills plus the service-authored progress append helper."""
     root = managed_job_root(job_id)
     from ptc_agent.config.agent import host_skill_dirs
 
     files: list[tuple[str, bytes]] = []
+    more_to_skills_files: dict[str, bytes] = {}
     for skill_name in skill_names:
         source_root = next(
             (
@@ -256,9 +259,29 @@ async def stage_managed_teaching_skills(
             try:
                 content = source.read_bytes()
             except OSError as exc:
-                raise TeachingPackageStorageError("Managed teaching skill is unavailable") from exc
+                raise TeachingPackageStorageError(
+                    "Managed teaching skill is unavailable"
+                ) from exc
             relative_path = source.relative_to(source_root).as_posix()
-            files.append((f"{root}/.agents/skills/{skill_name}/{relative_path}", content))
+            files.append(
+                (f"{root}/.agents/skills/{skill_name}/{relative_path}", content)
+            )
+            if skill_name == "more-to-skills":
+                more_to_skills_files[relative_path] = content
+    if expected_skill_sha256 is not None or expected_schema_sha256 is not None:
+        skill_content = more_to_skills_files.get("SKILL.md")
+        schema_content = more_to_skills_files.get("schemas/book-structure.schema.json")
+        if (
+            skill_content is None
+            or schema_content is None
+            or expected_skill_sha256 is None
+            or expected_schema_sha256 is None
+            or hashlib.sha256(skill_content).hexdigest() != expected_skill_sha256
+            or hashlib.sha256(schema_content).hexdigest() != expected_schema_sha256
+        ):
+            raise TeachingPackageStorageError(
+                "Managed teaching skill does not match the frozen identity"
+            )
     files.append((f"{root}/.langalpha/progress.jsonl", b""))
     files.append((f"{root}/.langalpha/progress.py", progress_helper_source()))
     await _upload_staged_files(sandbox, files)
@@ -285,10 +308,7 @@ def _normalized_source_asset_manifest(value: object) -> list[dict[str, str]]:
     for asset in value:
         if not isinstance(asset, Mapping):
             raise TeachingPackageStorageError("Frozen source asset is invalid")
-        fields = {
-            field: str(asset.get(field) or "")
-            for field in _SOURCE_ASSET_FIELDS
-        }
+        fields = {field: str(asset.get(field) or "") for field in _SOURCE_ASSET_FIELDS}
         relative_path = fields["relative_path"]
         if (
             not all(fields[field] for field in fields if field != "relative_path")
@@ -335,9 +355,7 @@ def _referenced_source_assets(
     position: int,
 ) -> tuple[list[str], list[dict[str, str]]]:
     image_assets = [
-        asset
-        for asset in asset_manifest
-        if asset["artifact_kind"] == "embedded_image"
+        asset for asset in asset_manifest if asset["artifact_kind"] == "embedded_image"
     ]
     by_path = {asset["relative_path"]: asset for asset in image_assets}
     by_basename: dict[str, list[dict[str, str]]] = {}
@@ -417,9 +435,7 @@ async def hydrate_source_asset_manifests(job: Mapping[str, Any]) -> dict[str, An
                         "Frozen source snapshot manifest is invalid"
                     ) from exc
                 artifacts = (
-                    manifest.get("artifacts")
-                    if isinstance(manifest, Mapping)
-                    else None
+                    manifest.get("artifacts") if isinstance(manifest, Mapping) else None
                 )
                 if (
                     not isinstance(manifest, Mapping)
@@ -482,9 +498,7 @@ def freeze_teaching_input(job: Mapping[str, Any]) -> dict[str, Any]:
                 or position <= 0
                 or position in positions
             ):
-                raise TeachingPackageStorageError(
-                    "Frozen source position is invalid"
-                )
+                raise TeachingPackageStorageError("Frozen source position is invalid")
             positions.add(position)
             slug = _safe_component(source.get("slug"), "source")
             markdown = source.get("markdown")
@@ -564,14 +578,18 @@ def freeze_teaching_input(job: Mapping[str, Any]) -> dict[str, Any]:
         chapter_id = str(UUID(str(chapter["content_chapter_id"])))
         position = chapter.get("position")
         if not isinstance(position, int) or isinstance(position, bool) or position <= 0:
-            raise TeachingPackageStorageError("Frozen content chapter position is invalid")
+            raise TeachingPackageStorageError(
+                "Frozen content chapter position is invalid"
+            )
         slug = _safe_component(chapter.get("slug"), "chapter")
         markdown = chapter.get("markdown")
         if not isinstance(markdown, str) or not markdown.strip():
             raise TeachingPackageStorageError("Frozen content chapter text is invalid")
         path = f"chapters/{position:02d}-{slug}.md"
         if path in paths:
-            raise TeachingPackageStorageError("Frozen content chapter paths must be unique")
+            raise TeachingPackageStorageError(
+                "Frozen content chapter paths must be unique"
+            )
         paths.add(path)
         normalized_chapters.append(
             {
@@ -891,9 +909,7 @@ async def download_book_asset_outputs(
         f"{root}/outputs/chapters_manifest.json"
     )
     if not isinstance(manifest_content, bytes) or not manifest_content.strip():
-        raise TeachingPackageStorageError(
-            "Managed book asset manifest is unavailable"
-        )
+        raise TeachingPackageStorageError("Managed book asset manifest is unavailable")
     try:
         candidate = json.loads(manifest_content.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -911,9 +927,7 @@ async def download_book_asset_outputs(
         expected_files = expected_book_asset_files(manifest)
     outputs: dict[str, bytes] = {}
     for relative_path in expected_files:
-        content = await sandbox.adownload_file_bytes(
-            f"{root}/outputs/{relative_path}"
-        )
+        content = await sandbox.adownload_file_bytes(f"{root}/outputs/{relative_path}")
         if not isinstance(content, bytes) or not content.strip():
             raise TeachingPackageStorageError(
                 f"Managed book asset is unavailable: {relative_path}"
@@ -1121,18 +1135,14 @@ async def read_reading_asset_knowledge(
         or not isinstance(expected_size, int)
         or len(expected_sha256) != 64
     ):
-        raise TeachingPackageStorageError(
-            "Knowledge-point chapter manifest is invalid"
-        )
+        raise TeachingPackageStorageError("Knowledge-point chapter manifest is invalid")
     content = await asyncio.to_thread(get_bytes, f"{prefix}/{relative_path}")
     if (
         not isinstance(content, bytes)
         or len(content) != expected_size
         or hashlib.sha256(content).hexdigest() != expected_sha256
     ):
-        raise TeachingPackageStorageError(
-            "Knowledge-point chapter asset is invalid"
-        )
+        raise TeachingPackageStorageError("Knowledge-point chapter asset is invalid")
     try:
         return content.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -1151,7 +1161,9 @@ async def download_kp_lesson_outputs(
     root = managed_job_root(job_id)
     lesson = await sandbox.adownload_file_bytes(f"{root}/outputs/lesson.md")
     if not isinstance(lesson, bytes) or not lesson.strip():
-        raise TeachingPackageStorageError("Knowledge-point lesson output is unavailable")
+        raise TeachingPackageStorageError(
+            "Knowledge-point lesson output is unavailable"
+        )
     if len(lesson) > _MAX_CANDIDATE_BYTES:
         raise TeachingPackageStorageError("Knowledge-point lesson output is too large")
     practice = await sandbox.adownload_file_bytes(f"{root}/outputs/practice.json")
@@ -1181,7 +1193,9 @@ async def _put(key: str, content: bytes, content_type: str) -> None:
 
 
 def _asset_content_type(path: str) -> str:
-    return "application/json" if path.endswith(".json") else "text/markdown; charset=utf-8"
+    return (
+        "application/json" if path.endswith(".json") else "text/markdown; charset=utf-8"
+    )
 
 
 def _safe_asset_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -1191,7 +1205,9 @@ def _safe_asset_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     concept_index = manifest.get("concept_index")
     coverage_audit = manifest.get("coverage_audit")
     chapters = manifest.get("chapters")
-    if not isinstance(concept_index, Mapping) or not isinstance(coverage_audit, Mapping):
+    if not isinstance(concept_index, Mapping) or not isinstance(
+        coverage_audit, Mapping
+    ):
         raise TeachingPackageStorageError("Teaching asset manifest is invalid")
     if not isinstance(chapters, list):
         raise TeachingPackageStorageError("Teaching asset manifest is invalid")
@@ -1389,9 +1405,7 @@ def validate_book_pipeline_checkpoint_prefix(value: object) -> str:
     """Return one canonical checkpoint prefix or reject it."""
     prefix = str(value or "").strip()
     if not _CHECKPOINT_BUNDLE_PREFIX_RE.fullmatch(prefix):
-        raise TeachingPackageStorageError(
-            "Book pipeline checkpoint prefix is invalid"
-        )
+        raise TeachingPackageStorageError("Book pipeline checkpoint prefix is invalid")
     return prefix
 
 
@@ -1468,8 +1482,7 @@ async def stage_book_pipeline_checkpoint_bundle(
     )
     root = managed_job_root(str(job["generation_job_id"]))
     manifest = _strict_json_object(
-        await asyncio.to_thread(get_bytes, f"{prefix}/manifest.json")
-        or b"",
+        await asyncio.to_thread(get_bytes, f"{prefix}/manifest.json") or b"",
         label="Book pipeline checkpoint manifest",
     )
     if manifest.get("format") != "langalpha-book-pipeline-checkpoint/v1":
@@ -1478,8 +1491,7 @@ async def stage_book_pipeline_checkpoint_bundle(
         )
     manifest_attempt_id = str(manifest.get("attempt_id") or "")
     if (
-        str(manifest.get("generation_job_id") or "")
-        != str(job["generation_job_id"])
+        str(manifest.get("generation_job_id") or "") != str(job["generation_job_id"])
         or str(manifest.get("version_id") or "") != str(job.get("version_id") or "")
         or manifest_attempt_id != str(job.get("latest_attempt_id") or "")
     ):
@@ -1665,9 +1677,7 @@ def kp_lesson_content_key(
             "Knowledge-point lesson version is invalid"
         ) from exc
     if min(content_sequence, structure_sequence) <= 0:
-        raise TeachingPackageStorageError(
-            "Knowledge-point lesson version is invalid"
-        )
+        raise TeachingPackageStorageError("Knowledge-point lesson version is invalid")
     prefix = (
         "education/{household}/{textbook}/v{content}/structures/v{structure}"
     ).format(
@@ -1702,9 +1712,7 @@ def kp_lesson_content_key(
             "Knowledge-point lesson version is invalid"
         ) from exc
     if min(unit_position, knowledge_point_position) <= 0:
-        raise TeachingPackageStorageError(
-            "Knowledge-point lesson version is invalid"
-        )
+        raise TeachingPackageStorageError("Knowledge-point lesson version is invalid")
     return (
         f"{prefix}/units/{{unit_position:02d}}-{{unit_slug}}/knowledge-points/"
         "{knowledge_point_position:02d}-{knowledge_point_slug}/lessons/"
@@ -1773,13 +1781,12 @@ async def read_kp_lesson_revision(
         or not content
         or len(content) > _MAX_CANDIDATE_BYTES
     ):
-        raise TeachingPackageStorageError("Knowledge-point lesson content is unavailable")
-    if (
-        expected_sha256 is not None
-        and (
-            not _SHA256_RE.fullmatch(expected_sha256)
-            or hashlib.sha256(content).hexdigest() != expected_sha256
+        raise TeachingPackageStorageError(
+            "Knowledge-point lesson content is unavailable"
         )
+    if expected_sha256 is not None and (
+        not _SHA256_RE.fullmatch(expected_sha256)
+        or hashlib.sha256(content).hexdigest() != expected_sha256
     ):
         raise TeachingPackageStorageError(
             "Knowledge-point lesson content hash mismatch"

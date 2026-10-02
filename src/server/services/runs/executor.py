@@ -22,12 +22,13 @@ from typing import Dict, Any, Literal, Optional, Callable, Coroutine
 from enum import Enum
 from dataclasses import dataclass, field
 from contextlib import suppress
+from uuid import uuid4
 
 from src.config.settings import (
     get_max_concurrent_workflows,
     get_workflow_result_ttl,
     get_abandoned_workflow_timeout,
-    get_education_teaching_abandoned_timeout,
+    get_education_book_abandoned_timeout,
     get_cleanup_interval,
     is_intermediate_storage_enabled,
     get_max_stored_messages_per_agent,
@@ -66,6 +67,7 @@ class LocalRunStatus(str, Enum):
 @dataclass
 class LocalRunExecution:
     """Information about a background workflow task."""
+
     thread_id: str
     run_id: str
     status: LocalRunStatus
@@ -90,7 +92,9 @@ class LocalRunExecution:
 
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-    completion_callback: Optional[Callable[["LocalRunExecution"], Coroutine[Any, Any, None]]] = None
+    completion_callback: Optional[
+        Callable[["LocalRunExecution"], Coroutine[Any, Any, None]]
+    ] = None
     terminal_callback: Optional[
         Callable[["LocalRunExecution", str], Coroutine[Any, Any, None]]
     ] = None
@@ -112,13 +116,14 @@ class LocalRunExecutor:
     by construction.
     """
 
-    _instance: Optional['LocalRunExecutor'] = None
+    _instance: Optional["LocalRunExecutor"] = None
 
     def __init__(self):
         # Keyed by (thread_id, run_id). One slot per turn; no cross-turn
         # aliasing because run_id is fresh per POST.
         self.executions: Dict[TaskKey, LocalRunExecution] = {}
         self.task_lock = asyncio.Lock()
+        self._capacity_reservations: set[str] = set()
         # Per-thread admission locks remain thread-keyed: admission policy
         # (wait_or_steer / one foreground turn at a time) is a thread-level
         # invariant, independent of the per-turn key.
@@ -149,7 +154,7 @@ class LocalRunExecutor:
         # holds across workers, not just this process.
 
     @classmethod
-    def get_instance(cls) -> 'LocalRunExecutor':
+    def get_instance(cls) -> "LocalRunExecutor":
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
@@ -157,12 +162,8 @@ class LocalRunExecutor:
     def _abandoned_timeout_for_metadata(self, metadata: dict[str, Any]) -> int:
         """Keep a managed textbook root alive through its longer reconnect window."""
         managed = metadata.get("managed_execution")
-        if isinstance(managed, dict) and managed.get("kind") in {
-            "education_teaching",
-            "education_lesson",
-            "education_book_pipeline",
-        }:
-            return get_education_teaching_abandoned_timeout()
+        if isinstance(managed, dict) and managed.get("kind") == "education_book":
+            return get_education_book_abandoned_timeout()
         return self.abandoned_timeout
 
     # ---------- helpers ----------
@@ -363,7 +364,10 @@ class LocalRunExecutor:
                     abandoned_threshold = now - timedelta(
                         seconds=self._abandoned_timeout_for_metadata(info.metadata)
                     )
-                    if info.active_connections == 0 and info.last_access_at < abandoned_threshold:
+                    if (
+                        info.active_connections == 0
+                        and info.last_access_at < abandoned_threshold
+                    ):
                         # Locally cold — candidate only. The cross-worker
                         # consumer signal is consulted outside the lock
                         # before anything is cancelled.
@@ -401,7 +405,9 @@ class LocalRunExecutor:
                     or info.active_connections != 0
                     or info.last_access_at
                     >= now
-                    - timedelta(seconds=self._abandoned_timeout_for_metadata(info.metadata))
+                    - timedelta(
+                        seconds=self._abandoned_timeout_for_metadata(info.metadata)
+                    )
                 ):
                     continue
                 if info.task and not info.task.done():
@@ -473,17 +479,39 @@ class LocalRunExecutor:
 
     # ---------- workflow lifecycle ----------
 
+    async def reserve_capacity(self) -> str | None:
+        """Reserve one workflow slot without waiting or allocating runtime state."""
+        async with self.task_lock:
+            running_count = sum(
+                1
+                for execution in self.executions.values()
+                if execution.status is LocalRunStatus.RUNNING
+            )
+            if running_count + len(self._capacity_reservations) >= self.max_concurrent:
+                return None
+            token = str(uuid4())
+            self._capacity_reservations.add(token)
+            return token
+
+    async def release_capacity_reservation(self, token: str) -> None:
+        """Release an unused reservation; consumed reservations are a no-op."""
+        async with self.task_lock:
+            self._capacity_reservations.discard(token)
+
     async def start_run(
         self,
         thread_id: str,
         run_id: str,
         workflow_generator: Any,
         metadata: Optional[Dict[str, Any]] = None,
-        completion_callback: Optional[Callable[["LocalRunExecution"], Coroutine[Any, Any, None]]] = None,
+        completion_callback: Optional[
+            Callable[["LocalRunExecution"], Coroutine[Any, Any, None]]
+        ] = None,
         terminal_callback: Optional[
             Callable[["LocalRunExecution", str], Coroutine[Any, Any, None]]
         ] = None,
         graph: Optional[Any] = None,
+        capacity_reservation: str | None = None,
     ) -> LocalRunExecution:
         """Start a workflow as a background task."""
         key = (thread_id, run_id)
@@ -494,16 +522,29 @@ class LocalRunExecutor:
                     f"{self.executions[key].status}"
                 )
 
+            has_reservation = capacity_reservation is not None
+            if (
+                has_reservation
+                and capacity_reservation not in self._capacity_reservations
+            ):
+                raise ValueError("Invalid or already consumed capacity reservation")
+
             running_count = sum(
-                1 for t in self.executions.values()
-                if t.status is LocalRunStatus.RUNNING
+                1
+                for execution in self.executions.values()
+                if execution.status is LocalRunStatus.RUNNING
             )
-            if running_count >= self.max_concurrent:
+            if not has_reservation and (
+                running_count + len(self._capacity_reservations) >= self.max_concurrent
+            ):
                 raise ValueError(
-                    f"Max concurrent workflows reached ({self.max_concurrent}). "
-                    f"Currently running: {running_count}"
+                    "Max concurrent workflows reached "
+                    f"({self.max_concurrent}). Currently running: "
+                    f"{running_count}"
                 )
 
+            if capacity_reservation is not None:
+                self._capacity_reservations.remove(capacity_reservation)
             task_info = LocalRunExecution(
                 thread_id=thread_id,
                 run_id=run_id,
@@ -516,7 +557,9 @@ class LocalRunExecutor:
             )
             task_info.task = asyncio.create_task(
                 self._run_workflow(
-                    thread_id, run_id, workflow_generator,
+                    thread_id,
+                    run_id,
+                    workflow_generator,
                     cancel_event=task_info.cancel_event,
                 )
             )
@@ -526,7 +569,8 @@ class LocalRunExecutor:
 
             logger.info(
                 f"[LocalRunExecutor] Started workflow thread_id={thread_id} "
-                f"run_id={run_id} (running: {running_count + 1}/{self.max_concurrent})"
+                f"run_id={run_id} "
+                f"(running: {running_count + 1}/{self.max_concurrent})"
             )
 
             started = task_info
@@ -600,6 +644,7 @@ class LocalRunExecutor:
         """
         key = (thread_id, run_id)
         try:
+
             async def consume_workflow(wf_gen):
                 async for event in wf_gen:
                     if cancel_event.is_set():
@@ -712,9 +757,14 @@ class LocalRunExecutor:
 
         except Exception as e:
             logger.error(
-                f"[LocalRunExecutor] Workflow {key} failed: {e}",
-                exc_info=True
+                f"[LocalRunExecutor] Workflow {key} failed: {e}", exc_info=True
             )
+            async with self.task_lock:
+                task_info = self.executions.get(key)
+                if task_info is not None:
+                    task_info.metadata["terminal_error_type"] = (
+                        f"{type(e).__module__}.{type(e).__qualname__}"
+                    )
             await self._finalize_run(thread_id, run_id, kind="failed", error=str(e))
 
     async def _flush_checkpoint(self, thread_id: str, run_id: str) -> None:
@@ -790,7 +840,9 @@ class LocalRunExecutor:
             return  # memory backend: no stream transport to lose
 
         await stream_writer.buffer_event(
-            thread_id, run_id, event,
+            thread_id,
+            run_id,
+            event,
             max_stored_messages=self.max_stored_messages,
         )
 
@@ -810,7 +862,9 @@ class LocalRunExecutor:
         if self.event_storage_backend != "redis":
             return
         await stream_writer.append_run_end_event(
-            thread_id, run_id, outcome,
+            thread_id,
+            run_id,
+            outcome,
             error_frame=error_frame,
             redis_event_ttl=self.redis_event_ttl,
             max_stored_messages=self.max_stored_messages,
@@ -850,8 +904,14 @@ class LocalRunExecutor:
         sandbox=None,
     ) -> None:
         await subagent_collection.collect_subagent_results_for_turn(
-            thread_id, response_id, original_chunks, tasks,
-            workspace_id, user_id, timeout=timeout, is_byok=is_byok,
+            thread_id,
+            response_id,
+            original_chunks,
+            tasks,
+            workspace_id,
+            user_id,
+            timeout=timeout,
+            is_byok=is_byok,
             sandbox=sandbox,
             track_orphan_collector=self._track_orphan_collector,
         )
@@ -869,7 +929,10 @@ class LocalRunExecutor:
         retire_streams: bool = True,
     ) -> None:
         await subagent_collection.await_drain_and_cleanup_tasks(
-            tasks, thread_id, response_id, timeout=timeout,
+            tasks,
+            thread_id,
+            response_id,
+            timeout=timeout,
             retire_streams=retire_streams,
         )
 
@@ -1007,10 +1070,12 @@ class LocalRunExecutor:
                 async def tail_drain() -> None:
                     await self._drain_run_subagent_writers(thread_id, run_id, guard)
 
-            finalize_applied, status, survivor_status = (
-                await finalization.drive_finalize_cas(
-                    key, handle, outcome, tail_drain=tail_drain
-                )
+            (
+                finalize_applied,
+                status,
+                survivor_status,
+            ) = await finalization.drive_finalize_cas(
+                key, handle, outcome, tail_drain=tail_drain
             )
         else:
             logger.error(
@@ -1208,7 +1273,11 @@ class LocalRunExecutor:
     ) -> None:
         """Claim this run's subagents and collect their events post-terminal."""
         await subagent_collection.spawn_subagent_collector(
-            thread_id, run_id, metadata, workspace_id, user_id,
+            thread_id,
+            run_id,
+            metadata,
+            workspace_id,
+            user_id,
             collect_for_turn=self._collect_subagent_results_for_turn,
         )
 
@@ -1249,8 +1318,13 @@ class LocalRunExecutor:
         sandbox=None,
     ) -> bool:
         return await subagent_collection.persist_collected_events(
-            main_chunks, subagent_events, response_id,
-            thread_id, workspace_id, user_id, sandbox=sandbox,
+            main_chunks,
+            subagent_events,
+            response_id,
+            thread_id,
+            workspace_id,
+            user_id,
+            sandbox=sandbox,
         )
 
     async def _persist_subagent_usage(
@@ -1263,7 +1337,11 @@ class LocalRunExecutor:
         is_byok: bool = False,
     ) -> None:
         await subagent_collection.persist_subagent_usage(
-            response_id, tasks, thread_id, workspace_id, user_id,
+            response_id,
+            tasks,
+            thread_id,
+            workspace_id,
+            user_id,
             is_byok=is_byok,
         )
 
@@ -1324,8 +1402,11 @@ class LocalRunExecutor:
         return found
 
     async def signal_cancel(
-        self, thread_id: str, run_id: Optional[str] = None,
-        *, user_initiated: bool = True,
+        self,
+        thread_id: str,
+        run_id: Optional[str] = None,
+        *,
+        user_initiated: bool = True,
     ) -> bool:
         """Cancel a running workflow immediately.
 

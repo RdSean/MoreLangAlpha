@@ -33,16 +33,42 @@ REGISTRY_STORE_MOD = "src.server.services.background_registry_store"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_btm() -> LocalRunExecutor:
     """Create a LocalRunExecutor with config calls patched out."""
-    with patch("src.server.services.runs.executor.get_max_concurrent_workflows", return_value=10), \
-         patch("src.server.services.runs.executor.get_workflow_result_ttl", return_value=3600), \
-         patch("src.server.services.runs.executor.get_abandoned_workflow_timeout", return_value=3600), \
-         patch("src.server.services.runs.executor.get_cleanup_interval", return_value=60), \
-         patch("src.server.services.runs.executor.is_intermediate_storage_enabled", return_value=False), \
-         patch("src.server.services.runs.executor.get_max_stored_messages_per_agent", return_value=1000), \
-         patch("src.server.services.runs.executor.get_event_storage_backend", return_value="memory"), \
-         patch("src.server.services.runs.executor.get_redis_ttl_workflow_events", return_value=86400):
+    with (
+        patch(
+            "src.server.services.runs.executor.get_max_concurrent_workflows",
+            return_value=10,
+        ),
+        patch(
+            "src.server.services.runs.executor.get_workflow_result_ttl",
+            return_value=3600,
+        ),
+        patch(
+            "src.server.services.runs.executor.get_abandoned_workflow_timeout",
+            return_value=3600,
+        ),
+        patch(
+            "src.server.services.runs.executor.get_cleanup_interval", return_value=60
+        ),
+        patch(
+            "src.server.services.runs.executor.is_intermediate_storage_enabled",
+            return_value=False,
+        ),
+        patch(
+            "src.server.services.runs.executor.get_max_stored_messages_per_agent",
+            return_value=1000,
+        ),
+        patch(
+            "src.server.services.runs.executor.get_event_storage_backend",
+            return_value="memory",
+        ),
+        patch(
+            "src.server.services.runs.executor.get_redis_ttl_workflow_events",
+            return_value=86400,
+        ),
+    ):
         btm = LocalRunExecutor()
     return btm
 
@@ -66,12 +92,40 @@ def _make_task_info(
     )
 
 
+@pytest.mark.asyncio
+async def test_capacity_reservation_prevents_default_starts_from_stealing_slot():
+    executor = _make_btm()
+    executor.max_concurrent = 1
+    occupying = _make_task_info(thread_id="thread-busy", run_id="run-busy")
+    executor.executions[(occupying.thread_id, occupying.run_id)] = occupying
+    executor._run_workflow = AsyncMock()
+
+    with pytest.raises(ValueError, match="Max concurrent workflows reached"):
+        await executor.start_run("thread-rejected", "run-rejected", object())
+    assert await executor.reserve_capacity() is None
+
+    occupying.status = LocalRunStatus.COMPLETED
+    reservation = await executor.reserve_capacity()
+    assert reservation is not None
+    with pytest.raises(ValueError, match="Max concurrent workflows reached"):
+        await executor.start_run("thread-unreserved", "run-unreserved", object())
+    started = await executor.start_run(
+        "thread-reserved",
+        "run-reserved",
+        object(),
+        capacity_reservation=reservation,
+    )
+
+    assert started.thread_id == "thread-reserved"
+    assert started.run_id == "run-reserved"
+
+
 # ---------------------------------------------------------------------------
 # cancel_stale_workflow — no task
 # ---------------------------------------------------------------------------
 
-class TestCancelStaleWorkflowNoTask:
 
+class TestCancelStaleWorkflowNoTask:
     @pytest.mark.asyncio
     async def test_cancel_stale_workflow_no_task(self, caplog):
         """cancel_stale_workflow returns False and logs no warning for missing thread."""
@@ -88,8 +142,8 @@ class TestCancelStaleWorkflowNoTask:
 # cancel_stale_workflow — RUNNING
 # ---------------------------------------------------------------------------
 
-class TestCancelStaleWorkflowRunning:
 
+class TestCancelStaleWorkflowRunning:
     @pytest.mark.asyncio
     async def test_cancel_stale_workflow_running(self):
         """cancel_stale_workflow sets cancel_event, cancels inner_task, returns True."""
@@ -123,8 +177,8 @@ class TestCancelStaleWorkflowRunning:
 # signal_cancel — user stop force-cancels inner_task (immediacy)
 # ---------------------------------------------------------------------------
 
-class TestCancelWorkflowForceCancelsInner:
 
+class TestCancelWorkflowForceCancelsInner:
     @pytest.mark.asyncio
     async def test_user_cancel_force_cancels_inner_task(self):
         """signal_cancel force-cancels a not-done inner_task immediately."""
@@ -180,9 +234,9 @@ class TestCancelWorkflowForceCancelsInner:
         assert task_info.user_stop is True
 
         # Graceful shutdown fires a system cancel on the same still-RUNNING task.
-        assert await btm.signal_cancel(
-            "thread-1", "run-1", user_initiated=False
-        ) is True
+        assert (
+            await btm.signal_cancel("thread-1", "run-1", user_initiated=False) is True
+        )
         assert task_info.user_stop is True  # not downgraded
 
     @pytest.mark.asyncio
@@ -193,9 +247,9 @@ class TestCancelWorkflowForceCancelsInner:
         task_info = _make_task_info(status=LocalRunStatus.RUNNING)
         btm.executions[("thread-1", "run-1")] = task_info
 
-        assert await btm.signal_cancel(
-            "thread-1", "run-1", user_initiated=False
-        ) is True
+        assert (
+            await btm.signal_cancel("thread-1", "run-1", user_initiated=False) is True
+        )
         assert task_info.explicit_cancel is True
         assert task_info.user_stop is False
 
@@ -204,8 +258,8 @@ class TestCancelWorkflowForceCancelsInner:
 # cancel_stale_workflow — COMPLETED (no-op)
 # ---------------------------------------------------------------------------
 
-class TestCancelStaleWorkflowCompleted:
 
+class TestCancelStaleWorkflowCompleted:
     @pytest.mark.asyncio
     async def test_cancel_stale_workflow_completed(self):
         """cancel_stale_workflow returns False for a COMPLETED task."""
@@ -225,8 +279,8 @@ class TestCancelStaleWorkflowCompleted:
 # cancel_stale_workflow — timeout waiting for outer task
 # ---------------------------------------------------------------------------
 
-class TestCancelStaleWorkflowTimeout:
 
+class TestCancelStaleWorkflowTimeout:
     @pytest.mark.asyncio
     async def test_cancel_stale_workflow_timeout(self, caplog):
         """cancel_stale_workflow logs warning when outer task does not exit in time."""
@@ -257,6 +311,7 @@ class TestCancelStaleWorkflowTimeout:
 # cancel_stale_workflow
 # ---------------------------------------------------------------------------
 
+
 class TestCancelStaleWorkflow:
     @pytest.mark.asyncio
     async def test_stale_run_cancelled(self):
@@ -277,6 +332,7 @@ class TestCancelStaleWorkflow:
 # ---------------------------------------------------------------------------
 # signal_cancel — run_id targeting (active vs latest, explicit vs implicit)
 # ---------------------------------------------------------------------------
+
 
 class TestCancelWorkflowRunIdTargeting:
     """``signal_cancel(thread_id)`` without an explicit run_id must target
@@ -319,7 +375,11 @@ class TestCancelWorkflowRunIdTargeting:
         """No live runs on the thread ⇒ cancel is a no-op + returns False."""
         btm = _make_btm()
 
-        for status in (LocalRunStatus.COMPLETED, LocalRunStatus.FAILED, LocalRunStatus.CANCELLED):
+        for status in (
+            LocalRunStatus.COMPLETED,
+            LocalRunStatus.FAILED,
+            LocalRunStatus.CANCELLED,
+        ):
             ti = _make_task_info(status=status, run_id=f"run-{status.value}")
             btm.executions[("thread-1", ti.run_id)] = ti
 
@@ -356,7 +416,6 @@ class TestCancelWorkflowRunIdTargeting:
 
 
 class TestConsumeWorkflowUsesClosureEvents:
-
     @pytest.mark.asyncio
     async def test_consume_workflow_uses_closure_events(self):
         """_run_workflow checks the cancel_event passed as a parameter.
@@ -377,17 +436,20 @@ class TestConsumeWorkflowUsesClosureEvents:
         cancel_event = asyncio.Event()
 
         # Pre-register a RUNNING task so _run_workflow can find it
-        task_info = _make_task_info(thread_id="thread-closure", status=LocalRunStatus.RUNNING)
+        task_info = _make_task_info(
+            thread_id="thread-closure", status=LocalRunStatus.RUNNING
+        )
         btm.executions[("thread-closure", "run-1")] = task_info
 
         # Patch the terminal finalize + sentinel so they don't try to do real
         # persistence work. v4 folded _mark_completed/_cancelled/_failed into a
         # single _finalize_run(kind=...); the kind reveals which terminal path ran.
-        with patch.object(btm, "_finalize_run", new_callable=AsyncMock) as mock_finalize, \
-             patch.object(btm, "append_run_end_event", new_callable=AsyncMock), \
-             patch.object(btm, "_flush_checkpoint", new_callable=AsyncMock), \
-             patch.object(btm, "_teardown_subagents_on_stop", new_callable=AsyncMock):
-
+        with (
+            patch.object(btm, "_finalize_run", new_callable=AsyncMock) as mock_finalize,
+            patch.object(btm, "append_run_end_event", new_callable=AsyncMock),
+            patch.object(btm, "_flush_checkpoint", new_callable=AsyncMock),
+            patch.object(btm, "_teardown_subagents_on_stop", new_callable=AsyncMock),
+        ):
             # Schedule setting the cancel_event after a brief delay
             async def set_cancel_after_delay():
                 await asyncio.sleep(0.05)
@@ -424,8 +486,8 @@ class TestConsumeWorkflowUsesClosureEvents:
 # Force-cancel propagates from outer task into inner consume_workflow
 # ---------------------------------------------------------------------------
 
-class TestOuterTaskCancelPropagatesToInner:
 
+class TestOuterTaskCancelPropagatesToInner:
     @pytest.mark.asyncio
     async def test_outer_task_cancel_propagates_to_inner(self):
         """Cancelling the outer task that wraps _run_workflow now cancels the
@@ -457,11 +519,12 @@ class TestOuterTaskCancelPropagatesToInner:
         )
         btm.executions[("thread-outer", "run-outer")] = task_info
 
-        with patch.object(btm, "_finalize_run", new_callable=AsyncMock) as mock_finalize, \
-             patch.object(btm, "append_run_end_event", new_callable=AsyncMock), \
-             patch.object(btm, "_flush_checkpoint", new_callable=AsyncMock), \
-             patch.object(btm, "_teardown_subagents_on_stop", new_callable=AsyncMock):
-
+        with (
+            patch.object(btm, "_finalize_run", new_callable=AsyncMock) as mock_finalize,
+            patch.object(btm, "append_run_end_event", new_callable=AsyncMock),
+            patch.object(btm, "_flush_checkpoint", new_callable=AsyncMock),
+            patch.object(btm, "_teardown_subagents_on_stop", new_callable=AsyncMock),
+        ):
             outer_task = asyncio.create_task(
                 btm._run_workflow(
                     thread_id="thread-outer",
@@ -501,6 +564,7 @@ class TestOuterTaskCancelPropagatesToInner:
 # _mark_cancelled labels persistence by cancel origin (explicit_cancel)
 # ---------------------------------------------------------------------------
 
+
 class TestMarkCancelledUserLabeling:
     """``cancelled_by_user`` must reflect ``task_info.user_stop``, NOT
     ``explicit_cancel``.
@@ -532,14 +596,20 @@ class TestMarkCancelledUserLabeling:
 
         fin = "src.server.services.runs.finalization"
         mod = "src.server.services.runs.executor"
-        with patch(f"{fin}.get_token_usage_from_callback", return_value=(None, [])), \
-             patch(f"{fin}.get_tool_usage_from_handler", return_value={}), \
-             patch(f"{fin}.get_sse_events_from_handler", return_value=[]), \
-             patch(f"{fin}.calculate_execution_time", return_value=1.0), \
-             patch(f"{mod}.release_burst_slot", new_callable=AsyncMock), \
-             patch("src.server.services.runs.coordinator.RunCoordinator") as mock_coord_cls:
+        with (
+            patch(f"{fin}.get_token_usage_from_callback", return_value=(None, [])),
+            patch(f"{fin}.get_tool_usage_from_handler", return_value={}),
+            patch(f"{fin}.get_sse_events_from_handler", return_value=[]),
+            patch(f"{fin}.calculate_execution_time", return_value=1.0),
+            patch(f"{mod}.release_burst_slot", new_callable=AsyncMock),
+            patch(
+                "src.server.services.runs.coordinator.RunCoordinator"
+            ) as mock_coord_cls,
+        ):
             mock_coord_cls.get_instance.return_value = coordinator
-            await btm._finalize_run(task_info.thread_id, task_info.run_id, kind="cancelled")
+            await btm._finalize_run(
+                task_info.thread_id, task_info.run_id, kind="cancelled"
+            )
 
         coordinator.finalize_run.assert_awaited_once()
         outcome = coordinator.finalize_run.await_args.args[1]
@@ -578,7 +648,7 @@ class TestMarkCancelledUserLabeling:
         "Stopped" turns into chat history."""
         btm = _make_btm()
         task_info = _make_task_info(thread_id="thread-shutdown", run_id="run-sd")
-        task_info.explicit_cancel = True   # shutdown/stale set this...
+        task_info.explicit_cancel = True  # shutdown/stale set this...
         assert task_info.user_stop is False  # ...but NOT user_stop
 
         persist_metadata = await self._run_finalize_cancelled(btm, task_info)
@@ -610,12 +680,14 @@ class TestThrownFinalizeLeavesEntryRunning:
     async def _run_finalize(self, btm, task_info, coordinator):
         fin = "src.server.services.runs.finalization"
         mod = "src.server.services.runs.executor"
-        with patch(f"{fin}.get_token_usage_from_callback", return_value=(None, [])), \
-             patch(f"{fin}.get_tool_usage_from_handler", return_value={}), \
-             patch(f"{fin}.get_sse_events_from_handler", return_value=[]), \
-             patch(f"{fin}.calculate_execution_time", return_value=1.0), \
-             patch(f"{mod}.release_burst_slot", new_callable=AsyncMock), \
-             patch("src.server.services.runs.coordinator.RunCoordinator") as coord_cls:
+        with (
+            patch(f"{fin}.get_token_usage_from_callback", return_value=(None, [])),
+            patch(f"{fin}.get_tool_usage_from_handler", return_value={}),
+            patch(f"{fin}.get_sse_events_from_handler", return_value=[]),
+            patch(f"{fin}.calculate_execution_time", return_value=1.0),
+            patch(f"{mod}.release_burst_slot", new_callable=AsyncMock),
+            patch("src.server.services.runs.coordinator.RunCoordinator") as coord_cls,
+        ):
             coord_cls.get_instance.return_value = coordinator
             await btm._finalize_run(
                 task_info.thread_id, task_info.run_id, kind="stream_end"
@@ -662,6 +734,7 @@ class TestThrownFinalizeLeavesEntryRunning:
 # _run_workflow stop path: flush + teardown gated on explicit_cancel
 # ---------------------------------------------------------------------------
 
+
 class TestStopPathFlushGating:
     """The except-CancelledError handler flushes the checkpoint and tears down
     subagents ONLY when the cancel was user-initiated (explicit_cancel)."""
@@ -679,11 +752,14 @@ class TestStopPathFlushGating:
         task_info.explicit_cancel = explicit
         btm.executions[("t-stop", "r-stop")] = task_info
 
-        with patch.object(btm, "_finalize_run", new_callable=AsyncMock), \
-             patch.object(btm, "append_run_end_event", new_callable=AsyncMock), \
-             patch.object(btm, "_flush_checkpoint", new_callable=AsyncMock) as flush, \
-             patch.object(btm, "_teardown_subagents_on_stop", new_callable=AsyncMock) as teardown:
-
+        with (
+            patch.object(btm, "_finalize_run", new_callable=AsyncMock),
+            patch.object(btm, "append_run_end_event", new_callable=AsyncMock),
+            patch.object(btm, "_flush_checkpoint", new_callable=AsyncMock) as flush,
+            patch.object(
+                btm, "_teardown_subagents_on_stop", new_callable=AsyncMock
+            ) as teardown,
+        ):
             outer = asyncio.create_task(
                 btm._run_workflow(
                     thread_id="t-stop",
@@ -730,12 +806,17 @@ class TestStopPathFlushGating:
         task_info.explicit_cancel = True
         btm.executions[("t-flushfail", "r-flushfail")] = task_info
 
-        with patch.object(btm, "_finalize_run", new_callable=AsyncMock) as finalize, \
-             patch.object(btm, "append_run_end_event", new_callable=AsyncMock), \
-             patch.object(btm, "_flush_checkpoint", new_callable=AsyncMock,
-                          side_effect=RuntimeError("flush boom")), \
-             patch.object(btm, "_teardown_subagents_on_stop", new_callable=AsyncMock):
-
+        with (
+            patch.object(btm, "_finalize_run", new_callable=AsyncMock) as finalize,
+            patch.object(btm, "append_run_end_event", new_callable=AsyncMock),
+            patch.object(
+                btm,
+                "_flush_checkpoint",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("flush boom"),
+            ),
+            patch.object(btm, "_teardown_subagents_on_stop", new_callable=AsyncMock),
+        ):
             outer = asyncio.create_task(
                 btm._run_workflow(
                     thread_id="t-flushfail",
@@ -774,12 +855,17 @@ class TestStopPathFlushGating:
         task_info.explicit_cancel = True
         btm.executions[("t-recancel", "r-recancel")] = task_info
 
-        with patch.object(btm, "_finalize_run", new_callable=AsyncMock) as finalize, \
-             patch.object(btm, "append_run_end_event", new_callable=AsyncMock), \
-             patch.object(btm, "_flush_checkpoint", new_callable=AsyncMock), \
-             patch.object(btm, "_teardown_subagents_on_stop", new_callable=AsyncMock,
-                          side_effect=asyncio.CancelledError()):
-
+        with (
+            patch.object(btm, "_finalize_run", new_callable=AsyncMock) as finalize,
+            patch.object(btm, "append_run_end_event", new_callable=AsyncMock),
+            patch.object(btm, "_flush_checkpoint", new_callable=AsyncMock),
+            patch.object(
+                btm,
+                "_teardown_subagents_on_stop",
+                new_callable=AsyncMock,
+                side_effect=asyncio.CancelledError(),
+            ),
+        ):
             outer = asyncio.create_task(
                 btm._run_workflow(
                     thread_id="t-recancel",
@@ -794,9 +880,7 @@ class TestStopPathFlushGating:
                 await outer
 
         # Even though teardown raised CancelledError, persistence still ran.
-        finalize.assert_awaited_once_with(
-            "t-recancel", "r-recancel", kind="cancelled"
-        )
+        finalize.assert_awaited_once_with("t-recancel", "r-recancel", kind="cancelled")
 
 
 # ---------------------------------------------------------------------------
@@ -804,8 +888,8 @@ class TestStopPathFlushGating:
 # everything scoped to the stopped run.
 # ---------------------------------------------------------------------------
 
-class TestStopTeardownOrdering:
 
+class TestStopTeardownOrdering:
     @pytest.mark.asyncio
     async def test_cancel_run_tasks_runs_before_drain(self):
         """_teardown_subagents_on_stop kills the run's tasks BEFORE draining:
@@ -825,9 +909,7 @@ class TestStopTeardownOrdering:
         own_task = MagicMock(spawned_run_id="r-order")
         foreign_task = MagicMock(spawned_run_id="r-prior")
         fake_registry = MagicMock()
-        fake_registry.get_all_tasks = AsyncMock(
-            return_value=[own_task, foreign_task]
-        )
+        fake_registry.get_all_tasks = AsyncMock(return_value=[own_task, foreign_task])
 
         drained_tasks: list = []
 
@@ -845,10 +927,13 @@ class TestStopTeardownOrdering:
 
         fake_store.cancel_run_tasks = AsyncMock(side_effect=fake_cancel_run_tasks)
 
-        with patch(
-            f"{REGISTRY_STORE_MOD}.BackgroundRegistryStore.get_instance",
-            return_value=fake_store,
-        ), patch.object(btm, "_drain_killed_subagent_events", side_effect=fake_drain):
+        with (
+            patch(
+                f"{REGISTRY_STORE_MOD}.BackgroundRegistryStore.get_instance",
+                return_value=fake_store,
+            ),
+            patch.object(btm, "_drain_killed_subagent_events", side_effect=fake_drain),
+        ):
             await btm._teardown_subagents_on_stop("t-order", "r-order")
 
         assert order == ["cancel_run_tasks", "drain"]
@@ -884,14 +969,17 @@ class TestStopTeardownOrdering:
         fake_store.get_registry = AsyncMock(return_value=fake_registry)
         fake_store.cancel_run_tasks = AsyncMock(return_value=1)
 
-        with patch(
-            f"{REGISTRY_STORE_MOD}.BackgroundRegistryStore.get_instance",
-            return_value=fake_store,
-        ), patch.object(btm, "_drain_killed_subagent_events", side_effect=slow_drain), \
-           patch(
-               "src.server.services.runs.teardown.get_stop_drain_timeout",
-               return_value=0.05,
-           ):
+        with (
+            patch(
+                f"{REGISTRY_STORE_MOD}.BackgroundRegistryStore.get_instance",
+                return_value=fake_store,
+            ),
+            patch.object(btm, "_drain_killed_subagent_events", side_effect=slow_drain),
+            patch(
+                "src.server.services.runs.teardown.get_stop_drain_timeout",
+                return_value=0.05,
+            ),
+        ):
             await btm._teardown_subagents_on_stop("t-tmo", "r-tmo")
 
         # No drained events stashed, but cancel_run_tasks still ran.
@@ -966,8 +1054,8 @@ class TestStopTeardownOrdering:
 # Drain closes open subagent reasoning blocks (replay zombie fix)
 # ---------------------------------------------------------------------------
 
-class TestDrainReasoningClose:
 
+class TestDrainReasoningClose:
     def _task(self, task_id: str, count: int) -> MagicMock:
         task = MagicMock()
         task.task_id = task_id
@@ -985,10 +1073,16 @@ class TestDrainReasoningClose:
         before the stopped close, so replay isn't stuck 'thinking'."""
         btm = _make_btm()
         records = [
-            {"event": "message_chunk", "data": {
-                "agent": "task:abc", "id": "m1",
-                "content": "start", "content_type": "reasoning_signal"},
-             "run": "run-1"},
+            {
+                "event": "message_chunk",
+                "data": {
+                    "agent": "task:abc",
+                    "id": "m1",
+                    "content": "start",
+                    "content_type": "reasoning_signal",
+                },
+                "run": "run-1",
+            },
         ]
 
         async def fake_iter(thread_id, task):
@@ -1004,7 +1098,8 @@ class TestDrainReasoningClose:
             )
 
         completes = [
-            e for e in merged
+            e
+            for e in merged
             if e["data"].get("content_type") == "reasoning_signal"
             and e["data"].get("content") == "complete"
         ]
@@ -1013,11 +1108,11 @@ class TestDrainReasoningClose:
         assert completes[0]["data"]["id"] == "m1"
         # The synthetic complete precedes the finish_reason 'stopped' close.
         idx_complete = next(
-            i for i, e in enumerate(merged)
-            if e["data"].get("content") == "complete"
+            i for i, e in enumerate(merged) if e["data"].get("content") == "complete"
         )
         idx_stop = next(
-            i for i, e in enumerate(merged)
+            i
+            for i, e in enumerate(merged)
             if e["data"].get("finish_reason") == "stopped"
         )
         assert idx_complete < idx_stop
@@ -1028,14 +1123,26 @@ class TestDrainReasoningClose:
         synthetic complete appended."""
         btm = _make_btm()
         records = [
-            {"event": "message_chunk", "data": {
-                "agent": "task:abc", "id": "m1",
-                "content": "start", "content_type": "reasoning_signal"},
-             "run": "run-1"},
-            {"event": "message_chunk", "data": {
-                "agent": "task:abc", "id": "m1",
-                "content": "complete", "content_type": "reasoning_signal"},
-             "run": "run-1"},
+            {
+                "event": "message_chunk",
+                "data": {
+                    "agent": "task:abc",
+                    "id": "m1",
+                    "content": "start",
+                    "content_type": "reasoning_signal",
+                },
+                "run": "run-1",
+            },
+            {
+                "event": "message_chunk",
+                "data": {
+                    "agent": "task:abc",
+                    "id": "m1",
+                    "content": "complete",
+                    "content_type": "reasoning_signal",
+                },
+                "run": "run-1",
+            },
         ]
 
         async def fake_iter(thread_id, task):
@@ -1051,7 +1158,8 @@ class TestDrainReasoningClose:
             )
 
         completes = [
-            e for e in merged
+            e
+            for e in merged
             if e["data"].get("content_type") == "reasoning_signal"
             and e["data"].get("content") == "complete"
         ]
@@ -1088,10 +1196,16 @@ class TestDrainReasoningClose:
         snapshot. The whole task is withheld, closes included."""
         btm = _make_btm()
         records = [
-            {"event": "message_chunk", "data": {
-                "agent": "task:abc", "id": "m1",
-                "content": "partial", "content_type": "text"},
-             "run": "run-1"},
+            {
+                "event": "message_chunk",
+                "data": {
+                    "agent": "task:abc",
+                    "id": "m1",
+                    "content": "partial",
+                    "content_type": "text",
+                },
+                "run": "run-1",
+            },
         ]
 
         async def fake_iter(thread_id, task):
@@ -1121,9 +1235,15 @@ class TestDrainReasoningClose:
         task.handler_task = live_writer
 
         async def fake_iter(thread_id, t):
-            yield {"event": "message_chunk", "data": {
-                "agent": "task:abc", "id": "m1",
-                "content": "x", "content_type": "text"}}
+            yield {
+                "event": "message_chunk",
+                "data": {
+                    "agent": "task:abc",
+                    "id": "m1",
+                    "content": "x",
+                    "content_type": "text",
+                },
+            }
 
         with patch(
             "src.server.services.runs.subagent_collection.iter_subagent_events_full",
@@ -1142,8 +1262,12 @@ class TestDrainReasoningClose:
         records = [
             {
                 "event": "message_chunk",
-                "data": {"agent": "task:abc", "id": "m1",
-                         "content": "r2", "content_type": "text"},
+                "data": {
+                    "agent": "task:abc",
+                    "id": "m1",
+                    "content": "r2",
+                    "content_type": "text",
+                },
                 "run": "run-2",
             },
         ]
@@ -1164,7 +1288,6 @@ class TestDrainReasoningClose:
 
 
 class TestPersistCollectedEvents:
-
     @pytest.mark.asyncio
     async def test_persist_delegates_to_locked_rebase(self):
         """The archive write goes through the row-locked rebase (concurrent
@@ -1172,9 +1295,7 @@ class TestPersistCollectedEvents:
         collected agents are the strip set, cleaned rows the append set,
         and the pre-compose main rows the missing-row fallback."""
         btm = _make_btm()
-        main = [
-            {"event": "message_chunk", "data": {"agent": "ptc", "content": "m"}}
-        ]
+        main = [{"event": "message_chunk", "data": {"agent": "ptc", "content": "m"}}]
         captured = [
             {
                 "event": "message_chunk",
@@ -1184,9 +1305,7 @@ class TestPersistCollectedEvents:
         ]
 
         rebase = AsyncMock(return_value=True)
-        with patch(
-            "src.server.database.conversation.rebase_sse_events", new=rebase
-        ):
+        with patch("src.server.database.conversation.rebase_sse_events", new=rebase):
             ok = await btm._persist_collected_events(
                 main, captured, "resp-1", "t-x", "ws", "u"
             )
@@ -1209,10 +1328,13 @@ class TestPersistCollectedEvents:
         of the transcript after a failed archive write."""
         btm = _make_btm()
 
-        with patch(
-            "src.server.database.conversation.rebase_sse_events",
-            new=AsyncMock(side_effect=RuntimeError("db down")),
-        ), patch("asyncio.sleep", new=AsyncMock()):
+        with (
+            patch(
+                "src.server.database.conversation.rebase_sse_events",
+                new=AsyncMock(side_effect=RuntimeError("db down")),
+            ),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
             ok = await btm._persist_collected_events(
                 [],
                 [{"event": "message_chunk", "data": {"agent": "task:abc"}}],
@@ -1226,7 +1348,6 @@ class TestPersistCollectedEvents:
 
 
 class TestReplayOwnedTaskEvents:
-
     def _task(self, count: int, response_id: str = "resp-1") -> MagicMock:
         task = MagicMock()
         task.task_id = "abc"
@@ -1415,7 +1536,6 @@ class TestReplayOwnedTaskEvents:
 
 
 class TestCleanupRetireSplit:
-
     def _task(self, response_id: str = "resp-1") -> MagicMock:
         task = MagicMock()
         task.task_id = "abc"
@@ -1435,19 +1555,26 @@ class TestCleanupRetireSplit:
         registry.remove_task_if_owned = AsyncMock()
         store = MagicMock()
         store.get_registry = AsyncMock(return_value=registry)
-        with patch(
-            "src.server.services.runs.subagent_collection.delete_task_keys_if_owned",
-            new=delete_mock,
-        ), patch(
-            "src.server.services.runs.subagent_collection.get_cache_client",
-            return_value=MagicMock(),
-        ), patch(
-            f"{REGISTRY_STORE_MOD}.BackgroundRegistryStore.get_instance",
-            return_value=store,
+        with (
+            patch(
+                "src.server.services.runs.subagent_collection.delete_task_keys_if_owned",
+                new=delete_mock,
+            ),
+            patch(
+                "src.server.services.runs.subagent_collection.get_cache_client",
+                return_value=MagicMock(),
+            ),
+            patch(
+                f"{REGISTRY_STORE_MOD}.BackgroundRegistryStore.get_instance",
+                return_value=store,
+            ),
         ):
             await btm._await_drain_and_cleanup_tasks(
-                [self._task()], "t-x", "resp-1",
-                timeout=0.01, retire_streams=retire_streams,
+                [self._task()],
+                "t-x",
+                "resp-1",
+                timeout=0.01,
+                retire_streams=retire_streams,
             )
         return delete_mock, registry.remove_task_if_owned
 
@@ -1523,7 +1650,9 @@ class TestWaitForAdmission:
         task = asyncio.ensure_future(dies())
         with suppress(asyncio.CancelledError):
             await asyncio.sleep(0)  # let it schedule
-        ti = _make_task_info(thread_id="t-stop", status=LocalRunStatus.RUNNING, task=task)
+        ti = _make_task_info(
+            thread_id="t-stop", status=LocalRunStatus.RUNNING, task=task
+        )
         btm.executions[("t-stop", ti.run_id)] = ti
 
         with patch(
@@ -1540,14 +1669,19 @@ class TestWaitForAdmission:
         btm = _make_btm()
 
         never = asyncio.get_event_loop().create_future()
-        ti = _make_task_info(thread_id="t-slow", status=LocalRunStatus.RUNNING, task=never)
+        ti = _make_task_info(
+            thread_id="t-slow", status=LocalRunStatus.RUNNING, task=never
+        )
         btm.executions[("t-slow", ti.run_id)] = ti
         row = _stopping_row(ti.run_id)
 
-        with patch(
-            "src.server.services.runs.admission.get_checkpoint_flush_timeout",
-            return_value=0.01,
-        ), patch(_GET_ACTIVE_RUN, new_callable=AsyncMock, return_value=row):
+        with (
+            patch(
+                "src.server.services.runs.admission.get_checkpoint_flush_timeout",
+                return_value=0.01,
+            ),
+            patch(_GET_ACTIVE_RUN, new_callable=AsyncMock, return_value=row),
+        ):
             assert await btm.wait_for_admission("t-slow") == ("stopping", row)
 
     @pytest.mark.asyncio
@@ -1608,11 +1742,14 @@ class TestStartWorkflowHandoffCancelIntent:
             "status": "in_progress",
             "cancel_requested_at": "2026-01-01T00:00:00Z",
         }
-        with patch(
-            "src.server.database.runs.lifecycle.get_run",
-            new_callable=AsyncMock,
-            return_value=row,
-        ), patch.object(btm, "_finalize_run", new=AsyncMock()):
+        with (
+            patch(
+                "src.server.database.runs.lifecycle.get_run",
+                new_callable=AsyncMock,
+                return_value=row,
+            ),
+            patch.object(btm, "_finalize_run", new=AsyncMock()),
+        ):
             ti = await btm.start_run(
                 thread_id="t-gap",
                 run_id="run-gap",
@@ -1701,9 +1838,7 @@ class TestMutationAdmissionGuard:
     finishes — now delegated to ThreadMutationRunner (v4 2.4) so the hold
     covers ops owned by OTHER workers, not just this process."""
 
-    RUNNER = (
-        "src.server.services.thread_mutation.ThreadMutationRunner.get_instance"
-    )
+    RUNNER = "src.server.services.thread_mutation.ThreadMutationRunner.get_instance"
 
     def _runner(self, mutating: bool, idle_within_wait: bool = True):
         runner = MagicMock()
@@ -1720,8 +1855,9 @@ class TestMutationAdmissionGuard:
         row = _live_row()
         runner = self._runner(mutating=True, idle_within_wait=True)
 
-        with patch(self.RUNNER, return_value=runner), patch(
-            _GET_ACTIVE_RUN, new_callable=AsyncMock, return_value=row
+        with (
+            patch(self.RUNNER, return_value=runner),
+            patch(_GET_ACTIVE_RUN, new_callable=AsyncMock, return_value=row),
         ):
             result = await btm.wait_for_admission("thread-1")
 
@@ -1735,8 +1871,9 @@ class TestMutationAdmissionGuard:
         btm = _make_btm()
         runner = self._runner(mutating=True, idle_within_wait=True)
 
-        with patch(self.RUNNER, return_value=runner), patch(
-            _GET_ACTIVE_RUN, new_callable=AsyncMock, return_value=None
+        with (
+            patch(self.RUNNER, return_value=runner),
+            patch(_GET_ACTIVE_RUN, new_callable=AsyncMock, return_value=None),
         ):
             result = await btm.wait_for_admission("thread-1")
 
@@ -1762,18 +1899,22 @@ class TestMutationAdmissionGuard:
         btm = _make_btm()
         runner = self._runner(mutating=True, idle_within_wait=True)
 
-        with patch(
-            "src.server.services.runs.admission.COMPACTION_ADMISSION_MARGIN_S",
-            1.0,
-        ), patch(
-            "src.server.services.runs.admission."
-            "get_admission_compaction_wait_timeout",
-            return_value=0.05,  # would 409 almost immediately WITHOUT the floor
-        ), patch(
-            "src.server.services.runs.admission.get_compaction_timeout",
-            return_value=0.5,  # floor: 0.5 + 1.0 margin governs
-        ), patch(self.RUNNER, return_value=runner), patch(
-            _GET_ACTIVE_RUN, new_callable=AsyncMock, return_value=None
+        with (
+            patch(
+                "src.server.services.runs.admission.COMPACTION_ADMISSION_MARGIN_S",
+                1.0,
+            ),
+            patch(
+                "src.server.services.runs.admission."
+                "get_admission_compaction_wait_timeout",
+                return_value=0.05,  # would 409 almost immediately WITHOUT the floor
+            ),
+            patch(
+                "src.server.services.runs.admission.get_compaction_timeout",
+                return_value=0.5,  # floor: 0.5 + 1.0 margin governs
+            ),
+            patch(self.RUNNER, return_value=runner),
+            patch(_GET_ACTIVE_RUN, new_callable=AsyncMock, return_value=None),
         ):
             await btm.wait_for_admission("thread-1")
 
@@ -1789,13 +1930,9 @@ class TestMutationAdmissionGuard:
         pin keeps the sequential control flow honest against that sum."""
         btm = _make_btm()
         runner = self._runner(mutating=True, idle_within_wait=True)
-        ledger = AsyncMock(
-            side_effect=[_stopping_row("r-stop"), None, None]
-        )
+        ledger = AsyncMock(side_effect=[_stopping_row("r-stop"), None, None])
 
-        with patch(self.RUNNER, return_value=runner), patch(
-            _GET_ACTIVE_RUN, ledger
-        ):
+        with patch(self.RUNNER, return_value=runner), patch(_GET_ACTIVE_RUN, ledger):
             result = await btm.wait_for_admission("thread-1")
 
         assert result == ("fresh", None)
@@ -1811,8 +1948,9 @@ class TestMutationAdmissionGuard:
         btm = _make_btm()
         runner = self._runner(mutating=False)
 
-        with patch(self.RUNNER, return_value=runner), patch(
-            _GET_ACTIVE_RUN, new_callable=AsyncMock, return_value=None
+        with (
+            patch(self.RUNNER, return_value=runner),
+            patch(_GET_ACTIVE_RUN, new_callable=AsyncMock, return_value=None),
         ):
             result = await btm.wait_for_admission("thread-1")
 
@@ -1827,6 +1965,7 @@ class TestMutationAdmissionGuard:
 # ---------------------------------------------------------------------------
 # Terminal run_end frame (RUN_END_EVENT_TYPE)
 # ---------------------------------------------------------------------------
+
 
 class _FakePipeline:
     """Captures xadd/expire calls issued inside ``async with pipeline()``."""
@@ -1868,9 +2007,7 @@ def _sentinel_cache(
         )
     )
     cache.client.xadd = AsyncMock(
-        side_effect=lambda key, fields, **kw: calls.append(
-            ("xadd", key, fields)
-        )
+        side_effect=lambda key, fields, **kw: calls.append(("xadd", key, fields))
     )
     cache.client.set = AsyncMock(
         side_effect=lambda *a, **kw: (
@@ -1880,14 +2017,11 @@ def _sentinel_cache(
     cache.client.delete = AsyncMock(
         side_effect=lambda *a: calls.append(("delete",) + a)
     )
-    cache.client.pipeline = MagicMock(
-        return_value=_FakePipeline(calls, fail=fail)
-    )
+    cache.client.pipeline = MagicMock(return_value=_FakePipeline(calls, fail=fail))
     return cache
 
 
 class TestAppendRunEndEvent:
-
     @pytest.mark.asyncio
     async def test_appends_sse_wire_frame_with_outcome_and_ttl(self):
         import json as _json
@@ -1985,9 +2119,7 @@ class TestAppendRunEndEvent:
         assert len(xadds) == 2
         first = xadds[0][2][b"event"].decode("utf-8")
         assert first.startswith("event: error\ndata: ")
-        assert _json.loads(first.split("data: ", 1)[1]) == {
-            "error": "worker_lost"
-        }
+        assert _json.loads(first.split("data: ", 1)[1]) == {"error": "worker_lost"}
         second = xadds[1][2][b"event"].decode("utf-8")
         assert second.startswith("event: run_end\ndata: ")
 
@@ -2109,9 +2241,11 @@ class TestNoPreFinalizeRunEndOnTerminalFlavors:
         async def record_finalize(thread_id, run_id, *, kind, error=None):
             order.append(f"finalize:{kind}")
 
-        with patch.object(btm, "_buffer_event_redis", side_effect=record_buffer), \
-             patch.object(btm, "append_run_end_event", side_effect=record_run_end), \
-             patch.object(btm, "_finalize_run", side_effect=record_finalize):
+        with (
+            patch.object(btm, "_buffer_event_redis", side_effect=record_buffer),
+            patch.object(btm, "append_run_end_event", side_effect=record_run_end),
+            patch.object(btm, "_finalize_run", side_effect=record_finalize),
+        ):
             await btm._run_workflow(
                 thread_id="t-comp",
                 run_id="r-1",
@@ -2139,9 +2273,11 @@ class TestNoPreFinalizeRunEndOnTerminalFlavors:
         async def record_finalize(thread_id, run_id, *, kind, error=None):
             order.append(f"finalize:{kind}")
 
-        with patch.object(btm, "_buffer_event_redis", side_effect=record_buffer), \
-             patch.object(btm, "append_run_end_event", side_effect=record_run_end), \
-             patch.object(btm, "_finalize_run", side_effect=record_finalize):
+        with (
+            patch.object(btm, "_buffer_event_redis", side_effect=record_buffer),
+            patch.object(btm, "append_run_end_event", side_effect=record_run_end),
+            patch.object(btm, "_finalize_run", side_effect=record_finalize),
+        ):
             await btm._run_workflow(
                 thread_id="t-fail",
                 run_id="r-1",
@@ -2150,6 +2286,9 @@ class TestNoPreFinalizeRunEndOnTerminalFlavors:
             )
 
         assert order == ["event", "finalize:failed"]
+        assert btm.executions[("t-fail", "r-1")].metadata["terminal_error_type"] == (
+            "builtins.RuntimeError"
+        )
 
     @pytest.mark.asyncio
     async def test_cancelled_writes_no_run_end_before_finalize(self):
@@ -2172,11 +2311,13 @@ class TestNoPreFinalizeRunEndOnTerminalFlavors:
             await asyncio.sleep(0.03)
             cancel_event.set()
 
-        with patch.object(btm, "_buffer_event_redis", new_callable=AsyncMock), \
-             patch.object(btm, "append_run_end_event", side_effect=record_run_end), \
-             patch.object(btm, "_finalize_run", side_effect=record_finalize), \
-             patch.object(btm, "_flush_checkpoint", new_callable=AsyncMock), \
-             patch.object(btm, "_teardown_subagents_on_stop", new_callable=AsyncMock):
+        with (
+            patch.object(btm, "_buffer_event_redis", new_callable=AsyncMock),
+            patch.object(btm, "append_run_end_event", side_effect=record_run_end),
+            patch.object(btm, "_finalize_run", side_effect=record_finalize),
+            patch.object(btm, "_flush_checkpoint", new_callable=AsyncMock),
+            patch.object(btm, "_teardown_subagents_on_stop", new_callable=AsyncMock),
+        ):
             setter = asyncio.create_task(set_cancel())
             with pytest.raises(asyncio.CancelledError):
                 await btm._run_workflow(
@@ -2193,6 +2334,7 @@ class TestNoPreFinalizeRunEndOnTerminalFlavors:
 # ---------------------------------------------------------------------------
 # _await_drain_and_cleanup_tasks — spill-lock-serialized, claim-fenced deletes
 # ---------------------------------------------------------------------------
+
 
 class TestCleanupSpillLockFence:
     """Cleanup's Redis deletes are serialized on the task's spill lock and
@@ -2235,12 +2377,15 @@ class TestCleanupSpillLockFence:
         fake_store.get_registry = AsyncMock(return_value=None)
 
         await task.redis_spill_lock.acquire()  # resume holds the lock
-        with patch(
-            "src.server.services.runs.subagent_collection.get_cache_client",
-            return_value=cache,
-        ), patch(
-            f"{REGISTRY_STORE_MOD}.BackgroundRegistryStore.get_instance",
-            return_value=fake_store,
+        with (
+            patch(
+                "src.server.services.runs.subagent_collection.get_cache_client",
+                return_value=cache,
+            ),
+            patch(
+                f"{REGISTRY_STORE_MOD}.BackgroundRegistryStore.get_instance",
+                return_value=fake_store,
+            ),
         ):
             cleanup = asyncio.create_task(
                 btm._await_drain_and_cleanup_tasks([task], "thread-x", "run-old")
@@ -2271,12 +2416,15 @@ class TestCleanupSpillLockFence:
         fake_store = MagicMock()
         fake_store.get_registry = AsyncMock(return_value=None)
 
-        with patch(
-            "src.server.services.runs.subagent_collection.get_cache_client",
-            return_value=cache,
-        ), patch(
-            f"{REGISTRY_STORE_MOD}.BackgroundRegistryStore.get_instance",
-            return_value=fake_store,
+        with (
+            patch(
+                "src.server.services.runs.subagent_collection.get_cache_client",
+                return_value=cache,
+            ),
+            patch(
+                f"{REGISTRY_STORE_MOD}.BackgroundRegistryStore.get_instance",
+                return_value=fake_store,
+            ),
         ):
             await btm._await_drain_and_cleanup_tasks([task], "thread-x", "run-old")
 
@@ -2296,6 +2444,7 @@ class TestCleanupSpillLockFence:
 # ---------------------------------------------------------------------------
 # _replay_owned_task_events — per-record claim recheck across the XRANGE await
 # ---------------------------------------------------------------------------
+
 
 class TestReplayOwnershipRecheck:
     """The replay iterator awaits Redis between yields: a resume can steal the
@@ -2330,9 +2479,7 @@ class TestReplayOwnershipRecheck:
             "src.server.services.runs.subagent_collection.iter_subagent_events_full",
             side_effect=_iter,
         ):
-            ok = await btm._replay_owned_task_events(
-                "thread-x", task, "run-1", out
-            )
+            ok = await btm._replay_owned_task_events("thread-x", task, "run-1", out)
 
         # A steal aborts the whole replay: even pre-steal records are
         # withheld (a partial round-1 archive would clear the replay cache
@@ -2384,9 +2531,7 @@ class TestReplayOwnershipRecheck:
             "src.server.services.runs.subagent_collection.iter_subagent_events_full",
             side_effect=_iter,
         ):
-            ok = await btm._replay_owned_task_events(
-                "thread-x", task, "run-1", out
-            )
+            ok = await btm._replay_owned_task_events("thread-x", task, "run-1", out)
 
         assert ok is True
         contents = [e["data"]["content"] for e in out]

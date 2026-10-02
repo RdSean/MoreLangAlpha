@@ -50,9 +50,7 @@ async def classify_outcome(
             # I8: a pause that never reached the checkpointer must not
             # advertise resumability.
             status, phase = "error", "error"
-            error = error or (
-                "interrupt_not_durable: the pause was not checkpointed"
-            )
+            error = error or ("interrupt_not_durable: the pause was not checkpointed")
     elif handler is not None:
         status, phase = "completed", "completion"
     else:
@@ -77,8 +75,7 @@ async def classify_outcome(
                     )
         except Exception:
             logger.warning(
-                f"[Finalize] fallback state probe failed for "
-                f"({thread_id}, ...)",
+                f"[Finalize] fallback state probe failed for ({thread_id}, ...)",
                 exc_info=True,
             )
     return status, phase, interrupt_reason, error
@@ -116,8 +113,7 @@ async def assemble_finalize_artifacts(
             sse_events = handler.finalize_stopped_events()
         except Exception as recon_err:
             logger.warning(
-                f"[Finalize] finalize_stopped_events failed "
-                f"for {key}: {recon_err}"
+                f"[Finalize] finalize_stopped_events failed for {key}: {recon_err}"
             )
     if sse_events is None:
         sse_events = get_sse_events_from_handler(metadata, phase, thread_id)
@@ -137,7 +133,13 @@ async def assemble_finalize_artifacts(
     llm_runtime = safe_llm_runtime_metadata(metadata.get("llm_runtime"))
     if llm_runtime:
         persist_metadata["llm_runtime"] = llm_runtime
-    for extra in ("workspace_id", "sandbox_id", "locale", "timezone"):
+    for extra in (
+        "workspace_id",
+        "sandbox_id",
+        "locale",
+        "timezone",
+        "terminal_error_type",
+    ):
         if metadata.get(extra):
             persist_metadata[extra] = metadata[extra]
     if status == "cancelled":
@@ -147,9 +149,7 @@ async def assemble_finalize_artifacts(
     # fabricated query rows for orphan turn indexes.
     if handler is not None and getattr(handler, "injected_steerings", None):
         persist_metadata["steering_inputs"] = [
-            m.get("content")
-            for m in handler.injected_steerings
-            if m.get("content")
+            m.get("content") for m in handler.injected_steerings if m.get("content")
         ]
     if not (workspace_id and user_id):
         # Usage rows need both; without them the ledger transition still

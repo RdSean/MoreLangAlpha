@@ -12,9 +12,9 @@ from time import monotonic
 from typing import Any
 from uuid import UUID, uuid4
 
-from ptc_agent.agent.managed_execution import education_structure_policy
+from ptc_agent.agent.managed_execution import education_book_policy
 from src.config.settings import (
-    get_education_teaching_workflow_timeout,
+    get_education_book_workflow_timeout,
     get_ptc_recursion_limit,
 )
 from src.server.database.conversation import create_thread
@@ -71,7 +71,7 @@ from src.server.utils.error_sanitization import sanitize_error_text
 
 logger = logging.getLogger(__name__)
 
-_MANAGED_KIND = "education_structure"
+_MANAGED_KIND = "education_book"
 _HEARTBEAT_INTERVAL_SECONDS = 15.0
 _CHECKPOINT_STOP_TIMEOUT_SECONDS = 10.0
 _MANAGED_CAPABILITY_MATRIX = (
@@ -250,9 +250,7 @@ def managed_book_pipeline_continuation_prompt(
         "知识点保持待人工审核，绝不能自动接受。继续遵守来源范围、路径安全、"
         "静默非交互执行和进度安全契约。progress.jsonl 只允许 append，不得重写；"
         "不得泄漏思维链、prompt、原始工具参数或结果、凭据、完整 sandbox 路径"
-        "或原始教材段落。"
-        + _MANAGED_CAPABILITY_MATRIX
-        + "progress event_key 必须使用 "
+        "或原始教材段落。" + _MANAGED_CAPABILITY_MATRIX + "progress event_key 必须使用 "
         "`<stage>:<substage-or-status>:<safe-id>`，禁止 probe/diagnostic/test/debug；"
         "skipped 仅允许 checkpoint_review。"
         "不得访问普通 workspace，"
@@ -655,11 +653,16 @@ async def _dispatch_structure_root_run(
             session=session,
             thread_id=thread_id,
             run_handle=run_handle,
-            policy=education_structure_policy(generation_job_id),
+            policy=education_book_policy(generation_job_id),
             agent_config=agent_config,
             prompt=prompt,
             tags=("managed", "education", "structure"),
-            managed_kind=_MANAGED_KIND,
+            operation="structure",
+            textbook_id=generation_job_id,
+            job_id=generation_job_id,
+            item_id=generation_job_id,
+            execution_id=generation_job_id,
+            attempt_token=attempt_id,
         )
         graph_config["recursion_limit"] = get_ptc_recursion_limit()
         running = await mark_generation_attempt_running(
@@ -673,7 +676,7 @@ async def _dispatch_structure_root_run(
         handler = RunSSEProducer(
             thread_id=thread_id,
             run_id=run_id,
-            workflow_timeout=get_education_teaching_workflow_timeout(),
+            workflow_timeout=get_education_book_workflow_timeout(),
             replay_profile="education_compact",
         )
         progress_collector = ManagedProgressCollector(
@@ -786,7 +789,7 @@ async def launch_structure_generation(
         )
         raise
 
-    policy = education_structure_policy(generation_job_id)
+    policy = education_book_policy(generation_job_id)
     try:
         session = (
             await WorkspaceManager.get_instance().provision_managed_textbook_session(

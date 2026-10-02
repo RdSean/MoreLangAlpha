@@ -24,6 +24,34 @@ def _source_value(source: dict[str, Any], name: str) -> Any:
     return value
 
 
+def _validated_follow_up_request(
+    value: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    expected = {
+        "operation",
+        "depth",
+        "requirements",
+        "replace_existing",
+        "include_supplementary",
+    }
+    if set(value) != expected:
+        raise ValueError("Structure follow-up request fields are invalid")
+    if value.get("operation") != "materials":
+        raise ValueError("Structure follow-up operation must be materials")
+    if value.get("depth") not in {"summary", "lesson", "deep"}:
+        raise ValueError("Structure follow-up depth is invalid")
+    requirements = value.get("requirements")
+    if requirements is not None and not isinstance(requirements, str):
+        raise ValueError("Structure follow-up requirements are invalid")
+    if not isinstance(value.get("replace_existing"), bool) or not isinstance(
+        value.get("include_supplementary"), bool
+    ):
+        raise ValueError("Structure follow-up flags are invalid")
+    return dict(value)
+
+
 async def get_owned_parse_job(
     *, owner_user_id: str, producer_job_id: str
 ) -> dict[str, Any] | None:
@@ -101,12 +129,14 @@ async def create_textbook_with_initial_job(
     source: dict[str, Any],
     idempotency_key: str,
     identity: MoreToSkillsIdentity,
+    follow_up_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create one source-bound textbook and its structure job atomically."""
 
     textbook_id = UUID(str(textbook_id))
     job_id = uuid4()
     item_id = uuid4()
+    follow_up_request = _validated_follow_up_request(follow_up_request)
     source_parse_job_id = str(_source_value(source, "parse_job_id"))
     primary_artifact_id = str(_source_value(source, "primary_artifact_id"))
     expected_prefix = (
@@ -216,9 +246,9 @@ async def create_textbook_with_initial_job(
                 INSERT INTO education_book_jobs (
                     job_id, textbook_id, kind, status, idempotency_key,
                     more_to_skills_version, skill_sha256, schema_sha256,
-                    requested_by_user_id, total_items
+                    requested_by_user_id, total_items, follow_up_request
                 ) VALUES (
-                    %s, %s, 'structure', 'queued', %s, %s, %s, %s, %s, 1
+                    %s, %s, 'structure', 'queued', %s, %s, %s, %s, %s, 1, %s
                 )
                 """,
                 (
@@ -229,6 +259,7 @@ async def create_textbook_with_initial_job(
                     identity.skill_sha256,
                     identity.schema_sha256,
                     parent_user_id,
+                    Jsonb(follow_up_request) if follow_up_request is not None else None,
                 ),
             )
             await cur.execute(
@@ -240,6 +271,23 @@ async def create_textbook_with_initial_job(
                 (item_id, job_id),
             )
     return {"textbook_id": textbook_id, "job_id": job_id, "item_id": item_id}
+
+
+async def _lock_structure_job(cur, *, job_id: str | UUID) -> UUID:
+    """Lock a structure job before its item and textbook rows."""
+
+    await cur.execute(
+        """
+        SELECT job_id FROM education_book_jobs
+        WHERE job_id = %s
+        FOR UPDATE
+        """,
+        (job_id,),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        raise LookupError("Structure job was not found")
+    return row["job_id"]
 
 
 async def commit_book_structure(
@@ -256,12 +304,14 @@ async def commit_book_structure(
     structure_id = uuid4()
     async with get_db_connection() as conn, conn.transaction():
         async with conn.cursor(row_factory=dict_row) as cur:
+            locked_job_id = await _lock_structure_job(cur, job_id=job_id)
             await cur.execute(
                 """
                 SELECT items.status AS item_status, items.attempt_token,
                        jobs.status AS job_status, jobs.textbook_id,
                        jobs.more_to_skills_version, jobs.skill_sha256,
-                       jobs.schema_sha256,
+                       jobs.schema_sha256, jobs.follow_up_request,
+                       jobs.requested_by_user_id,
                        textbooks.current_structure_id,
                        textbooks.source_content_sha256
                 FROM education_book_job_items AS items
@@ -271,9 +321,9 @@ async def commit_book_structure(
                 WHERE items.item_id = %s AND jobs.job_id = %s
                   AND textbooks.textbook_id = %s
                   AND jobs.kind = 'structure' AND items.kind = 'structure'
-                FOR UPDATE OF items, jobs, textbooks
+                FOR UPDATE OF items, textbooks
                 """,
-                (item_id, job_id, textbook_id),
+                (item_id, locked_job_id, textbook_id),
             )
             context = await cur.fetchone()
             if context is None:
@@ -397,6 +447,82 @@ async def commit_book_structure(
                 (job_id,),
             )
             event_seq = (await cur.fetchone())["high_water_seq"]
+            follow_up = context["follow_up_request"]
+            if follow_up is not None:
+                if (
+                    not isinstance(follow_up, dict)
+                    or follow_up.get("operation") != "materials"
+                    or follow_up.get("depth") not in {"summary", "lesson", "deep"}
+                ):
+                    raise ValueError("Structure follow-up request is invalid")
+                follow_up_job_id = uuid4()
+                knowledge_point_ids = [row[0] for row in knowledge_point_rows]
+                include_supplementary = bool(
+                    follow_up.get("include_supplementary", False)
+                )
+                total_items = len(knowledge_point_ids) + int(include_supplementary)
+                await cur.execute(
+                    """
+                    INSERT INTO education_book_jobs (
+                        job_id, textbook_id, kind, status, idempotency_key,
+                        target_knowledge_point_ids, depth, requirements,
+                        replace_existing, include_supplementary,
+                        more_to_skills_version, skill_sha256, schema_sha256,
+                        requested_by_user_id, total_items
+                    ) SELECT
+                        %s, %s, 'materials', 'queued', %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s
+                    WHERE %s > 0
+                    """,
+                    (
+                        follow_up_job_id,
+                        textbook_id,
+                        f"follow-up:{job_id}",
+                        Jsonb([str(value) for value in knowledge_point_ids]),
+                        follow_up["depth"],
+                        follow_up.get("requirements"),
+                        bool(follow_up.get("replace_existing", False)),
+                        include_supplementary,
+                        context["more_to_skills_version"],
+                        context["skill_sha256"],
+                        context["schema_sha256"],
+                        context["requested_by_user_id"],
+                        total_items,
+                        total_items,
+                    ),
+                )
+                follow_up_items = [
+                    (
+                        uuid4(),
+                        follow_up_job_id,
+                        position,
+                        "material",
+                        knowledge_point_id,
+                    )
+                    for position, knowledge_point_id in enumerate(
+                        knowledge_point_ids, start=1
+                    )
+                ]
+                if include_supplementary:
+                    follow_up_items.append(
+                        (
+                            uuid4(),
+                            follow_up_job_id,
+                            len(follow_up_items) + 1,
+                            "supplementary",
+                            None,
+                        )
+                    )
+                if follow_up_items:
+                    await cur.executemany(
+                        """
+                        INSERT INTO education_book_job_items (
+                            item_id, job_id, position, kind,
+                            knowledge_point_id, status
+                        ) VALUES (%s, %s, %s, %s, %s, 'queued')
+                        """,
+                        follow_up_items,
+                    )
             await cur.execute(
                 """
                 INSERT INTO education_book_activity_events (

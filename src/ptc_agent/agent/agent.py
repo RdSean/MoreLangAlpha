@@ -82,7 +82,9 @@ from ptc_agent.agent.middleware.background_subagent.workflow.prebuilt import (
 )
 from ptc_agent.agent.backends.user_data import UserDataBackend
 from ptc_agent.agent.middleware.image_capture import ImageCaptureMiddleware
-from ptc_agent.agent.middleware.openai_prompt_caching import OpenAIPromptCachingMiddleware
+from ptc_agent.agent.middleware.openai_prompt_caching import (
+    OpenAIPromptCachingMiddleware,
+)
 from ptc_agent.agent.middleware.runtime_context import RuntimeContextMiddleware
 from ptc_agent.agent.middleware.background_subagent.registry import (
     BackgroundTaskRegistry,
@@ -100,7 +102,6 @@ from ptc_agent.agent.prompts import (
 )
 from ptc_agent.agent.subagents import (
     SubagentCompiler,
-    SubagentDefinition,
     SubagentRegistry,
     create_subagents,
 )
@@ -154,34 +155,6 @@ if TYPE_CHECKING:
 
 DEFAULT_MAX_CONCURRENT_TASK_UNITS = 3
 
-#: The only worker a managed teaching job may delegate to. It inherits the
-#: managed sandbox and is confined to the fixed asset contract, so it never
-#: reaches web, MCP, Vault, user data or paths outside the job root.
-_MANAGED_TEXTBOOK_SUBAGENTS = {
-    "textbook-chapter-worker": SubagentDefinition(
-        name="textbook-chapter-worker",
-        description=(
-            "Delegate one frozen textbook chapter or coverage check. The worker inherits "
-            "the managed textbook sandbox and can only inspect or write the fixed asset contract."
-        ),
-        mode="ptc",
-        role_prompt=(
-            "Work only on the assigned frozen textbook unit. Read the staged managed contract "
-            "before writing a fixed v2 asset. Do not access web, MCP, Vault, user data, or paths "
-            "outside the managed task root. Report concise results to the parent root."
-        ),
-        tools=["filesystem", "bash", "todo"],
-        max_iterations=30,
-        stateful=True,
-        sections={
-            "workspace_paths": False,
-            "tool_guide": False,
-            "data_processing": False,
-            "visualizations": False,
-        },
-    )
-}
-
 
 def _build_managed_policy_tools(
     policy: "ManagedExecutionPolicy",
@@ -193,8 +166,6 @@ def _build_managed_policy_tools(
     on_signed_url: Any,
 ) -> tuple[list[Any], Any | None, Any | None]:
     """Build the managed tool surface declared by one execution policy."""
-    from ptc_agent.agent.managed_execution import TEXTBOOK_PURPOSES
-
     execute_code_tool = None
     if policy.enable_code_execution:
         execute_code_tool = create_execute_code_tool(
@@ -206,19 +177,10 @@ def _build_managed_policy_tools(
     bash_tool = None
     bash_output_tool = None
     if policy.enable_bash:
-        bash_validator = None
-        if policy.purpose not in TEXTBOOK_PURPOSES:
-            from ptc_agent.agent.managed_execution import (
-                validate_managed_bash_command,
-            )
-
-            def bash_validator(command: str) -> str | None:
-                return validate_managed_bash_command(command, policy)
-
         bash_tool = create_execute_bash_tool(
             backend,
             thread_id=thread_id,
-            command_validator=bash_validator,
+            command_validator=None,
             fixed_working_dir=policy.filesystem_root,
         )
         bash_output_tool = create_bash_output_tool(backend)
@@ -268,7 +230,9 @@ def build_finance_tools(config: AgentConfig) -> list[Any]:
         screen_stocks,  # Stock screener with filters
     ]
     if config.feature_enabled("market_watch"):
-        finance_tools.append(watch_market)  # Market watch start/stop (live price injection)
+        finance_tools.append(
+            watch_market
+        )  # Market watch start/stop (live price injection)
     return finance_tools
 
 
@@ -619,7 +583,9 @@ class PTCAgent:
             # A WriterGuard is a service-owned checkpoint lease, not an
             # inherited parent capability. Fixed managed workers need it to
             # write their task namespaces through the root's fenced saver.
-            namespace_owner = namespace_owner if managed_policy.allow_subagents else None
+            namespace_owner = (
+                namespace_owner if managed_policy.allow_subagents else None
+            )
             store = None
             user_id = None
             user_profile = None
@@ -664,14 +630,12 @@ class PTCAgent:
                 workspace_id_present=bool(workspace_id_for_memory),
             )
 
-        filesystem_backend, dynamic_context_middleware = (
-            self._build_filesystem_backend(
-                backend=backend,
-                gates=gates,
-                store=store,
-                user_id=user_id,
-                workspace_id=workspace_id_for_memory,
-            )
+        filesystem_backend, dynamic_context_middleware = self._build_filesystem_backend(
+            backend=backend,
+            gates=gates,
+            store=store,
+            user_id=user_id,
+            workspace_id=workspace_id_for_memory,
         )
 
         if managed_policy is None:
@@ -704,9 +668,7 @@ class PTCAgent:
                 education_create_homework,
             ]
         else:
-            workspace_id = (
-                getattr(session, "conversation_id", "") if session else ""
-            )
+            workspace_id = getattr(session, "conversation_id", "") if session else ""
             tools, execute_code_tool, bash_tool = _build_managed_policy_tools(
                 managed_policy,
                 backend=backend,
@@ -776,11 +738,7 @@ class PTCAgent:
 
         if subagent_names is None:
             subagent_names = (
-                # A managed job gets exactly its fixed worker set, never the
-                # deployment's enabled subagents.
-                ["textbook-chapter-worker"]
-                if managed_policy is not None and managed_policy.allow_subagents
-                else self.config.subagents.enabled
+                [] if managed_policy is not None else self.config.subagents.enabled
             )
 
         # --- Build shared middleware (for both main agent and subagents) ---
@@ -918,9 +876,7 @@ class PTCAgent:
         from ptc_agent.agent.tools import think_tool
 
         subagent_registry = (
-            # A managed job gets its fixed worker set and nothing the account
-            # happens to have configured.
-            SubagentRegistry(builtins=_MANAGED_TEXTBOOK_SUBAGENTS)
+            SubagentRegistry()
             if managed_policy is not None
             else SubagentRegistry(
                 user_definitions=(
@@ -933,7 +889,9 @@ class PTCAgent:
         # A managed job builds no ambient tools, so each set degrades to empty
         # rather than naming a local that was never bound.
         subagent_tool_sets: dict[str, list[Any]] = {
-            "execute_code": [execute_code_tool] if execute_code_tool is not None else [],
+            "execute_code": [execute_code_tool]
+            if execute_code_tool is not None
+            else [],
             "bash": [bash_tool] if bash_tool is not None else [],
             "filesystem": list(filesystem_tools) if filesystem_tools else [],
             "web_search": (
@@ -942,7 +900,9 @@ class PTCAgent:
             # The pre-existing finance set, deliberately without the homework
             # tool: built-in subagents declare this set by name, so widening it
             # would hand one of them a household read it never asked for.
-            "finance": [] if managed_policy is not None else build_finance_tools(self.config),
+            "finance": []
+            if managed_policy is not None
+            else build_finance_tools(self.config),
             "think": [think_tool],
             "todo": [TodoWrite],
         }
@@ -1024,7 +984,9 @@ class PTCAgent:
         client = resolve_compaction_client(self.config)
         if client is not None:
             compaction_config["_llm_client"] = client
-        compaction = CompactionMiddleware.from_config(config=compaction_config, backend=backend)
+        compaction = CompactionMiddleware.from_config(
+            config=compaction_config, backend=backend
+        )
 
         model_resilience = [build_model_resilience_middleware(self.config, turn)]
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 from uuid import uuid4
 
 import pytest
@@ -407,3 +407,106 @@ async def test_store_material_leaves_tracked_object_when_pg_finalize_fails(
         )
 
     deleted.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_candidates_deletes_only_uncommitted_explicit_keys(monkeypatch):
+    from src.server.services import education_book_storage as storage
+
+    item_id = uuid4()
+    attempt_token = uuid4()
+    household_id = uuid4()
+    textbook_id = uuid4()
+    knowledge_point_id = uuid4()
+    prefix = (
+        f"education/{household_id}/textbooks/{textbook_id}/materials/"
+        f"{knowledge_point_id}/attempts/{attempt_token}/"
+    )
+    committed = f"{prefix}committed.md"
+    orphan = f"{prefix}orphan.md"
+    invalid = "education/unrelated-homework/attachment.md"
+    monkeypatch.setattr(
+        storage,
+        "get_book_item_candidate_cleanup_context",
+        AsyncMock(
+            return_value={
+                "candidate_objects": [committed, orphan, invalid],
+                "result_snapshot": {"content_key": committed},
+                "kind": "material",
+                "household_id": household_id,
+                "textbook_id": textbook_id,
+                "knowledge_point_id": knowledge_point_id,
+            }
+        ),
+    )
+    delete = AsyncMock(return_value=True)
+    read = AsyncMock(return_value=b"candidate")
+    forget = AsyncMock(return_value=True)
+    monkeypatch.setattr(storage, "_delete", delete)
+    monkeypatch.setattr(storage, "_read", read)
+    monkeypatch.setattr(storage, "forget_book_candidate_object", forget)
+
+    cleaned = await storage.cleanup_book_item_candidates(
+        item_id=item_id,
+        attempt_token=attempt_token,
+    )
+
+    assert cleaned == 2
+    delete.assert_awaited_once_with(orphan)
+    assert forget.await_args_list == [
+        call(
+            item_id=item_id,
+            attempt_token=attempt_token,
+            content_key=committed,
+        ),
+        call(
+            item_id=item_id,
+            attempt_token=attempt_token,
+            content_key=orphan,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_keeps_candidate_while_registered_upload_is_not_visible(
+    monkeypatch,
+):
+    from src.server.services import education_book_storage as storage
+
+    item_id = uuid4()
+    attempt_token = uuid4()
+    household_id = uuid4()
+    textbook_id = uuid4()
+    knowledge_point_id = uuid4()
+    candidate = (
+        f"education/{household_id}/textbooks/{textbook_id}/materials/"
+        f"{knowledge_point_id}/attempts/{attempt_token}/pending.md"
+    )
+    monkeypatch.setattr(
+        storage,
+        "get_book_item_candidate_cleanup_context",
+        AsyncMock(
+            return_value={
+                "candidate_objects": [candidate],
+                "result_snapshot": None,
+                "kind": "material",
+                "household_id": household_id,
+                "textbook_id": textbook_id,
+                "knowledge_point_id": knowledge_point_id,
+            }
+        ),
+    )
+    monkeypatch.setattr(storage, "_read", AsyncMock(return_value=None))
+    delete = AsyncMock(return_value=True)
+    forget = AsyncMock(return_value=True)
+    monkeypatch.setattr(storage, "_delete", delete)
+    monkeypatch.setattr(storage, "forget_book_candidate_object", forget)
+
+    cleaned = await storage.cleanup_book_item_candidates(
+        item_id=item_id,
+        attempt_token=attempt_token,
+    )
+
+    assert cleaned == 0
+    delete.assert_not_awaited()
+    forget.assert_not_awaited()

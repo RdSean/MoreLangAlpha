@@ -320,9 +320,7 @@ async def lifespan(app: FastAPI):
                 PlatformSecretSweeper,
             )
 
-            PlatformSecretSweeper.get_instance().start(
-                agent_config.to_core_config()
-            )
+            PlatformSecretSweeper.get_instance().start(agent_config.to_core_config())
         except Exception as e:
             logger.warning(f"Failed to start PlatformSecretSweeper: {e}")
 
@@ -529,6 +527,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Recovery scanner startup failed: {e}")
 
+    try:
+        from src.server.services.education_book_jobs import EducationBookJobService
+
+        EducationBookJobService.get_instance().start()
+        logger.info("EducationBookJobService started")
+    except Exception as e:
+        logger.warning(f"Education textbook queue startup failed: {e}")
+
     # Turn-cancel nudge listener (v4 Phase 2.4e): a /cancel landing on
     # another worker signals this one's executor via pub/sub.
     try:
@@ -577,7 +583,9 @@ async def lifespan(app: FastAPI):
         )
         from src.server.services.document_job_worker import DocumentJobWorker
 
-        document_executor = DocumentJobExecutor(object_store=S3CompatibleDocumentStore())
+        document_executor = DocumentJobExecutor(
+            object_store=S3CompatibleDocumentStore()
+        )
         document_executor.set_update_notifier(publish_document_job_hint)
         document_job_worker = DocumentJobWorker(executor=document_executor)
         await document_job_worker.start()
@@ -617,6 +625,13 @@ async def lifespan(app: FastAPI):
 
     # 0.0. Stop the recovery scanner first — no new recovery work while the
     # process drains (live runs hold their guards and are skipped anyway).
+    try:
+        from src.server.services.education_book_jobs import EducationBookJobService
+
+        await EducationBookJobService.get_instance().stop()
+    except Exception as e:
+        logger.warning(f"Error stopping EducationBookJobService: {e}")
+
     try:
         from src.server.services.runs.recovery import RecoveryScanner
 
@@ -1007,7 +1022,9 @@ app.add_middleware(
 # ============================================================================
 
 
-async def _sandbox_unreachable_handler(request: Request, exc: Exception) -> JSONResponse:
+async def _sandbox_unreachable_handler(
+    request: Request, exc: Exception
+) -> JSONResponse:
     """Map an unreachable sandbox to 503 once, for every route.
 
     The detail wording is a wire contract, not a message: the file panel
@@ -1121,16 +1138,26 @@ app.include_router(market_data_router)  # /api/v1/market-data/* - Market data pr
 app.include_router(
     bars_router
 )  # /api/v1/market-data/bars/* - Protocol-native progressive bars
-app.include_router(auth_router)  # /api/v1/auth/* - Local accounts and household membership
+app.include_router(
+    auth_router
+)  # /api/v1/auth/* - Local accounts and household membership
 app.include_router(family_llm_router)  # /api/v1/family/* - Shared household models
-app.include_router(education_assets_router)  # /api/v1/education/assets/* - Private attachments
-app.include_router(education_tasks_router)  # /api/v1/education/tasks/* - Homework workflow
-app.include_router(education_textbooks_router)  # /api/v1/education/textbooks + learning - Versioned textbook learning
+app.include_router(
+    education_assets_router
+)  # /api/v1/education/assets/* - Private attachments
+app.include_router(
+    education_tasks_router
+)  # /api/v1/education/tasks/* - Homework workflow
+app.include_router(
+    education_textbooks_router
+)  # /api/v1/education/textbooks + learning - Versioned textbook learning
 app.include_router(users_router)  # /api/v1/users/* - User management
 app.include_router(
     user_events_router
 )  # /api/v1/users/me/thread-events - Thread lifecycle SSE feed
-app.include_router(features_router)  # /api/v1/features/* - Feature flags (per-user resolved)
+app.include_router(
+    features_router
+)  # /api/v1/features/* - Feature flags (per-user resolved)
 app.include_router(
     watchlist_router
 )  # /api/v1/users/me/watchlist/* - Watchlist management
@@ -1185,15 +1212,9 @@ app.include_router(
 app.include_router(
     mcp_oauth_router
 )  # /api/v1/mcp/servers/{name}/oauth - MCP OAuth lifecycle
-app.include_router(
-    user_vault_router
-)  # /api/v1/mcp/vault/secrets - User-level vault
-app.include_router(
-    plugins_router
-)  # /api/v1/plugins/* - Agent Plugins packages
-app.include_router(
-    egress_relay_router
-)  # /v1/egress/{grant_id} - Sandbox egress relay
+app.include_router(user_vault_router)  # /api/v1/mcp/vault/secrets - User-level vault
+app.include_router(plugins_router)  # /api/v1/plugins/* - Agent Plugins packages
+app.include_router(egress_relay_router)  # /v1/egress/{grant_id} - Sandbox egress relay
 app.include_router(
     mcp_servers_router
 )  # /api/v1/workspaces/{id}/mcp/servers - Per-workspace MCP server config
@@ -1203,7 +1224,9 @@ app.include_router(
 )  # /ws/v1/market-data/* - ginlix-data WS proxy (or its status stub)
 app.include_router(channels_router)  # /api/v1/channels/* - Generic channel bindings
 app.include_router(runtime_resources_router)  # /api/v1/runtime-resources/*
-app.include_router(documents_router)  # /api/v1/documents/* - User-private knowledge library
+app.include_router(
+    documents_router
+)  # /api/v1/documents/* - User-private knowledge library
 app.include_router(health_router)  # /health - Health check
 app.include_router(
     preview_redirect_router

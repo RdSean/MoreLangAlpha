@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 from collections.abc import Mapping
+from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -12,7 +14,11 @@ from src.config.settings import get_document_parsing_config
 from src.server.database.education_book_jobs import (
     create_materials_job,
     finalize_material,
+    finalize_supplementary,
+    forget_book_candidate_object,
+    get_book_item_candidate_cleanup_context,
     get_material_attempt_context,
+    get_supplementary_attempt_context,
     record_candidate_object,
     start_item_attempt,
 )
@@ -23,6 +29,9 @@ from src.utils.storage import delete_object, get_bytes, upload_bytes
 
 class BookStorageError(RuntimeError):
     """A managed textbook object could not be stored or verified."""
+
+
+logger = logging.getLogger(__name__)
 
 
 async def _upload(
@@ -46,6 +55,79 @@ async def _read(key: str) -> bytes | None:
 
 async def _delete(key: str) -> bool:
     return await asyncio.to_thread(delete_object, key)
+
+
+def _committed_candidate_keys(result_snapshot: object) -> set[str]:
+    if not isinstance(result_snapshot, Mapping):
+        return set()
+    keys = set()
+    content_key = result_snapshot.get("content_key")
+    if isinstance(content_key, str):
+        keys.add(content_key)
+    files = result_snapshot.get("files")
+    if isinstance(files, list):
+        keys.update(
+            str(file["content_key"])
+            for file in files
+            if isinstance(file, Mapping) and isinstance(file.get("content_key"), str)
+        )
+    return keys
+
+
+def _candidate_cleanup_prefix(
+    context: Mapping[str, Any], *, item_id: UUID, attempt_token: UUID
+) -> str:
+    base = (
+        f"education/{UUID(str(context['household_id']))}/textbooks/"
+        f"{UUID(str(context['textbook_id']))}/"
+    )
+    if context.get("kind") == "material":
+        return (
+            f"{base}materials/{UUID(str(context['knowledge_point_id']))}/"
+            f"attempts/{attempt_token}/"
+        )
+    if context.get("kind") == "supplementary":
+        return f"{base}supplementary/{item_id}/attempts/{attempt_token}/"
+    raise ValueError("Textbook candidate cleanup context is invalid")
+
+
+async def cleanup_book_item_candidates(*, item_id: UUID, attempt_token: UUID) -> int:
+    """Settle only the explicit candidate keys recorded for one terminal attempt."""
+
+    try:
+        context = await get_book_item_candidate_cleanup_context(
+            item_id=item_id,
+            attempt_token=attempt_token,
+        )
+        if context is None:
+            return 0
+        committed = _committed_candidate_keys(context.get("result_snapshot"))
+        expected_prefix = _candidate_cleanup_prefix(
+            context,
+            item_id=item_id,
+            attempt_token=attempt_token,
+        )
+        cleaned = 0
+        for raw_key in context.get("candidate_objects") or []:
+            key = str(raw_key)
+            if not key.startswith(expected_prefix) or ".." in PurePosixPath(key).parts:
+                logger.error("Refusing to clean invalid textbook candidate key %r", key)
+                continue
+            if key not in committed:
+                if await _read(key) is None:
+                    continue
+                if not await _delete(key):
+                    continue
+            if await forget_book_candidate_object(
+                item_id=item_id,
+                attempt_token=attempt_token,
+                content_key=key,
+            ):
+                cleaned += 1
+        return cleaned
+    except Exception:
+        logger.exception("Could not settle textbook candidate objects for %s", item_id)
+        return 0
 
 
 def material_candidate_key(
@@ -116,6 +198,68 @@ async def store_material(
         content_sha256=digest,
         size_bytes=len(markdown),
         generation_params=generation_params,
+    )
+
+
+async def store_supplementary(
+    *,
+    item_id: UUID,
+    attempt_token: UUID,
+    files: Mapping[str, bytes],
+) -> dict[str, Any]:
+    """Archive the fixed supplementary output set for one explicit item."""
+
+    expected = ("glossary.md", "patterns.md", "cheatsheet.md")
+    if tuple(files) != expected or any(not files[name] for name in expected):
+        raise BookStorageError("Supplementary textbook outputs are incomplete")
+    context = await get_supplementary_attempt_context(
+        item_id=item_id,
+        attempt_token=attempt_token,
+    )
+    max_size = get_document_parsing_config().max_upload_bytes
+    snapshots: list[dict[str, Any]] = []
+    for filename in expected:
+        content = files[filename]
+        digest = hashlib.sha256(content).hexdigest()
+        content_key = (
+            f"education/{context['household_id']}/textbooks/"
+            f"{context['textbook_id']}/supplementary/{item_id}/attempts/"
+            f"{attempt_token}/{digest}-{filename}"
+        )
+        await record_candidate_object(
+            item_id=item_id,
+            attempt_token=attempt_token,
+            content_key=content_key,
+        )
+        if not await _upload(
+            content_key,
+            content,
+            "text/markdown; charset=utf-8",
+            max_size=max_size,
+        ):
+            raise BookStorageError("A supplementary textbook file could not be stored")
+        stored = await _read(content_key)
+        if stored is None or hashlib.sha256(stored).hexdigest() != digest:
+            raise BookStorageError(
+                "A supplementary textbook file failed storage verification"
+            )
+        snapshots.append(
+            {
+                "name": filename,
+                "content_key": content_key,
+                "content_sha256": digest,
+                "size_bytes": len(content),
+            }
+        )
+    result = {
+        "item_id": str(item_id),
+        "attempt_token": str(attempt_token),
+        "files": snapshots,
+    }
+    return await finalize_supplementary(
+        item_id=item_id,
+        attempt_token=attempt_token,
+        result_snapshot=result,
     )
 
 

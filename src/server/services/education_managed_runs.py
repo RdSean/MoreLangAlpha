@@ -20,7 +20,12 @@ async def build_managed_education_graph(
     operation_callback: Any | None = None,
     prompt: str,
     tags: tuple[str, ...],
-    managed_kind: str,
+    operation: str,
+    textbook_id: str,
+    job_id: str,
+    item_id: str,
+    execution_id: str,
+    attempt_token: str,
 ) -> tuple[Any, dict[str, Any], dict[str, Any]]:
     """Build a constrained managed graph from service-owned inputs."""
     from src.server.app import setup
@@ -28,16 +33,28 @@ async def build_managed_education_graph(
     config = agent_config or setup.agent_config
     if config is None:
         raise RuntimeError("PTC Agent is not initialized")
-    job_id = str(UUID(policy.filesystem_root.rsplit("/", 1)[-1]))
+    if operation not in {"structure", "material"}:
+        raise ValueError("Unsupported education book operation")
+    identity = {
+        "kind": "education_book",
+        "operation": operation,
+        "textbook_id": str(UUID(textbook_id)),
+        "job_id": str(UUID(job_id)),
+        "item_id": str(UUID(item_id)),
+        "execution_id": str(UUID(execution_id)),
+        "attempt_token": str(UUID(attempt_token)),
+    }
+    if policy.filesystem_root.rsplit("/", 1)[-1] != identity["execution_id"]:
+        raise ValueError("Managed policy root does not match execution_id")
     graph = await build_ptc_graph_with_session(
         session=session,
         operation_callback=operation_callback,
         config=config,
-        subagent_names=["textbook-chapter-worker"] if policy.allow_subagents else [],
-        disable_subagents=not policy.allow_subagents,
+        subagent_names=[],
+        disable_subagents=True,
         checkpointer=run_handle.checkpointer,
         background_registry=None,
-        namespace_owner=run_handle.guard if policy.allow_subagents else None,
+        namespace_owner=None,
         user_id=None,
         plan_mode=False,
         thread_id=thread_id,
@@ -50,12 +67,12 @@ async def build_managed_education_graph(
         "configurable": {
             "thread_id": thread_id,
             "agent_mode": "ptc",
-            "managed_execution": {"kind": managed_kind, "job_id": job_id},
+            "managed_execution": identity,
         },
         "recursion_limit": get_ptc_recursion_limit(),
         "tags": list(tags),
         "metadata": {
-            "managed_execution": {"kind": managed_kind, "job_id": job_id},
+            "managed_execution": identity,
             "run_id": run_handle.run_id,
             "turn_index": run_handle.turn_index,
         },

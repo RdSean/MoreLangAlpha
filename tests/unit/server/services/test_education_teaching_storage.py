@@ -147,7 +147,14 @@ def _source_asset_job(
 
 @pytest.mark.asyncio
 async def test_stage_teaching_inputs_uploads_only_safe_manifest_and_frozen_chapters():
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -173,20 +180,30 @@ async def test_stage_teaching_inputs_uploads_only_safe_manifest_and_frozen_chapt
     } == set(paths)
     assert all("storage_key" not in body for body in bodies)
     assert frozen["chapters"][0]["content_sha256"]
-    manifest = json.loads(next(body for path, body in uploaded if path.endswith("manifest.json")))
-    assert manifest["chapters"][0]["content_chapter_id"] == _job()["chapters"][0]["content_chapter_id"]
+    manifest = json.loads(
+        next(body for path, body in uploaded if path.endswith("manifest.json"))
+    )
+    assert (
+        manifest["chapters"][0]["content_chapter_id"]
+        == _job()["chapters"][0]["content_chapter_id"]
+    )
     sandbox.ensure_directories.assert_awaited_once_with(
         [f"{root}inputs"],
         mode=0o555,
     )
-    sandbox.seal_directory_read_only.assert_awaited_once_with(
-        f"{root}inputs"
-    )
+    sandbox.seal_directory_read_only.assert_awaited_once_with(f"{root}inputs")
 
 
 @pytest.mark.asyncio
 async def test_stage_teaching_inputs_exposes_ordered_complete_source_bundles_without_storage_details():
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -230,7 +247,9 @@ async def test_stage_teaching_inputs_exposes_ordered_complete_source_bundles_wit
 
 
 @pytest.mark.asyncio
-async def test_stage_teaching_inputs_resolves_exact_and_basename_asset_refs(monkeypatch):
+async def test_stage_teaching_inputs_resolves_exact_and_basename_asset_refs(
+    monkeypatch,
+):
     image = b"frozen-image-bytes"
     markdown = (
         "# Complete source\n\n"
@@ -254,7 +273,14 @@ async def test_stage_teaching_inputs_resolves_exact_and_basename_asset_refs(monk
     monkeypatch.setattr(
         education_teaching_storage, "get_bytes", get_bytes, raising=False
     )
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -291,7 +317,14 @@ async def test_stage_teaching_inputs_reads_legacy_root_image_layout(monkeypatch)
     prefix = job["sources"][0]["snapshot_prefix"]
     objects = {f"{prefix}images/figure.png": image}
     monkeypatch.setattr(education_teaching_storage, "get_bytes", objects.get)
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -308,7 +341,9 @@ async def test_stage_teaching_inputs_reads_legacy_root_image_layout(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_stage_teaching_inputs_backfills_empty_asset_manifest_from_snapshot(monkeypatch):
+async def test_stage_teaching_inputs_backfills_empty_asset_manifest_from_snapshot(
+    monkeypatch,
+):
     image = b"backfilled-image"
     markdown = "![figure](images/figure.png)\n"
     job = _source_job()
@@ -343,7 +378,14 @@ async def test_stage_teaching_inputs_backfills_empty_asset_manifest_from_snapsho
         f"{prefix}images/figure.png": image,
     }
     monkeypatch.setattr(education_teaching_storage, "get_bytes", objects.get)
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -368,8 +410,7 @@ async def test_stage_teaching_inputs_percent_decodes_image_references(monkeypatc
     first_image = b"encoded-space"
     second_image = b"encoded-unicode"
     markdown = (
-        "![encoded](images/my%20figure-%E5%9B%BE.png)\n"
-        "![basename](%E5%9B%BE.png)\n"
+        "![encoded](images/my%20figure-%E5%9B%BE.png)\n![basename](%E5%9B%BE.png)\n"
     )
     job = _source_asset_job(
         markdown=markdown,
@@ -397,7 +438,14 @@ async def test_stage_teaching_inputs_percent_decodes_image_references(monkeypatc
     monkeypatch.setattr(
         education_teaching_storage, "get_bytes", get_bytes, raising=False
     )
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -426,7 +474,14 @@ async def test_stage_teaching_inputs_rejects_encoded_traversal_reference():
         asset_sha256=sha256(b"secret").hexdigest(),
         relative_path="images/secret.png",
     )
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -446,7 +501,14 @@ async def test_stage_teaching_inputs_ignores_unreferenced_asset_manifest_entries
     )
     get_bytes = AsyncMock()
     monkeypatch.setattr(education_teaching_storage, "get_bytes", get_bytes)
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -472,7 +534,14 @@ async def test_stage_teaching_inputs_fails_closed_for_missing_referenced_asset()
         asset_sha256=sha256(b"other").hexdigest(),
         relative_path="images/other.png",
     )
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -496,7 +565,14 @@ async def test_stage_teaching_inputs_fails_closed_for_referenced_asset_digest_mi
         lambda _key: b"different-bytes",
         raising=False,
     )
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -511,7 +587,14 @@ async def test_stage_teaching_inputs_fails_closed_for_referenced_asset_digest_mi
 
 @pytest.mark.asyncio
 async def test_stage_teaching_inputs_precreates_the_fixed_v2_output_directories():
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -532,7 +615,14 @@ async def test_stage_teaching_inputs_precreates_the_fixed_v2_output_directories(
 
 @pytest.mark.asyncio
 async def test_stage_reading_asset_inputs_uploads_only_fixed_reading_slices():
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -586,21 +676,30 @@ async def test_stage_reading_asset_inputs_uploads_only_fixed_reading_slices():
         call.args[0]: call.args[1]
         for call in sandbox.aupload_file_bytes.await_args_list
     }
-    assert uploaded[
-        f"{root}inputs/readings/01-unit-1-sports/reading_a.md"
-    ].startswith(b"### THE WORLD'S GAME")
+    assert uploaded[f"{root}inputs/readings/01-unit-1-sports/reading_a.md"].startswith(
+        b"### THE WORLD'S GAME"
+    )
     assert manifest["readings"][0]["slot"] == "reading_a"
 
 
 @pytest.mark.asyncio
 async def test_stage_managed_teaching_skills_stages_complete_static_builtin_skill_catalogs():
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
     sandbox.seal_file_append_only = AsyncMock()
 
-    await education_teaching_storage.stage_managed_teaching_skills(_job()["job_id"], sandbox)
+    await education_teaching_storage.stage_managed_teaching_skills(
+        _job()["job_id"], sandbox
+    )
 
     root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/.agents/skills/"
     paths = {call.args[0] for call in sandbox.aupload_file_bytes.await_args_list}
@@ -614,7 +713,14 @@ async def test_stage_managed_teaching_skills_stages_complete_static_builtin_skil
 
 @pytest.mark.asyncio
 async def test_stage_managed_teaching_skills_stages_progress_helper():
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -633,12 +739,40 @@ async def test_stage_managed_teaching_skills_stages_progress_helper():
     root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d"
     assert f"{root}/.langalpha/progress.py" in uploaded
     assert uploaded[f"{root}/.langalpha/progress.jsonl"] == b""
-    assert str(education_generation_progress.MAX_METADATA_INTEGER).encode() in uploaded[
-        f"{root}/.langalpha/progress.py"
-    ]
+    assert (
+        str(education_generation_progress.MAX_METADATA_INTEGER).encode()
+        in uploaded[f"{root}/.langalpha/progress.py"]
+    )
     sandbox.seal_file_append_only.assert_awaited_once_with(
         f"{root}/.langalpha/progress.jsonl"
     )
+
+
+@pytest.mark.asyncio
+async def test_stage_managed_teaching_skills_rejects_changed_frozen_content():
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
+    sandbox.aupload_file_bytes = AsyncMock(return_value=True)
+
+    with pytest.raises(
+        education_teaching_storage.TeachingPackageStorageError,
+        match="frozen identity",
+    ):
+        await education_teaching_storage.stage_managed_teaching_skills(
+            _job()["job_id"],
+            sandbox,
+            skill_names=("more-to-skills",),
+            expected_skill_sha256="0" * 64,
+            expected_schema_sha256="1" * 64,
+        )
+
+    sandbox.aupload_file_bytes.assert_not_awaited()
 
 
 def test_staged_progress_helper_appends_valid_events_and_never_rewrites(tmp_path: Path):
@@ -850,7 +984,14 @@ def test_staged_progress_helper_enforces_input_size_limits(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_structure_staging_loads_only_book_to_skill():
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -869,12 +1010,18 @@ async def test_structure_staging_loads_only_book_to_skill():
 
 @pytest.mark.asyncio
 async def test_staging_fails_closed_when_a_sandbox_upload_is_rejected():
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=False)
 
     with pytest.raises(education_teaching_storage.TeachingPackageStorageError):
         await education_teaching_storage.stage_teaching_inputs(_job(), sandbox)
-
 
 
 @pytest.mark.asyncio
@@ -960,9 +1107,7 @@ async def test_write_kp_lesson_revision_uses_private_revision_path(monkeypatch):
         "content_sha256": sha256(content).hexdigest(),
         "size_bytes": len(content),
     }
-    assert uploads == [
-        (expected_key, content, "text/markdown; charset=utf-8")
-    ]
+    assert uploads == [(expected_key, content, "text/markdown; charset=utf-8")]
 
 
 @pytest.mark.asyncio
@@ -1099,7 +1244,14 @@ async def test_write_generic_lesson_revision_reuses_duplicate_content(
 
 @pytest.mark.asyncio
 async def test_stage_kp_lesson_inputs_contains_only_target_context():
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -1127,8 +1279,13 @@ async def test_stage_kp_lesson_inputs_contains_only_target_context():
         for call in sandbox.aupload_file_bytes.await_args_list
     }
     root = "/managed/textbook-job/5e3a0b43-8378-4b6c-926f-0f053577501d/"
-    assert uploaded[f"{root}inputs/readings/reading_a.md"] == b"# Unit 1\n\nsource excerpt"
-    assert uploaded[f"{root}inputs/chapters/reading_a-knowledge.md"] == b"# Reading knowledge"
+    assert (
+        uploaded[f"{root}inputs/readings/reading_a.md"] == b"# Unit 1\n\nsource excerpt"
+    )
+    assert (
+        uploaded[f"{root}inputs/chapters/reading_a-knowledge.md"]
+        == b"# Reading knowledge"
+    )
     manifest = json.loads(uploaded[f"{root}inputs/manifest.json"])
     assert manifest["knowledge_point_id"] == "kp-1"
     assert manifest["scope_slot"] == "reading_a"
@@ -1137,7 +1294,14 @@ async def test_stage_kp_lesson_inputs_contains_only_target_context():
 
 @pytest.mark.asyncio
 async def test_stage_generic_kp_lesson_uses_node_specific_paths():
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -1181,7 +1345,14 @@ async def test_stage_generic_kp_lesson_uses_node_specific_paths():
 
 @pytest.mark.asyncio
 async def test_stage_generic_kp_lesson_allows_missing_or_empty_source_refs():
-    sandbox = AsyncMock(spec=["aupload_file_bytes", "ensure_directories", "seal_directory_read_only", "seal_file_append_only"])
+    sandbox = AsyncMock(
+        spec=[
+            "aupload_file_bytes",
+            "ensure_directories",
+            "seal_directory_read_only",
+            "seal_file_append_only",
+        ]
+    )
     sandbox.aupload_file_bytes = AsyncMock(return_value=True)
     sandbox.ensure_directories = AsyncMock()
     sandbox.seal_directory_read_only = AsyncMock()
@@ -1319,9 +1490,7 @@ async def test_read_kp_lesson_revision_accepts_only_private_lesson_keys(monkeypa
             expected_size=len(b"# Lesson\n") + 1,
         )
     with pytest.raises(education_teaching_storage.TeachingPackageStorageError):
-        await education_teaching_storage.read_kp_lesson_revision(
-            "education/../secret"
-        )
+        await education_teaching_storage.read_kp_lesson_revision("education/../secret")
 
 
 @pytest.mark.asyncio
@@ -1346,9 +1515,10 @@ async def test_download_kp_lesson_outputs_uses_only_fixed_paths():
     ]
 
 
-
 @pytest.mark.asyncio
-async def test_private_teaching_archive_retries_across_the_transient_storage_window(monkeypatch):
+async def test_private_teaching_archive_retries_across_the_transient_storage_window(
+    monkeypatch,
+):
     attempts = 0
     delays: list[float] = []
 
