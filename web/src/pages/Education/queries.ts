@@ -1,7 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
 import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from './api';
 import type {
+  BookActivityConnectionState,
+} from './api';
+import type {
+  BookActivityEvent,
+  BookJob,
+  BookJobStatus,
   CreateBookPipelineJobInput,
   EducationTaskCalendarRequest,
   MergeKnowledgePointCandidatesInput,
@@ -10,6 +17,223 @@ import type {
   TextbookStructureUnit,
   UpdateKnowledgePointCandidateInput,
 } from './types';
+
+const TERMINAL_MANAGED_BOOK_STATUSES = new Set<BookJobStatus>([
+  'succeeded',
+  'partially_succeeded',
+  'failed',
+  'cancelled',
+]);
+
+interface RefreshSchedulerOptions {
+  minimumIntervalMs?: number;
+  now?: () => number;
+}
+
+export function createCoalescedRefreshScheduler(
+  refresh: () => unknown | Promise<unknown>,
+  options: RefreshSchedulerOptions = {},
+) {
+  const minimumIntervalMs = options.minimumIntervalMs ?? 1_000;
+  const now = options.now ?? Date.now;
+  let lastStartedAt = Number.NEGATIVE_INFINITY;
+  let running = false;
+  let pending = false;
+  let disposed = false;
+  let timer: number | null = null;
+  let idleWaiters: Array<() => void> = [];
+
+  const resolveIdle = () => {
+    if (running || pending || timer !== null) return;
+    const waiters = idleWaiters;
+    idleWaiters = [];
+    for (const resolve of waiters) resolve();
+  };
+
+  const schedule = () => {
+    if (disposed || running || !pending) {
+      resolveIdle();
+      return;
+    }
+    const remaining = minimumIntervalMs - (now() - lastStartedAt);
+    if (remaining > 0) {
+      if (timer === null) {
+        timer = window.setTimeout(() => {
+          timer = null;
+          schedule();
+        }, remaining);
+      }
+      return;
+    }
+    pending = false;
+    running = true;
+    lastStartedAt = now();
+    void Promise.resolve(refresh()).finally(() => {
+      running = false;
+      schedule();
+    });
+  };
+
+  return {
+    notify() {
+      if (disposed) return;
+      pending = true;
+      schedule();
+    },
+    flush() {
+      if (disposed) return Promise.resolve();
+      pending = true;
+      lastStartedAt = Number.NEGATIVE_INFINITY;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+      schedule();
+      if (!running && !pending && timer === null) return Promise.resolve();
+      return new Promise<void>((resolve) => { idleWaiters.push(resolve); });
+    },
+    dispose() {
+      disposed = true;
+      pending = false;
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+      resolveIdle();
+    },
+  };
+}
+
+export function useBookJob(jobId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.education.bookJob(jobId ?? ''),
+    queryFn: () => educationApi.getBookJob(jobId ?? ''),
+    enabled: Boolean(jobId) && enabled,
+    staleTime: 1_000,
+  });
+}
+
+function usePageVisibility() {
+  const [visible, setVisible] = useState(
+    () => typeof document === 'undefined' || document.visibilityState === 'visible',
+  );
+  useEffect(() => {
+    const update = () => setVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
+  return visible;
+}
+
+function mergeBoundedActivity(
+  previous: readonly BookActivityEvent[],
+  incoming: readonly BookActivityEvent[],
+) {
+  if (incoming.length === 0) return [...previous];
+  const bySequence = new Map(previous.map((entry) => [entry.seq, entry]));
+  for (const entry of incoming) bySequence.set(entry.seq, entry);
+  return [...bySequence.values()]
+    .sort((left, right) => left.seq - right.seq)
+    .slice(-1_000);
+}
+
+export function useBookActivity(
+  jobId: string | undefined,
+  textbookId: string | undefined,
+  enabled = true,
+) {
+  const queryClient = useQueryClient();
+  const job = useBookJob(jobId, enabled);
+  const [events, setEvents] = useState<BookActivityEvent[]>([]);
+  const eventsRef = useRef<BookActivityEvent[]>([]);
+  const [connectionState, setConnectionState] = useState<BookActivityConnectionState>('connecting');
+  const [streamError, setStreamError] = useState<unknown>(null);
+  const visible = usePageVisibility();
+  const terminal = TERMINAL_MANAGED_BOOK_STATUSES.has(job.data?.status ?? 'queued');
+
+  useEffect(() => {
+    eventsRef.current = [];
+    setEvents([]);
+    setStreamError(null);
+    setConnectionState('connecting');
+  }, [jobId]);
+
+  useEffect(() => {
+    if (!enabled || !jobId || !visible || terminal) return;
+    const abortController = new AbortController();
+    let disposed = false;
+    const jobKey = queryKeys.education.bookJob(jobId);
+    const refreshJob = () => queryClient.fetchQuery({
+      queryKey: jobKey,
+      queryFn: () => educationApi.getBookJob(jobId),
+      staleTime: 0,
+    });
+    const scheduler = createCoalescedRefreshScheduler(refreshJob);
+    const invalidateWorkbench = () => textbookId
+      ? queryClient.invalidateQueries({
+        queryKey: queryKeys.education.textbookWorkbench(textbookId),
+      })
+      : Promise.resolve();
+
+    const fallbackTimer = window.setInterval(() => scheduler.notify(), 5_000);
+    const afterSeq = eventsRef.current.at(-1)?.seq ?? 0;
+    void educationApi.watchBookActivity(jobId, {
+      afterSeq,
+      signal: abortController.signal,
+      onConnectionChange: (state) => {
+        if (disposed) return;
+        setConnectionState(state);
+        if (state === 'connected') scheduler.notify();
+      },
+      onError: (error) => {
+        if (!disposed) setStreamError(error);
+      },
+      onPage: async (page) => {
+        if (disposed) return;
+        setStreamError(null);
+        if (page.events.length > 0) {
+          setEvents((previous) => {
+            const merged = mergeBoundedActivity(previous, page.events);
+            eventsRef.current = merged;
+            return merged;
+          });
+        }
+        queryClient.setQueryData<BookJob>(jobKey, (current) => current
+          ? { ...current, activity_status: page.activity_status }
+          : current);
+        const hasBusinessEvent = page.events.some(
+          (entry) => entry.kind !== 'tool' && entry.kind !== 'progress',
+        );
+        if (hasBusinessEvent) scheduler.notify();
+        if (TERMINAL_MANAGED_BOOK_STATUSES.has(page.status)) {
+          await scheduler.flush();
+          if (!disposed) await invalidateWorkbench();
+        }
+      },
+      onCursorExpired: async () => {
+        if (disposed) return;
+        eventsRef.current = [];
+        setEvents([]);
+        await scheduler.flush();
+        if (!disposed) await invalidateWorkbench();
+      },
+    }).catch((error) => {
+      if (!disposed && !abortController.signal.aborted) setStreamError(error);
+    });
+
+    return () => {
+      disposed = true;
+      abortController.abort();
+      window.clearInterval(fallbackTimer);
+      scheduler.dispose();
+    };
+  }, [enabled, jobId, queryClient, terminal, textbookId, visible]);
+
+  return {
+    ...job,
+    events,
+    connectionState,
+    streamError,
+  };
+}
 
 export function useEducationTasks() {
   return useQuery({

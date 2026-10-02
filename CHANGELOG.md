@@ -2,6 +2,14 @@
 
 ## 2026-10-02
 
+### 新增：教材工作台可恢复活动时间线
+
+- 新增与托管教材 job/item/activity DTO 对齐的前端类型、任务查询键和可取消 SSE reader；活动页先完整校验并成功合并后才推进 `last_processed_seq`，空页和高水位不跳读，重放按 seq 去重，过期游标清空缓存后从 0 重建。
+- 新增任务级活动订阅 hook，以 PostgreSQL job 快照作为状态和计数真值；业务通知按每秒一次合并并保留尾随刷新，可见活跃任务每 5 秒兜底，后台、卸载、任务切换及权限终止会清理 stream 与 timer。
+- 新增分层活动面板：材料 N/M 仅统计成功 material item，supplementary 单列，当前项只取 running item；合法语义阶段显示在主线，Read/Bash 等工具事件收进折叠明细，断线重连和活动不可用不会被显示为任务失败。
+- 活动面板由 `activity=<job-id>` URL 状态控制，展开运行明细不改变 URL 或正文滚动；控件使用稳定尺寸、可换行长文、减弱动画支持和 44px 关闭目标，为后续单页教材工作台接线保留窄屏布局边界。
+- 验证：活动投影、URL、分页重连、游标和订阅生命周期聚焦测试 `19 passed`，连同既有教育查询回归共 `26 passed`；`pnpm typecheck`、`pnpm build`、关键路径检查及 `git diff --check` 通过。完整工作台与真实后端门面仍按后续任务接线，未迁移开发数据库或改动 Docker volume。
+
 ### 新增：可恢复的教材任务快照与活动流 API
 
 - 新增家长授权的教材任务快照接口，以单条 PostgreSQL 语句读取同一时点的 job 与有序 items；公开投影包含 structure/material/supplementary 类型和业务状态，不暴露 attempt token、运行身份、候选对象或 Skill 摘要。

@@ -1,5 +1,222 @@
 import { api } from '@/api/client';
 import type { BookPipelineJob, BookPipelineProgress, CompletedParseJob, CreateBookPipelineJobInput, CreateEducationTaskInput, EducationAsset, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskCalendar, EducationTaskCalendarRequest, EducationTaskDetail, EducationTaskReview, EducationTaskSubmission, KnowledgePointCandidate, KnowledgePointCandidateReview, KnowledgePointLesson, KnowledgePointSourcePreview, LearningAssignment, LearningChatSpace, LearningItem, LearningItemKind, LessonGenerationStatus, MergeKnowledgePointCandidatesInput, ParentLearningTranscript, SplitKnowledgePointCandidateInput, StructureGenerationJob, StructureGenerationProgress, StudentKnowledgePointLesson, StudentTextbookStructure, SubmitEducationTaskInput, TextbookAssignment, TextbookDetail, TextbookLibraryItem, TextbookProcessingJob, TextbookStructure, TextbookStructureUnit, UpdateKnowledgePointCandidateInput } from './types';
+import type { BookActivityEvent, BookActivityPage, BookJob, BookJobStatus } from './types';
+
+const TERMINAL_BOOK_JOB_STATUSES = new Set<BookJobStatus>([
+  'succeeded',
+  'partially_succeeded',
+  'failed',
+  'cancelled',
+]);
+
+const BOOK_JOB_STATUSES = new Set<BookJobStatus>([
+  'queued',
+  'running',
+  ...TERMINAL_BOOK_JOB_STATUSES,
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isActivityEvent(value: unknown, jobId: string): value is BookActivityEvent {
+  if (!isRecord(value) || !isRecord(value.metadata)) return false;
+  return Number.isInteger(value.seq)
+    && Number(value.seq) >= 1
+    && value.job_id === jobId
+    && (value.item_id === null || typeof value.item_id === 'string')
+    && typeof value.kind === 'string'
+    && typeof value.status === 'string'
+    && typeof value.message === 'string'
+    && value.message.length <= 512
+    && typeof value.created_at === 'string';
+}
+
+function parseBookActivityPage(value: unknown, jobId: string): BookActivityPage {
+  if (!isRecord(value)
+    || value.job_id !== jobId
+    || typeof value.status !== 'string'
+    || !BOOK_JOB_STATUSES.has(value.status as BookJobStatus)
+    || !Array.isArray(value.events)
+    || !Number.isInteger(value.high_water_seq)
+    || Number(value.high_water_seq) < 0
+    || (value.activity_status !== 'available' && value.activity_status !== 'unavailable')
+    || typeof value.cursor_expired !== 'boolean'
+    || typeof value.has_more !== 'boolean') {
+    throw new Error('Invalid textbook activity page');
+  }
+  if (!value.events.every((entry) => isActivityEvent(entry, jobId))) {
+    throw new Error('Invalid textbook activity event');
+  }
+  const events = value.events as BookActivityEvent[];
+  if (events.some((entry, index) => index > 0 && entry.seq <= events[index - 1].seq)) {
+    throw new Error('Textbook activity events are not strictly increasing');
+  }
+  return value as unknown as BookActivityPage;
+}
+
+function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (milliseconds <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(done, milliseconds);
+    function done() {
+      window.clearTimeout(timeout);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    }
+    signal?.addEventListener('abort', done, { once: true });
+  });
+}
+
+function isAbortError(error: unknown, signal?: AbortSignal) {
+  return signal?.aborted
+    || (error instanceof DOMException && error.name === 'AbortError');
+}
+
+class TerminalBookActivityStreamError extends Error {}
+
+interface ConsumeBookActivityStreamOptions {
+  jobId: string;
+  body: ReadableStream<Uint8Array>;
+  signal?: AbortSignal;
+  lastProcessedSeq: number;
+  seenSequences: Set<number>;
+  onPage: (page: BookActivityPage) => void | Promise<void>;
+  onCursorExpired?: () => void | Promise<void>;
+}
+
+async function consumeBookActivityStream(options: ConsumeBookActivityStreamOptions) {
+  const reader = options.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let lastProcessedSeq = options.lastProcessedSeq;
+  let cursorExpired = false;
+  let terminal = false;
+  const cancelReader = () => { void reader.cancel(); };
+  options.signal?.addEventListener('abort', cancelReader, { once: true });
+
+  async function consumeFrame(frame: string) {
+    const lines = frame.split(/\r?\n/);
+    const eventName = lines.find((line) => line.startsWith('event:'))?.slice(6).trim();
+    if (eventName && eventName !== 'snapshot') return;
+    const data = lines
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n');
+    if (!data) return;
+    const page = parseBookActivityPage(JSON.parse(data), options.jobId);
+    if (page.cursor_expired) {
+      await options.onCursorExpired?.();
+      options.seenSequences.clear();
+      lastProcessedSeq = 0;
+      cursorExpired = true;
+      return;
+    }
+    const freshEvents = page.events.filter(
+      (entry) => entry.seq > lastProcessedSeq && !options.seenSequences.has(entry.seq),
+    );
+    const mergedPage = { ...page, events: freshEvents };
+    await options.onPage(mergedPage);
+    for (const entry of freshEvents) options.seenSequences.add(entry.seq);
+    if (freshEvents.length > 0) {
+      lastProcessedSeq = Math.max(...freshEvents.map((entry) => entry.seq));
+    }
+    terminal = TERMINAL_BOOK_JOB_STATUSES.has(page.status);
+  }
+
+  try {
+    while (!options.signal?.aborted && !cursorExpired && !terminal) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let boundary = buffer.match(/\r?\n\r?\n/);
+      while (boundary && !cursorExpired && !terminal) {
+        const index = boundary.index ?? 0;
+        const frame = buffer.slice(0, index);
+        buffer = buffer.slice(index + boundary[0].length);
+        await consumeFrame(frame);
+        boundary = buffer.match(/\r?\n\r?\n/);
+      }
+    }
+  } finally {
+    options.signal?.removeEventListener('abort', cancelReader);
+    if (options.signal?.aborted) await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  return { cursorExpired, lastProcessedSeq, terminal };
+}
+
+export type BookActivityConnectionState = 'connecting' | 'connected' | 'reconnecting';
+
+export interface WatchBookActivityOptions {
+  afterSeq?: number;
+  signal?: AbortSignal;
+  reconnectDelayMs?: number;
+  onPage: (page: BookActivityPage) => void | Promise<void>;
+  onCursorExpired?: () => void | Promise<void>;
+  onConnectionChange?: (state: BookActivityConnectionState) => void;
+  onError?: (error: unknown) => void;
+}
+
+export async function getBookJob(jobId: string): Promise<BookJob> {
+  const { data } = await api.get<BookJob>(
+    `/api/v1/education/book-jobs/${encodeURIComponent(jobId)}`,
+  );
+  return data;
+}
+
+export async function watchBookActivity(
+  jobId: string,
+  options: WatchBookActivityOptions,
+): Promise<void> {
+  let lastProcessedSeq = options.afterSeq ?? 0;
+  const seenSequences = new Set<number>();
+  let connecting: BookActivityConnectionState = 'connecting';
+  const reconnectDelayMs = options.reconnectDelayMs ?? 1_000;
+
+  while (!options.signal?.aborted) {
+    options.onConnectionChange?.(connecting);
+    try {
+      const params = new URLSearchParams({ after_seq: String(lastProcessedSeq) });
+      const response = await fetch(
+        `${api.defaults.baseURL ?? ''}/api/v1/education/book-jobs/${encodeURIComponent(jobId)}/events?${params}`,
+        {
+          headers: { Accept: 'text/event-stream' },
+          credentials: 'include',
+          signal: options.signal,
+        },
+      );
+      if (response.status === 403 || response.status === 404) {
+        throw new TerminalBookActivityStreamError('Textbook activity is no longer available');
+      }
+      if (!response.ok
+        || !response.body
+        || !response.headers.get('Content-Type')?.includes('text/event-stream')) {
+        throw new Error('Textbook activity stream is unavailable');
+      }
+      options.onConnectionChange?.('connected');
+      const consumed = await consumeBookActivityStream({
+        jobId,
+        body: response.body,
+        signal: options.signal,
+        lastProcessedSeq,
+        seenSequences,
+        onPage: options.onPage,
+        onCursorExpired: options.onCursorExpired,
+      });
+      lastProcessedSeq = consumed.lastProcessedSeq;
+      if (consumed.terminal || options.signal?.aborted) return;
+      connecting = 'reconnecting';
+    } catch (error) {
+      if (isAbortError(error, options.signal)) return;
+      options.onError?.(error);
+      if (error instanceof TerminalBookActivityStreamError) return;
+      connecting = 'reconnecting';
+      options.onConnectionChange?.('reconnecting');
+    }
+    await abortableDelay(reconnectDelayMs, options.signal);
+  }
+}
 
 export async function listEducationTasks(): Promise<EducationTask[]> {
   const { data } = await api.get<EducationTask[]>('/api/v1/education/tasks');

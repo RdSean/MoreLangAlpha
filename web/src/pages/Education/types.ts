@@ -143,6 +143,85 @@ export interface EducationTaskCalendarRequest {
   student_id?: string;
 }
 
+export type BookJobKind = 'structure' | 'materials';
+export type BookMaterialDepth = 'summary' | 'lesson' | 'deep';
+export type BookJobStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'partially_succeeded'
+  | 'failed'
+  | 'cancelled';
+export type BookJobItemStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'not_run';
+export type BookJobItemKind = 'structure' | 'material' | 'supplementary';
+export type BookActivityStatus = 'available' | 'unavailable';
+
+export interface BookJobItem {
+  item_id: string;
+  kind: BookJobItemKind;
+  position: number;
+  knowledge_point_id: string | null;
+  skill_kp_id: string | null;
+  status: BookJobItemStatus;
+  attempt: number;
+  safe_error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface BookJobSummary {
+  job_id: string;
+  kind: BookJobKind;
+  status: BookJobStatus;
+  total_items: number;
+  succeeded_items: number;
+  failed_items: number;
+  cancelled_items: number;
+  not_run_items: number;
+  high_water_seq: number;
+  activity_status: BookActivityStatus;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  safe_error: string | null;
+}
+
+export interface BookJob extends BookJobSummary {
+  textbook_id: string;
+  depth: BookMaterialDepth | null;
+  requirements: string | null;
+  replace_existing: boolean;
+  include_supplementary: boolean;
+  items: BookJobItem[];
+}
+
+export interface BookActivityEvent {
+  seq: number;
+  job_id: string;
+  item_id: string | null;
+  kind: string;
+  status: string;
+  message: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface BookActivityPage {
+  job_id: string;
+  status: BookJobStatus;
+  events: BookActivityEvent[];
+  high_water_seq: number;
+  activity_status: BookActivityStatus;
+  cursor_expired: boolean;
+  has_more: boolean;
+}
+
 export type TextbookVersionStatus = 'draft' | 'processing' | 'review' | 'published' | 'failed';
 
 export interface TextbookLibraryItem {
