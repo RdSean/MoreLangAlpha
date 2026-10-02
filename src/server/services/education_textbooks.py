@@ -8,7 +8,7 @@ import re
 from collections.abc import Mapping
 from io import BytesIO
 from pathlib import PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote
 from uuid import UUID, uuid4
 
@@ -43,6 +43,11 @@ from src.server.database.education_books import (
     list_book_source_candidates_for_parent,
     list_managed_textbooks_for_parent,
 )
+from src.server.database.education_book_jobs import (
+    create_materials_job,
+    get_book_job_for_parent,
+    retry_book_job,
+)
 from src.server.database.session_lock import await_settled
 from src.server.services.education_textbook_source_snapshots import (
     TextbookSourceSnapshotError,
@@ -56,6 +61,7 @@ from src.server.services.education_textbook_snapshot_reads import (
     safe_asset_manifest_entry,
 )
 from src.server.services.education_book_storage import read_material_bytes
+from src.server.services.education_book_jobs import cancel_book_job
 from src.server.services.education_book_structure import (
     get_more_to_skills_identity,
     project_material_content_files,
@@ -65,6 +71,9 @@ from src.server.services.education_teaching_storage import (
     read_kp_lesson_revision,
 )
 from src.utils.storage import get_bytes
+
+if TYPE_CHECKING:
+    from src.server.app.education.book_models import BookJobCreateRequest
 
 
 logger = logging.getLogger(__name__)
@@ -431,6 +440,100 @@ async def open_managed_textbook_asset(
         "media_type": manifest["media_type"],
         "sha256": manifest["sha256"],
     }
+
+
+async def create_managed_textbook_job(
+    *,
+    parent_user_id: str,
+    textbook_id: str | UUID,
+    request: BookJobCreateRequest,
+) -> dict[str, Any]:
+    textbook = await get_managed_textbook_for_parent(
+        parent_user_id=parent_user_id,
+        textbook_id=textbook_id,
+    )
+    if textbook is None:
+        raise TextbookNotFoundError("Textbook not found")
+    if textbook.get("current_job") is not None:
+        raise TextbookTransitionError("The textbook already has an active job")
+    if request.kind != "materials":
+        raise TextbookTransitionError(
+            "Structure analysis is created when the textbook is added"
+        )
+    try:
+        created = await create_materials_job(
+            textbook_id=textbook_id,
+            requested_by_user_id=parent_user_id,
+            knowledge_point_ids=request.knowledge_point_ids,
+            depth=request.depth,
+            requirements=request.requirements,
+            replace_existing=request.replace_existing,
+            include_supplementary=request.include_supplementary,
+            idempotency_key=request.idempotency_key,
+            identity=get_more_to_skills_identity(),
+        )
+    except ValueError as exc:
+        if "targets must belong" in str(exc):
+            raise TextbookNotFoundError(
+                "One or more knowledge points were not found"
+            ) from exc
+        raise TextbookTransitionError(str(exc)) from exc
+    result = await get_book_job_for_parent(
+        job_id=created["job_id"],
+        parent_user_id=parent_user_id,
+    )
+    if result is None:
+        raise TextbookProcessingError("The textbook job could not be read")
+    return result
+
+
+async def cancel_managed_textbook_job(
+    *, parent_user_id: str, job_id: str | UUID
+) -> dict[str, Any]:
+    visible = await get_book_job_for_parent(
+        job_id=job_id,
+        parent_user_id=parent_user_id,
+    )
+    if visible is None:
+        raise TextbookNotFoundError("Book job not found")
+    try:
+        await cancel_book_job(job_id=str(job_id))
+    except LookupError as exc:
+        raise TextbookTransitionError("The textbook job is no longer active") from exc
+    result = await get_book_job_for_parent(
+        job_id=job_id,
+        parent_user_id=parent_user_id,
+    )
+    if result is None:
+        raise TextbookProcessingError("The cancelled textbook job could not be read")
+    return result
+
+
+async def retry_managed_textbook_job(
+    *, parent_user_id: str, job_id: str | UUID
+) -> dict[str, Any]:
+    visible = await get_book_job_for_parent(
+        job_id=job_id,
+        parent_user_id=parent_user_id,
+    )
+    if visible is None:
+        raise TextbookNotFoundError("Book job not found")
+    try:
+        created = await retry_book_job(
+            source_job_id=job_id,
+            requested_by_user_id=parent_user_id,
+            idempotency_key=f"retry:{job_id}",
+            identity=get_more_to_skills_identity(),
+        )
+    except (LookupError, ValueError) as exc:
+        raise TextbookTransitionError(str(exc)) from exc
+    result = await get_book_job_for_parent(
+        job_id=created["job_id"],
+        parent_user_id=parent_user_id,
+    )
+    if result is None:
+        raise TextbookProcessingError("The retried textbook job could not be read")
+    return result
 
 
 def assert_version_transition(*, current: str, target: str) -> None:

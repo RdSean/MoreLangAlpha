@@ -503,6 +503,64 @@ async def test_managed_asset_response_is_private_and_digest_bound(client):
 
 
 @pytest.mark.asyncio
+async def test_parent_creates_cancels_and_retries_managed_book_jobs(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    create_job = AsyncMock(return_value=_managed_job_snapshot())
+    cancel_job = AsyncMock(return_value=_managed_job_snapshot())
+    retry_job = AsyncMock(return_value=_managed_job_snapshot())
+    with (
+        patch.object(
+            textbook_routes,
+            "create_managed_textbook_job",
+            new=create_job,
+            create=True,
+        ),
+        patch.object(
+            textbook_routes,
+            "cancel_managed_textbook_job",
+            new=cancel_job,
+            create=True,
+        ),
+        patch.object(
+            textbook_routes,
+            "retry_managed_textbook_job",
+            new=retry_job,
+            create=True,
+        ),
+    ):
+        created = await client.post(
+            f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/jobs",
+            json={
+                "kind": "materials",
+                "knowledge_point_ids": [str(KNOWLEDGE_POINT_ID)],
+                "depth": "lesson",
+                "requirements": "Include examples",
+                "replace_existing": False,
+                "include_supplementary": True,
+                "idempotency_key": "materials-1",
+            },
+        )
+        cancelled = await client.post(
+            f"/api/v1/education/book-jobs/{MANAGED_JOB_ID}/cancel"
+        )
+        retried = await client.post(
+            f"/api/v1/education/book-jobs/{MANAGED_JOB_ID}/retry"
+        )
+
+    assert created.status_code == 202
+    assert cancelled.status_code == 200
+    assert retried.status_code == 202
+    assert create_job.await_args.kwargs["parent_user_id"] == "parent-1"
+    assert create_job.await_args.kwargs["textbook_id"] == UUID(TEXTBOOK["textbook_id"])
+    assert create_job.await_args.kwargs["request"].kind == "materials"
+    cancel_job.assert_awaited_once_with(
+        parent_user_id="parent-1", job_id=MANAGED_JOB_ID
+    )
+    retry_job.assert_awaited_once_with(parent_user_id="parent-1", job_id=MANAGED_JOB_ID)
+
+
+@pytest.mark.asyncio
 async def test_student_cannot_create_or_publish_a_textbook(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "student-1"

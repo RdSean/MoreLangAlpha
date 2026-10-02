@@ -9,6 +9,7 @@ from uuid import UUID
 
 import pytest
 
+from src.server.app.education.book_models import BookJobCreateRequest
 from src.server.services import education_textbooks as textbooks
 
 
@@ -272,3 +273,111 @@ async def test_asset_read_resolves_only_database_manifest_entry(monkeypatch):
         expected_sha256="d" * 64,
         max_bytes=textbooks.get_document_parsing_config().max_upload_bytes,
     )
+
+
+def _job_snapshot(*, job_id: UUID | None = None) -> dict:
+    now = datetime.now(timezone.utc)
+    return {
+        "job_id": str(job_id or UUID("9998bb1a-687a-4d45-815d-5b1dd6ed2f17")),
+        "textbook_id": str(TEXTBOOK_ID),
+        "kind": "materials",
+        "status": "queued",
+        "total_items": 1,
+        "succeeded_items": 0,
+        "failed_items": 0,
+        "cancelled_items": 0,
+        "not_run_items": 0,
+        "high_water_seq": 0,
+        "activity_status": "available",
+        "created_at": now,
+        "started_at": None,
+        "finished_at": None,
+        "safe_error": None,
+        "depth": "lesson",
+        "requirements": None,
+        "replace_existing": False,
+        "include_supplementary": False,
+        "items": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_managed_material_job_freezes_current_identity(monkeypatch):
+    identity = SimpleNamespace(
+        version="1.0.0",
+        skill_sha256="a" * 64,
+        schema_sha256="b" * 64,
+    )
+    job_id = UUID("9998bb1a-687a-4d45-815d-5b1dd6ed2f17")
+    create = AsyncMock(return_value={"job_id": job_id})
+    read = AsyncMock(return_value=_job_snapshot(job_id=job_id))
+    monkeypatch.setattr(
+        textbooks,
+        "get_managed_textbook_for_parent",
+        AsyncMock(return_value={"textbook_id": TEXTBOOK_ID}),
+    )
+    monkeypatch.setattr(textbooks, "create_materials_job", create, raising=False)
+    monkeypatch.setattr(textbooks, "get_book_job_for_parent", read, raising=False)
+    monkeypatch.setattr(textbooks, "get_more_to_skills_identity", lambda: identity)
+    request = BookJobCreateRequest(
+        kind="materials",
+        knowledge_point_ids=[KNOWLEDGE_POINT_ID],
+        depth="lesson",
+        requirements=None,
+        replace_existing=False,
+        include_supplementary=False,
+        idempotency_key="materials-1",
+    )
+
+    result = await textbooks.create_managed_textbook_job(
+        parent_user_id="parent-1",
+        textbook_id=TEXTBOOK_ID,
+        request=request,
+    )
+
+    assert result["job_id"] == str(job_id)
+    assert create.await_args.kwargs["identity"] is identity
+    assert create.await_args.kwargs["knowledge_point_ids"] == [KNOWLEDGE_POINT_ID]
+    read.assert_awaited_once_with(
+        job_id=job_id,
+        parent_user_id="parent-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancel_managed_job_checks_parent_acl_before_runtime_cancel(monkeypatch):
+    cancel = AsyncMock()
+    monkeypatch.setattr(
+        textbooks,
+        "get_book_job_for_parent",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(textbooks, "cancel_book_job", cancel, raising=False)
+
+    with pytest.raises(textbooks.TextbookNotFoundError, match="Book job not found"):
+        await textbooks.cancel_managed_textbook_job(
+            parent_user_id="other-user",
+            job_id=UUID("9998bb1a-687a-4d45-815d-5b1dd6ed2f17"),
+        )
+
+    cancel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_retry_managed_job_uses_source_job_as_idempotency_scope(monkeypatch):
+    source_job_id = UUID("9998bb1a-687a-4d45-815d-5b1dd6ed2f17")
+    new_job_id = UUID("e8805482-3021-4035-8c7d-fb8c2b1ebf31")
+    source = _job_snapshot(job_id=source_job_id)
+    retried = _job_snapshot(job_id=new_job_id)
+    read = AsyncMock(side_effect=[source, retried])
+    retry = AsyncMock(return_value={"job_id": new_job_id})
+    monkeypatch.setattr(textbooks, "get_book_job_for_parent", read, raising=False)
+    monkeypatch.setattr(textbooks, "retry_book_job", retry, raising=False)
+
+    result = await textbooks.retry_managed_textbook_job(
+        parent_user_id="parent-1", job_id=source_job_id
+    )
+
+    assert result["job_id"] == str(new_job_id)
+    assert retry.await_args.kwargs["idempotency_key"] == f"retry:{source_job_id}"

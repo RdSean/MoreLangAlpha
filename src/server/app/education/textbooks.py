@@ -10,6 +10,7 @@ from fastapi.responses import Response, StreamingResponse
 
 from src.server.app.education.book_models import (
     BookActivityPageResponse,
+    BookJobCreateRequest,
     BookSourceListResponse,
     BookSourceSliceResponse,
     BookStructureResponse,
@@ -113,6 +114,8 @@ from src.server.services.education_textbooks import (
     TextbookTransitionError,
     assign_publication,
     create_managed_textbook,
+    create_managed_textbook_job,
+    cancel_managed_textbook_job,
     get_managed_knowledge_point_material,
     get_managed_textbook_source,
     get_managed_textbook_structure,
@@ -124,6 +127,7 @@ from src.server.services.education_textbooks import (
     list_completed_textbook_parse_jobs,
     list_managed_textbooks,
     open_managed_textbook_asset,
+    retry_managed_textbook_job,
     retry_processing_for_parent,
     run_processing_for_parent,
     start_processing,
@@ -333,6 +337,55 @@ async def get_managed_asset(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+@router.post(
+    "/textbooks/{textbook_id}/jobs",
+    response_model=BookJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_managed_job(
+    textbook_id: UUID,
+    body: BookJobCreateRequest,
+    user_id: CurrentUserId,
+):
+    try:
+        return await create_managed_textbook_job(
+            parent_user_id=user_id,
+            textbook_id=textbook_id,
+            request=body,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/book-jobs/{job_id}/cancel",
+    response_model=BookJobResponse,
+)
+async def cancel_managed_job(job_id: UUID, user_id: CurrentUserId):
+    try:
+        return await cancel_managed_textbook_job(
+            parent_user_id=user_id,
+            job_id=job_id,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post(
+    "/book-jobs/{job_id}/retry",
+    response_model=BookJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_managed_job(job_id: UUID, user_id: CurrentUserId):
+    try:
+        return await retry_managed_textbook_job(
+            parent_user_id=user_id,
+            job_id=job_id,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
 
 
 @router.get(

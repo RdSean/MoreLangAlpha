@@ -7,7 +7,8 @@
 - 家长教材来源、创建、列表、工作台、结构、原文和讲义接口已改接 more-to-skills 新表；创建时冻结当前 Skill/schema 身份并同时排队初始结构任务，不再通过空教材、版本或 publication DTO。
 - 新查询把家庭角色校验内聚到 PostgreSQL，跨家庭教材、结构、KP 和资源统一不可见；工作台状态与讲义 N/M 来自当前结构及已提交材料，`content_file` 仅由当前材料记录确定性投影。
 - 原文和讲义只读取数据库授权的不可变对象指针，并校验前缀、大小和 SHA-256；图片只按教材 manifest 中的 `asset_id` 解析，由应用私有响应返回，Markdown 本地图片引用改写到授权接口，不暴露 MinIO key 或公开 URL。
-- 验证：教材 facade/路由/存储/DTO 单元回归 `47 passed`，`langalpha_test` PostgreSQL 新表集成 `10 passed`；前后端仍健康监听 `0.0.0.0:5177`/`0.0.0.0:8000`，未向开发数据库应用 `082`，未改动 Docker volume。
+- 工作台材料任务创建、取消和重试已接入现有 PostgreSQL 队列及真实 runtime cancel；创建冻结当前 Skill 身份，重试以源 job 为幂等范围，取消在任何运行信号前先验证家长 ACL，三者均回读同一公开 job 快照。
+- 验证：教材 facade/路由/存储/DTO/job 单元回归 `87 passed`，`langalpha_test` PostgreSQL 新表集成 `10 passed`；前后端仍健康监听 `0.0.0.0:5177`/`0.0.0.0:8000`，未向开发数据库应用 `082`，未改动 Docker volume。
 
 ### 完善：教材工作台原文定位与阅读连续性
 
