@@ -362,6 +362,7 @@ async def test_scoped_progress_persists_server_message_and_replays_by_seq(
     patched_get_db_connection,
     seed_user,
 ) -> None:
+    from src.server.app.education.book_models import BookActivityPageResponse
     from src.server.database.education_book_activity import get_book_activity_page
     from src.server.services.education_book_activity import BookActivityObserver
 
@@ -406,6 +407,9 @@ async def test_scoped_progress_persists_server_message_and_replays_by_seq(
         limit=100,
     )
     assert page is not None
+    public = BookActivityPageResponse.model_validate(page)
+    assert public.job_id == str(item["job_id"])
+    assert public.events[0].job_id == str(item["job_id"])
     assert len(page["events"]) == 1
     event = page["events"][0]
     assert event["kind"] == "progress"

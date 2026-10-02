@@ -129,7 +129,7 @@ async def cleanup_book_item_candidates(*, item_id: UUID, attempt_token: UUID) ->
             item_id=item_id,
             attempt_token=attempt_token,
         )
-        if context is None:
+        if context is None or not context.get("candidate_objects"):
             return 0
         committed = _committed_candidate_keys(context.get("result_snapshot"))
         expected_prefix = _candidate_cleanup_prefix(

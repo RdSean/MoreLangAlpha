@@ -516,6 +516,7 @@ async def get_book_activity_page(
     has_more = len(rows) > limit
     rows = rows[:limit]
     for row in rows:
+        row["job_id"] = str(row["job_id"])
         metadata = dict(row.get("metadata") or {})
         metadata.pop("activity_bytes", None)
         metadata.pop("budget_class", None)

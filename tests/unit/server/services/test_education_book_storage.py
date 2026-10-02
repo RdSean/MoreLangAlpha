@@ -462,6 +462,43 @@ async def test_store_material_leaves_tracked_object_when_pg_finalize_fails(
 
 
 @pytest.mark.asyncio
+async def test_cleanup_structure_without_candidates_is_a_quiet_noop(
+    monkeypatch, caplog
+):
+    from src.server.services import education_book_storage as storage
+
+    monkeypatch.setattr(
+        storage,
+        "get_book_item_candidate_cleanup_context",
+        AsyncMock(
+            return_value={
+                "kind": "structure",
+                "candidate_objects": [],
+                "result_snapshot": {},
+                "household_id": uuid4(),
+                "textbook_id": uuid4(),
+            }
+        ),
+    )
+    read = AsyncMock()
+    delete = AsyncMock()
+    monkeypatch.setattr(storage, "_read", read)
+    monkeypatch.setattr(storage, "_delete", delete)
+
+    assert (
+        await storage.cleanup_book_item_candidates(
+            item_id=uuid4(),
+            attempt_token=uuid4(),
+        )
+        == 0
+    )
+
+    read.assert_not_awaited()
+    delete.assert_not_awaited()
+    assert not caplog.records
+
+
+@pytest.mark.asyncio
 async def test_cleanup_candidates_deletes_only_uncommitted_explicit_keys(monkeypatch):
     from src.server.services import education_book_storage as storage
 

@@ -646,6 +646,7 @@ async def finalize_book_item(
             format=str(item.get("source_format") or ""),
             total_lines=total_lines,
             anchor_mode="source_lines",
+            line_offset=0,
         ),
         raw_json=raw_json,
         allowed_output_paths=(),

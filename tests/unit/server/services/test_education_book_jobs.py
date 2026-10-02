@@ -507,10 +507,86 @@ async def test_finalize_structure_uses_service_identity_and_source_coordinates(
     assert source.filename == "sample.md"
     assert source.format == "pdf"
     assert source.total_lines == 120
+    assert source.anchor_mode == "source_lines"
+    assert source.line_offset == 0
     assert parse.call_args.kwargs["allowed_output_paths"] == ()
     commit.assert_awaited_once()
     assert commit.await_args.kwargs["validated_identity"].version == "2.1.0"
     assert result == {"structure_id": "structure-1"}
+
+
+@pytest.mark.asyncio
+async def test_finalize_structure_validates_real_parser_with_unmodified_source(
+    monkeypatch,
+):
+    from src.server.services import education_book_jobs
+
+    item = {
+        **CLAIMED,
+        "operation": "structure",
+        "kind": "structure",
+        "source_filename": "sample.pdf",
+        "source_format": "pdf",
+        "source_total_lines": 10,
+    }
+    candidate = {
+        "schema_version": "2.1.0",
+        "generator": {
+            "name": "more-to-skills",
+            "version": "2.1.0",
+            "generated_at": "2026-10-02T12:00:00Z",
+        },
+        "book": {"title": "Sample", "title_source": "normalized"},
+        "source": {},
+        "level_names": ["chapter"],
+        "nodes": [
+            {
+                "id": "ch1",
+                "title": "Chapter",
+                "anchor": {
+                    "start_line": 1,
+                    "end_line": 10,
+                },
+            }
+        ],
+        "knowledge_points": [
+            {
+                "id": "kp1",
+                "title": "Concept",
+                "unit": "ch1",
+                "nodes": ["ch1"],
+                "anchor": {"start_line": 1, "end_line": 10},
+            }
+        ],
+        "coverage": {
+            "scope": "Complete book",
+            "excluded": [],
+            "omitted": [],
+            "gaps": [],
+        },
+    }
+    sandbox = type(
+        "Sandbox",
+        (),
+        {
+            "adownload_file_bytes": AsyncMock(
+                return_value=json.dumps(candidate).encode()
+            ),
+        },
+    )()
+    commit = AsyncMock(return_value={"structure_id": "structure-1"})
+    monkeypatch.setattr(education_book_jobs, "commit_book_structure", commit)
+
+    await education_book_jobs.finalize_book_item(
+        item=item,
+        task=education_book_jobs.build_execution_task(item),
+        sandbox=sandbox,
+    )
+
+    parsed = commit.await_args.kwargs["parsed"]
+    assert parsed.document["source"]["line_offset"] == 0
+    assert parsed.knowledge_points[0]["start_line"] == 1
+    assert parsed.knowledge_points[0]["end_line"] == 10
 
 
 @pytest.mark.asyncio
