@@ -2,6 +2,13 @@
 
 ## 2026-10-02
 
+### 重构：学生 Flash 学习会话切换到当前教材授权
+
+- 学习空间、学生 thread 识别和家长转录查询改接 082 的教材 assignment，不再经过 publication/version 表；同一 assignment 并发复用唯一的学生私有 Flash thread。
+- Flash 每轮由服务端重新校验学生授权，读取当前成功讲义及当前结构中的知识点标题，并把当时内容冻结为本轮 directive；浏览器附带上下文会被丢弃，未生成讲义、猜测 KP 或撤销授权均不能注入学习材料。
+- 撤销教材授权会在同一事务中移除学习空间映射后删除 assignment，但保留原 conversation thread；服务端创建时写入的教育标记继续阻止旧会话被普通 Flash 消息复用或由通用 thread API 删除。
+- 验证：Flash 上下文、家长转录、thread 保护及相关教材门面单元回归 `41 passed`，`langalpha_test` PostgreSQL 教材集成 `12 passed`；5177/8000 均返回 200，未向开发数据库应用 `082`，未改动 Docker volume。
+
 ### 重构：学生笔记、进度与总结切换到新节点模型
 
 - 学生学习页直接复用教材工作台的 Skill node/KP 导航、授权原文切片与阅读器；URL 保存 Skill KP ID 或 node ID，服务请求和进度写入使用当前结构映射出的数据库 KP UUID。移除版本号和“已发布”措辞，未生成讲义时直接展示原文。

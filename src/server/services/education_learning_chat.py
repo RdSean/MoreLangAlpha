@@ -5,8 +5,9 @@ from typing import Any
 from src.server.services.education_textbooks import (
     TextbookError,
     get_student_kp_lesson,
+    get_student_structure,
 )
-from src.server.database.education_textbooks import (
+from src.server.database.education_learning import (
     get_or_create_student_learning_space,
     get_student_learning_space_for_thread,
 )
@@ -19,7 +20,7 @@ class EducationLearningChatContextError(ValueError):
 async def get_learning_chat_space(
     *, user_id: str, assignment_id: str
 ) -> dict[str, Any]:
-    """Return the student's durable Flash conversation for one publication snapshot."""
+    """Return the student's durable Flash conversation for one assignment."""
     space = await get_or_create_student_learning_space(
         student_user_id=user_id, assignment_id=assignment_id
     )
@@ -57,7 +58,7 @@ async def attach_learning_chat_context(
     knowledge_point_id: str | None,
     additional_context: list[Any] | None,
 ) -> list[Any] | None:
-    """Resolve published lesson material into the sole learning-chat directive."""
+    """Freeze the currently authorized material into this Flash request."""
     if assignment_id is None and knowledge_point_id is None:
         return additional_context
     if not assignment_id or not knowledge_point_id:
@@ -65,26 +66,44 @@ async def attach_learning_chat_context(
             "Learning chat requires an assignment and knowledge point"
         )
     try:
-        lesson = await get_student_kp_lesson(
+        material = await get_student_kp_lesson(
             student_user_id=user_id,
             assignment_id=assignment_id,
             knowledge_point_id=knowledge_point_id,
         )
+        markdown = material.get("markdown")
+        if not material.get("material_available") or not isinstance(markdown, str):
+            raise EducationLearningChatContextError("Learning material is unavailable")
+        structure = await get_student_structure(
+            student_user_id=user_id,
+            assignment_id=assignment_id,
+        )
+        point = next(
+            (
+                item
+                for item in structure.get("knowledge_points", [])
+                if str(item.get("knowledge_point_id")) == knowledge_point_id
+            ),
+            None,
+        )
+        if point is None or not str(point.get("title") or "").strip():
+            raise EducationLearningChatContextError("Learning material is unavailable")
         context = {
             "content": "\n\n".join(
                 [
-                    f"# {lesson['unit_title']} - {lesson['knowledge_point_title']}",
-                    "以下是学生已分配且已发布的单知识点课程。只根据这些材料解释、"
-                    "提问和引导学习；不要声称能访问未发布版本、其他学生记录或家长管理资料。",
-                    lesson["content_markdown"],
+                    f"# {point['title']}",
+                    "以下是学生当前获授权教材中的成功讲义。只根据这份冻结到本轮请求"
+                    "的材料解释、提问和引导学习；不要声称能访问其他学生记录或家长管理资料。",
+                    markdown,
                 ]
             )
         }
+    except EducationLearningChatContextError:
+        raise
     except TextbookError as exc:
         raise EducationLearningChatContextError(
             "Learning lesson is unavailable"
         ) from exc
-    # Learning threads are deterministic published-material conversations.
-    # Discard client context so it cannot change or dilute the assigned chapter.
+    # Discard client context so it cannot change or dilute the assigned material.
     del additional_context
     return [{"type": "directive", "content": context["content"]}]

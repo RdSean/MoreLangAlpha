@@ -42,7 +42,7 @@ from src.server.database.conversation import (
     update_thread_external_id,
     get_thread_by_id,
 )
-from src.server.database.education_textbooks import (
+from src.server.database.education_learning import (
     get_student_learning_space_for_thread,
 )
 
@@ -229,8 +229,8 @@ async def delete_thread_endpoint(thread_id: str, x_user_id: CurrentUserId):
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "This learning conversation is retained with its published "
-                    "textbook assignment and cannot be deleted."
+                    "This learning conversation is retained with its textbook "
+                    "assignment and cannot be deleted."
                 ),
             )
         # Read the row pre-delete: the thread_deleted feed event needs the

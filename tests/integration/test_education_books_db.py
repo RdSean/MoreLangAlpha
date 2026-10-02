@@ -1067,6 +1067,104 @@ async def test_assignment_grants_and_revokes_current_book_reads_atomically(
     )
 
 
+async def test_learning_space_uses_current_assignment_and_retains_thread_protection(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.database.education_learning import (
+        assign_textbook_students,
+        get_or_create_student_learning_space,
+        get_parent_learning_space,
+        get_student_learning_space,
+        get_student_learning_space_for_thread,
+        revoke_textbook_students,
+    )
+
+    student_id = f"student-{uuid4().hex}"
+    parent_user_id = seed_user["user_id"]
+    async with patched_get_db_connection() as conn:
+        household_id = await _seed_parent_household(conn, parent_user_id=parent_user_id)
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO users (user_id, name) VALUES (%s, %s)",
+                (student_id, "Student"),
+            )
+            await cur.execute(
+                """
+                INSERT INTO education_memberships (
+                    household_id, user_id, role, display_name
+                ) VALUES (%s, %s, 'student', %s)
+                """,
+                (household_id, student_id, "Student"),
+            )
+    created, _, _ = await _create_committed_book(
+        parent_user_id=parent_user_id,
+        household_id=household_id,
+    )
+    assigned = await assign_textbook_students(
+        textbook_id=created["textbook_id"],
+        student_user_ids=[student_id],
+        assigned_by_user_id=parent_user_id,
+    )
+    assert assigned is not None
+    assignment_id = assigned[0]["assignment_id"]
+
+    first = await get_or_create_student_learning_space(
+        student_user_id=student_id,
+        assignment_id=str(assignment_id),
+    )
+    repeated = await get_or_create_student_learning_space(
+        student_user_id=student_id,
+        assignment_id=str(assignment_id),
+    )
+    assert first == repeated
+    assert first is not None
+    thread_id = str(first["conversation_thread_id"])
+    assert (
+        await get_student_learning_space(
+            student_user_id=student_id,
+            assignment_id=str(assignment_id),
+        )
+        == first
+    )
+    assert (
+        await get_parent_learning_space(
+            parent_user_id=parent_user_id,
+            assignment_id=str(assignment_id),
+        )
+    )["conversation_thread_id"] == first["conversation_thread_id"]
+
+    assert (
+        await revoke_textbook_students(
+            textbook_id=created["textbook_id"],
+            student_user_ids=[student_id],
+            parent_user_id=parent_user_id,
+        )
+        == 1
+    )
+    assert (
+        await get_student_learning_space(
+            student_user_id=student_id,
+            assignment_id=str(assignment_id),
+        )
+        is None
+    )
+    restricted = await get_student_learning_space_for_thread(
+        student_user_id=student_id,
+        conversation_thread_id=thread_id,
+    )
+    assert restricted is not None
+    assert str(restricted["assignment_id"]) == str(assignment_id)
+    assert restricted["is_restricted"] is True
+    assert (
+        await get_parent_learning_space(
+            parent_user_id=parent_user_id,
+            assignment_id=str(assignment_id),
+        )
+        is None
+    )
+
+
 async def test_existing_structure_materials_use_the_normal_storage_flow(
     patched_get_db_connection,
     seed_user,

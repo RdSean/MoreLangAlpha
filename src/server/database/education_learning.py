@@ -130,6 +130,16 @@ async def revoke_textbook_students(
                 return None
             await cur.execute(
                 """
+                DELETE FROM education_learning_spaces AS spaces
+                USING education_textbook_assignments AS assignments
+                WHERE spaces.assignment_id = assignments.assignment_id
+                  AND assignments.textbook_id = %s
+                  AND assignments.student_user_id = ANY(%s::text[])
+                """,
+                (textbook_id, student_user_ids),
+            )
+            await cur.execute(
+                """
                 DELETE FROM education_textbook_assignments
                 WHERE textbook_id = %s
                   AND student_user_id = ANY(%s::text[])
@@ -137,6 +147,169 @@ async def revoke_textbook_students(
                 (textbook_id, student_user_ids),
             )
             return cur.rowcount
+
+
+async def get_or_create_student_learning_space(
+    *, student_user_id: str, assignment_id: str | UUID
+) -> dict[str, Any] | None:
+    """Create the assignment's sole Flash thread while its grant is active."""
+
+    from src.server.database.conversation import create_thread
+    from src.server.database.workspace import get_or_create_flash_workspace
+
+    thread_id = str(uuid4())
+    async with get_db_connection() as conn, conn.transaction():
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT assignments.assignment_id, textbooks.title AS textbook_title
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = assignments.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.user_id = assignments.student_user_id
+                 AND memberships.household_id = textbooks.household_id
+                 AND memberships.role = 'student'
+                WHERE assignments.assignment_id = %s
+                  AND assignments.student_user_id = %s
+                FOR UPDATE OF assignments
+                """,
+                (assignment_id, student_user_id),
+            )
+            assignment = await cur.fetchone()
+            if assignment is None:
+                return None
+            await cur.execute(
+                """
+                SELECT assignment_id, workspace_id, conversation_thread_id, created_at
+                FROM education_learning_spaces
+                WHERE assignment_id = %s
+                """,
+                (assignment_id,),
+            )
+            existing = await cur.fetchone()
+            if existing is not None:
+                return dict(existing)
+
+            workspace = await get_or_create_flash_workspace(student_user_id, conn=conn)
+            await create_thread(
+                conversation_thread_id=thread_id,
+                workspace_id=str(workspace["workspace_id"]),
+                current_status="completed",
+                msg_type="flash",
+                title=f"{assignment['textbook_title']} 学习问答"[:255],
+                platform="education",
+                metadata={
+                    "education": {"assignment_id": str(assignment["assignment_id"])}
+                },
+                conn=conn,
+            )
+            await cur.execute(
+                """
+                INSERT INTO education_learning_spaces (
+                    assignment_id, workspace_id, conversation_thread_id
+                ) VALUES (%s, %s, %s)
+                RETURNING assignment_id, workspace_id,
+                          conversation_thread_id, created_at
+                """,
+                (assignment_id, workspace["workspace_id"], thread_id),
+            )
+            created = await cur.fetchone()
+    return dict(created) if created is not None else None
+
+
+async def get_student_learning_space(
+    *, student_user_id: str, assignment_id: str | UUID
+) -> dict[str, Any] | None:
+    """Read an active assignment's canonical Flash thread without creating it."""
+
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT spaces.assignment_id, spaces.workspace_id,
+                       spaces.conversation_thread_id, spaces.created_at
+                FROM education_learning_spaces AS spaces
+                JOIN education_textbook_assignments AS assignments
+                  ON assignments.assignment_id = spaces.assignment_id
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = assignments.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.user_id = assignments.student_user_id
+                 AND memberships.household_id = textbooks.household_id
+                 AND memberships.role = 'student'
+                WHERE spaces.assignment_id = %s
+                  AND assignments.student_user_id = %s
+                """,
+                (assignment_id, student_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row is not None else None
+
+
+async def get_student_learning_space_for_thread(
+    *, student_user_id: str, conversation_thread_id: str | UUID
+) -> dict[str, Any] | None:
+    """Recognize active and retired learning threads owned by one student.
+
+    The server-authored thread marker deliberately outlives an assignment and
+    its learning-space row. Revocation therefore cannot turn an old learning
+    conversation into an ordinary deletable or unscoped Flash thread.
+    """
+
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT threads.metadata #>> '{education,assignment_id}'
+                           AS assignment_id,
+                       threads.workspace_id,
+                       threads.conversation_thread_id,
+                       TRUE AS is_restricted
+                FROM conversation_threads AS threads
+                JOIN workspaces
+                  ON workspaces.workspace_id = threads.workspace_id
+                WHERE threads.conversation_thread_id = %s
+                  AND workspaces.user_id = %s
+                  AND threads.platform = 'education'
+                  AND threads.msg_type = 'flash'
+                  AND COALESCE(
+                      threads.metadata #>> '{education,assignment_id}', ''
+                  ) <> ''
+                """,
+                (conversation_thread_id, student_user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row is not None else None
+
+
+async def get_parent_learning_space(
+    *, parent_user_id: str, assignment_id: str | UUID
+) -> dict[str, Any] | None:
+    """Resolve an active assignment and its optional thread for its parent."""
+
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT assignments.assignment_id, assignments.student_user_id,
+                       textbooks.title AS textbook_title, spaces.workspace_id,
+                       spaces.conversation_thread_id, spaces.created_at
+                FROM education_textbook_assignments AS assignments
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = assignments.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                 AND memberships.user_id = %s
+                 AND memberships.role = 'parent'
+                LEFT JOIN education_learning_spaces AS spaces
+                  ON spaces.assignment_id = assignments.assignment_id
+                WHERE assignments.assignment_id = %s
+                """,
+                (parent_user_id, assignment_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row is not None else None
 
 
 async def assign_textbook(

@@ -3,7 +3,7 @@
 from typing import Any
 
 from src.server.database.conversation import get_replay_thread_data
-from src.server.database.education_textbooks import get_parent_learning_space
+from src.server.database.education_learning import get_parent_learning_space
 from src.server.services.education_textbooks import TextbookNotFoundError
 
 

@@ -494,12 +494,9 @@ async def _handle_send_message(
             await require_student_flash_workspace(user_id, workspace)
 
         # A learning reference can only ever drive the student's private Flash
-        # workspace. Resolve the immutable published lesson on the server so a
+        # workspace. Resolve the current successful material on the server so a
         # browser cannot inject arbitrary material or cross-household content.
-        if (
-            request.education_assignment_id
-            or request.education_knowledge_point_id
-        ):
+        if request.education_assignment_id or request.education_knowledge_point_id:
             if (
                 agent_mode != "flash"
                 or not workspace
