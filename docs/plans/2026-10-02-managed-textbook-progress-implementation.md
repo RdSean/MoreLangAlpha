@@ -12,6 +12,8 @@
 
 ## 0. 执行前提
 
+> 2026-10-03 后续开发入口（未实施）：[业务动作时间线补充计划](2026-10-03-textbook-business-activity.md)。本计划 Task 1–5 的已交付记录保留；后续增加可选 action、工具预算保护、历史时间线/隐藏诊断，并限定修改 Skill 的可选上报说明。仅这些增量按补充执行，不重新执行旧数据库切换前置步骤。补充验收与本计划 Task 6 一起并入总 Task 8，不能提前标为完成。
+
 - 依据：[详细设计](2026-10-02-managed-textbook-progress-design.md)、[总设计](2026-09-30-more-to-skills-design.md)、[总实施计划](2026-09-30-more-to-skills-implementation.md)。
 - 在 `feature/more-to-skills-textbook-refactor` worktree 中实施；总 Task 4 提交 `bb29d347` 已完成。本计划分阶段并入总计划，不能将整份计划当作总 Task 5 的前置任务。
 - 不修改 `plugins/langalpha_local/skills/more-to-skills/`；不恢复旧 `.langalpha/progress.jsonl`、progress helper 或旧教育进度表。
