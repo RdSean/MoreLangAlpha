@@ -178,6 +178,50 @@ export function useManagedKnowledgePointMaterial(
   });
 }
 
+export function useManagedBookAssignments(
+  textbookId: string | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.education.bookAssignments(textbookId ?? ''),
+    queryFn: () => educationApi.listManagedBookAssignments(textbookId ?? ''),
+    enabled: Boolean(textbookId) && enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useManagedBookAssignmentMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = (textbookId: string) => Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.education.bookAssignments(textbookId),
+    }),
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.education.textbookWorkbench(textbookId),
+    }),
+  ]);
+  return {
+    assign: useMutation({
+      mutationFn: ({ textbookId, studentUserIds }: {
+        textbookId: string;
+        studentUserIds: string[];
+      }) => educationApi.assignManagedBookStudents(textbookId, {
+        student_user_ids: studentUserIds,
+      }),
+      onSuccess: (_assignments, variables) => invalidate(variables.textbookId),
+    }),
+    revoke: useMutation({
+      mutationFn: ({ textbookId, studentUserIds }: {
+        textbookId: string;
+        studentUserIds: string[];
+      }) => educationApi.revokeManagedBookStudents(textbookId, {
+        student_user_ids: studentUserIds,
+      }),
+      onSuccess: (_result, variables) => invalidate(variables.textbookId),
+    }),
+  };
+}
+
 export function useManagedBookMutations() {
   const queryClient = useQueryClient();
   const invalidateBook = (textbookId: string) => Promise.all([

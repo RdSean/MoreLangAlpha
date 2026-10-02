@@ -274,6 +274,16 @@ export interface TextbookWorkbench extends ManagedTextbookSummary {
   assigned_student_count: number;
 }
 
+export interface BookAssignment {
+  textbook_id: string;
+  student_user_id: string;
+  assigned_at: string;
+}
+
+export interface BookAssignmentRequest {
+  student_user_ids: string[];
+}
+
 export interface BookStructureAnchor {
   start_line: number;
   end_line: number;

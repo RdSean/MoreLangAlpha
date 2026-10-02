@@ -7,8 +7,10 @@ import { BookGenerationForm } from '../components/BookGenerationForm';
 import { BookReader } from '../components/BookReader';
 import TextbookWorkbenchPage from '../TextbookWorkbenchPage';
 import type {
+  BookAssignment,
   BookSourceSlice,
   BookStructure,
+  EducationMember,
   KnowledgePointMaterial,
   TextbookWorkbench,
 } from '../types';
@@ -46,7 +48,23 @@ const pageState = vi.hoisted(() => ({
   createJob: vi.fn(),
   cancelJob: vi.fn(),
   retryJob: vi.fn(),
+  assignStudents: vi.fn(),
+  revokeStudents: vi.fn(),
+  membersRefetch: vi.fn(),
+  assignmentsRefetch: vi.fn(),
   sourceSlice: vi.fn(),
+  members: [
+    { user_id: 'parent-1', name: '陈女士', role: 'parent' },
+    { user_id: 'student-1', name: '小雨', role: 'student' },
+    { user_id: 'student-2', name: '小川', role: 'student' },
+  ] as EducationMember[],
+  assignments: [
+    {
+      textbook_id: 'book-1',
+      student_user_id: 'student-1',
+      assigned_at: '2026-10-02T07:00:00Z',
+    },
+  ] as BookAssignment[],
   workbench: {
     textbook_id: 'book-1',
     title: 'Reading Explorer 3',
@@ -160,6 +178,22 @@ vi.mock('../queries', () => ({
     isLoading: false,
   }),
   useBookActivity: () => ({ data: undefined, events: [], connectionState: 'connected' }),
+  useEducationMembers: () => ({
+    data: pageState.members,
+    isLoading: false,
+    isError: false,
+    refetch: pageState.membersRefetch,
+  }),
+  useManagedBookAssignments: () => ({
+    data: pageState.assignments,
+    isLoading: false,
+    isError: false,
+    refetch: pageState.assignmentsRefetch,
+  }),
+  useManagedBookAssignmentMutations: () => ({
+    assign: { mutateAsync: pageState.assignStudents, isPending: false },
+    revoke: { mutateAsync: pageState.revokeStudents, isPending: false },
+  }),
   useManagedBookMutations: () => ({
     createJob: { mutateAsync: pageState.createJob, isPending: false },
     cancelJob: { mutateAsync: pageState.cancelJob, isPending: false },
@@ -175,6 +209,8 @@ beforeEach(() => {
   pageState.createJob.mockResolvedValue({ job_id: 'job-created' });
   pageState.cancelJob.mockResolvedValue({ job_id: 'job-active' });
   pageState.retryJob.mockResolvedValue({ job_id: 'job-retry' });
+  pageState.assignStudents.mockResolvedValue([]);
+  pageState.revokeStudents.mockResolvedValue(undefined);
   pageState.sourceSlice.mockImplementation((_bookId, startLine, endLine) => ({
     textbook_id: 'book-1',
     start_line: startLine,
@@ -470,5 +506,73 @@ describe('TextbookWorkbenchPage', () => {
     await user.click(screen.getByRole('button', { name: '重试未完成项' }));
     expect(pageState.retryJob).toHaveBeenCalledWith('job-partial');
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('activity=job-retry'));
+  });
+
+  it('opens student access with current assignments preselected and excludes parents', async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+
+    await user.click(screen.getByRole('button', { name: '给学生使用' }));
+
+    expect(screen.getByRole('dialog', { name: '给学生使用' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '小雨' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '小川' })).not.toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: '陈女士' })).not.toBeInTheDocument();
+  });
+
+  it('saves only added and removed student assignments', async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+
+    await user.click(screen.getByRole('button', { name: '给学生使用' }));
+    await user.click(screen.getByRole('checkbox', { name: '小雨' }));
+    await user.click(screen.getByRole('checkbox', { name: '小川' }));
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(pageState.assignStudents).toHaveBeenCalledWith({
+      textbookId: 'book-1',
+      studentUserIds: ['student-2'],
+    });
+    expect(pageState.revokeStudents).toHaveBeenCalledWith({
+      textbookId: 'book-1',
+      studentUserIds: ['student-1'],
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '给学生使用' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('keeps the assignment dialog open while saving', async () => {
+    const user = userEvent.setup();
+    pageState.assignStudents.mockReturnValue(new Promise(() => undefined));
+    renderWorkbench();
+
+    await user.click(screen.getByRole('button', { name: '给学生使用' }));
+    await user.click(screen.getByRole('checkbox', { name: '小川' }));
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(screen.getByRole('button', { name: '正在保存' })).toBeDisabled();
+    expect(screen.getByRole('dialog', { name: '给学生使用' })).toBeInTheDocument();
+  });
+
+  it('shows a retry action without losing the selection when saving fails', async () => {
+    const user = userEvent.setup();
+    pageState.assignStudents
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce([]);
+    renderWorkbench();
+
+    await user.click(screen.getByRole('button', { name: '给学生使用' }));
+    await user.click(screen.getByRole('checkbox', { name: '小川' }));
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存学生授权失败');
+    expect(screen.getByRole('checkbox', { name: '小川' })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: '重试' }));
+
+    expect(pageState.assignStudents).toHaveBeenCalledTimes(2);
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '给学生使用' })).not.toBeInTheDocument();
+    });
   });
 });

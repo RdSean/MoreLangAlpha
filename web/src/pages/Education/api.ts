@@ -22,6 +22,8 @@ import type {
 import type {
   BookActivityEvent,
   BookActivityPage,
+  BookAssignment,
+  BookAssignmentRequest,
   BookJob,
   BookJobStatus,
   BookSourceSlice,
@@ -254,6 +256,36 @@ export async function getManagedKnowledgePointMaterial(
     `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/knowledge-points/${encodeURIComponent(knowledgePointId)}/material`,
   );
   return data;
+}
+
+export async function listManagedBookAssignments(
+  textbookId: string,
+): Promise<BookAssignment[]> {
+  const { data } = await api.get<BookAssignment[]>(
+    `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/assignments`,
+  );
+  return data;
+}
+
+export async function assignManagedBookStudents(
+  textbookId: string,
+  input: BookAssignmentRequest,
+): Promise<BookAssignment[]> {
+  const { data } = await api.post<BookAssignment[]>(
+    `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/assignments`,
+    input,
+  );
+  return data;
+}
+
+export async function revokeManagedBookStudents(
+  textbookId: string,
+  input: BookAssignmentRequest,
+): Promise<void> {
+  await api.delete(
+    `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/assignments`,
+    { data: input },
+  );
 }
 
 export async function createManagedBookJob(

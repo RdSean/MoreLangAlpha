@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { BookActivityPanel } from './components/BookActivityPanel';
+import { BookAssignmentDialog } from './components/BookAssignmentDialog';
 import { BookNavigator } from './components/BookNavigator';
 import { BookReader } from './components/BookReader';
 import {
@@ -42,6 +43,7 @@ export default function TextbookWorkbenchPage() {
   const { textbookId } = useParams<{ textbookId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [navigatorOpen, setNavigatorOpen] = useState(false);
+  const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
   const [batchFormOpen, setBatchFormOpen] = useState(false);
   const [batchSelection, setBatchSelection] = useState<Set<string>>(new Set());
@@ -283,12 +285,25 @@ export default function TextbookWorkbenchPage() {
             <Activity className="size-4 sm:mr-2" aria-hidden="true" />
             <span className="hidden sm:inline">活动</span>
           </Button>
-          <Button variant="outline" className="min-h-11 px-3" aria-label="给学生使用">
+          <Button
+            variant="outline"
+            className="min-h-11 px-3"
+            aria-label="给学生使用"
+            onClick={() => setAssignmentOpen(true)}
+          >
             <Users className="size-4 sm:mr-2" aria-hidden="true" />
             <span className="hidden sm:inline">给学生使用</span>
           </Button>
         </div>
       </header>
+
+      {textbookId && (
+        <BookAssignmentDialog
+          textbookId={textbookId}
+          open={assignmentOpen}
+          onOpenChange={setAssignmentOpen}
+        />
+      )}
 
       <div className={visibleActivityJob ? 'textbook-workbench-grid has-activity' : 'textbook-workbench-grid'}>
         {structure.data && (

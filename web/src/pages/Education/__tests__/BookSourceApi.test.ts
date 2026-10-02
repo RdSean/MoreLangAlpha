@@ -2,13 +2,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/api/client', () => ({
   api: {
+    delete: vi.fn(),
     get: vi.fn(),
     post: vi.fn(),
   },
 }));
 
 import { api } from '@/api/client';
-import { createManagedTextbook, listManagedBookSources } from '../api';
+import {
+  assignManagedBookStudents,
+  createManagedTextbook,
+  listManagedBookAssignments,
+  listManagedBookSources,
+  revokeManagedBookStudents,
+} from '../api';
 
 describe('managed textbook source API', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -31,5 +38,26 @@ describe('managed textbook source API', () => {
 
     await expect(createManagedTextbook(input)).resolves.toEqual({ textbook_id: 'book-1', job_id: 'book-job-1' });
     expect(api.post).toHaveBeenCalledWith('/api/v1/education/textbooks', input);
+  });
+
+  it('lists, adds, and revokes managed textbook assignments', async () => {
+    const assignment = {
+      textbook_id: 'book-1',
+      student_user_id: 'student-1',
+      assigned_at: '2026-10-02T07:00:00Z',
+    };
+    const input = { student_user_ids: ['student-1'] };
+    vi.mocked(api.get).mockResolvedValue({ data: [assignment] });
+    vi.mocked(api.post).mockResolvedValue({ data: [assignment] });
+    vi.mocked(api.delete).mockResolvedValue({});
+
+    await expect(listManagedBookAssignments('book-1')).resolves.toEqual([assignment]);
+    await expect(assignManagedBookStudents('book-1', input)).resolves.toEqual([assignment]);
+    await expect(revokeManagedBookStudents('book-1', input)).resolves.toBeUndefined();
+
+    const url = '/api/v1/education/textbooks/book-1/assignments';
+    expect(api.get).toHaveBeenCalledWith(url);
+    expect(api.post).toHaveBeenCalledWith(url, input);
+    expect(api.delete).toHaveBeenCalledWith(url, { data: input });
   });
 });
