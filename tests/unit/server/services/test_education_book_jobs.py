@@ -131,6 +131,15 @@ def test_structure_execution_task_uses_structure_only_and_explicit_ids():
     assert task["item_id"] == str(CLAIMED["item_id"])
     assert task["execution_id"] == str(CLAIMED["execution_id"])
     assert task["attempt_token"] == str(CLAIMED["attempt_token"])
+    assert task["progress"] == {
+        "tool": "report_progress",
+        "allowed_stages": [
+            "structure_reading",
+            "structure_organizing",
+            "structure_splitting",
+            "structure_validating",
+        ],
+    }
     assert task["output"]["structure"] == "outputs/sample-book/book-structure.json"
     assert "knowledge_point" not in task
 
@@ -167,6 +176,12 @@ def test_material_execution_task_contains_exactly_one_target_without_predecessor
         },
     }
     assert task["output"]["material"] == "outputs/sample-book/chapters/u02-k03.md"
+    assert task["progress"]["allowed_stages"] == [
+        "material_reading",
+        "material_organizing",
+        "material_writing",
+        "material_validating",
+    ]
 
 
 def test_supplementary_item_is_explicit_and_has_a_fixed_output_set():
@@ -189,6 +204,11 @@ def test_supplementary_item_is_explicit_and_has_a_fixed_output_set():
         "outputs/sample-book/glossary.md",
         "outputs/sample-book/patterns.md",
         "outputs/sample-book/cheatsheet.md",
+    ]
+    assert task["progress"]["allowed_stages"] == [
+        "supplementary_reading",
+        "supplementary_organizing",
+        "supplementary_validating",
     ]
 
 
@@ -222,6 +242,9 @@ def test_managed_item_prompt_exposes_only_execution_id():
     assert str(CLAIMED["item_id"]) not in prompt
     assert str(CLAIMED["attempt_token"]) not in prompt
     assert "Reading Material Only" in prompt
+    assert "progress.allowed_stages" in prompt
+    assert "report_progress" in prompt
+    assert "does not replace" in prompt
 
 
 @pytest.mark.asyncio

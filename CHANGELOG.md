@@ -2,6 +2,12 @@
 
 ## 2026-10-02
 
+### 新增：教材托管任务语义阶段契约
+
+- 教育服务定义 structure、material、supplementary 三类固定阶段及中文公开文案，并向每个 `task.json.progress` 写入当前 item 的工具名与允许阶段。
+- managed prompt 要求 Agent 仅在进入真实阶段时调用 `report_progress`；上报可缺失、重试或回退，不替代产物和最终回复。既有任务身份、attempt、来源与输出契约保持不变。
+- 验证：阶段与教材 job 服务聚焦单元测试 `42 passed`，相关 Ruff 和 `git diff --check` 通过。
+
 ### 新增：托管 PTC 受限语义进度工具
 
 - 新增只接受短 stage 标识符的 `report_progress` 工具，将受控语义阶段写入 LangGraph custom stream；非法输入和 stream writer 故障返回固定继续说明，不中断 Agent。

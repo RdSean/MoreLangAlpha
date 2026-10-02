@@ -42,6 +42,7 @@ from src.server.services.education_book_activity import (
     BookActivityObserver,
     publish_book_activity_hint,
 )
+from src.server.services.education_book_progress import progress_contract
 from src.server.services.education_book_structure import (
     MoreToSkillsIdentity,
     TrustedBookSource,
@@ -229,6 +230,7 @@ def build_execution_task(item: Mapping[str, Any]) -> dict[str, Any]:
             "skill_sha256": str(item.get("skill_sha256") or ""),
             "schema_sha256": str(item.get("schema_sha256") or ""),
         },
+        "progress": progress_contract(item),
         "output": {
             "root": f"outputs/{slug}",
             "structure": f"outputs/{slug}/book-structure.json",
@@ -444,7 +446,10 @@ def managed_item_prompt(item: Mapping[str, Any]) -> str:
         f"Managed textbook execution {execution_id}. Run more-to-skills in "
         f"{mode} mode. Read {root}/inputs/task.json and the frozen "
         f"{root}/.agents/skills/more-to-skills/SKILL.md contract. Use normal "
-        "Read, image reading, Bash, and ExecuteCode as needed. Write only the "
+        "Read, image reading, Bash, and ExecuteCode as needed. Follow the "
+        "task.json progress contract: call report_progress only with a listed "
+        "progress.allowed_stages value when entering a real stage. Progress is "
+        "optional and does not replace outputs or the final response. Write only the "
         "single task's declared outputs; do not infer business identifiers from paths."
     )
 
