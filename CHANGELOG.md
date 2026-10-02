@@ -2,6 +2,13 @@
 
 ## 2026-10-02
 
+### 新增：可恢复的教材任务快照与活动流 API
+
+- 新增家长授权的教材任务快照接口，以单条 PostgreSQL 语句读取同一时点的 job 与有序 items；公开投影包含 structure/material/supplementary 类型和业务状态，不暴露 attempt token、运行身份、候选对象或 Skill 摘要。
+- 新增 PostgreSQL 权威活动 SSE 接口，复用既有 `BookActivityService.pages()` 完成补页与 Redis 唤醒；每帧经严格 DTO 验证并清除内部预算字段，未授权或跨家庭访问统一返回 404。
+- SSE `id` 仅跟随该帧实际交付的最大事件序号，空页不推进；500 条活动按 200 条分页时可从 200 继续取得余下事件，过期游标、活动不可用、终态结束和断连清理均保持显式语义。
+- 验证：DTO/路由单元测试 `28 passed`，activity service 回归 `18 passed`，`langalpha_test` PostgreSQL 集成 `10 passed`；未向开发数据库应用 `082`，未改动现有 Docker volume。
+
 ### 新增：教材语义阶段的严格活动投影
 
 - `BookActivityObserver` 绑定 item kind，仅接受 artifact ID 与 payload stage 一致且属于该 item 白名单的阶段；公开文案和 running 状态均由服务端生成，模型自由文案、状态和跨 item 阶段被忽略。

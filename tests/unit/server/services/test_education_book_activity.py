@@ -152,8 +152,7 @@ async def test_public_progress_uses_scoped_server_message_and_is_rate_limited():
 
     assert append.await_count == 2
     assert all(
-        call.kwargs["message"] == "正在整理章节层级"
-        for call in append.await_args_list
+        call.kwargs["message"] == "正在整理章节层级" for call in append.await_args_list
     )
     assert all(call.kwargs["status"] == "running" for call in append.await_args_list)
     assert all(
@@ -407,9 +406,7 @@ async def test_budget_exhaustion_filters_progress_noise_and_invalid_stages():
         monotonic=lambda: 10.0,
     )
 
-    await observer(
-        "tool_calls", {"tool_calls": [{"id": "read-1", "name": "Read"}]}
-    )
+    await observer("tool_calls", {"tool_calls": [{"id": "read-1", "name": "Read"}]})
     await observer(
         "tool_calls",
         {"tool_calls": [{"id": "progress-1", "name": "report_progress"}]},
@@ -510,6 +507,51 @@ async def test_stream_subscribes_then_rereads_pg_to_close_notification_race():
         [2],
     ]
     assert repository.calls[1]["after_seq"] == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_drains_snapshot_pages_before_waiting_for_redis():
+    from src.server.services.education_book_activity import BookActivityService
+
+    initial = {
+        **_page(seqs=list(range(1, 201)), high_water=500, status="running"),
+        "has_more": True,
+    }
+    middle = {
+        **_page(seqs=list(range(201, 401)), high_water=500, status="running"),
+        "job_id": initial["job_id"],
+        "has_more": True,
+    }
+    terminal = {
+        **_page(seqs=list(range(401, 501)), high_water=500, status="succeeded"),
+        "job_id": initial["job_id"],
+    }
+    repository = _PageRepository([initial, middle, terminal])
+    wait_calls = 0
+
+    @asynccontextmanager
+    async def subscribe(_channel):
+        async def wait(_timeout):
+            nonlocal wait_calls
+            wait_calls += 1
+            return ("timeout", None)
+
+        yield wait
+
+    service = BookActivityService(repository=repository, subscribe=subscribe)
+
+    pages = [
+        page
+        async for page in service.pages(
+            job_id=initial["job_id"],
+            parent_user_id="parent-1",
+            after_seq=0,
+        )
+    ]
+
+    assert [len(page["events"]) for page in pages] == [200, 200, 100]
+    assert [call["after_seq"] for call in repository.calls] == [0, 200, 400]
+    assert wait_calls == 0
 
 
 @pytest.mark.asyncio

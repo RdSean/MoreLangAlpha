@@ -10,6 +10,7 @@ from src.server.app.education.book_models import (
     BookActivityEventResponse,
     BookActivityPageResponse,
     BookJobCreateRequest,
+    BookJobItemResponse,
     BookSourceSliceResponse,
     CreateBookRequest,
     KnowledgePointProjectionResponse,
@@ -24,7 +25,12 @@ def test_activity_event_exposes_only_projected_metadata() -> None:
         kind="tool",
         status="running",
         message="Running Read",
-        metadata={"tool_name": "Read", "tool_call_id": "call-1"},
+        metadata={
+            "tool_name": "Read",
+            "tool_call_id": "call-1",
+            "budget_class": "detail",
+            "activity_bytes": 256,
+        },
         created_at=datetime.now(timezone.utc),
     )
 
@@ -34,13 +40,81 @@ def test_activity_event_exposes_only_projected_metadata() -> None:
 def test_activity_page_exposes_unavailable_state() -> None:
     page = BookActivityPageResponse(
         job_id="9998bb1a-687a-4d45-815d-5b1dd6ed2f17",
+        status="running",
         events=[],
         high_water_seq=0,
         cursor_expired=False,
         activity_status="unavailable",
+        has_more=False,
     )
 
     assert page.activity_status == "unavailable"
+
+
+@pytest.mark.parametrize("missing", ["status", "has_more"])
+def test_activity_page_requires_complete_repository_snapshot(missing: str) -> None:
+    payload = {
+        "job_id": "9998bb1a-687a-4d45-815d-5b1dd6ed2f17",
+        "status": "running",
+        "events": [],
+        "high_water_seq": 0,
+        "cursor_expired": False,
+        "activity_status": "available",
+        "has_more": False,
+    }
+    payload.pop(missing)
+
+    with pytest.raises(ValidationError):
+        BookActivityPageResponse.model_validate(payload)
+
+
+def test_activity_page_requires_strictly_increasing_event_sequences() -> None:
+    created_at = datetime.now(timezone.utc)
+    event = {
+        "seq": 2,
+        "job_id": "9998bb1a-687a-4d45-815d-5b1dd6ed2f17",
+        "item_id": None,
+        "kind": "job",
+        "status": "running",
+        "message": "Job running",
+        "metadata": {},
+        "created_at": created_at,
+    }
+
+    with pytest.raises(ValidationError, match="strictly increasing"):
+        BookActivityPageResponse(
+            job_id=event["job_id"],
+            status="running",
+            events=[event, event],
+            high_water_seq=2,
+            cursor_expired=False,
+            activity_status="available",
+            has_more=False,
+        )
+
+
+def test_job_item_kind_distinguishes_supplementary_from_material() -> None:
+    common = {
+        "position": 1,
+        "knowledge_point_id": None,
+        "skill_kp_id": None,
+        "status": "queued",
+        "attempt": 0,
+    }
+
+    material = BookJobItemResponse(
+        item_id=UUID("86f03a73-7604-4097-905b-768e6ad0f644"),
+        kind="material",
+        **common,
+    )
+    supplementary = BookJobItemResponse(
+        item_id=UUID("a5f8dcd6-58c8-4ea7-b3dd-a1f8bf276a63"),
+        kind="supplementary",
+        **common,
+    )
+
+    assert material.kind == "material"
+    assert supplementary.kind == "supplementary"
 
 
 def test_create_book_request_freezes_one_completed_parse_artifact() -> None:

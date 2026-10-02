@@ -804,6 +804,68 @@ def _material_result_snapshot(material: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def get_book_job_for_parent(
+    *,
+    job_id: str | UUID,
+    parent_user_id: str,
+) -> dict[str, Any] | None:
+    """Return the public job snapshot when the user is a parent in its household."""
+
+    job_id = UUID(str(job_id))
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT jobs.job_id, jobs.textbook_id, jobs.kind, jobs.status,
+                       jobs.total_items, jobs.succeeded_items,
+                       jobs.failed_items, jobs.cancelled_items,
+                       jobs.not_run_items, jobs.high_water_seq,
+                       jobs.activity_status, jobs.created_at, jobs.started_at,
+                       jobs.finished_at, jobs.safe_error, jobs.depth,
+                       jobs.requirements, jobs.replace_existing,
+                       jobs.include_supplementary,
+                       COALESCE((
+                           SELECT jsonb_agg(
+                               jsonb_build_object(
+                                   'item_id', items.item_id,
+                                   'kind', items.kind,
+                                   'position', items.position,
+                                   'knowledge_point_id', items.knowledge_point_id,
+                                   'skill_kp_id', points.skill_kp_id,
+                                   'status', items.status,
+                                   'attempt', items.attempt,
+                                   'safe_error', items.safe_error,
+                                   'started_at', items.started_at,
+                                   'finished_at', items.finished_at
+                               ) ORDER BY items.position
+                           )
+                           FROM education_book_job_items AS items
+                           LEFT JOIN education_book_knowledge_points AS points
+                             ON points.knowledge_point_id = items.knowledge_point_id
+                           WHERE items.job_id = jobs.job_id
+                       ), '[]'::jsonb) AS items
+                FROM education_book_jobs AS jobs
+                JOIN education_textbooks AS textbooks
+                  ON textbooks.textbook_id = jobs.textbook_id
+                JOIN education_memberships AS memberships
+                  ON memberships.household_id = textbooks.household_id
+                 AND memberships.user_id = %s
+                 AND memberships.role = 'parent'
+                WHERE jobs.job_id = %s
+                """,
+                (parent_user_id, job_id),
+            )
+            job = await cur.fetchone()
+            if job is None:
+                return None
+
+    result = dict(job)
+    result["job_id"] = str(result["job_id"])
+    result["textbook_id"] = str(result["textbook_id"])
+    result["items"] = [dict(item) for item in result["items"]]
+    return result
+
+
 async def _load_job_with_items(cur, *, job_id: UUID) -> dict[str, Any]:
     await cur.execute(
         "SELECT * FROM education_book_jobs WHERE job_id = %s",

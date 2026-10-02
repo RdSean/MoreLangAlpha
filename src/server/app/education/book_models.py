@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 BookJobKind = Literal["structure", "materials"]
@@ -27,6 +27,7 @@ BookJobItemStatus = Literal[
     "cancelled",
     "not_run",
 ]
+BookJobItemKind = Literal["structure", "material", "supplementary"]
 BookStructureStatus = Literal["queued", "running", "ready", "failed"]
 BookActivityStatus = Literal["available", "unavailable"]
 
@@ -193,6 +194,7 @@ class BookJobCreateRequest(_StrictModel):
 
 class BookJobItemResponse(_StrictModel):
     item_id: UUID
+    kind: BookJobItemKind
     position: int = Field(ge=1)
     knowledge_point_id: UUID | None = None
     skill_kp_id: str | None = None
@@ -222,13 +224,34 @@ class BookActivityEventResponse(_StrictModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _hide_internal_budget_metadata(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        public = dict(value)
+        public.pop("budget_class", None)
+        public.pop("activity_bytes", None)
+        return public
+
 
 class BookActivityPageResponse(_StrictModel):
     job_id: str
+    status: BookJobStatus
     events: list[BookActivityEventResponse]
     high_water_seq: int = Field(ge=0)
-    activity_status: BookActivityStatus = "available"
-    cursor_expired: bool = False
+    activity_status: BookActivityStatus
+    cursor_expired: bool
+    has_more: bool
+
+    @model_validator(mode="after")
+    def _events_are_strictly_increasing(self) -> BookActivityPageResponse:
+        sequences = [event.seq for event in self.events]
+        if any(
+            current <= previous for previous, current in zip(sequences, sequences[1:])
+        ):
+            raise ValueError("activity event sequences must be strictly increasing")
+        return self
 
 
 class BookAssignmentRequest(_StrictModel):

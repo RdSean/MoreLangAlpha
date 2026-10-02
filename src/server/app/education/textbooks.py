@@ -2,11 +2,16 @@
 
 import asyncio
 import json
+from contextlib import aclosing
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
+from src.server.app.education.book_models import (
+    BookActivityPageResponse,
+    BookJobResponse,
+)
 from src.server.app.education.models import (
     AssignTextbookPublicationRequest,
     ApproveKnowledgePointLessonRequest,
@@ -45,6 +50,8 @@ from src.server.app.education.models import (
     UpdateKnowledgePointProgressRequest,
     UpdateTextbookStructureRequest,
 )
+from src.server.database.education_book_jobs import get_book_job_for_parent
+from src.server.services.education_book_activity import BookActivityService
 from src.server.services.education_candidate_review import (
     accept_knowledge_point_candidates_for_parent,
     list_knowledge_point_candidates_for_parent,
@@ -140,6 +147,58 @@ def _textbook_http_error(exc: TextbookError) -> HTTPException:
     if isinstance(exc, TextbookTransitionError):
         return HTTPException(status_code=409, detail=str(exc))
     return HTTPException(status_code=400, detail=str(exc))
+
+
+def _managed_book_job_not_found() -> HTTPException:
+    return HTTPException(status_code=404, detail="Book job not found")
+
+
+@router.get("/book-jobs/{job_id}", response_model=BookJobResponse)
+async def get_managed_book_job(job_id: UUID, user_id: CurrentUserId):
+    job = await get_book_job_for_parent(
+        job_id=job_id,
+        parent_user_id=user_id,
+    )
+    if job is None:
+        raise _managed_book_job_not_found()
+    return BookJobResponse.model_validate(job)
+
+
+@router.get(
+    "/book-jobs/{job_id}/events",
+    response_class=StreamingResponse,
+)
+async def stream_managed_book_job_events(
+    job_id: UUID,
+    user_id: CurrentUserId,
+    after_seq: int = Query(0, ge=0),
+):
+    job = await get_book_job_for_parent(
+        job_id=job_id,
+        parent_user_id=user_id,
+    )
+    if job is None:
+        raise _managed_book_job_not_found()
+
+    async def event_generator():
+        service = BookActivityService()
+        pages = service.pages(
+            job_id=job_id,
+            parent_user_id=user_id,
+            after_seq=after_seq,
+        )
+        async with aclosing(pages):
+            async for raw_page in pages:
+                page = BookActivityPageResponse.model_validate(raw_page)
+                delivered_seq = max((event.seq for event in page.events), default=None)
+                event_id = f"id: {delivered_seq}\n" if delivered_seq is not None else ""
+                yield (f"{event_id}event: snapshot\ndata: {page.model_dump_json()}\n\n")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers=_BOOK_PROGRESS_SSE_HEADERS,
+    )
 
 
 @router.get("/textbooks", response_model=list[dict])

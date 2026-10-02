@@ -1,7 +1,10 @@
 """Role-safe HTTP contracts for versioned family textbook routes."""
 
+import asyncio
+import json
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
@@ -9,6 +12,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from src.server.app.education.textbooks import router
+import src.server.app.education.textbooks as textbook_routes
 from src.server.services.education_textbooks import TextbookPermissionError
 from src.server.utils.api import get_current_user_id
 
@@ -21,6 +25,96 @@ TEXTBOOK = {
     "created_by_user_id": "parent-1",
 }
 
+MANAGED_JOB_ID = UUID("9998bb1a-687a-4d45-815d-5b1dd6ed2f17")
+
+
+def _managed_job_snapshot() -> dict:
+    now = datetime.now(timezone.utc)
+    return {
+        "job_id": str(MANAGED_JOB_ID),
+        "textbook_id": TEXTBOOK["textbook_id"],
+        "kind": "materials",
+        "status": "running",
+        "total_items": 2,
+        "succeeded_items": 1,
+        "failed_items": 0,
+        "cancelled_items": 0,
+        "not_run_items": 0,
+        "high_water_seq": 3,
+        "activity_status": "available",
+        "created_at": now,
+        "started_at": now,
+        "finished_at": None,
+        "safe_error": None,
+        "depth": "lesson",
+        "requirements": None,
+        "replace_existing": False,
+        "include_supplementary": True,
+        "items": [
+            {
+                "item_id": UUID("86f03a73-7604-4097-905b-768e6ad0f644"),
+                "kind": "material",
+                "position": 1,
+                "knowledge_point_id": UUID("4c3f4d0c-a508-4bff-a89f-a3a584a2fe86"),
+                "skill_kp_id": "unit-1-k1",
+                "status": "succeeded",
+                "attempt": 1,
+                "safe_error": None,
+                "started_at": now,
+                "finished_at": now,
+            },
+            {
+                "item_id": UUID("a5f8dcd6-58c8-4ea7-b3dd-a1f8bf276a63"),
+                "kind": "supplementary",
+                "position": 2,
+                "knowledge_point_id": None,
+                "skill_kp_id": None,
+                "status": "running",
+                "attempt": 1,
+                "safe_error": None,
+                "started_at": now,
+                "finished_at": None,
+            },
+        ],
+    }
+
+
+def _activity_event(seq: int) -> dict:
+    return {
+        "seq": seq,
+        "job_id": str(MANAGED_JOB_ID),
+        "item_id": None,
+        "kind": "tool",
+        "status": "running",
+        "message": f"Running tool {seq}",
+        "metadata": {
+            "tool_name": "Read",
+            "budget_class": "detail",
+            "activity_bytes": 256,
+        },
+        "created_at": datetime.now(timezone.utc),
+    }
+
+
+def _activity_page(
+    *,
+    events: list[dict],
+    high_water_seq: int,
+    status: str = "running",
+    activity_status: str = "available",
+    cursor_expired: bool = False,
+    has_more: bool = False,
+) -> dict:
+    return {
+        "job_id": str(MANAGED_JOB_ID),
+        "status": status,
+        "activity_status": activity_status,
+        "events": events,
+        "high_water_seq": high_water_seq,
+        "cursor_expired": cursor_expired,
+        "has_more": has_more,
+    }
+
 
 @pytest_asyncio.fixture
 async def client():
@@ -30,6 +124,152 @@ async def client():
         transport=ASGITransport(app=app), base_url="http://test"
     ) as session:
         yield session
+
+
+@pytest.mark.asyncio
+async def test_parent_reads_public_managed_job_snapshot(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    with patch(
+        "src.server.app.education.textbooks.get_book_job_for_parent",
+        new=AsyncMock(return_value=_managed_job_snapshot()),
+        create=True,
+    ) as read_job:
+        response = await client.get(f"/api/v1/education/book-jobs/{MANAGED_JOB_ID}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["kind"] for item in payload["items"]] == [
+        "material",
+        "supplementary",
+    ]
+    assert "attempt_token" not in payload["items"][0]
+    read_job.assert_awaited_once_with(
+        job_id=MANAGED_JOB_ID,
+        parent_user_id="parent-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_managed_job_routes_hide_missing_or_cross_household_job(client):
+    app = client._transport.app
+    app.dependency_overrides[get_current_user_id] = lambda: "student-or-other-parent"
+    with patch(
+        "src.server.app.education.textbooks.get_book_job_for_parent",
+        new=AsyncMock(return_value=None),
+        create=True,
+    ):
+        snapshot = await client.get(f"/api/v1/education/book-jobs/{MANAGED_JOB_ID}")
+        events = await client.get(
+            f"/api/v1/education/book-jobs/{MANAGED_JOB_ID}/events"
+        )
+
+    assert snapshot.status_code == 404
+    assert events.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_activity_sse_ids_follow_delivered_events_not_high_water():
+    observed_after_seq: list[int] = []
+    first_page_closed = asyncio.Event()
+
+    class FakeActivityService:
+        async def pages(self, *, job_id, parent_user_id, after_seq):
+            observed_after_seq.append(after_seq)
+            if after_seq == 0:
+                try:
+                    yield _activity_page(
+                        events=[_activity_event(seq) for seq in range(1, 201)],
+                        high_water_seq=500,
+                        has_more=True,
+                    )
+                    await asyncio.Event().wait()
+                finally:
+                    first_page_closed.set()
+                return
+            yield _activity_page(
+                events=[_activity_event(seq) for seq in range(201, 501)],
+                high_water_seq=500,
+                status="succeeded",
+            )
+
+    with (
+        patch.object(
+            textbook_routes,
+            "get_book_job_for_parent",
+            new=AsyncMock(return_value=_managed_job_snapshot()),
+            create=True,
+        ),
+        patch.object(
+            textbook_routes,
+            "BookActivityService",
+            return_value=FakeActivityService(),
+            create=True,
+        ),
+    ):
+        first = await textbook_routes.stream_managed_book_job_events(
+            job_id=MANAGED_JOB_ID,
+            user_id="parent-1",
+            after_seq=0,
+        )
+        first_iterator = first.body_iterator
+        first_frame = await anext(first_iterator)
+        await first_iterator.aclose()
+
+        resumed = await textbook_routes.stream_managed_book_job_events(
+            job_id=MANAGED_JOB_ID,
+            user_id="parent-1",
+            after_seq=200,
+        )
+        resumed_frames = [chunk async for chunk in resumed.body_iterator]
+
+    assert first_page_closed.is_set()
+    assert first_frame.startswith("id: 200\nevent: snapshot\n")
+    assert resumed_frames[0].startswith("id: 500\nevent: snapshot\n")
+    assert observed_after_seq == [0, 200]
+    payload = json.loads(resumed_frames[0].split("data: ", 1)[1])
+    assert payload["events"][0]["seq"] == 201
+    assert payload["events"][-1]["seq"] == 500
+    assert "budget_class" not in payload["events"][0]["metadata"]
+    assert "activity_bytes" not in payload["events"][0]["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_activity_sse_empty_snapshot_does_not_advance_id():
+    class EmptyActivityService:
+        async def pages(self, **_kwargs):
+            yield _activity_page(
+                events=[],
+                high_water_seq=9,
+                activity_status="unavailable",
+                cursor_expired=True,
+            )
+
+    with (
+        patch.object(
+            textbook_routes,
+            "get_book_job_for_parent",
+            new=AsyncMock(return_value=_managed_job_snapshot()),
+            create=True,
+        ),
+        patch.object(
+            textbook_routes,
+            "BookActivityService",
+            return_value=EmptyActivityService(),
+            create=True,
+        ),
+    ):
+        response = await textbook_routes.stream_managed_book_job_events(
+            job_id=MANAGED_JOB_ID,
+            user_id="parent-1",
+            after_seq=4,
+        )
+        frames = [chunk async for chunk in response.body_iterator]
+
+    assert frames[0].startswith("event: snapshot\n")
+    assert not frames[0].startswith("id:")
+    assert '"activity_status":"unavailable"' in frames[0]
+    assert '"cursor_expired":true' in frames[0]
 
 
 @pytest.mark.asyncio
@@ -381,7 +621,6 @@ async def test_parent_lists_only_safe_completed_parse_job_candidates(client):
         }
     ]
     listed.assert_awaited_once_with(parent_user_id="parent-1")
-
 
 
 @pytest.mark.asyncio

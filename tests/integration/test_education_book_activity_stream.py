@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -76,6 +78,145 @@ async def _seed_running_item(connection_factory, *, parent_user_id: str) -> dict
     claimed = await claim_next_book_item(worker_id="activity-worker", lease_seconds=60)
     assert claimed is not None
     return {**created, **claimed, "household_id": household_id}
+
+
+async def test_parent_authorized_job_snapshot_projects_only_public_fields(
+    patched_get_db_connection,
+    seed_user,
+) -> None:
+    from src.server.app.education.book_models import (
+        BookJobItemResponse,
+        BookJobResponse,
+    )
+    from src.server.database.education_book_jobs import get_book_job_for_parent
+
+    item = await _seed_running_item(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+    )
+
+    snapshot = await get_book_job_for_parent(
+        job_id=item["job_id"],
+        parent_user_id=seed_user["user_id"],
+    )
+    denied = await get_book_job_for_parent(
+        job_id=item["job_id"],
+        parent_user_id="other-parent",
+    )
+
+    assert snapshot is not None
+    public = BookJobResponse.model_validate(snapshot)
+    assert public.job_id == str(item["job_id"])
+    assert len(public.items) == 1
+    assert public.items[0].kind == "structure"
+    assert denied is None
+    assert set(snapshot) == set(BookJobResponse.model_fields)
+    assert set(snapshot["items"][0]) == set(BookJobItemResponse.model_fields)
+
+
+async def test_parent_authorized_job_snapshot_is_consistent_during_finalize(
+    patched_get_db_connection,
+    seed_user,
+    test_db_uri,
+    monkeypatch,
+) -> None:
+    import psycopg
+
+    from src.server.database import education_book_jobs as book_job_repository
+
+    item = await _seed_running_item(
+        patched_get_db_connection,
+        parent_user_id=seed_user["user_id"],
+    )
+    read_started = asyncio.Event()
+    update_done = asyncio.Event()
+    interleaved = False
+
+    class CursorProxy:
+        def __init__(self, cursor_context):
+            self._cursor_context = cursor_context
+            self._cursor = None
+            self._sql = ""
+
+        async def __aenter__(self):
+            self._cursor = await self._cursor_context.__aenter__()
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return await self._cursor_context.__aexit__(exc_type, exc, traceback)
+
+        async def execute(self, sql, params=None):
+            self._sql = sql
+            return await self._cursor.execute(sql, params)
+
+        async def fetchone(self):
+            nonlocal interleaved
+            row = await self._cursor.fetchone()
+            if not interleaved and "SELECT jobs.job_id" in self._sql:
+                interleaved = True
+                read_started.set()
+                await update_done.wait()
+            return row
+
+        async def fetchall(self):
+            return await self._cursor.fetchall()
+
+    class ConnectionProxy:
+        def __init__(self, connection):
+            self._connection = connection
+
+        def cursor(self, *args, **kwargs):
+            return CursorProxy(self._connection.cursor(*args, **kwargs))
+
+    @asynccontextmanager
+    async def interleaved_connection():
+        async with patched_get_db_connection() as connection:
+            yield ConnectionProxy(connection)
+
+    async def finalize_between_reads() -> None:
+        await read_started.wait()
+        try:
+            async with await psycopg.AsyncConnection.connect(test_db_uri) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        UPDATE education_book_job_items
+                        SET status = 'succeeded', finished_at = NOW(), updated_at = NOW()
+                        WHERE item_id = %s
+                        """,
+                        (item["item_id"],),
+                    )
+                    await cur.execute(
+                        """
+                        UPDATE education_book_jobs
+                        SET status = 'succeeded', succeeded_items = 1,
+                            finished_at = NOW(), updated_at = NOW()
+                        WHERE job_id = %s
+                        """,
+                        (item["job_id"],),
+                    )
+                await conn.commit()
+        finally:
+            update_done.set()
+
+    monkeypatch.setattr(
+        book_job_repository,
+        "get_db_connection",
+        interleaved_connection,
+    )
+    finalizer = asyncio.create_task(finalize_between_reads())
+
+    snapshot = await book_job_repository.get_book_job_for_parent(
+        job_id=item["job_id"],
+        parent_user_id=seed_user["user_id"],
+    )
+    await finalizer
+
+    assert snapshot is not None
+    assert (snapshot["status"], snapshot["items"][0]["status"]) in {
+        ("running", "running"),
+        ("succeeded", "succeeded"),
+    }
 
 
 async def test_detail_budget_bounds_rows_bytes_and_keeps_terminal_events(
