@@ -30,6 +30,8 @@ Task 1–7 与 Task 4A 已交付。Task 7 已向开发库应用 `082_more_to_ski
 
 **2026-10-03 后续补验：** 家长正常 Cookie 从上传/解析、首次“添加并分析”、结构完成到讲义提交/刷新恢复已实测；第二标签页重复添加复用原教材和初始任务。新增真实 MinIO 上传中断/响应丢失与 PostgreSQL COMMIT 确认丢失测试，教材四套 `48 passed`；真实模型完成、业务回调未提交后精确终止临时 worker，原 8000 worker 恢复原沙箱并提交同一 attempt。新版工具/动作组合压力保留 1000 明细，其中 800 工具、200 业务、298430 字节；隔离 HTTP/browser 桌面/375px 默认203业务行、展开1000行，无溢出或raw泄漏。普通 PTC/MCP/subagent/刷新续轮/checkpoint 已实测。详见[后续记录](2026-10-03-more-to-skills-task8-incremental-results.md)。总 Task 8 暂不完成，家庭作业 live 等收口边界及既有前端全量失败按该记录保留。
 
+**家庭作业后续补验：** 用户同意仅设专用学生为三年级后，正常家长 UI 创建单次数学预习作业并保存反馈，正常学生 Cookie API 提交/幂等重发/重新登录读取反馈通过；家长刷新和375px可见，聚焦36 passed。学生作业UI及未来日历未补验。实际发现开发库 `practice_sources` 为空，练习类创建不可用，未擅自补种；该缺口与既有前端单测失败仍待收口，不能标记总 Task 8 完成。详见上述最新记录。
+
 Task 8 已开始：真实模型结构和中间知识点讲义提交成功，语义阶段可回放，实际批量默认跳过已有讲义与 runtime 取消已验证；补齐 PostgreSQL 四项部分失败、独立连接 reconcile、事务回滚恢复与浏览器分页/静默/前台/关闭活动恢复测试。真实验收发现的服务收尾、UUID 投影和客户端缓存/终态分页问题已修正。详细证据及未完成边界见 [Task 8 记录](2026-10-02-more-to-skills-task8-results.md)，仍不得标记完整验收完成。
 
 本批继续补验：普通 runtime 真实多进程 gate 分批 5/5、4/4；教材真实写锁 owner 被 SIGKILL 后由另一进程收敛失败，不双跑、不改变 attempt。150001 合成 delta 经真实 PG/Redis/浏览器过滤和回放保持有界，专用 Redis 断连后 HTTP SSE 由 PG 补齐终态。教材集成复跑 42 passed。临时进程/Redis 已收尾，共享数据和 5177/8000 不变；隔离库 schema 重建与活 worker 验收必须串行。真实 MinIO/COMMIT ACK、模型完成后跨进程恢复提交、家长 cookie 添加与完整普通产品 live 链仍待补，不将本批成功写为 Task 8 完成。
