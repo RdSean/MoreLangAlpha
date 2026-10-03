@@ -12,7 +12,9 @@
 
 ## 0. 执行前提
 
-> 2026-10-03 增量已实施：[业务动作时间线补充计划](2026-10-03-textbook-business-activity.md)的可选 action、工具预算保护、知识点历史/隐藏诊断/独立游标，以及限定的 Skill 可选上报说明已交付。两份数学/语言专用真实加工和 PG/SSE/browser 一致性已验证，见[增量验收记录](2026-10-03-textbook-business-activity-results.md)。下文 Task 1–5 保留历史交付记录，其中“不修改 Skill”、stage-only、仅当前阶段和共享全部工具预算由该增量替代；不重新执行数据库切换。本计划 Task 6/总 Task 8 仍未完成。
+> 2026-10-03 最终状态：本计划 Task 1–6 随总 Task 8 完成，15 行验收矩阵已有自动化或真实行为证据，最终前端2623/后端7930/教材集成48/较宽浏览器35 passed。详见[最终收口记录](2026-10-03-more-to-skills-task8-closeout.md)，额外未测边界单独保留。下文执行规则与历史检查点不重新触发数据库切换。
+
+> 2026-10-03 增量已实施：[业务动作时间线补充计划](2026-10-03-textbook-business-activity.md)的可选 action、工具预算保护、知识点历史/隐藏诊断/独立游标，以及限定的 Skill 可选上报说明已交付。两份数学/语言专用真实加工和 PG/SSE/browser 一致性已验证，见[增量验收记录](2026-10-03-textbook-business-activity-results.md)。下文 Task 1–5 保留历史交付记录，其中“不修改 Skill”、stage-only、仅当前阶段和共享全部工具预算由该增量替代；不重新执行数据库切换。
 
 - 依据：[详细设计](2026-10-02-managed-textbook-progress-design.md)、[总设计](2026-09-30-more-to-skills-design.md)、[总实施计划](2026-09-30-more-to-skills-implementation.md)。
 - 在 `feature/more-to-skills-textbook-refactor` worktree 中实施；总 Task 4 提交 `bb29d347` 已完成。本计划分阶段并入总计划，不能将整份计划当作总 Task 5 的前置任务。
@@ -29,7 +31,7 @@
 
 总 Task 5/6 继续负责教材完整 API、学生和图书馆消费者，总 Task 7 负责一次切换。Task 4A 完成其 Task 1–4 的检查和提交后即可进入总 Task 5。
 
-### 当前检查点（2026-10-02）
+### 历史检查点（最终收口前）
 
 最新家庭作业收口（2026-10-03）：专用学生g3的家长正常UI预习作业创建/反馈、正常学生Cookie API提交幂等/重新登录读反馈、家长刷新及375px通过。后续只补入开发库两项规范练习来源，并实测数学练习家长UI/学生API链。Plugins测试修正实际sessionStorage原型模拟，未改产品行为；全量前端2607、后端7930 passed，字典PG集成1 passed，build/lint通过。8000已重启加载用户LangSmith配置，未声称真实trace已上传；5177保留。两项缺口已关闭，学生作业UI、未来日历及其他矩阵边界未补验，总 Task 8/本计划 Task 6 仍不整体标记完成。详情见下方最新后续记录，旧检查点仅作历史。
 
@@ -446,6 +448,8 @@ git commit -m "feat(web): add textbook activity timeline"
 ```
 
 ## Task 6：全量回归与文档收口（随总 Task 8）
+
+2026-10-03 已完成，当前验证范围、真实链路与已记录静态基线见[最终收口记录](2026-10-03-more-to-skills-task8-closeout.md)。不把每种故障均未重跑真实模型作为新必验门槛。
 
 Task 4A 交付时只运行本计划 Task 1–4 的聚焦检查。本节在总 Task 5–7 完成后汇总验收，不要求 Task 4A 提前通过未实现工作台的测试。
 

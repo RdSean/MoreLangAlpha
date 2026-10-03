@@ -453,13 +453,14 @@ test('reader restores independent positions after reload and delayed body loadin
   await reader.evaluate((element) => { element.scrollTop = 240; });
   await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(240);
   await page.reload();
-  await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(240);
+  // Match the restore hook's four-pixel tolerance for font/Markdown layout changes.
+  await expect.poll(async () => Math.abs(await reader.evaluate((element) => element.scrollTop) - 240)).toBeLessThanOrEqual(4);
   delaySource = true;
   await page.getByRole('tab', { name: '原文', exact: true }).click();
-  await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(580);
+  await expect.poll(async () => Math.abs(await reader.evaluate((element) => element.scrollTop) - 580)).toBeLessThanOrEqual(4);
   await page.reload();
   await expect(page.getByText('原书内容', { exact: true })).toBeVisible();
-  await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(580);
+  await expect.poll(async () => Math.abs(await reader.evaluate((element) => element.scrollTop) - 580)).toBeLessThanOrEqual(4);
 });
 
 test('reader waits for a cold image before restoring its saved offset', async ({ page }) => {

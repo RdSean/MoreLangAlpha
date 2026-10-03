@@ -523,7 +523,10 @@ test('waits for an explicit method choice, then shows progress and extensible ar
     mimeType: 'application/pdf',
     buffer: Buffer.from('%PDF-1.7\nfixture\n%%EOF\n'),
   });
-  await page.getByRole('checkbox', { name: dataset.name }).check();
+  await page.getByRole('button', { name: 'Dataset selector' }).click();
+  await page.getByRole('button', { name: dataset.name, exact: true }).click();
+  await page.getByRole('heading', { name: 'Parse document' }).click();
+  await expect(page.getByRole('button', { name: 'Dataset selector' })).toContainText(dataset.name);
   await page.getByRole('checkbox', { name: tag.name }).check();
   await page.getByRole('button', { name: 'Upload and inspect' }).click();
 
@@ -597,10 +600,13 @@ test('library textbook workbench mock flow renders without runtime', async ({ pa
   const networkFindings = [];
   const inspectedResponsePaths = [];
   const pendingResponseChecks = [];
+  const pendingApiRequests = new Set();
+  const capturedStreamBodies = new Map();
   const inspectedBodyCounts = { requests: 0, responses: 0 };
   page.on('request', (request) => {
     const url = new URL(request.url());
     if (!isRelevantApiPath(url.pathname)) return;
+    pendingApiRequests.add(request);
     inspectedBodyCounts.requests += 1;
     const body = request.postData();
     const requestText = `${request.method()} ${url.href}\n${body ?? ''}`;
@@ -609,6 +615,13 @@ test('library textbook workbench mock flow renders without runtime', async ({ pa
       networkFindings.push(`request ${url.pathname}: ${finding} in ${requestText}`);
     }
   });
+  page.on('requestfinished', (request) => pendingApiRequests.delete(request));
+  page.on('requestfailed', (request) => pendingApiRequests.delete(request));
+  const inspectCompletedResponses = async () => {
+    // Ignore unrelated, deliberately long-lived thread SSE, not API body errors.
+    await expect.poll(() => pendingApiRequests.size).toBe(0);
+    await Promise.all(pendingResponseChecks);
+  };
   page.on('response', (response) => {
     const url = new URL(response.url());
     if (!isRelevantApiPath(url.pathname)) return;
@@ -617,7 +630,8 @@ test('library textbook workbench mock flow renders without runtime', async ({ pa
     const headers = Object.entries(response.headers())
       .map(([name, value]) => `${name}: ${value}`)
       .join('\n');
-    pendingResponseChecks.push(response.text().then((body) => {
+    const streamBody = capturedStreamBodies.get(response.request());
+    pendingResponseChecks.push((streamBody === undefined ? response.text() : Promise.resolve(streamBody)).then((body) => {
       const responseText = `${response.status()} ${url.href}\n${headers}\n${body}`;
       const finding = findSensitiveNetworkValue(responseText);
       if (finding) {
@@ -626,6 +640,18 @@ test('library textbook workbench mock flow renders without runtime', async ({ pa
     }).catch((error) => {
       networkFindings.push(`response ${url.pathname}: ${String(error)}`);
     }));
+  });
+  // Chromium may discard SSE response bodies from CDP. Inspect the exact terminal
+  // HTTP bytes before relaying this finite fixture, rather than skipping its body.
+  await page.route(`**/api/v1/education/book-jobs/${textbookAssets.jobId}/events*`, async (route) => {
+    const upstream = await route.fetch();
+    try {
+      const body = await upstream.body();
+      capturedStreamBodies.set(route.request(), body.toString('utf8'));
+      await route.fulfill({ response: upstream, body });
+    } finally {
+      await upstream.dispose();
+    }
   });
   // If either the document usage view or textbook workbench starts depending on runtime state, it will get
   // a 503 here and the zero-request assertion will also fail.
@@ -652,6 +678,7 @@ test('library textbook workbench mock flow renders without runtime', async ({ pa
   await page.getByRole('button', { name: '开始解析' }).click();
   await expect(page.getByRole('heading', { name: '解析结果' })).toBeVisible();
 
+  await inspectCompletedResponses();
   await page.goto(`/documents/${document.document_id}`);
   await expect(page.getByRole('tab', { name: '原文' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tab', { name: '解析结果' })).toBeVisible();
@@ -683,6 +710,8 @@ test('library textbook workbench mock flow renders without runtime', async ({ pa
   });
 
   sandboxAvailable = false;
+  // CDP response bodies belong to the current document; inspect before replacing it.
+  await inspectCompletedResponses();
   await page.goto(`/documents/${document.document_id}`);
   await page.getByRole('tab', { name: '教材资产' }).click();
   await expect(page.getByRole('link', { name: textbookAssets.title })).toHaveAttribute(
@@ -709,8 +738,7 @@ test('library textbook workbench mock flow renders without runtime', async ({ pa
   }
   expect(sandboxRequests).toEqual([]);
 
-  await page.waitForLoadState('networkidle');
-  await Promise.all(pendingResponseChecks);
+  await inspectCompletedResponses();
   const requiredInspectedPaths = [
     `/api/v1/documents/${document.document_id}`,
     `/api/v1/documents/${document.document_id}/teaching-usage`,
@@ -724,6 +752,7 @@ test('library textbook workbench mock flow renders without runtime', async ({ pa
   }
   expect(inspectedBodyCounts.requests).toBeGreaterThanOrEqual(10);
   expect(inspectedBodyCounts.responses).toBeGreaterThanOrEqual(10);
+  expect(capturedStreamBodies.size).toBeGreaterThan(0);
   expect(networkFindings).toEqual([]);
 });
 

@@ -5,7 +5,7 @@
 
 配套：[设计](2026-09-30-more-to-skills-design.md)、[实施计划](2026-09-30-more-to-skills-implementation.md)。
 
-2026-10-02 实际切换范围与验证记录见[Task 7 切换记录](2026-10-02-more-to-skills-cutover-results.md)。本文保留原审计要求；F.5 的全链路行为验收归 Task 8，尚不能宣称整份最终验收全部通过。
+2026-10-02 实际切换范围与验证记录见[Task 7 切换记录](2026-10-02-more-to-skills-cutover-results.md)。本文保留原审计要求。2026-10-03 F.5 的 Task 8 行为验收已收口，见[最终记录](2026-10-03-more-to-skills-task8-closeout.md)；没有新增未完成清理项。本轮没有再执行数据、容器、对象或持久卷删除。
 
 ## A. 旧页面与路由：删除页面，不套壳改名
 

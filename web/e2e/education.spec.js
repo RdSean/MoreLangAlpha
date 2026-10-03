@@ -15,6 +15,20 @@ const student = {
   name: '学生',
   role: 'student',
   household_id: 'household-1',
+  grade_code: 'g4',
+};
+
+const dictionaries = {
+  timezone: 'Asia/Tokyo',
+  subjects: [{
+    code: 'math', name: '数学', color: '#277DA1', sort_order: 1,
+    homework_types: [{ code: 'practice', name: '练习', sort_order: 1 }],
+  }],
+  grade_levels: [{ code: 'g4', name: '四年级', stage: 'primary', sort_order: 4 }],
+  practice_sources: [
+    { code: 'schoolwork', name: '校内作业', sort_order: 1 },
+    { code: 'homework', name: '校外作业', sort_order: 2 },
+  ],
 };
 
 const task = (status) => ({
@@ -160,6 +174,7 @@ test.describe('Family education roles', () => {
       'GET /auth/me': parent,
       'GET /auth/members': [parent, student],
       'GET /education/tasks': [],
+      'GET /education/dictionaries': dictionaries,
       'POST /education/tasks': async (route) => {
         created = route.request().postDataJSON();
         await route.fulfill({
@@ -172,15 +187,21 @@ test.describe('Family education roles', () => {
 
     await page.goto('/education');
     await expect(page.getByRole('heading', { name: '家庭作业' })).toBeVisible();
-    await page.getByRole('button', { name: '创建作业' }).click();
-    await page.getByLabel('学生').selectOption(student.user_id);
-    await page.getByLabel('标题').fill('新的阅读任务');
+    await page.getByRole('link', { name: '创建作业' }).click();
+    await page.getByRole('button', { name: student.name, exact: true }).click();
+    await expect(page.getByText('当前年级：四年级')).toBeVisible();
+    await page.getByLabel('说明').fill('比较十位数字。');
     await page.getByLabel('截止时间').fill('2026-08-10T10:00');
     await page.getByRole('button', { name: '创建作业' }).click();
 
     await expect.poll(() => created).toMatchObject({
       assigned_student_id: student.user_id,
-      title: '新的阅读任务',
+      title: '数学练习',
+      description: '比较十位数字。',
+      subject_code: 'math',
+      type_code: 'practice',
+      practice_source_code: 'homework',
+      due_at: '2026-08-10T01:00:00.000Z',
       frequency: 'once',
       material_asset_ids: [],
     });
@@ -190,14 +211,16 @@ test.describe('Family education roles', () => {
     let submitted;
     await mockAPI(page, {
       'GET /auth/me': student,
-      'GET /education/tasks': [task('revision_requested')],
+      'GET /education/tasks': [task('completed')],
+      'GET /education/dictionaries': dictionaries,
+      'GET /education/learning': [],
       'POST /education/assets': {
         asset_id: 'asset-1',
         original_filename: 'homework.pdf',
         content_type: 'application/pdf',
         size_bytes: 16,
       },
-      'POST /education/tasks/*/submissions': async (route) => {
+      'POST /education/tasks/*/revisions': async (route) => {
         submitted = route.request().postDataJSON();
         await route.fulfill({ status: 201, contentType: 'application/json', body: '{}' });
       },
@@ -208,14 +231,14 @@ test.describe('Family education roles', () => {
     await expect(page.getByRole('button', { name: '创建作业' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '反馈' })).toHaveCount(0);
 
-    await page.getByRole('button', { name: '提交作业' }).click();
-    await page.getByPlaceholder('写下完成情况').fill('已按建议补充。');
+    await page.getByRole('button', { name: '补充提交' }).click();
+    await page.getByPlaceholder('补充说明或修改内容').fill('已按建议补充。');
     await page.getByLabel('附件').setInputFiles({
       name: 'homework.pdf',
       mimeType: 'application/pdf',
       buffer: Buffer.from('student homework'),
     });
-    await page.getByRole('button', { name: '提交' }).click();
+    await page.getByRole('button', { name: '提交补充' }).click();
 
     await expect.poll(() => submitted).toMatchObject({
       submission_text: '已按建议补充。',
