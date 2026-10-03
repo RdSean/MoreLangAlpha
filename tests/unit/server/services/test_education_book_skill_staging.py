@@ -1,6 +1,7 @@
 """Managed textbook skills are repository-owned, frozen, and free of JSONL helpers."""
 
 from unittest.mock import AsyncMock
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -62,7 +63,20 @@ async def test_staging_ignores_personal_skill_catalog_and_does_not_stage_progres
     assert f"{root}/SKILL.md" in files
     assert f"{root}/schemas/book-structure.schema.json" in files
     assert f"{root}/tools/split_blocks.py" in files
+    skill_root = (
+        Path(__file__).resolve().parents[4]
+        / "plugins/langalpha_local/skills/more-to-skills"
+    )
+    for reference in (
+        "material-math.md",
+        "material-language.md",
+        "material-general.md",
+    ):
+        destination = f"{root}/reference/{reference}"
+        assert destination in files
+        assert files[destination] == (skill_root / "reference" / reference).read_bytes()
     assert all(path.startswith(root + "/") for path in files)
+    assert not any("skill-backups" in path for path in files)
     sandbox.seal_directory_read_only.assert_awaited_once_with(root)
 
 
@@ -93,3 +107,31 @@ async def test_failed_skill_upload_does_not_seal_incomplete_catalog():
             expected_schema_sha256=identity.schema_sha256,
         )
     sandbox.seal_directory_read_only.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_subject_reference_change_rejects_frozen_catalog_before_upload(
+    monkeypatch, tmp_path
+):
+    from src.server.services import education_book_structure as structure
+
+    root = tmp_path / "skill"
+    (root / "schemas").mkdir(parents=True)
+    (root / "reference").mkdir()
+    (root / "SKILL.md").write_bytes(b"instructions")
+    (root / "schemas/book-structure.schema.json").write_bytes(b"{}")
+    reference = root / "reference/material-math.md"
+    reference.write_bytes(b"original teaching guidance")
+    monkeypatch.setattr(structure, "_SKILL_ROOT", root)
+    identity = get_more_to_skills_identity()
+    reference.write_bytes(b"changed teaching guidance")
+    assert get_more_to_skills_identity().schema_sha256 == identity.schema_sha256
+    sandbox = AsyncMock()
+    with pytest.raises(ValueError, match="frozen identity"):
+        await education_book_jobs.stage_book_skill(
+            str(uuid4()),
+            sandbox,
+            expected_skill_sha256=identity.skill_sha256,
+            expected_schema_sha256=identity.schema_sha256,
+        )
+    sandbox.aupload_file_bytes.assert_not_awaited()
