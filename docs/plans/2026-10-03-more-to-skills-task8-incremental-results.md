@@ -4,7 +4,7 @@
 
 ## 范围与结论
 
-本批补齐家长普通登录 Cookie 的首次添加与讲义生成、真实 MinIO 断连、真实 PostgreSQL COMMIT 确认丢失、模型完成但业务未提交时的跨进程恢复，以及新版动作/工具预算组合容量。普通 PTC、MCP、subagent 与 checkpoint 也已实测。用户确认后，专用学生的单次预习作业创建/提交/反馈链已补齐。总 Task 8 暂不标记完成：开发库练习来源字典为空，练习类创建未通过；前端全量仍有既有 Plugins storage-throws 失败。
+本批补齐家长普通登录 Cookie 的首次添加与讲义生成、真实 MinIO 断连、真实 PostgreSQL COMMIT 确认丢失、模型完成但业务未提交时的跨进程恢复，以及新版动作/工具预算组合容量。普通 PTC、MCP、subagent 与 checkpoint 也已实测。用户确认后，专用学生的单次预习作业创建/提交/反馈链已补齐。后续收口已修复开发库练习来源空字典并实测练习作业，Plugins storage-throws 测试模拟也已纠正，前后端全量通过。总 Task 8 仍保留矩阵中的其他未实测边界，不因两项缺口关闭而宣称全部完成。
 
 只新增验收测试与记录，未修改产品实现、Skill、schema 或用户模型配置。`.env` 延续原分支的业务配置，S3 使用用户确认的 `localhost:9000`；本批末逐键比对仅 `LANGSMITH_API_KEY`、`LANGSMITH_TRACING` 有本地差异，保留原状，不输出值或覆盖配置。`agent_config.yaml` 仍字节一致。不导出家长 Cookie，不复制凭据。专用夹具、身份、日志、截图均不提交。
 
@@ -107,7 +107,17 @@ Flash 的普通学生 Cookie/真实模型/上下文持久化证据沿用上一�
 
 验收操作限制：第一次自动 fill 的日期虽进入 DOM，却未在提交时进入表单状态，报“截止时间无效”；真实键盘变更后可提交，未改产品代码。键盘最终得到的截止时间为 `2025-11-04T09:00:00Z`（家庭时区 18:00），所以本轮包含已过截止时间的单次作业，不作为未来日历排程证据。第一版核验脚本把列表上的 latest feedback 字段误当成详情根字段；按现有接口改为列表摘要加详情嵌套 reviews 核验后完整通过，未改接口。
 
-另一个真实缺口：创建表单的“练习来源”没有选项，正常学生 `/education/dictionaries` 确认 `practice_sources` 长度为 `0`；练习类提交按钮因此不可用，本轮改验不依赖该字典的预习类型。读取 082 迁移未发现删除该字典表的操作，但尚未确定字典数据为何为空；未补种或删除字典数据，不宣称全部家庭作业类型通过。
+此前发现创建表单的“练习来源”没有选项，正常学生 `/education/dictionaries` 确认 `practice_sources` 长度为 `0`；该批改验不依赖字典的预习类型。读取 082 迁移未发现删除该字典表的操作，历史缺失原因仍未确定。后续修复和练习验收见下节，不把此前未补种状态作为当前状态。
+
+### 两项缺口收口与服务重启
+
+- 精确核对开发库为 `postgres`、head 为 `082_more_to_skills_textbooks`。按迁移 034 的规范在一个事务中补入 `schoolwork/校内作业/1`、`homework/校外作业/2`，使用 `ON CONFLICT (code) DO NOTHING`，不更新或删除既有行。修复前后作业 4 条、提交 2 条不变；再次执行新增 0 条。
+- 家长普通 UI 为同一专用学生创建数学练习、校外作业、单次合成任务 `b0b9528e-00a7-4ecf-9e3e-ef223ac725eb`，标记 `Task 8 Practice Acceptance 20261003`。真实键盘操作后核对截止时间为 `2026-10-04T09:00:00Z`，即家庭当地 18:00。没有修改 henry 或既有作业。
+- 学生独立正常 Cookie API 打卡及同幂等键重发，仅一份提交、sequence 1、completed。家长 UI 保存反馈并刷新可见，学生重新登录读取相同列表摘要及嵌套 review，反馈仅一条。字典返回两项；新增专用验收后数据库作业 5 条、提交 3 条。截图仅保存私人临时目录，不提交。
+- Plugins 的 `connectReturn.test.ts` 原 isolated 15 passed/1 failed。Node v26.3.0 全局 `Storage.prototype` 不是 jsdom 实际 sessionStorage 的原型，旧 spy 没有模拟存储禁用，因而误触发 abandoned 回调。改为 `Object.getPrototypeOf(sessionStorage)` 并直接断言 getItem/setItem 抛 blocked，isolated 16 passed。只修正测试替身，不修改产品行为或放宽原断言。
+- 新全量：前端 271 文件、2607 passed；后端 7930 passed、8 deselected、1 xfailed、34 warnings（109.92s）；字典 PostgreSQL 集成 1 passed（4.90s）；build/typecheck 和 critical path 356.4 kB gzip 通过；make lint 0 error/55 既有 warning。测试进程单独禁用 tracing，未覆盖 `.env`。
+- 重启前数据库确认活动 runtime、subagent、教材 queued/running 均为 0。旧服务等待开放连接超时后正常完成 shutdown；新服务 18:27 启动在 `0.0.0.0:8000`。5177 原前端保留，本机和 LAN `192.168.1.252` 的页面/health HTTP 200，共享 Docker/volumes 不变。
+- 用户新增 `.env` 保留，SDK 确认 key 存在、tracing enabled、project `langalpha`，未输出凭据。尚未验证云端实际接收真实加工 trace，重启不使旧任务追溯产生轨迹。模型/工具耗时看后续 trace；排队、文件冻结和最终业务存储等端到端区间仍需对照数据库时间，不能只凭模型 trace 代替。
 
 ## 验证与剩余边界
 
@@ -117,4 +127,4 @@ Flash 的普通学生 Cookie/真实模型/上下文持久化证据沿用上一�
 - 新测试 Ruff/format 与 diff whitespace 检查通过。没有为这些只读/故障验收改产品代码。
 - 收尾确认 8843/8844/5188/6389 无监听，5177/8000 仍监听 `0.0.0.0`；本机与当前 LAN `192.168.1.252` 的前端首页/后端 health 均 HTTP 200。家长原标签页保留在本批成功教材，临时标签页已关闭。
 - 本次家庭账户/作业页面/作业契约聚焦前端回归：三文件 `36 passed`；学生正常 Cookie 提交幂等和家长 UI 反馈持久化独立验证通过，没有重跑全部前端或教材集成。
-- 总 Task 8 尚有练习来源空字典与既有前端失败的收口；单次预习作业 live 和新版容量浏览器组合复验已补齐。大型教材、多类型来源及长期负载属于明确保留的额外覆盖边界，不保证全部模型提前上报。
+- 练习来源空字典与 Plugins 测试失败已按上节关闭，单次预习/练习作业 live 和新版容量浏览器组合复验已补齐。学生作业 UI、未来日历排程及原矩阵其他未实测项仍保留；大型教材、多类型来源及长期负载不冒充本轮覆盖，不保证全部模型提前上报。总 Task 8 暂不整体标记完成。

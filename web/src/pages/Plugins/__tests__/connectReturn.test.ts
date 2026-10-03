@@ -210,12 +210,16 @@ describe('useConnectReturn', () => {
   // Private windows and blocked site data. This guidance is a nicety, and it
   // must never be the thing that takes the page down.
   it('survives a storage that throws on both sides', () => {
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    // Node's global Storage may differ from the instance supplied by jsdom.
+    const storagePrototype = Object.getPrototypeOf(sessionStorage);
+    vi.spyOn(storagePrototype, 'setItem').mockImplementation(() => {
       throw new Error('blocked');
     });
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    vi.spyOn(storagePrototype, 'getItem').mockImplementation(() => {
       throw new Error('blocked');
     });
+    expect(() => sessionStorage.getItem('mcp:connect-started')).toThrow('blocked');
+    expect(() => sessionStorage.setItem('mcp:connect-started', '[]')).toThrow('blocked');
     const h = handlers();
 
     expect(() => markConnectStarted('robinhood', false)).not.toThrow();

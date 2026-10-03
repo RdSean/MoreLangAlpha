@@ -92,7 +92,7 @@ Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验�
 | 学生与图书馆反查 | PG assignment/progress/note/chat-space/document-usage；真实学生 Cookie 进度/笔记/总结/模型追问及家长转录；家长正常 Cookie 图书馆添加 | 更多真实教材/节点的组合覆盖 |
 | 撤销/跨家庭 | PG ACL；真实学生 cookie 原文/讲义/图片/笔记/chat-space 跨家庭拒绝，撤销后读取/写入/追问拒绝，旧 thread 无上下文复用拒绝；浏览器旧页不可用 | 授权撤销与在途模型提交同时竞态的 live 故障注入 |
 | 旧路由/catalog | Task 7 切换清单、PG head catalog、退役路由单元回归 | 无新增清理；沿用 Task 7 证据 |
-| 普通产品回归 | 全量后端/前端记录；managed Docker、文档E2E/runtime gate 9项；正常家长Cookie PTC写文件、子代理交付、MCP scrape、刷新续轮、70个checkpoint；上一批学生Flash；专用学生g3的家长UI预习作业创建/反馈、正常学生Cookie API提交幂等/读取反馈、家长刷新及375px，聚焦36 passed | 开发库practice_sources为空，练习类创建不可用，未补种；学生作业UI和未来日历排程未补验；既有Plugins单测失败保留 |
+| 普通产品回归 | managed Docker、文档E2E/runtime gate 9项；正常家长Cookie PTC写文件、子代理交付、MCP scrape、刷新续轮、70个checkpoint；上一批学生Flash；专用学生g3的家长UI预习及练习作业创建/反馈、正常学生Cookie API提交幂等/读取反馈，预习家长刷新及375px；字典补齐两规范项，Plugins测试替身修正；最新前端2607、后端7930 passed | 学生作业UI和未来日历排程未补验；字典历史缺失原因未确定 |
 
 ## 验证结果
 
@@ -113,4 +113,4 @@ Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验�
 - 本批重新执行教材三套 PostgreSQL 集成：`42 passed in 65.33s`。此前后端/前端全量记录保持原日期和原结果，不冒充本批重新运行；既有 Plugins 失败仍未消除。
 - `.env` 与 `agent_config.yaml` 再次与原分支字节一致，5177/8000 本机及当前 LAN HTTP 200，共享 PostgreSQL/Redis/MinIO 均仍运行。
 
-最新未完成边界以 2026-10-03 后续记录为准：练习来源空字典与既有前端失败收口；已补齐的单次预习作业 live、MinIO/COMMIT ACK、模型完成后跨进程提交、家长 Cookie 及新版容量浏览器回放不再列为未测。未完成矩阵行不得在总计划或语义计划标记完成。
+最新状态以 2026-10-03 后续记录的“两项缺口收口与服务重启”为准：练习来源已补齐并完成专用练习作业 live，Plugins 仅修正存储模拟测试，前端2607、后端7930 passed。已补齐的预习/练习作业 live、MinIO/COMMIT ACK、模型完成后跨进程提交、家长 Cookie 及新版容量回放不再列为未测；上文历史失败保留其日期语境。8000已重启并加载用户LangSmith配置，尚未确认真实trace云端接收。其他未实测矩阵项保留，总 Task 8/语义 Task 6 不整体标记完成。

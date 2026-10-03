@@ -2,6 +2,14 @@
 
 ## 2026-10-03
 
+### 收口：练习来源字典与 Plugins 存储模拟测试
+
+- 开发库练习来源缺失，仅按迁移 034 的规范补入“校内作业／校外作业”两条，事务内校验已有作业和提交计数不变；重复执行不新增记录。未改 schema、迁移、产品实现或共享容器数据，缺失的历史原因未确定。
+- 家长正常 UI 为专用学生创建数学练习作业，学生独立正常 Cookie API 提交及幂等重发、家长 UI 反馈、学生重新登录读取反馈通过；新作业截止时间为 2026-10-04 家庭当地 18:00。不冒充学生作业 UI 或未来日历排程验收。
+- Plugins 的 storage-throws 测试改为拦截实际 sessionStorage 实例原型，并断言模拟确实生效，解决 Node 全局 Storage 与 jsdom 原型不同造成的误报；没有改变连接器产品行为。
+- 本轮全量复验：前端 271 文件／2607 passed，后端 7930 passed／8 deselected／1 xfailed；字典 PostgreSQL 集成 1 passed，build/typecheck 与关键路径 356.4 kB gzip 通过，make lint 0 error／55 既有 warning。
+- 确认没有活动运行后重启 8000，5177 保留，本机与 LAN HTTP 200；保留用户新增 LangSmith 配置，SDK tracing 已启用，项目 langalpha。未启动新的真实模型加工或确认云端轨迹入库，不把历史任务写为可回溯追踪；总 Task 8 的其他未实测边界继续明确保留。
+
 ### 验收：专用学生的家庭作业提交与家长反馈
 
 - 用户同意后，正常家长 UI 仅将专用 `Task 8 Acceptance student` 设为三年级，并创建一项合成数学预习作业；henry 和既有作业未改。
