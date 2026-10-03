@@ -20,6 +20,7 @@ from src.server.database.education_books import (
     get_owned_parse_job,
 )
 from src.server.database.session_lock import await_settled
+from src.server.services.education_book_timing import book_phase
 from src.utils.storage import delete_object, get_bytes, upload_bytes
 
 
@@ -487,13 +488,14 @@ async def create_textbook_from_library_source(
         return existing
 
     textbook_id = uuid4()
-    frozen = await freeze_book_source(
-        owner_user_id=parent_user_id,
-        parse_job_id=parse_job_id,
-        primary_artifact_id=primary_artifact_id,
-        household_id=household_id,
-        textbook_id=str(textbook_id),
-    )
+    with book_phase({"textbook_id": textbook_id}, "source_freezing"):
+        frozen = await freeze_book_source(
+            owner_user_id=parent_user_id,
+            parse_job_id=parse_job_id,
+            primary_artifact_id=primary_artifact_id,
+            household_id=household_id,
+            textbook_id=str(textbook_id),
+        )
     try:
         created = await create_textbook_with_initial_job(
             textbook_id=textbook_id,

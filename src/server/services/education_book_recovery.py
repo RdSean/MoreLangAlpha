@@ -24,6 +24,7 @@ from src.server.services.education_book_jobs import (
     finalize_book_item,
 )
 from src.server.services.education_book_activity import publish_book_activity_hint
+from src.server.services.education_book_timing import book_phase
 from src.server.services.runs.cancel import publish_cancel_nudge
 from src.server.services.runs.executor import LocalRunExecutor
 from src.server.services.workspace_manager import WorkspaceManager
@@ -51,11 +52,12 @@ async def recover_completed_book_item(item: Mapping[str, Any]) -> dict[str, Any]
             )
         except UnicodeDecodeError as exc:
             raise RuntimeError("Frozen textbook Markdown is not UTF-8") from exc
-    return await finalize_book_item(
-        item=recovered_item,
-        task=build_execution_task(recovered_item),
-        sandbox=session.sandbox,
-    )
+    with book_phase(recovered_item, "recovery_finalization"):
+        return await finalize_book_item(
+            item=recovered_item,
+            task=build_execution_task(recovered_item),
+            sandbox=session.sandbox,
+        )
 
 
 async def _signal_cancelled_book_runtime(

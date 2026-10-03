@@ -6,7 +6,7 @@
 
 - 基线代码：`7fff42cc5`。用户提供 graph trace `f55f5ae6-6c76-465b-a702-c3c47c3da0e8`，graph 79.71s，14 次模型调用合计 71.17s；此计时沿用用户分析。
 - 开发库只读核对：job `1129c084-ee90-4ca7-af57-30b9e01c53f5`，execution `4c6cf80a-0d4b-4cb7-ba2b-5f5b24287d39`，run 与 trace 同 ID，深度 `lesson`，要求“给小学生进行讲解。使用中文”。
-- started `2026-10-03T09:39:01.452847Z`、finished `09:40:26.217314Z`，业务开始到提交 84.764s；包含 sandbox/staging/graph/收尾，不能与 graph 相加。首次请求/冻结、独立模型配置和推理强度待核对，不从时间差推断精确分段。
+- started `2026-10-03T09:39:01.452847Z`、finished `09:40:26.217314Z`，业务开始到提交 84.764s；包含 sandbox/staging/graph/收尾，不能与 graph 相加。SDK 只读核对 trace 的公开元数据：模型 deepseek-flash、reasoning_effort high、prompt_guidance detailed；14 个 LLM spans。首次请求/冻结未测，不从时间差推断精确分段。
 - 来源 SHA256 `ea1304d40631ef98be9d691f01e09e3b8adedc590a589061ede7b538653c3530`；旧 Skill SHA256 `d80660ca11693cb11003a33e923bc1faa52430fda6e287cb44b56817d1c5d7ef`；结构 schema SHA256 `601bced7331cb5eac37ead5a8c3f13ed55382f4afa05d2e4227b6ee04d7eb6d1`。
 - 开始开发前 jobs/items queued/running 为 0，conversation responses in_progress 为 0。精确停止原后端 reloader PID 51658，避免自动重载中间版本；共享 Docker 和数据不变。前端保留，最终恢复 8000。
 
@@ -25,3 +25,10 @@
 - 实际执行目录放在 RuntimeContextMiddleware 的缓存断点之后；两个不同 execution 的静态提示相同，lean 为 detailed 子集。源文不授予工具能力，输入与 Skill 只读规则保留。
 - 初始新接口/渲染测试 6 failed、1 passed；实现后提示/契约/runtime/普通输出格式 80 passed。新增实际 create_agent 装配、动态上下文与两套缓存回归后聚焦 45 passed，1 既有 Pydantic copy 弃用 warning；改动 Ruff 通过。
 - 真实模型耗时和内容行为仍待 P4 验证，提示长度变化不等同于已证明提速。
+
+## P3：分段计时与回归
+
+- 教育模块增加单次调用范围的 monotonic 计时：source_freezing、sandbox_preparation、input_staging、finalization、recovery_finalization。只输出白名单身份与阶段/耗时/结果，不输出来源、要求、错误正文或凭据；日志失败不改变结果/原异常。
+- 两项准备时间进入 graph 的 education_preparation_ms 元数据；最终提交与恢复提交通过 run/execution/attempt 关联的结构化服务日志查询。graph/LLM 使用原 LangSmith spans，没有为同一次模型调用重复统计。排队与总提交时间仍取持久数据库时间戳，首次请求没有历史计时则标为未知。
+- 初始计时测试因缺少模块失败；实现后教材/进度/活动/工具/facade 聚焦 96 passed。全量后端 7941 passed、8 deselected、1 xpassed、38 warnings，101.46s；期望失败项本轮 xpassed，不据此宣称其所有环境均已修复。
+- 明确 TEST_DB_NAME=langalpha_test、MinIO opt-in，本机四套教材集成串行 48 passed，97.09s。测试只重建隔离库 schema，未改开发库业务数据或共享挂载卷。

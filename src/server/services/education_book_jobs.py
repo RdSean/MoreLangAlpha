@@ -43,6 +43,7 @@ from src.server.services.education_book_activity import (
     publish_book_activity_hint,
 )
 from src.server.services.education_book_progress import progress_contract
+from src.server.services.education_book_timing import book_phase
 from src.server.services.education_book_structure import (
     MoreToSkillsIdentity,
     TrustedBookSource,
@@ -708,6 +709,7 @@ async def launch_book_item(
     _validate_book_execution_identity(item)
     identity = _managed_identity(item)
     task = build_execution_task(item)
+    timings: dict[str, float] = {}
     prompt = managed_item_prompt(item)
     workspace_id = str(uuid4())
     thread_id: str | None = None
@@ -743,19 +745,20 @@ async def launch_book_item(
             parent_user_id=str(item["requested_by_user_id"])
         )
         policy = education_book_policy(identity["execution_id"])
-        session = (
-            await WorkspaceManager.get_instance().provision_managed_textbook_session(
+        with book_phase(item, "sandbox_preparation", measurements=timings):
+            session = await WorkspaceManager.get_instance().provision_managed_textbook_session(
                 workspace_id=workspace_id,
                 policy=policy,
             )
-        )
-        staged = await stage_book_execution(
-            item=item,
-            task=task,
-            sandbox=session.sandbox,
-        )
+        with book_phase(item, "input_staging", measurements=timings):
+            staged = await stage_book_execution(
+                item=item,
+                task=task,
+                sandbox=session.sandbox,
+            )
         item.update(staged)
         run_id = str(uuid4())
+        item["run_id"] = run_id
         run_handle = await RunCoordinator.get_instance().start_run(
             thread_id=thread_id,
             run_id=run_id,
@@ -810,6 +813,7 @@ async def launch_book_item(
             attempt_token=identity["attempt_token"],
             task_schema_version=task["schema_version"],
         )
+        graph_config["metadata"]["education_preparation_ms"] = dict(timings)
         handler = RunSSEProducer(
             thread_id=thread_id,
             run_id=run_id,
@@ -830,11 +834,12 @@ async def launch_book_item(
                         await activity_observer.report_service_stage(
                             "service_finalizing"
                         )
-                        result = await finalize_book_item(
-                            item=item,
-                            task=task,
-                            sandbox=session.sandbox,
-                        )
+                        with book_phase(item, "finalization"):
+                            result = await finalize_book_item(
+                                item=item,
+                                task=task,
+                                sandbox=session.sandbox,
+                            )
                         await publish_book_activity_hint(
                             item["job_id"],
                             result.get("high_water_seq")
