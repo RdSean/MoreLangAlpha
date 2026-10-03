@@ -26,6 +26,7 @@ async def build_managed_education_graph(
     item_id: str,
     execution_id: str,
     attempt_token: str,
+    task_schema_version: str,
 ) -> tuple[Any, dict[str, Any], dict[str, Any]]:
     """Build a constrained managed graph from service-owned inputs."""
     from src.server.app import setup
@@ -73,6 +74,7 @@ async def build_managed_education_graph(
         "tags": list(tags),
         "metadata": {
             "managed_execution": identity,
+            "task_schema_version": task_schema_version,
             "run_id": run_handle.run_id,
             "turn_index": run_handle.turn_index,
         },

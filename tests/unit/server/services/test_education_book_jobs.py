@@ -126,6 +126,12 @@ def test_structure_execution_task_uses_structure_only_and_explicit_ids():
     )
 
     assert task["mode"] == "structure_only"
+    assert task["schema_version"] == "langalpha-education-book-task/v2"
+    assert task["delivery"] == {
+        "structure_owner": "agent",
+        "content_file_owner": "host",
+        "completion_owner": "host",
+    }
     assert task["textbook_id"] == str(CLAIMED["textbook_id"])
     assert task["job_id"] == str(CLAIMED["job_id"])
     assert task["item_id"] == str(CLAIMED["item_id"])
@@ -177,6 +183,14 @@ def test_material_execution_task_contains_exactly_one_target_without_predecessor
         },
     }
     assert task["output"]["material"] == "outputs/sample-book/chapters/u02-k03.md"
+    assert "structure" not in task["output"]
+    assert task["context"] == {"manifest": "inputs/material-context.json"}
+    assert task["schema_version"] == "langalpha-education-book-task/v2"
+    assert task["delivery"] == {
+        "structure_owner": "host",
+        "content_file_owner": "host",
+        "completion_owner": "host",
+    }
     assert task["progress"]["allowed_stages"] == [
         "material_reading",
         "material_organizing",
@@ -201,6 +215,9 @@ def test_supplementary_item_is_explicit_and_has_a_fixed_output_set():
     assert task["mode"] == "reading_material_only"
     assert task["supplementary"] is True
     assert "knowledge_point" not in task
+    assert "structure" not in task["output"]
+    assert task["context"]["structure"] == "inputs/book-structure.json"
+    assert task["delivery"]["structure_owner"] == "host"
     assert task["output"]["supplementary"] == [
         "outputs/sample-book/glossary.md",
         "outputs/sample-book/patterns.md",
@@ -248,6 +265,9 @@ def test_managed_item_prompt_exposes_only_execution_id():
     assert "does not replace" in prompt
     assert "separate short tool-only turn" in prompt
     assert "Do not retrospectively report" in prompt
+    assert "delivery" in prompt
+    assert "Do not copy or update" in prompt
+    assert "brief" in prompt
 
 
 @pytest.mark.asyncio

@@ -203,7 +203,7 @@ def build_execution_task(item: Mapping[str, Any]) -> dict[str, Any]:
     if not slug or "/" in slug or ".." in slug:
         raise ValueError("Textbook slug is invalid")
     task: dict[str, Any] = {
-        "schema_version": "langalpha-education-book-task/v1",
+        "schema_version": "langalpha-education-book-task/v2",
         "mode": (
             "structure_only" if operation == "structure" else "reading_material_only"
         ),
@@ -229,11 +229,17 @@ def build_execution_task(item: Mapping[str, Any]) -> dict[str, Any]:
             "schema_sha256": str(item.get("schema_sha256") or ""),
         },
         "progress": progress_contract(item),
+        "delivery": {
+            "structure_owner": "agent" if operation == "structure" else "host",
+            "content_file_owner": "host",
+            "completion_owner": "host",
+        },
         "output": {
             "root": f"outputs/{slug}",
-            "structure": f"outputs/{slug}/book-structure.json",
         },
     }
+    if operation == "structure":
+        task["output"]["structure"] = f"outputs/{slug}/book-structure.json"
     if operation == "material" and item.get("kind") == "supplementary":
         task.update(
             {
@@ -455,7 +461,14 @@ def managed_item_prompt(item: Mapping[str, Any]) -> str:
         "then generate that content in the next turn. Do not bundle that report with long "
         "Write/Edit/Bash arguments. Do not retrospectively report completed stages as ongoing. "
         "Missing or unavailable reporting must not interrupt content work. Write only the "
-        "single task's declared outputs; do not infer business identifiers from paths."
+        "single task's declared outputs; output.root is a directory, not an additional "
+        "deliverable. Follow task.json delivery ownership: the host commits results, "
+        "updates content_file pointers and confirms completion. For Reading Material "
+        "Only, read the input structure as context. Do not copy or update an output "
+        "structure or validate the presence of other knowledge points' materials. "
+        "Check the target content and sources, write the final deliverable directly "
+        "without creating a second full draft, and keep the final response brief. "
+        "Do not infer business identifiers from paths."
     )
 
 
@@ -759,6 +772,7 @@ async def launch_book_item(
             ),
             run_metadata={
                 "managed_execution": identity,
+                "task_schema_version": task["schema_version"],
                 "suppress_lifecycle_hooks": True,
             },
         )
@@ -794,6 +808,7 @@ async def launch_book_item(
             item_id=identity["item_id"],
             execution_id=identity["execution_id"],
             attempt_token=identity["attempt_token"],
+            task_schema_version=task["schema_version"],
         )
         handler = RunSSEProducer(
             thread_id=thread_id,

@@ -96,10 +96,15 @@ async def test_managed_graph_uses_explicit_education_book_execution_identity(
         item_id=identity["item_id"],
         execution_id=identity["execution_id"],
         attempt_token=identity["attempt_token"],
+        task_schema_version="langalpha-education-book-task/v2",
     )
 
     assert graph_config["configurable"]["managed_execution"] == identity
     assert graph_config["metadata"]["managed_execution"] == identity
+    assert (
+        graph_config["metadata"]["task_schema_version"]
+        == "langalpha-education-book-task/v2"
+    )
     assert build_graph.await_args.kwargs["subagent_names"] == []
     assert build_graph.await_args.kwargs["disable_subagents"] is True
     assert build_graph.await_args.kwargs["namespace_owner"] is None
@@ -127,6 +132,7 @@ async def test_managed_graph_rejects_a_policy_for_another_execution():
             item_id="86f03a73-7604-4097-905b-768e6ad0f644",
             execution_id="e21b6198-85c6-41e2-b22b-2662851bc782",
             attempt_token="d5c87e74-fb75-4624-bb25-a36ec73a89ce",
+            task_schema_version="langalpha-education-book-task/v2",
         )
 
 
