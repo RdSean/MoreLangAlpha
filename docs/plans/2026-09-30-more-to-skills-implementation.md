@@ -26,7 +26,9 @@ Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skill
 
 **2026-10-03 增量已交付：** [教材业务动作时间线开发细则](2026-10-03-textbook-business-activity.md)的可选 action/工具预算、知识点标题分组/终态历史/隐藏诊断/独立游标及 Skill 可选报告已实施。两份专用数学/语言讲义真实提交，动作经 PG/SSE/browser 回放，未因上报扩写例题/词表；后端聚焦 119、PG 45、前端聚焦 49、工作台 Chromium 11 passed。详细范围与性能/身份验证限制见[增量验收记录](2026-10-03-textbook-business-activity-results.md)。不重开 Task 1–7，不改变提交/权限/恢复边界；总 Task 8 原未完成项保留。
 
-Task 1–7 与 Task 4A 已交付。Task 7 已向开发库应用 `082_more_to_skills_textbooks`，并按升级前导出的私人资源清单清理旧教材；详细范围、保护计数、检查证据和未验收项见[切换记录](2026-10-02-more-to-skills-cutover-results.md)。Task 8 已开始但仍有真实存储/提交 ACK 故障、模型已完成结果的跨进程恢复提交及完整普通产品 live 链路未覆盖，不能将清理或局部真实加工成功等同于整个重构验收通过。
+Task 1–7 与 Task 4A 已交付。Task 7 已向开发库应用 `082_more_to_skills_textbooks`，并按升级前导出的私人资源清单清理旧教材；详细范围、保护计数、检查证据和未验收项见[切换记录](2026-10-02-more-to-skills-cutover-results.md)。Task 8 仍在收口，最新边界以以下增量记录为准，不能将清理或局部真实加工成功等同于整个重构验收通过。
+
+**2026-10-03 后续补验：** 家长正常 Cookie 从上传/解析、首次“添加并分析”、结构完成到讲义提交/刷新恢复已实测；第二标签页重复添加复用原教材和初始任务。新增真实 MinIO 上传中断/响应丢失与 PostgreSQL COMMIT 确认丢失测试，教材四套 `48 passed`；真实模型完成、业务回调未提交后精确终止临时 worker，原 8000 worker 恢复原沙箱并提交同一 attempt。新版工具/动作组合压力保留 1000 明细，其中 800 工具、200 业务、298430 字节；隔离 HTTP/browser 桌面/375px 默认203业务行、展开1000行，无溢出或raw泄漏。普通 PTC/MCP/subagent/刷新续轮/checkpoint 已实测。详见[后续记录](2026-10-03-more-to-skills-task8-incremental-results.md)。总 Task 8 暂不完成，家庭作业 live 等收口边界及既有前端全量失败按该记录保留。
 
 Task 8 已开始：真实模型结构和中间知识点讲义提交成功，语义阶段可回放，实际批量默认跳过已有讲义与 runtime 取消已验证；补齐 PostgreSQL 四项部分失败、独立连接 reconcile、事务回滚恢复与浏览器分页/静默/前台/关闭活动恢复测试。真实验收发现的服务收尾、UUID 投影和客户端缓存/终态分页问题已修正。详细证据及未完成边界见 [Task 8 记录](2026-10-02-more-to-skills-task8-results.md)，仍不得标记完整验收完成。
 

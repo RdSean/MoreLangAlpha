@@ -4,6 +4,8 @@
 
 ## 结论与范围
 
+2026-10-03 后续增量：[家长 Cookie、传输故障与完成结果恢复补验](2026-10-03-more-to-skills-task8-incremental-results.md)已覆盖正常家长登录的完整添加/讲义提交、第二标签页源复用、真实 MinIO 中断/响应丢失、真实 PostgreSQL COMMIT 确认丢失，以及模型已完成结果的跨进程恢复提交。新版 action/工具子预算压力与普通 PTC/MCP/subagent/checkpoint 已补验；教材四套 `48 passed`。下文历史测试记录不冒充本次重跑，最新限制见增量记录，总 Task 8 暂不标记完成。
+
 2026-10-03 增量交付：[业务动作时间线开发细则](2026-10-03-textbook-business-activity.md)已实施，包含可选 action、工具子预算、知识点终态历史、隐藏诊断、独立消费游标与 Skill 指引。新专用教材的数学无例题摘要/语言两原例讲义均真实提交，PG/SSE/browser 一致，聚焦后端 119、PG 45、前端 49、工作台 Chromium 11 passed。详细证据与未做配对性能/token 比较的限制见[新验收记录](2026-10-03-textbook-business-activity-results.md)。下述历史容量数据仍对应原 stage-only 与共享预算，不冒充新版本组合压力结果；总 Task 8 原未完成项不变。
 
 Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验收通过声明。已完成真实模型结构提交、中间知识点首次讲义、真实语义阶段回放、批量默认跳过与真实取消、PostgreSQL 故障边界和浏览器恢复验证，以及专用学生普通 cookie 的学习与撤销链。本批补齐普通 runtime 的真实多进程故障、教材账本的 OS owner-loss 恢复，以及真实 PostgreSQL/Redis/浏览器组合容量与 Redis 断连回放。
@@ -76,21 +78,21 @@ Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验�
 
 | 场景 | 已有证据 | 尚未覆盖的边界 |
 |---|---|---|
-| 图书馆一次添加 | 真实源冻结/重复创建复用；DB 原子性测试 | 正常 cookie 的完整添加页面流程 |
+| 图书馆一次添加 | 家长正常 Cookie 上传/AnyDoc 解析/首次添加，实际结构及讲义成功；PG 同源一个教材、一个初始任务；第二标签页重复添加复用 | 大文件冻结的异步响应优化不在本轮实现 |
 | 结构-only | 真实模型提交 3 章/4 KP；严格解析器测试 | 大型、多类型教材 |
 | 中间 KP 首次生成 | 真实第三 KP 成功，前两份无讲义；原文图片/脚注/邻近内容可用 | 真实讲义嵌图 |
 | 已有讲义重做失败 | PG 四项替换批量第三项失败，旧材料保持可读 | 真实模型重做失败 |
 | 批量第 3 项失败 | PG 前两项立即可读、第三项失败、第四项成功，retry 仅第三项 | 模型批量全链故障注入 |
 | 取消与迟到回调 | 真实 UI/run 取消、后续 attempt=0；PG 当前 fence 拒绝迟到 token | 真实模型取消后迟到结果 |
-| 双击/两标签页 | 真实创建复用及材料 409；PG 并发 idempotency | 两个真实 cookie 标签页 |
-| 上传/PG finalize 崩溃 | 真 PG 事务回滚及同 attempt 恢复，无重复 material/generation/终态事件；上传为 fake storage | 真实 MinIO 中断、COMMIT ACK 丢失 |
-| 关闭浏览器/换 worker | PG 双连接 reconcile 不重领；浏览器重连；普通 runtime SIGSTOP/SIGKILL/SIGTERM；教材真实写锁 owner-loss 后另一进程收敛失败，无重复 run | 真实模型/沙箱已完成但业务未提交时的跨进程恢复提交 |
-| Redis/150001 delta | 全新夹具真实 PG/Redis/浏览器组合压力；1000 明细/293280 字节、单摘要/3001 省略；Redis 断连后 HTTP SSE 由 PG 补齐终态；普通 runtime START 前拒绝/运行中明确失败 | 长期真实模型负载，不将合成事件当模型或网络吞吐证据 |
+| 双击/两标签页 | 真实创建复用及材料 409；PG 并发 idempotency；两个正常 Cookie 标签页顺序重复添加源复用 | 没有把顺序 UI 复用写为同时提交 |
+| 上传/PG finalize 崩溃 | 真 PG 事务回滚；真实 MinIO body 中断及接受 PUT 后丢响应；真实 COMMIT CommandComplete 丢失；同 attempt 恢复、已提交不再生成、候选收尾保留对象 | 非本机云存储网络及长时间分区 |
+| 关闭浏览器/换 worker | 浏览器重连/刷新；普通 runtime OS 故障；教材 owner-loss 收敛失败；真实模型完成后临时 worker 未提交即退出，原 8000 worker 从原沙箱提交同一 attempt，无第二次生成 | 默认租约等待时间未压测；本次精确加速专用 item 租约过期 |
+| Redis/150001 delta | 旧版 PG/Redis/browser 组合与 Redis 断连终态补齐；新版 150001 delta/4000 工具/250 action，1000 明细/800 工具/200业务/298430字节、单摘要/3250省略、Redis及producer各1条；新版隔离 HTTP/browser 桌面/375px 默认203业务行、展开1000行，无横向溢出/raw泄漏 | 长期真实模型负载；合成事件和测试身份回放不作模型吞吐或普通Cookie证据 |
 | 节点/长文/图片/深链 | 真实原文图像与中间 KP；375px/长标题/512字符/读者滚动/相对链接 E2E | 更多真实节点及长文阅读位置回程 |
-| 学生与图书馆反查 | PG assignment/progress/note/chat-space/document-usage；真实学生 cookie 进度/笔记/总结/模型追问及家长转录；浏览器保存笔记/总结 | 家长正常 cookie 的图书馆一键添加 |
+| 学生与图书馆反查 | PG assignment/progress/note/chat-space/document-usage；真实学生 Cookie 进度/笔记/总结/模型追问及家长转录；家长正常 Cookie 图书馆添加 | 更多真实教材/节点的组合覆盖 |
 | 撤销/跨家庭 | PG ACL；真实学生 cookie 原文/讲义/图片/笔记/chat-space 跨家庭拒绝，撤销后读取/写入/追问拒绝，旧 thread 无上下文复用拒绝；浏览器旧页不可用 | 授权撤销与在途模型提交同时竞态的 live 故障注入 |
 | 旧路由/catalog | Task 7 切换清单、PG head catalog、退役路由单元回归 | 无新增清理；沿用 Task 7 证据 |
-| 普通产品回归 | 全量后端 unit、前端 unit、真实 managed Docker capability smoke、普通文档 E2E；真实模型普通 runtime 多进程 gate 9 项 | 普通 PTC/MCP/subagent/checkpoint/家庭作业完整 live 回归 |
+| 普通产品回归 | 全量后端/前端记录；managed Docker、文档E2E/runtime gate 9项；正常家长Cookie PTC写文件、子代理交付、MCP scrape、刷新续轮、70个checkpoint；上一批学生Flash | 家庭作业live待专用学生年级确认；既有Plugins单测失败保留 |
 
 ## 验证结果
 
@@ -111,4 +113,4 @@ Task 8 和语义进度计划 Task 6 仍在进行中，本记录不是完整验�
 - 本批重新执行教材三套 PostgreSQL 集成：`42 passed in 65.33s`。此前后端/前端全量记录保持原日期和原结果，不冒充本批重新运行；既有 Plugins 失败仍未消除。
 - `.env` 与 `agent_config.yaml` 再次与原分支字节一致，5177/8000 本机及当前 LAN HTTP 200，共享 PostgreSQL/Redis/MinIO 均仍运行。
 
-下一批优先补真实 MinIO 中断/提交 ACK 丢失、已完成模型结果的跨进程恢复提交、家长 cookie 图书馆添加及普通 PTC/MCP/subagent/checkpoint/家庭作业 live 回归。未完成矩阵行不得在总计划或语义计划标记完成。
+最新未完成边界以 2026-10-03 后续记录为准：家庭作业 live 与既有前端失败收口；已补齐的 MinIO/COMMIT ACK、模型完成后跨进程提交、家长 Cookie 及新版容量浏览器回放不再列为未测。未完成矩阵行不得在总计划或语义计划标记完成。
