@@ -83,6 +83,7 @@ services:
       CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ../web:/app
+      - ../mingju.json:/mingju.json:ro
       - langalpha-dev-frontend-node-modules:/app/node_modules
       - langalpha-dev-frontend-pnpm-store:/app/.pnpm-store
 

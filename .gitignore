@@ -69,6 +69,7 @@ Thumbs.db
 node_modules/
 .pnpm-store/
 web/.vite-dev-https/
+web/public/education-quotes/
 
 # Testing
 .pytest_cache/

@@ -94,7 +94,7 @@ def test_fixed_skill_and_schema_have_recordable_content_digests() -> None:
 
     assert identity.version == "2.1.0"
     assert identity.skill_sha256 == (
-        "46ca820bfd66b3adaba0b8cbd405e71af27276caf891202c8376a3897c961495"
+        "d80660ca11693cb11003a33e923bc1faa52430fda6e287cb44b56817d1c5d7ef"
     )
     assert identity.schema_sha256 == (
         "601bced7331cb5eac37ead5a8c3f13ed55382f4afa05d2e4227b6ee04d7eb6d1"

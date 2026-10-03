@@ -33,6 +33,14 @@ const PROGRESS_STAGES: Record<BookJobItemKind, ReadonlySet<string>> = {
   ]),
 };
 
+function acceptsProgress(entry: BookActivityEvent, kind?: BookJobItemKind) {
+  const stage = entry.metadata.stage;
+  if (typeof stage !== 'string') return false;
+  if (stage === 'service_preparing' || stage === 'service_finalizing') return entry.metadata.origin === 'service';
+  return kind ? PROGRESS_STAGES[kind].has(stage)
+    : Object.values(PROGRESS_STAGES).some((stages) => stages.has(stage));
+}
+
 export interface BookActivityProjection {
   jobStatus: BookJobStatus;
   activityUnavailable: boolean;
@@ -77,9 +85,7 @@ export function projectBookActivity(
     if (entry.kind === 'progress') {
       const item = entry.item_id ? itemsById.get(entry.item_id) : undefined;
       const stage = entry.metadata.stage;
-      if (typeof stage !== 'string' || !(item
-        ? PROGRESS_STAGES[item.kind].has(stage)
-        : Object.values(PROGRESS_STAGES).some((stages) => stages.has(stage)))) continue;
+      if (!acceptsProgress(entry, item?.kind)) continue;
       const previous = milestones.at(-1);
       if (previous?.kind === 'progress' && previous.item_id === entry.item_id
         && previous.metadata.stage === stage && previous.metadata.action === entry.metadata.action) {
@@ -108,11 +114,10 @@ export function projectBookActivity(
       .find((entry) => entry.status === 'running') ?? null;
   const progressEvents = currentItem
     ? events.filter((entry) => {
-      const stage = entry.metadata.stage;
       return entry.kind === 'progress'
         && entry.item_id === currentItem.item_id
-        && typeof stage === 'string'
-        && PROGRESS_STAGES[currentItem.kind].has(stage);
+        && (!currentItem.started_at || Date.parse(entry.created_at) >= Date.parse(currentItem.started_at))
+        && acceptsProgress(entry, currentItem.kind);
     })
     : [];
   const currentStage = progressEvents.reduce<BookActivityEvent | null>(

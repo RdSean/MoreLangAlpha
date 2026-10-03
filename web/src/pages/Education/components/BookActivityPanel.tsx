@@ -3,6 +3,7 @@ import { AlertCircle, Check, ChevronDown, Circle, Minus, X } from 'lucide-react'
 import { Loader } from '@/components/ui/loader';
 import { useSearchParams } from 'react-router-dom';
 import type { BookActivityEvent, BookJob, BookJobStatus } from '../types';
+import { BookLiveActivity } from './BookLiveActivity';
 import {
   isTerminalBookJobStatus,
   projectBookActivity,
@@ -21,6 +22,8 @@ interface BookActivityPanelProps {
   job: BookJob;
   events: readonly BookActivityEvent[];
   reconnecting?: boolean;
+  connected?: boolean;
+  liveAfterSeq?: number | null;
   onClose?: () => void;
 }
 
@@ -28,6 +31,8 @@ export function BookActivityPanel({
   job,
   events,
   reconnecting = false,
+  connected = true,
+  liveAfterSeq,
   onClose,
 }: BookActivityPanelProps) {
   const activity = projectBookActivity(job, events);
@@ -62,24 +67,28 @@ export function BookActivityPanel({
         )}
       </header>
 
+      {!isTerminalBookJobStatus(job.status) && (
+        <div className="shrink-0 border-b px-4 py-3">
+          <div className="flex min-h-12 items-start gap-3">
+            <span className="mt-0.5 shrink-0" aria-hidden="true"><Loader size={16} /></span>
+            <div className="min-w-0 flex-1">
+              {activity.currentObjectLabel && <p className="break-words text-xs text-muted-foreground">{activity.currentObjectLabel}</p>}
+              <p className="break-words text-sm font-medium text-foreground" aria-live="polite">{activity.currentDescription}</p>
+              {reconnecting && <p className="mt-1 text-xs text-muted-foreground">正在重新连接活动流</p>}
+              {activity.currentItem && !activity.activityUnavailable && (
+                <BookLiveActivity key={`${job.job_id}:${activity.currentItem.item_id}:${activity.currentItem.attempt}`}
+                  job={job} item={activity.currentItem} events={events} connected={connected && !reconnecting} liveAfterSeq={liveAfterSeq} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4" aria-live="polite">
         {activity.activityUnavailable && (
           <div className="mb-4 flex gap-2 border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
             <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
             <span className="min-w-0 break-words">活动暂不可用，任务状态仍会继续更新。</span>
-          </div>
-        )}
-
-        {!isTerminalBookJobStatus(job.status) && (
-          <div className="flex min-h-12 items-start gap-3">
-            <span className="mt-0.5 shrink-0" aria-hidden="true"><Loader size={16} /></span>
-            <div className="min-w-0">
-              {activity.currentObjectLabel && <p className="break-words text-xs text-muted-foreground">{activity.currentObjectLabel}</p>}
-              <p className="break-words text-sm font-medium text-foreground">
-                {activity.currentDescription}
-              </p>
-              {reconnecting && <p className="mt-1 text-xs text-muted-foreground">正在重新连接活动流</p>}
-            </div>
           </div>
         )}
 

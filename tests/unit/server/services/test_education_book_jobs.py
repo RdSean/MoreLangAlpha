@@ -246,6 +246,8 @@ def test_managed_item_prompt_exposes_only_execution_id():
     assert "progress.allowed_stages" in prompt
     assert "report_progress" in prompt
     assert "does not replace" in prompt
+    assert "separate short tool-only turn" in prompt
+    assert "Do not retrospectively report" in prompt
 
 
 @pytest.mark.asyncio
@@ -977,7 +979,7 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
     finalize = AsyncMock(return_value={"structure_id": "structure-1"})
     fail = AsyncMock(return_value={"high_water_seq": 7})
     publish_activity = AsyncMock()
-    observer = object()
+    observer = type("Observer", (), {"report_service_stage": AsyncMock()})()
     observer_factory = Mock(return_value=observer)
     cleanup_candidates = AsyncMock()
     cleanup_runtime = AsyncMock()
@@ -1066,6 +1068,7 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
     )
     assert build_graph.await_args.kwargs["operation"] == "structure"
     assert build_graph.await_args.kwargs["execution_id"] == str(CLAIMED["execution_id"])
+    observer.report_service_stage.assert_awaited_once_with("service_preparing")
     assert started["workflow_generator"] is workflow
     assert started["graph"] is graph
     assert started["capacity_reservation"] == "reservation-1"

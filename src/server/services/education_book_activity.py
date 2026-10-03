@@ -110,6 +110,29 @@ class BookActivityObserver:
         elif event_type == "artifact":
             await self._observe_public_progress(data)
 
+    async def report_service_stage(self, stage: str) -> None:
+        """Report an actual host step without turning projection errors into task errors."""
+        messages = {
+            "service_preparing": "正在准备处理文件",
+            "service_finalizing": "正在验收并提交产物",
+        }
+        if stage not in messages:
+            raise ValueError("Unknown textbook service stage")
+        if self._details_disabled or self._budget_exhausted:
+            return
+        try:
+            await self._store(
+                dedupe_key=f"service:{self.item_id}:{self.attempt_token}:{stage}",
+                kind="progress",
+                status="running",
+                message=messages[stage],
+                metadata={"stage": stage, "origin": "service"},
+            )
+        except Exception:
+            logger.warning(
+                "Textbook service progress unavailable for job %s", self.job_id
+            )
+
     async def _observe_tool_calls(self, data: Mapping[str, Any]) -> None:
         calls = data.get("tool_calls")
         if not isinstance(calls, list):

@@ -381,6 +381,8 @@ export default function TextbookWorkbenchPage() {
             <BookActivityPanel
               job={visibleActivityJob}
               events={activity.events}
+              connected={activity.connectionState === 'connected' && !activity.streamTerminal}
+              liveAfterSeq={activity.liveAfterSeq}
               reconnecting={activity.connectionState === 'reconnecting'}
               onClose={() => updateSearch((next) => next.delete('activity'), true)}
             />

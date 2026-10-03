@@ -5,6 +5,7 @@ COPY web/package.json web/pnpm-lock.yaml ./
 COPY web/patches/ patches/
 RUN pnpm install --frozen-lockfile
 COPY web/ .
+COPY mingju.json /mingju.json
 ARG VITE_HOST_MODE="oss"
 ARG VITE_API_BASE_URL=""
 ARG VITE_SUPABASE_URL=""

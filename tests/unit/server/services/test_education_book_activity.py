@@ -12,6 +12,64 @@ import pytest
 
 
 @pytest.mark.asyncio
+async def test_service_stages_are_fenced_nonterminal_and_cannot_be_agent_reported():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock(return_value={"outcome": "stored", "high_water_seq": 1})
+    token = uuid4()
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=token,
+        item_kind="material",
+        append=append,
+        publish=AsyncMock(),
+    )
+    await observer.report_service_stage("service_preparing")
+    await observer.report_service_stage("service_finalizing")
+    assert [call.kwargs["message"] for call in append.await_args_list] == [
+        "正在准备处理文件",
+        "正在验收并提交产物",
+    ]
+    assert all(call.kwargs["attempt_token"] == token for call in append.await_args_list)
+    assert all(call.kwargs["status"] == "running" for call in append.await_args_list)
+    assert append.await_args.kwargs["metadata"] == {
+        "stage": "service_finalizing",
+        "origin": "service",
+    }
+    await observer(
+        "artifact",
+        {
+            "artifact_type": "report_progress",
+            "artifact_id": "service_finalizing",
+            "payload": {"stage": "service_finalizing"},
+        },
+    )
+    assert append.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_service_projection_failure_is_unavailable_without_blocking_work():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    append = AsyncMock(side_effect=RuntimeError("storage offline"))
+    unavailable = AsyncMock(return_value={"outcome": "stored", "high_water_seq": 1})
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        item_kind="material",
+        append=append,
+        publish=AsyncMock(),
+        mark_unavailable=unavailable,
+    )
+    await observer.report_service_stage("service_preparing")
+    await observer.report_service_stage("service_finalizing")
+    append.assert_awaited_once()
+    unavailable.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_actions_are_scoped_rate_limited_and_ignore_model_messages():
     from src.server.services.education_book_activity import BookActivityObserver
 

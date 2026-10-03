@@ -301,6 +301,8 @@ export function useBookActivity(
   const eventsRef = useRef<BookActivityEvent[]>([]);
   const lastProcessedSeqRef = useRef(0);
   const [connectionState, setConnectionState] = useState<BookActivityConnectionState>('connecting');
+  const [liveAfterSeq, setLiveAfterSeq] = useState<number | null>(null);
+  const [streamTerminal, setStreamTerminal] = useState(false);
   const [streamError, setStreamError] = useState<unknown>(null);
   const visible = usePageVisibility();
   const terminal = TERMINAL_MANAGED_BOOK_STATUSES.has(job.data?.status ?? 'queued');
@@ -319,12 +321,16 @@ export function useBookActivity(
     setEvents([]);
     setStreamError(null);
     setConnectionState('connecting');
+    setLiveAfterSeq(null);
+    setStreamTerminal(false);
   }, [jobId, enabled]);
 
   useEffect(() => {
     if (!enabled || !jobId || !visible || (terminal && !streamEnabled)) return;
     const abortController = new AbortController();
     let disposed = false;
+    let replayBoundary: number | null = null;
+    setLiveAfterSeq(null);
     const jobKey = queryKeys.education.bookJob(jobId);
     const refreshJob = () => queryClient.fetchQuery({
       queryKey: jobKey,
@@ -354,6 +360,10 @@ export function useBookActivity(
       onConnectionChange: (state) => {
         if (disposed) return;
         setConnectionState(state);
+        if (state !== 'connected') {
+          replayBoundary = null;
+          setLiveAfterSeq(null);
+        }
         if (state === 'connected') scheduler.notify();
       },
       onError: (error) => {
@@ -364,6 +374,7 @@ export function useBookActivity(
         eventsRef.current = [];
         lastProcessedSeqRef.current = 0;
         setEvents([]);
+        setLiveAfterSeq(null);
         setStreamError(new Error('教材活动已不可访问'));
         disposed = true;
         abortController.abort();
@@ -373,6 +384,11 @@ export function useBookActivity(
       onPage: async (page) => {
         if (disposed) return;
         setStreamError(null);
+        if (TERMINAL_MANAGED_BOOK_STATUSES.has(page.status)) setStreamTerminal(true);
+        if (replayBoundary === null) {
+          replayBoundary = page.high_water_seq;
+          setLiveAfterSeq(replayBoundary);
+        }
         if (page.events.length > 0) {
           const merged = mergeBoundedActivity(eventsRef.current, page.events);
           eventsRef.current = merged;
@@ -396,6 +412,8 @@ export function useBookActivity(
         eventsRef.current = [];
         lastProcessedSeqRef.current = 0;
         setEvents([]);
+        replayBoundary = null;
+        setLiveAfterSeq(null);
         await scheduler.flush();
         if (!disposed) await invalidateWorkbench();
       },
@@ -415,6 +433,8 @@ export function useBookActivity(
     ...job,
     events,
     connectionState,
+    liveAfterSeq,
+    streamTerminal,
     streamError,
   };
 }

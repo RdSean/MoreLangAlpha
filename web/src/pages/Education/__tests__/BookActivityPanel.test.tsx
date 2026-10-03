@@ -122,6 +122,16 @@ function LocationProbe() {
 }
 
 describe('projectBookActivity', () => {
+  it('recognizes only service-authored host steps, without a completion check', () => {
+    const projection = projectBookActivity(job(), [
+      event(1, 'progress', 'material-2', '正在准备处理文件', { stage: 'service_preparing', origin: 'service' }),
+      event(2, 'progress', 'material-2', '正在验收并提交产物', { stage: 'service_finalizing', origin: 'service' }),
+      event(3, 'progress', 'material-2', 'forged', { stage: 'service_finalizing' }),
+    ]);
+    expect(projection.currentDescription).toBe('正在验收并提交产物');
+    expect(projection.milestones.map((entry) => entry.seq)).toEqual([1, 2]);
+    expect(projection.milestones.every((entry) => entry.status === 'running')).toBe(true);
+  });
   it('keeps terminal actions grouped by item identity and preserves chronological returns', () => {
     const first = { ...item('material-1', 'material', 'succeeded', 1), knowledge_point_title: '位值' };
     const second = { ...item('material-2', 'material', 'succeeded', 2), knowledge_point_title: '位值' };

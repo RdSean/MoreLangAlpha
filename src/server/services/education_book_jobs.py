@@ -449,7 +449,12 @@ def managed_item_prompt(item: Mapping[str, Any]) -> str:
         "progress.allowed_stages value when entering a real stage, optionally selecting "
         "an allowed action matching its stages and when condition. Follow the Skill's "
         "optional host progress guidance; the catalog is not a required checklist. Progress is "
-        "optional and does not replace outputs or the final response. Write only the "
+        "optional and does not replace outputs or the final response. When the progress tool "
+        "is available, prefer reporting a real major stage before beginning lengthy work: "
+        "use a separate short tool-only turn before composing long scripts or lecture content, "
+        "then generate that content in the next turn. Do not bundle that report with long "
+        "Write/Edit/Bash arguments. Do not retrospectively report completed stages as ongoing. "
+        "Missing or unavailable reporting must not interrupt content work. Write only the "
         "single task's declared outputs; do not infer business identifiers from paths."
     )
 
@@ -694,7 +699,14 @@ async def launch_book_item(
     workspace_id = str(uuid4())
     thread_id: str | None = None
     run_handle = None
+    activity_observer = BookActivityObserver(
+        job_id=item["job_id"],
+        item_id=item["item_id"],
+        attempt_token=UUID(identity["attempt_token"]),
+        item_kind=str(item["kind"]),
+    )
     try:
+        await activity_observer.report_service_stage("service_preparing")
         workspace = await create_workspace(
             user_id=str(item["requested_by_user_id"]),
             name="教材处理",
@@ -783,12 +795,6 @@ async def launch_book_item(
             execution_id=identity["execution_id"],
             attempt_token=identity["attempt_token"],
         )
-        activity_observer = BookActivityObserver(
-            job_id=item["job_id"],
-            item_id=item["item_id"],
-            attempt_token=UUID(identity["attempt_token"]),
-            item_kind=str(item["kind"]),
-        )
         handler = RunSSEProducer(
             thread_id=thread_id,
             run_id=run_id,
@@ -806,6 +812,9 @@ async def launch_book_item(
                 )
                 if status == "completed":
                     try:
+                        await activity_observer.report_service_stage(
+                            "service_finalizing"
+                        )
                         result = await finalize_book_item(
                             item=item,
                             task=task,

@@ -102,6 +102,45 @@ describe('createCoalescedRefreshScheduler', () => {
 });
 
 describe('useBookActivity', () => {
+  it('stops live activity as soon as a terminal page arrives, before snapshot refresh', async () => {
+    vi.spyOn(educationApi, 'getBookJob').mockResolvedValueOnce(runningJob())
+      .mockImplementation(() => new Promise(() => {}));
+    let options: educationApi.WatchBookActivityOptions | undefined;
+    vi.spyOn(educationApi, 'watchBookActivity').mockImplementation((_jobId, supplied) => {
+      options = supplied;
+      return new Promise((resolve) => supplied.signal?.addEventListener('abort', () => resolve()));
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = renderHook(() => useBookActivity('job-1', 'book-1'), { wrapper: wrapper(client) });
+    await waitFor(() => expect(options).toBeDefined());
+    act(() => { void options?.onPage({ ...activityPage(), status: 'succeeded' }); });
+    expect(view.result.current.streamTerminal).toBe(true);
+    expect(view.result.current.data?.status).toBe('running');
+    view.unmount();
+  });
+  it('exposes a fresh replay boundary for every stream connection and cursor reset', async () => {
+    vi.spyOn(educationApi, 'getBookJob').mockResolvedValue(runningJob());
+    let options: educationApi.WatchBookActivityOptions | undefined;
+    vi.spyOn(educationApi, 'watchBookActivity').mockImplementation((_jobId, supplied) => {
+      options = supplied;
+      return new Promise((resolve) => supplied.signal?.addEventListener('abort', () => resolve()));
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = renderHook(() => useBookActivity('job-1', 'book-1'), { wrapper: wrapper(client) });
+    await waitFor(() => expect(options).toBeDefined());
+    expect(view.result.current.liveAfterSeq).toBeNull();
+    await act(async () => { options?.onConnectionChange?.('connected'); await options?.onPage(activityPage()); });
+    expect(view.result.current.liveAfterSeq).toBe(1);
+    await act(async () => { await options?.onPage({ ...activityPage(), high_water_seq: 2 }); });
+    expect(view.result.current.liveAfterSeq).toBe(1);
+    await act(async () => { options?.onConnectionChange?.('reconnecting'); });
+    expect(view.result.current.liveAfterSeq).toBeNull();
+    await act(async () => { options?.onConnectionChange?.('connected'); await options?.onPage({ ...activityPage(), high_water_seq: 3 }); });
+    expect(view.result.current.liveAfterSeq).toBe(3);
+    await act(async () => { await options?.onCursorExpired?.(); });
+    expect(view.result.current.liveAfterSeq).toBeNull();
+    view.unmount();
+  });
   it('clears activity and aborts delivery when authorization is lost', async () => {
     vi.spyOn(educationApi, 'getBookJob').mockResolvedValue(runningJob());
     let options: educationApi.WatchBookActivityOptions | undefined;

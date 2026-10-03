@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import { createDevHttpsOptions } from './vite.dev-https.js'
+import { prepareEducationQuotesForWeb } from './scripts/education-quotes.mjs'
 
 // Shared by the entry and the lazy vendors — see manualChunks below.
 const EAGER_SHARED = new Set(['clsx', 'use-sync-external-store'])
@@ -13,6 +14,7 @@ const CHARTS = new Set(['recharts'])
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
+  prepareEducationQuotesForWeb(__dirname)
   // Load VITE_-prefixed vars from .env files (.env, .env.local, …) so they can
   // be seeded on disk instead of passed inline. loadEnv also merges matching
   // process.env entries, so `VITE_FOO=bar pnpm dev` keeps working too.

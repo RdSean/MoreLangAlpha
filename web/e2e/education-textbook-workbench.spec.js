@@ -315,6 +315,49 @@ test.afterEach(async ({ page }) => {
   await resetMockServer();
 });
 
+for (const width of [1440, 375]) {
+  test(`${width}px new diagnostics rotate a fixed quote slot without adding timeline rows`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const now = new Date().toISOString();
+    let snapshot = runningJob({ high_water_seq: 10, items: runningJob().items.map((item) => ({ ...item, started_at: now })) });
+    const quoteRequests = [];
+    page.on('request', (request) => { if (request.url().includes('/education-quotes/')) quoteRequests.push(request.url()); });
+    await configureSSE({
+      path: '/api/v1/education/book-jobs/job-1/events', keepOpen: true, delay: 1200,
+      events: [
+        { id: 10, event: 'snapshot', data: activityPage([
+          activityEvent(10, { kind: 'progress', message: '正在组织讲义内容', metadata: { stage: 'material_organizing' }, created_at: now }),
+        ], { high_water_seq: 10 }) },
+        { id: 11, event: 'snapshot', data: activityPage([activityEvent(11, { message: 'Running Bash hidden', created_at: now })], { high_water_seq: 11 }) },
+        { id: 40, event: 'snapshot', data: activityPage(Array.from({ length: 29 }, (_, index) => activityEvent(index + 12, { message: 'Finished Edit hidden', created_at: now })), { high_water_seq: 40 }) },
+      ],
+    });
+    await mockRunningWorkbench(page, () => snapshot, (route) => route.continue());
+    await page.goto('/textbooks/book-1?kp=sports-global-game&view=source&activity=job-1');
+    const panel = page.getByRole('complementary', { name: '教材处理活动' });
+    await expect(panel.getByText('正在组织讲义内容', { exact: true })).toBeVisible();
+    await expect(panel.getByText('最近活动', { exact: true })).toBeVisible();
+    const quote = panel.getByLabel('等待时的名句');
+    await expect(quote.locator('blockquote')).not.toHaveText('');
+    const firstQuote = await quote.textContent();
+    await expect(panel.getByRole('button', { name: '诊断明细（30）' })).toBeVisible();
+    expect(await quote.textContent()).toBe(firstQuote);
+    expect(quoteRequests).toHaveLength(2);
+    await expect(panel.getByText('Running Bash hidden')).toHaveCount(0);
+    await expect(panel.getByText('Finished Edit hidden')).toHaveCount(0);
+    await expect(panel.locator('ol li')).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+    const quoteBox = await quote.boundingBox();
+    const currentBox = await panel.getByText('正在组织讲义内容', { exact: true }).boundingBox();
+    expect(quoteBox.y).toBeGreaterThanOrEqual(currentBox.y + currentBox.height);
+    await page.screenshot({ path: testInfo.outputPath(`live-quote-${width}.png`), animations: 'disabled' });
+    snapshot = { ...job, high_water_seq: 40 };
+    await expect(panel.getByText('已完成 2/2 份讲义')).toBeVisible({ timeout: 8000 });
+    await expect(quote).toHaveCount(0);
+    expect(quoteRequests).toHaveLength(2);
+  });
+}
+
 test('desktop workbench keeps reading, batch controls, links, and activity in one page', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockWorkbench(page);
@@ -384,10 +427,14 @@ test('375px workbench keeps the directory drawer and actions reachable without o
 test('activity reconnects after the first 200 of 500 events without skipping or duplicating details', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 700 });
   const cursors = [];
+  const quoteRequests = [];
+  page.on('request', (request) => { if (request.url().includes('/education-quotes/')) quoteRequests.push(request.url()); });
+  const now = new Date().toISOString();
+  const snapshot = runningJob({ items: runningJob().items.map((item) => ({ ...item, started_at: now })) });
   let releaseRemainder;
   const remainderReady = new Promise((resolve) => { releaseRemainder = resolve; });
-  const events = Array.from({ length: 500 }, (_, index) => activityEvent(index + 1));
-  await mockRunningWorkbench(page, () => runningJob(), async (route) => {
+  const events = Array.from({ length: 500 }, (_, index) => activityEvent(index + 1, { created_at: now }));
+  await mockRunningWorkbench(page, () => snapshot, async (route) => {
     cursors.push(Number(new URL(route.request().url()).searchParams.get('after_seq')));
     if (cursors.length === 1) {
       return fulfillActivity(route, activityFrame(events.slice(0, 200), { has_more: true }));
@@ -412,6 +459,8 @@ test('activity reconnects after the first 200 of 500 events without skipping or 
   await expect(panel.getByText('正在重新连接活动流')).toBeVisible();
   releaseRemainder();
   await expect(panel.getByText('诊断明细（500）')).toBeVisible();
+  expect(quoteRequests).toHaveLength(0);
+  await expect(panel.getByLabel('等待时的名句').locator('blockquote')).toHaveCount(0);
   expect(cursors.slice(0, 3)).toEqual([0, 200, 200]);
   const readingURL = page.url();
   const reader = page.getByTestId('book-reader-scroll');
