@@ -238,3 +238,5 @@ Task 8 已开始：真实模型结构和中间知识点讲义提交成功，语�
 ## 后续优化
 
 2026-10-03 托管交付契约、受限系统提示与分段计时已实施；真实小样本指标和学科内容缺口见[优化记录](2026-10-03-managed-textbook-execution-optimization-results.md)，后续边界见[独立优化计划](2026-10-03-managed-textbook-execution-optimization.md)。这些是原 Task 8 收口后的改良，不倒改上述完成依据；学科改良、大教材与长期负载仍分别验收和授权。
+
+2026-10-04 [学科适配计划](2026-10-03-more-to-skills-subject-adaptation.md)的 Step 2.1/4/7、面向中国学生自学的语气/补充原则与三份渐进加载 reference 已实施；5 份真实数学讲义均提交，但仍有数值与实物量混淆、既有数字开头公式转义的显示缺陷，质量不判全通过。具体行为、指标与未覆盖范围见[复验记录](2026-10-03-more-to-skills-subject-adaptation-results.md)，未启动 SB3 或长期负载。
