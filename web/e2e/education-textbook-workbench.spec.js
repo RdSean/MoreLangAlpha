@@ -424,6 +424,73 @@ test('375px workbench keeps the directory drawer and actions reachable without o
   await expectNoHorizontalOverflow(page);
 });
 
+test('reader restores independent positions after reload and delayed body loading', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await mockWorkbench(page);
+  let delaySource = false;
+  await mockAPI(page, {
+    'GET /education/textbooks/book-1/source': async (route) => {
+      if (delaySource) await new Promise((resolve) => setTimeout(resolve, 650));
+      return fulfillJSON(route, {
+        textbook_id: 'book-1', start_line: 1, end_line: 120, total_lines: 120,
+        markdown: Array(12).fill(sourceMarkdown).join('\n\n'),
+      });
+    },
+    'GET /education/textbooks/book-1/knowledge-points/*/material': {
+      textbook_id: 'book-1', knowledge_point_id: 'kp-db-2', skill_kp_id: 'sports-training',
+      material_available: true, generated_at: '2026-10-02T06:00:00Z', depth: 'lesson',
+      requirements: null, content_sha256: 'b'.repeat(64),
+      markdown: Array(50).fill('# 已有冠军训练讲义\n\n训练需要稳定反馈。').join('\n\n'),
+    },
+  });
+  await page.goto('/textbooks/book-1?kp=sports-training&view=source');
+  const reader = page.getByTestId('book-reader-scroll');
+  await expect(page.getByText('原书内容', { exact: true })).toBeVisible();
+  await reader.evaluate((element) => { element.scrollTop = 580; });
+  await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(580);
+  await page.getByRole('tab', { name: '讲义', exact: true }).click();
+  await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(0);
+  await reader.evaluate((element) => { element.scrollTop = 240; });
+  await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(240);
+  await page.reload();
+  await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(240);
+  delaySource = true;
+  await page.getByRole('tab', { name: '原文', exact: true }).click();
+  await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(580);
+  await page.reload();
+  await expect(page.getByText('原书内容', { exact: true })).toBeVisible();
+  await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(580);
+});
+
+test('reader waits for a cold image before restoring its saved offset', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await mockWorkbench(page);
+  let delayImage = false;
+  await page.route('**/slow-reader-image.svg', async (route) => {
+    if (delayImage) await new Promise((resolve) => setTimeout(resolve, 1200));
+    await route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="2200"><rect width="600" height="2200" fill="white"/></svg>',
+    });
+  });
+  await mockAPI(page, {
+    'GET /education/textbooks/book-1/source': (route) => fulfillJSON(route, {
+      textbook_id: 'book-1', start_line: 1, end_line: 120, total_lines: 120,
+      markdown: '# Image lesson\n\n![Original figure](/slow-reader-image.svg)\n\nEnd of lesson.',
+    }),
+  });
+  await page.goto('/textbooks/book-1?kp=sports-global-game&view=source');
+  const reader = page.getByTestId('book-reader-scroll');
+  const image = reader.getByRole('img', { name: 'Original figure' });
+  await expect.poll(() => image.evaluate((element) => element.complete && element.naturalHeight > 0)).toBe(true);
+  await reader.evaluate((element) => { element.scrollTop = 580; });
+  await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(580);
+  delayImage = true;
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect.poll(() => image.evaluate((element) => element.complete && element.naturalHeight > 0)).toBe(true);
+  await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(580);
+});
+
 test('activity reconnects after the first 200 of 500 events without skipping or duplicating details', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 700 });
   const cursors = [];

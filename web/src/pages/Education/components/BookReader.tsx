@@ -41,7 +41,10 @@ export function BookReader({
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasMaterial = Boolean(material?.material_available && material.markdown);
   const canGenerate = Boolean(material && onGenerate);
-  useScrollMemory(scrollRef, readingPositionKey ?? `book-reader:${title}:${view}`);
+  useScrollMemory(scrollRef, readingPositionKey ?? `book-reader:${title}:${view}`, {
+    persist: true,
+    ready: !loading && (view === 'material' && hasMaterial || Boolean(source)),
+  });
 
   return (
     <article className="flex h-full min-h-0 flex-col bg-background" aria-label={`阅读 ${title}`}>
