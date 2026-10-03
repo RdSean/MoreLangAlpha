@@ -48,7 +48,7 @@ export function BookLiveActivity({ job, item, events, connected, liveAfterSeq = 
     if (!latest) return;
     setRecentAt(Date.parse(latest.created_at));
     if (!pool.current.length && !loading.current && !loadFailed.current) setRequested(latest.seq);
-    if (!pool.current.length || now - lastRotation.current < 15_000) return;
+    if (!pool.current.length || now - lastRotation.current < 5_000) return;
     setQuote(pool.current[nextQuote.current % pool.current.length]);
     nextQuote.current += 1;
     lastRotation.current = now;

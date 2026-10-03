@@ -56,10 +56,10 @@ describe('BookLiveActivity', () => {
     rerender(<BookLiveActivity {...props} events={[event(10), event(11)]} />);
     await screen.findByText('第一句');
     expect(screen.getByText('最近活动')).toBeInTheDocument();
-    now += 1_000;
+    now += 4_999;
     rerender(<BookLiveActivity {...props} events={[event(12)]} />);
     expect(screen.getByText('第一句')).toBeInTheDocument();
-    now += 20_000;
+    now += 1;
     rerender(<BookLiveActivity {...props} events={[event(12)]} />);
     expect(screen.getByText('第一句')).toBeInTheDocument();
     rerender(<BookLiveActivity {...props} events={[event(13)]} />);
