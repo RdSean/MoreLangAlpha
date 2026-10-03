@@ -11,7 +11,11 @@ across users and requests — only this block varies per request.
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import (
+    AgentMiddleware,
+    ModelRequest,
+    ModelResponse,
+)
 
 from ptc_agent.agent.middleware._utils import append_to_system_message
 from ptc_agent.agent.prompts import get_loader
@@ -41,10 +45,15 @@ class RuntimeContextMiddleware(AgentMiddleware):
         user_profile: dict[str, Any] | None = None,
         user_data_counts: dict[str, Any] | None = None,
         sandbox_enabled: bool = False,
+        working_directory: str | None = None,
     ) -> None:
         self._context_block = self._build_context_block(
             current_time, user_profile, user_data_counts, sandbox_enabled
         )
+        if working_directory is not None:
+            self._context_block += (
+                f"\n<execution_directory>\n{working_directory}\n</execution_directory>"
+            )
 
     @staticmethod
     def _build_context_block(

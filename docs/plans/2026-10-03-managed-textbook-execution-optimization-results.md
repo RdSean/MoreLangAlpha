@@ -17,3 +17,11 @@
 - Skill 仅增加可选宿主职责例外与简短交付说明，独立 Mode 3 和结构校验保持；教学模板尚未改。新冻结 Skill SHA256 `3c6d34c78ec1c88ed4ddb5a0a0b8fcd91f64ae12c785732915135a21bc1cb062`，更新现有 digest 锁定测试，schema hash 不变。
 - 其余任务与真实小样本仍在执行，暂不宣称第一轮完成或已证明提速。
 - 加入结构与 managed policy 回归后五套 83 passed；改动 Python Ruff 通过，格式化完成。
+
+## P2：托管系统提示
+
+- 新增通用 managed_system 模板，可信 managed policy 选择；按能力说明文件、代码、shell、图片、web 与可选进度。教材业务说明仍在教育任务与 Skill。
+- 移除托管运行中的金融身份、通用 agent.md 工作流和未启用的 Vault 指引，同时关闭 WorkspaceContextMiddleware、MarketWatchMiddleware 与用户金融数据计数注入。普通运行继续原装配路径。
+- 实际执行目录放在 RuntimeContextMiddleware 的缓存断点之后；两个不同 execution 的静态提示相同，lean 为 detailed 子集。源文不授予工具能力，输入与 Skill 只读规则保留。
+- 初始新接口/渲染测试 6 failed、1 passed；实现后提示/契约/runtime/普通输出格式 80 passed。新增实际 create_agent 装配、动态上下文与两套缓存回归后聚焦 45 passed，1 既有 Pydantic copy 弃用 warning；改动 Ruff 通过。
+- 真实模型耗时和内容行为仍待 P4 验证，提示长度变化不等同于已证明提速。

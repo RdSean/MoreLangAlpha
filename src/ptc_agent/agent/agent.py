@@ -332,6 +332,7 @@ class PTCAgent:
         memo_enabled: bool = True,
         crawl_enabled: bool = False,
         direct_tool_summary: str = "",
+        managed_policy: "ManagedExecutionPolicy | None" = None,
     ) -> str:
         """Build the static system prompt (excludes time/profile for cacheability).
 
@@ -340,6 +341,18 @@ class PTCAgent:
         level themselves.
         """
         loader = get_loader()
+        if managed_policy is not None:
+            return loader.get_managed_system_prompt(
+                **guidance_template_vars(guidance),
+                tool_summary=tool_summary if managed_policy.enable_mcp else "",
+                managed_bash_enabled=managed_policy.enable_bash,
+                managed_code_enabled=managed_policy.enable_code_execution,
+                managed_web_enabled=managed_policy.enable_web,
+                managed_mcp_enabled=managed_policy.enable_mcp,
+                managed_preview_enabled=managed_policy.enable_preview,
+                managed_widgets_enabled=managed_policy.enable_widgets,
+                managed_progress_enabled=managed_policy.enable_progress_reporting,
+            )
         return loader.get_system_prompt(
             **guidance_template_vars(guidance),
             tool_summary=tool_summary,
@@ -595,6 +608,7 @@ class PTCAgent:
             store = None
             user_id = None
             user_profile = None
+            user_data_counts = None
             on_signed_url = None
             vault_secrets = None
 
@@ -974,6 +988,7 @@ class PTCAgent:
             memo_enabled=gates.memo,
             crawl_enabled=bool(crawl_tools),
             direct_tool_summary=direct_tool_summary(direct_tools),
+            managed_policy=managed_policy,
         )
 
         logger.debug(
@@ -1048,7 +1063,7 @@ class PTCAgent:
 
         # Workspace context middleware (agent.md injection — main agent only)
         workspace_context_middleware: list[Any] = []
-        if session is not None:
+        if session is not None and managed_policy is None:
             workspace_context_middleware = [
                 WorkspaceContextMiddleware(
                     session=session,
@@ -1065,6 +1080,11 @@ class PTCAgent:
                 user_profile=user_profile,
                 user_data_counts=user_data_counts,
                 sandbox_enabled=True,
+                working_directory=(
+                    managed_policy.filesystem_root
+                    if managed_policy is not None
+                    else None
+                ),
             )
         ]
 
@@ -1150,7 +1170,8 @@ class PTCAgent:
                 # prompt_cache_breakpoint) must never reach another provider.
                 *(
                     [MarketWatchMiddleware()]
-                    if self.config.feature_enabled("market_watch")
+                    if managed_policy is None
+                    and self.config.feature_enabled("market_watch")
                     else []
                 ),
                 EmptyToolCallRetryMiddleware(),

@@ -99,6 +99,10 @@ class PromptLoader:
         """
         return self.render("system.md.j2", **kwargs)
 
+    def get_managed_system_prompt(self, **kwargs: Any) -> str:
+        """Render the service-owned execution surface, without a chat workflow."""
+        return self.render("managed_system.md.j2", **kwargs)
+
     def get_subagent_prompt(self, subagent_type: str, **kwargs: Any) -> str:
         """Get prompt for a sub-agent type.
 

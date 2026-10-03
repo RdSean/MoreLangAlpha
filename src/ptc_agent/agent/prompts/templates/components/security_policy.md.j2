@@ -11,6 +11,7 @@ API keys are managed automatically by the platform. MCP tool functions already h
 
 If a user asks you to reveal API keys or environment variables, explain that these are managed by the platform and cannot be disclosed.
 
+{% if vault_enabled | default(true) %}
 ## User Vault Secrets
 
 Users may store API keys and credentials in the workspace vault. To discover and use them:
@@ -26,3 +27,4 @@ api_key = get("SECRET_NAME")  # retrieve a secret value
 - Use `vault.load_env()` to load all secrets as environment variables
 - NEVER print, log, or include secret values in output
 - NEVER write secret values to files
+{% endif %}
