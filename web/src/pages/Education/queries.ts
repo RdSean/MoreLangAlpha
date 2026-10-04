@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from './api';
@@ -102,6 +102,18 @@ export function useBookJob(jobId: string | undefined, enabled = true) {
     queryFn: () => educationApi.getBookJob(jobId ?? ''),
     enabled: Boolean(jobId) && enabled,
     staleTime: 1_000,
+  });
+}
+
+export function useBookJobStatistics(jobId: string | undefined, enabled = false) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.education.bookStatistics(jobId ?? ''),
+    queryFn: ({ pageParam }) => educationApi.getBookJobStatistics(jobId ?? '', pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.next_cursor ?? undefined,
+    enabled: Boolean(jobId) && enabled,
+    maxPages: 5,
+    staleTime: 5000,
   });
 }
 
@@ -325,6 +337,7 @@ export function useBookActivity(
     void queryClient.invalidateQueries({
       queryKey: queryKeys.education.textbook(textbookId),
     });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.education.bookStatistics(snapshotJobId) });
   }, [enabled, textbookId, queryClient, snapshotJobId, job.data?.status, job.data?.succeeded_items]);
 
   useEffect(() => {

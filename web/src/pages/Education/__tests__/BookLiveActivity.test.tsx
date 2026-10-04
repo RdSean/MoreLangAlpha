@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
-import { BookLiveActivity } from '../components/BookLiveActivity';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
+import { BookLiveActivity, BookLiveActivityView } from '../components/BookLiveActivity';
+import { useBookLiveActivity } from '../components/useBookLiveActivity';
 import { loadQuotePool } from '../quotePool';
 import type { BookActivityEvent, BookJob, BookJobItem } from '../types';
 
@@ -21,6 +23,35 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('BookLiveActivity', () => {
+  it('keeps its quote and event fence when the layout remounts the presentation', async () => {
+    function Harness() {
+      const [layout, setLayout] = useState('page');
+      const [events, setEvents] = useState<BookActivityEvent[]>([]);
+      const activity = useBookLiveActivity(job, activeItem, events, true, 10);
+      return <><button onClick={() => setEvents([event(11)])}>event</button><button onClick={() => setLayout('compact')}>layout</button><BookLiveActivityView key={layout} activity={activity} /></>;
+    }
+    render(<Harness />);
+    fireEvent.click(screen.getByText('event'));
+    await screen.findByText('第一句');
+    now += 6000;
+    fireEvent.click(screen.getByText('layout'));
+    expect(screen.getByText('第一句')).toBeInTheDocument();
+    expect(loadQuotePool).toHaveBeenCalledTimes(1);
+  });
+  it('accepts fresh service resource confirmations during preparation and ignores lease heartbeats', async () => {
+    const props = { job, item: { ...activeItem, kind: 'structure' as const }, connected: true, events: [] as BookActivityEvent[] };
+    const { rerender } = render(<BookLiveActivity {...props} />);
+    rerender(<BookLiveActivity {...props} events={[event(11, { kind: 'heartbeat' })]} />);
+    expect(loadQuotePool).not.toHaveBeenCalled();
+    rerender(<BookLiveActivity {...props} events={[event(12, { kind: 'resource', metadata: { origin: 'service' } })]} />);
+    await screen.findByText('第一句');
+    expect(screen.getByText('存储确认')).toBeInTheDocument();
+  });
+
+  it('does not rotate on terminal callbacks', () => {
+    render(<BookLiveActivity job={{ ...job, status: 'succeeded' }} item={activeItem} events={[event(11)]} connected />);
+    expect(loadQuotePool).not.toHaveBeenCalled();
+  });
   it('does not restart an interrupted load without a fresh diagnostic', async () => {
     let resolve!: (value: typeof quotes) => void;
     vi.mocked(loadQuotePool).mockImplementation(() => new Promise((done) => { resolve = done; }));

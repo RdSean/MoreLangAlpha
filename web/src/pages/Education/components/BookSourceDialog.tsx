@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpenCheck, LoaderCircle, RefreshCw } from 'lucide-react';
+import { BookOpenCheck, RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { createDateFormatter } from '@/lib/format';
+import { Loader } from '@/components/ui/loader';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -39,6 +42,8 @@ export function BookSourceDialog({
   onOpenChange,
   onCreated,
 }: BookSourceDialogProps) {
+  useTranslation();
+  const formatDate = createDateFormatter({ dateStyle: 'medium', timeStyle: 'short' });
   const sources = useManagedBookSourceCandidates(open);
   const mutations = useManagedBookMutations();
   const requestId = useRef(createRequestId());
@@ -76,6 +81,7 @@ export function BookSourceDialog({
         title: title.trim(),
         idempotency_key: requestId.current,
       });
+      onOpenChange(false);
       onCreated(result);
     } catch {
       setSubmitError(true);
@@ -91,7 +97,7 @@ export function BookSourceDialog({
 
         {sources.isLoading ? (
           <div className="flex min-h-36 items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
-            <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            <Loader size={16} />
             正在读取可用解析结果…
           </div>
         ) : sources.isError ? (
@@ -134,7 +140,7 @@ export function BookSourceDialog({
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-medium text-foreground">{candidate.filename}</span>
                         <span className="mt-1 block text-xs text-muted-foreground">
-                          {new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(candidate.completed_at))}
+                          {formatDate(new Date(candidate.completed_at))}
                           {' · '}{candidate.parser_name}
                         </span>
                       </span>
@@ -158,7 +164,7 @@ export function BookSourceDialog({
             <DialogFooter className="mt-5">
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>取消</Button>
               <Button type="submit" disabled={!selected || !title.trim() || mutations.createTextbook.isPending}>
-                {mutations.createTextbook.isPending && <LoaderCircle className="mr-2 size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
+                {mutations.createTextbook.isPending && <span className="mr-2"><Loader size={16} /></span>}
                 添加并分析
               </Button>
             </DialogFooter>

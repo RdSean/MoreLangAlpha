@@ -178,6 +178,7 @@ export const queryKeys = {
     ],
     bookJob: (id: string) => [...queryKeys.education.all, 'book-jobs', id],
     bookActivity: (id: string) => [...queryKeys.education.bookJob(id), 'activity'],
+    bookStatistics: (id: string) => [...queryKeys.education.bookJob(id), 'statistics'],
     learning: () => [...queryKeys.education.all, 'learning'],
     assignment: (id: string) => [...queryKeys.education.learning(), id],
     assignmentStructure: (id: string) => [...queryKeys.education.assignment(id), 'structure'],

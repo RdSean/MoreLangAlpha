@@ -133,6 +133,8 @@
 
 ## Task A5：工作台整页时间线与共用计时组件
 
+状态：实现与组件/mock回归已完成。全教育145 passed，连同图书馆入口164 passed；pnpm build、改动TS/TSX ESLint和diff检查通过，首屏357.9kB gzip。核心受理/路由/共享时钟回归先失败再通过；补齐恢复累计片段、partial缺口、默认panel持久化、N/N来源清单状态、quote布局fence、终态历史按需订阅、阅读位置及记录分页。202跳转实际由DocumentsPage/DocumentDetailPage拥有，按证据小改两处，另提取共享useBookLiveActivity保持布局切换状态。保留既有工具告警；父代理两阶段复核、真实浏览器/亮暗/移动端与端到端验收待A6，开发库未迁移、未启新服务、未调用付费模型，不将mock测试称为真实工作流通过。
+
 **Files:**
 - Create: `web/src/pages/Education/components/BookProcessingView.tsx`。
 - Create: `web/src/pages/Education/components/BookTimingSummary.tsx`。

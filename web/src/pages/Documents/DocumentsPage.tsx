@@ -244,8 +244,8 @@ export default function DocumentsPage() {
         onOpenChange={(open) => {
           if (!open) updateParams((params) => params.delete('useAsTextbook'));
         }}
-        onCreated={({ textbook_id: textbookId, job_id: jobId }) => {
-          navigate(`/textbooks/${encodeURIComponent(textbookId)}?activity=${encodeURIComponent(jobId)}`);
+        onCreated={({ textbook_id: textbookId, job_id: jobId, acceptance }) => {
+          navigate(`/textbooks/${encodeURIComponent(textbookId)}?activity=${encodeURIComponent(jobId)}${acceptance === 'accepted_new' ? '&panel=processing' : ''}`);
         }}
       />
     </div>

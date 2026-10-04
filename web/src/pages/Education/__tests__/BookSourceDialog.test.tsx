@@ -89,4 +89,12 @@ describe('BookSourceDialog', () => {
     });
     expect(onCreated).toHaveBeenCalledWith({ textbook_id: 'book-1', job_id: 'book-job-1' });
   });
+
+  it('closes immediately after asynchronous acceptance', async () => {
+    state.createTextbook.mockResolvedValue({ textbook_id: 'book-1', job_id: 'book-job-1', acceptance: 'accepted_new', source_status: 'pending' });
+    const onOpenChange = vi.fn();
+    render(<BookSourceDialog open onOpenChange={onOpenChange} onCreated={vi.fn()} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: '添加并分析' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
 });

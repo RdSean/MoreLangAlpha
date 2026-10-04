@@ -122,6 +122,11 @@ function LocationProbe() {
 }
 
 describe('projectBookActivity', () => {
+  it('keeps retry-chain progress and identifies queued source preparation', () => {
+    const queued = { ...item('structure-1', 'structure', 'queued', 1), execution_phase: 'initial_queue' as const };
+    expect(projectBookActivity(job({ kind: 'structure', status: 'queued', items: [queued] }), []).currentDescription).toBe('等待准备教材来源');
+    expect(projectBookActivity(job({ material_progress: { completed: 8, total: 10 } }), []).materialProgress).toEqual({ completed: 8, total: 10 });
+  });
   it('recognizes only service-authored host steps, without a completion check', () => {
     const projection = projectBookActivity(job(), [
       event(1, 'progress', 'material-2', '正在准备处理文件', { stage: 'service_preparing', origin: 'service' }),

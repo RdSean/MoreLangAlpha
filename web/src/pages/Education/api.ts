@@ -25,6 +25,7 @@ import type {
   BookAssignment,
   BookAssignmentRequest,
   BookJob,
+  BookJobStatistics,
   BookJobStatus,
   BookSourceSlice,
   BookSourceCandidate,
@@ -197,6 +198,14 @@ export interface WatchBookActivityOptions {
 export async function getBookJob(jobId: string): Promise<BookJob> {
   const { data } = await api.get<BookJob>(
     `/api/v1/education/book-jobs/${encodeURIComponent(jobId)}`,
+  );
+  return data;
+}
+
+export async function getBookJobStatistics(jobId: string, cursor?: string): Promise<BookJobStatistics> {
+  const { data } = await api.get<BookJobStatistics>(
+    `/api/v1/education/book-jobs/${encodeURIComponent(jobId)}/statistics`,
+    { params: { limit: 50, ...(cursor ? { cursor } : {}) } },
   );
   return data;
 }

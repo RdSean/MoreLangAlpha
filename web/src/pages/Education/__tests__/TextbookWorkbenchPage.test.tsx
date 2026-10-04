@@ -6,6 +6,7 @@ import { scrollMemory } from '@/lib/scrollMemory';
 import { BookGenerationForm } from '../components/BookGenerationForm';
 import { BookReader } from '../components/BookReader';
 import TextbookWorkbenchPage from '../TextbookWorkbenchPage';
+import { processingJob } from './bookProcessingFixtures';
 import type {
   BookAssignment,
   BookSourceSlice,
@@ -53,6 +54,8 @@ const pageState = vi.hoisted(() => ({
   membersRefetch: vi.fn(),
   assignmentsRefetch: vi.fn(),
   sourceSlice: vi.fn(),
+  activityHook: vi.fn(),
+  activityJob: undefined as ReturnType<typeof processingJob> | undefined,
   members: [
     { user_id: 'parent-1', name: '陈女士', role: 'parent' },
     { user_id: 'student-1', name: '小雨', role: 'student' },
@@ -146,7 +149,7 @@ const pageState = vi.hoisted(() => ({
 
 vi.mock('../queries', () => ({
   useTextbookWorkbench: () => ({ data: pageState.workbench, isLoading: false, isError: false }),
-  useManagedBookStructure: () => ({ data: pageState.structure, isLoading: false, isError: false }),
+  useManagedBookStructure: (_id: string, enabled: boolean) => ({ data: enabled ? pageState.structure : undefined, isLoading: false, isError: false }),
   useManagedBookSourceSlice: (bookId: string, startLine: number, endLine: number) => ({
     data: pageState.sourceSlice(bookId, startLine, endLine),
     isLoading: false,
@@ -177,7 +180,8 @@ vi.mock('../queries', () => ({
       },
     isLoading: false,
   }),
-  useBookActivity: () => ({ data: undefined, events: [], connectionState: 'connected' }),
+  useBookActivity: (...args: unknown[]) => { pageState.activityHook(...args); return { data: pageState.activityJob, events: [], connectionState: 'connected' }; },
+  useBookJobStatistics: () => ({ data: undefined, isLoading: false, isError: false }),
   useEducationMembers: () => ({
     data: pageState.members,
     isLoading: false,
@@ -204,6 +208,9 @@ vi.mock('../queries', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   scrollMemory.clear();
+  pageState.activityJob = undefined;
+  pageState.workbench.structure_status = 'ready';
+  pageState.workbench.source_status = 'ready';
   pageState.workbench.current_job = null;
   pageState.workbench.recent_job = null;
   pageState.createJob.mockResolvedValue({ job_id: 'job-created' });
@@ -391,6 +398,61 @@ function renderWorkbench(initialEntry = '/textbooks/book-1') {
 }
 
 describe('TextbookWorkbenchPage', () => {
+  it('defaults pending sources without a directory to processing and allows a manual reading return', async () => {
+    pageState.workbench.structure_status = 'queued';
+    pageState.workbench.source_status = 'pending';
+    pageState.activityJob = processingJob({ status: 'queued' });
+    pageState.workbench.current_job = pageState.activityJob;
+    renderWorkbench();
+    expect(screen.getByRole('heading', { name: '处理时间线' })).toBeInTheDocument();
+    expect(screen.getByText('等待准备教材来源')).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('panel=processing');
+    await userEvent.setup().click(screen.getByRole('button', { name: '返回阅读' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('panel=reading');
+    expect(screen.queryByRole('heading', { name: '处理时间线' })).not.toBeInTheDocument();
+  });
+  it('restores processing layout without a second subscription and preserves the reading selection', async () => {
+    pageState.activityJob = processingJob();
+    renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1&panel=processing');
+    expect(screen.getByRole('heading', { name: '处理时间线' })).toBeInTheDocument();
+    expect(pageState.activityHook).toHaveBeenCalledTimes(1);
+    await userEvent.setup().click(screen.getByRole('button', { name: '返回阅读' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('kp=sports-training&view=material&activity=job-1');
+    expect(screen.getByText('已有冠军训练讲义')).toBeInTheDocument();
+  });
+
+  it('opens terminal activity history only on demand from a normal reader', () => {
+    pageState.workbench.recent_job = processingJob({ status: 'succeeded' });
+    renderWorkbench('/textbooks/book-1?kp=sports-training&view=material');
+    expect(pageState.activityHook).toHaveBeenCalledWith(undefined, 'book-1', false);
+  });
+
+  it('preserves reader scroll across full processing and compact layouts', async () => {
+    pageState.activityJob = processingJob();
+    renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1');
+    const reader = screen.getByTestId('book-reader-scroll');
+    reader.scrollTop = 184;
+    fireEvent.scroll(reader);
+    await userEvent.setup().click(screen.getByRole('button', { name: '打开整页时间线' }));
+    expect(screen.queryByTestId('book-reader-scroll')).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: '返回阅读' }));
+    expect(screen.getByTestId('book-reader-scroll').scrollTop).toBe(184);
+  });
+
+  it('enters processing after lesson acceptance and does not erase the current view', async () => {
+    renderWorkbench('/textbooks/book-1?kp=sports-global-game&view=source');
+    fireEvent.click(screen.getByRole('button', { name: '生成讲义' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: '开始生成' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('panel=processing');
+    expect(screen.getByTestId('location')).toHaveTextContent('kp=sports-global-game&view=source');
+  });
+
+  it('does not leave processing when the server reports completion', () => {
+    pageState.activityJob = processingJob({ status: 'succeeded' });
+    renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1&panel=processing');
+    expect(screen.getByRole('heading', { name: '处理时间线' })).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('panel=processing');
+  });
   it('chooses the first KP and source view when the URL has no selection', async () => {
     renderWorkbench();
 

@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
+import type { CreateManagedTextbookResponse } from '@/pages/Education/types';
 
 vi.mock('../components/DatasetGrid', () => ({ default: () => <div data-testid="dataset-grid" /> }));
 vi.mock('../components/DocumentTable', () => ({ default: () => <div data-testid="document-table" /> }));
@@ -12,8 +13,8 @@ vi.mock('../components/DocumentPreviewDrawer', () => ({
   ),
 }));
 vi.mock('@/pages/Education/components/BookSourceDialog', () => ({
-  BookSourceDialog: ({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) => (
-    open ? <button type="button" aria-label="Close textbook source" onClick={() => onOpenChange(false)}>Source picker</button> : null
+  BookSourceDialog: ({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (open: boolean) => void; onCreated: (result: CreateManagedTextbookResponse) => void }) => (
+    open ? <><button type="button" aria-label="Close textbook source" onClick={() => onOpenChange(false)}>Source picker</button><button onClick={() => onCreated({ textbook_id: 'book-1', job_id: 'job-1', acceptance: 'accepted_new' })}>accept</button><button onClick={() => onCreated({ textbook_id: 'book-1', job_id: 'job-1', acceptance: 'reused' })}>reuse</button></> : null
   ),
 }));
 
@@ -29,12 +30,24 @@ function renderPage(initialEntry = '/documents') {
     <MemoryRouter initialEntries={[initialEntry]} future={{ v7_startTransition: true }}>
       <Routes>
         <Route path="/documents" element={<><DocumentsPage /><LocationProbe /></>} />
+        <Route path="/textbooks/:textbookId" element={<LocationProbe />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 describe('DocumentsPage', () => {
+  it('enters processing after a new 202 acceptance', async () => {
+    renderPage('/documents?useAsTextbook=1');
+    await userEvent.setup().click(screen.getByText('accept'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('activity=job-1&panel=processing');
+  });
+  it('reuses an existing textbook in its reading layout', async () => {
+    renderPage('/documents?useAsTextbook=1');
+    await userEvent.setup().click(screen.getByText('reuse'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('activity=job-1');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('panel=processing');
+  });
   it('opens with Dataset and All Documents tabs', () => {
     renderPage();
 

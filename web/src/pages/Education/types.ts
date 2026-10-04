@@ -194,7 +194,7 @@ export interface BookAttemptTiming {
 export interface BookAttemptStatistics {
   item_id: string;
   kind: BookJobItemKind;
-  status: BookJobItemStatus;
+  status: BookJobItemStatus | 'interrupted';
   knowledge_point_title: string | null;
   timing: BookAttemptTiming;
 }
@@ -258,6 +258,7 @@ export interface BookJob extends BookJobSummary {
   replace_existing: boolean;
   include_supplementary: boolean;
   items: BookJobItem[];
+  material_progress?: { completed: number; total: number } | null;
 }
 
 export interface BookActivityEvent {

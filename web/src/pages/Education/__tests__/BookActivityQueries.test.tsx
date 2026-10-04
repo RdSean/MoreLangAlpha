@@ -7,6 +7,7 @@ import * as educationApi from '../api';
 import {
   createCoalescedRefreshScheduler,
   useBookActivity,
+  useBookJobStatistics,
 } from '../queries';
 import type { BookActivityPage, BookJob } from '../types';
 
@@ -102,6 +103,42 @@ describe('createCoalescedRefreshScheduler', () => {
 });
 
 describe('useBookActivity', () => {
+  it('invalidates on-demand statistics after committed material progress changes', async () => {
+    vi.spyOn(educationApi, 'getBookJob').mockResolvedValue(runningJob());
+    vi.spyOn(educationApi, 'watchBookActivity').mockImplementation((_id, options) => new Promise((resolve) => options.signal?.addEventListener('abort', () => resolve())));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const view = renderHook(() => useBookActivity('job-1', 'book-1'), { wrapper: wrapper(client) });
+    await waitFor(() => expect(view.result.current.data).toBeDefined());
+    invalidate.mockClear();
+    act(() => { client.setQueryData(queryKeys.education.bookJob('job-1'), { ...runningJob(), succeeded_items: 1 }); });
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.education.bookStatistics('job-1') }));
+    view.unmount();
+  });
+  it('does not resubscribe or request quotes when only the rendering layout changes', async () => {
+    vi.spyOn(educationApi, 'getBookJob').mockResolvedValue(runningJob());
+    const watch = vi.spyOn(educationApi, 'watchBookActivity').mockImplementation((_id, options) => new Promise((resolve) => options.signal?.addEventListener('abort', () => resolve())));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = renderHook(({ panel }) => ({ panel, activity: useBookActivity('job-1', 'book-1') }), { initialProps: { panel: 'processing' }, wrapper: wrapper(client) });
+    await waitFor(() => expect(view.result.current.activity.data).toBeDefined());
+    view.rerender({ panel: 'compact' });
+    expect(watch).toHaveBeenCalledTimes(1);
+    view.unmount();
+  });
+
+  it('requests history only on demand and follows the server cursor', async () => {
+    const stats = { job_id: 'job-1', request_round: 1, server_now: NOW, status: 'available' as const, round_total_ms: null, material_sample_count: 0, material_median_ms: null, material_longest_ms: null, supplementary: [], attempts: [], next_cursor: 'next' };
+    const get = vi.spyOn(educationApi, 'getBookJobStatistics').mockResolvedValueOnce(stats).mockResolvedValue({ ...stats, next_cursor: null });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = renderHook(({ enabled }) => useBookJobStatistics('job-1', enabled), { initialProps: { enabled: false }, wrapper: wrapper(client) });
+    expect(get).not.toHaveBeenCalled();
+    view.rerender({ enabled: true });
+    await waitFor(() => expect(view.result.current.data?.pages).toHaveLength(1));
+    await act(async () => { await view.result.current.fetchNextPage(); });
+    expect(get.mock.calls[1]).toEqual(['job-1', 'next']);
+    await waitFor(() => expect(view.result.current.hasNextPage).toBe(false));
+    view.unmount();
+  });
   it('stops live activity as soon as a terminal page arrives, before snapshot refresh', async () => {
     vi.spyOn(educationApi, 'getBookJob').mockResolvedValueOnce(runningJob())
       .mockImplementation(() => new Promise(() => {}));
