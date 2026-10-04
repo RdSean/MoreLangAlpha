@@ -340,6 +340,149 @@ IDENTITY = MoreToSkillsIdentity(
 )
 
 
+async def test_pending_book_is_atomically_bound_without_fake_frozen_fields(
+    patched_get_db_connection,
+    seed_user,
+):
+    from src.server.database.education_books import create_textbook_with_initial_job
+
+    parent = seed_user["user_id"]
+    async with patched_get_db_connection() as conn:
+        household = await _seed_parent_household(conn, parent_user_id=parent)
+    book_id = uuid4()
+    source = _source(
+        suffix=uuid4().hex, household_id=household, textbook_id=str(book_id)
+    )
+    for field in (
+        "snapshot_prefix",
+        "markdown_key",
+        "blocks_key",
+        "report_key",
+        "content_sha256",
+        "size_bytes",
+    ):
+        source[field] = None
+    source["source_status"] = "pending"
+    source["selected_source"] = {"content_sha256": "a" * 64, "size_bytes": 128}
+    source["preparation_descriptor"] = {
+        "resources": [],
+        "primary_artifact_id": source["primary_artifact_id"],
+    }
+    request = dict(
+        textbook_id=book_id,
+        parent_user_id=parent,
+        household_id=household,
+        title="Pending",
+        slug=f"pending-{book_id}",
+        source=source,
+        idempotency_key="pending-request",
+        identity=IDENTITY,
+    )
+    created = await create_textbook_with_initial_job(**request)
+    assert created["acceptance"] == "accepted_new"
+    reused = await create_textbook_with_initial_job(**request)
+    assert reused["acceptance"] == "reused"
+    assert reused["textbook_id"] == created["textbook_id"]
+    async with patched_get_db_connection() as conn:
+        row = await (
+            await conn.execute(
+                "SELECT * FROM education_textbooks WHERE textbook_id=%s", (book_id,)
+            )
+        ).fetchone()
+        assert row["source_status"] == "pending"
+        assert row["source_markdown_key"] is None
+        assert row["source_content_sha256"] is None
+        assert row["source_frozen_at"] is None
+        job = await (
+            await conn.execute(
+                "SELECT total_items FROM education_book_jobs WHERE job_id=%s",
+                (created["job_id"],),
+            )
+        ).fetchone()
+        assert job["total_items"] == 1
+        with pytest.raises(psycopg.errors.CheckViolation):
+            await conn.execute(
+                "UPDATE education_textbooks SET source_status='ready' WHERE textbook_id=%s",
+                (book_id,),
+            )
+    changed = dict(request, title="Different")
+    with pytest.raises(ValueError, match="idempotency"):
+        await create_textbook_with_initial_job(**changed)
+    contenders = await asyncio.gather(
+        *[
+            create_textbook_with_initial_job(
+                **dict(
+                    request, textbook_id=uuid4(), idempotency_key=f"same-source-{index}"
+                )
+            )
+            for index in range(2)
+        ]
+    )
+    assert all(row["textbook_id"] == created["textbook_id"] for row in contenders)
+    from src.server.database.education_book_jobs import (
+        claim_next_book_item,
+        fail_book_item,
+    )
+    from src.server.database.education_books import commit_prepared_book_source
+
+    claim = await claim_next_book_item(
+        worker_id="prepare-a", lease_seconds=30, preparation_only=True
+    )
+    assert claim["execution_phase"] == "source_freezing"
+    assert (
+        await claim_next_book_item(
+            worker_id="prepare-b", lease_seconds=30, preparation_only=True
+        )
+        is None
+    )
+    ready_source = _source(
+        suffix=uuid4().hex, household_id=household, textbook_id=str(book_id)
+    )
+    ready_source.update(
+        {
+            key: source[key]
+            for key in ("document_id", "parse_job_id", "primary_artifact_id")
+        }
+    )
+    prefix = f"education/{household}/textbooks/{book_id}/source/attempts/{claim['attempt_token']}/"
+    ready_source.update(
+        snapshot_prefix=prefix,
+        markdown_key=f"{prefix}artifacts/document.md",
+        blocks_key=None,
+        report_key=None,
+    )
+    with pytest.raises(RuntimeError, match="stale"):
+        await commit_prepared_book_source(
+            item_id=claim["item_id"], attempt_token=uuid4(), source=ready_source
+        )
+    await commit_prepared_book_source(
+        item_id=claim["item_id"],
+        attempt_token=claim["attempt_token"],
+        source=ready_source,
+    )
+    await commit_prepared_book_source(
+        item_id=claim["item_id"],
+        attempt_token=claim["attempt_token"],
+        source=ready_source,
+    )
+    await fail_book_item(
+        item_id=claim["item_id"],
+        attempt_token=claim["attempt_token"],
+        safe_error="Structure failed",
+        stop_remaining=True,
+    )
+    async with patched_get_db_connection() as conn:
+        frozen = await (
+            await conn.execute(
+                "SELECT source_status,source_frozen_at,source_markdown_key FROM education_textbooks WHERE textbook_id=%s",
+                (book_id,),
+            )
+        ).fetchone()
+        assert frozen["source_status"] == "ready"
+        assert frozen["source_frozen_at"] is not None
+        assert frozen["source_markdown_key"] == ready_source["markdown_key"]
+
+
 def _parsed_structure(*, content_file: str | None = None) -> ParsedBookStructure:
     knowledge_point = {
         "id": "kp-syntax",
@@ -392,7 +535,7 @@ async def _create_committed_book(*, parent_user_id: str, household_id: str):
             household_id=household_id,
             textbook_id=str(textbook_id),
         ),
-        idempotency_key="initial-structure",
+        idempotency_key=f"initial-structure-{textbook_id}",
         identity=IDENTITY,
     )
     structure_token = uuid4()
@@ -1025,7 +1168,7 @@ async def test_structure_import_and_material_finalization_are_atomic_and_idempot
             requirements=None,
             replace_existing=False,
             include_supplementary=False,
-            idempotency_key="initial-structure",
+            idempotency_key=f"initial-structure-{created['textbook_id']}",
             identity=IDENTITY,
         )
     with pytest.raises(ValueError, match="Idempotency key conflicts"):

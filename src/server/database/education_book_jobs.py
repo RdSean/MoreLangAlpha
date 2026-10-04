@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 async def claim_next_book_item(
-    *, worker_id: str, lease_seconds: int
+    *, worker_id: str, lease_seconds: int, preparation_only: bool = False
 ) -> dict[str, Any] | None:
     """Atomically claim the next sequential item and fence its execution."""
 
@@ -28,12 +28,24 @@ async def claim_next_book_item(
     execution_id = uuid4()
     async with get_db_connection() as conn, conn.transaction():
         async with conn.cursor(row_factory=dict_row) as cur:
+            if preparation_only:
+                await cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended('book-source-capacity', 0))"
+                )
+                await cur.execute(
+                    "SELECT 1 FROM education_book_job_items WHERE status='running' AND execution_phase='source_freezing' LIMIT 1"
+                )
+                if await cur.fetchone() is not None:
+                    return None
             await cur.execute(
                 """
                 SELECT jobs.job_id
                 FROM education_book_jobs AS jobs
+                JOIN education_textbooks AS books ON books.textbook_id=jobs.textbook_id
                 WHERE jobs.status IN ('queued', 'running')
                   AND jobs.cancel_requested_at IS NULL
+                  AND ((%s AND jobs.kind='structure' AND books.source_status IN ('pending','failed','cancelled'))
+                    OR (NOT %s AND books.source_status='ready'))
                   AND EXISTS (
                       SELECT 1
                       FROM education_book_job_items AS items
@@ -50,7 +62,8 @@ async def claim_next_book_item(
                 ORDER BY jobs.created_at, jobs.job_id
                 FOR UPDATE OF jobs SKIP LOCKED
                 LIMIT 1
-                """
+                """,
+                (preparation_only, preparation_only),
             )
             candidate_job = await cur.fetchone()
             if candidate_job is None:
@@ -84,6 +97,7 @@ async def claim_next_book_item(
                     lease_owner = %s,
                     lease_expires_at = NOW() + make_interval(secs => %s),
                     started_at = NOW(), finished_at = NULL, safe_error = NULL,
+                    execution_phase = %s,
                     updated_at = NOW()
                 WHERE item_id = %s AND status = 'queued'
                 RETURNING *
@@ -93,12 +107,18 @@ async def claim_next_book_item(
                     execution_id,
                     worker_id,
                     lease_seconds,
+                    "source_freezing" if preparation_only else "runtime_queue",
                     candidate["item_id"],
                 ),
             )
             item = await cur.fetchone()
             if item is None:
                 return None
+            if preparation_only:
+                await cur.execute(
+                    "UPDATE education_textbooks SET source_status='preparing',updated_at=NOW() WHERE textbook_id=(SELECT textbook_id FROM education_book_jobs WHERE job_id=%s) AND source_status<>'ready'",
+                    (item["job_id"],),
+                )
             await cur.execute(
                 """
                 UPDATE education_book_jobs
@@ -122,6 +142,8 @@ async def claim_next_book_item(
                        textbooks.source_snapshot_prefix,
                        textbooks.source_filename, textbooks.source_format,
                        textbooks.source_content_sha256,
+                       textbooks.source_status, textbooks.preparation_descriptor,
+                       textbooks.selected_source,
                        points.skill_kp_id, points.knowledge_point_json,
                        structures.structure_id, structures.structure_json,
                        CASE
@@ -616,10 +638,11 @@ async def retry_book_job(
                     target_knowledge_point_ids, depth, requirements,
                     replace_existing, include_supplementary,
                     more_to_skills_version, skill_sha256, schema_sha256,
-                    requested_by_user_id, total_items, follow_up_request
+                    requested_by_user_id, total_items, follow_up_request,
+                    request_round, previous_job_id
                 ) VALUES (
                     %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 """,
                 (
@@ -642,6 +665,8 @@ async def retry_book_job(
                         if source["follow_up_request"] is not None
                         else None
                     ),
+                    source["request_round"] + 1,
+                    source["job_id"],
                 ),
             )
             await cur.executemany(
@@ -824,6 +849,7 @@ async def get_book_job_for_parent(
                        jobs.finished_at, jobs.safe_error, jobs.depth,
                        jobs.requirements, jobs.replace_existing,
                        jobs.include_supplementary,
+                       jobs.request_round, jobs.round_accepted_at, NOW() AS server_now,
                        COALESCE((
                            SELECT jsonb_agg(
                                jsonb_build_object(
@@ -840,6 +866,8 @@ async def get_book_job_for_parent(
                                    'safe_error', items.safe_error,
                                    'started_at', items.started_at,
                                    'finished_at', items.finished_at
+                                   , 'execution_phase', items.execution_phase
+                                   , 'queued_at', items.queued_at
                                ) ORDER BY items.position
                            )
                            FROM education_book_job_items AS items
@@ -866,6 +894,13 @@ async def get_book_job_for_parent(
     result["job_id"] = str(result["job_id"])
     result["textbook_id"] = str(result["textbook_id"])
     result["items"] = [dict(item) for item in result["items"]]
+    from src.server.database.education_book_timing import get_current_attempt_summaries
+
+    timings = await get_current_attempt_summaries(job_id=job_id)
+    for item in result["items"]:
+        current = timings.get(str(item["item_id"]))
+        item["timing_summary"] = current["timing"] if current else None
+        item["preparation_progress"] = current["progress"] if current else None
     return result
 
 
@@ -1089,6 +1124,7 @@ async def start_item_attempt(
                 UPDATE education_book_job_items
                 SET status = 'running', attempt = attempt + 1,
                     attempt_token = %s, started_at = NOW(),
+                    execution_phase = 'runtime_queue',
                     finished_at = NULL, safe_error = NULL, updated_at = NOW()
                 WHERE item_id = %s AND job_id = %s AND status = 'queued'
                 RETURNING *

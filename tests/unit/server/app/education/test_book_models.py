@@ -233,16 +233,25 @@ def test_kp_projection_keeps_database_and_skill_identifiers_distinct() -> None:
 
 def _workbench_payload():
     return {
-        "textbook_id": "txt-test", "title": "Book", "structure_status": "queued",
+        "textbook_id": "txt-test",
+        "title": "Book",
+        "structure_status": "queued",
         "materials": {"total": 0, "ready": 0},
         "updated_at": datetime.now(timezone.utc),
-        "source_status": "pending", "source": None,
+        "source_status": "pending",
+        "source": None,
         "selected_source": {
-            "document_id": "doc-1", "parse_job_id": "parse-1",
-            "primary_artifact_id": "artifact-1", "filename": "book.md",
-            "media_type": "text/markdown", "parser_id": "parser-1",
-            "parser_name": "Parser", "completed_at": datetime.now(timezone.utc),
-            "content_sha256": "a" * 64, "size_bytes": 12, "image_count": 3,
+            "document_id": "doc-1",
+            "parse_job_id": "parse-1",
+            "primary_artifact_id": "artifact-1",
+            "filename": "book.md",
+            "media_type": "text/markdown",
+            "parser_id": "parser-1",
+            "parser_name": "Parser",
+            "completed_at": datetime.now(timezone.utc),
+            "content_sha256": "a" * 64,
+            "size_bytes": 12,
+            "image_count": 3,
         },
     }
 
@@ -277,7 +286,10 @@ def test_acceptance_explicitly_distinguishes_new_and_reused():
     from src.server.app.education.book_models import CreateBookResponse
 
     ids = {"textbook_id": UUID(int=1), "job_id": UUID(int=2)}
-    assert CreateBookResponse(**ids, acceptance="accepted_new").acceptance == "accepted_new"
+    assert (
+        CreateBookResponse(**ids, acceptance="accepted_new").acceptance
+        == "accepted_new"
+    )
     assert CreateBookResponse(**ids, acceptance="reused").acceptance == "reused"
     with pytest.raises(ValidationError):
         CreateBookResponse(**ids, acceptance="unknown")
@@ -285,14 +297,17 @@ def test_acceptance_explicitly_distinguishes_new_and_reused():
 
 def test_timing_unknown_is_not_zero_and_progress_is_not_delivery_count():
     from src.server.app.education.book_models import (
-        BookAttemptTimingResponse, BookPreparationProgressResponse,
+        BookAttemptTimingResponse,
+        BookPreparationProgressResponse,
     )
 
     timing = BookAttemptTimingResponse(attempt=1, request_round=2)
     assert timing.total_ms is None
     assert timing.status == "unavailable"
     assert timing.phases == []
-    progress = BookPreparationProgressResponse(total_resources=129, verified_resources=129)
+    progress = BookPreparationProgressResponse(
+        total_resources=129, verified_resources=129
+    )
     assert progress.model_dump() == {"total_resources": 129, "verified_resources": 129}
     with pytest.raises(ValidationError):
         BookPreparationProgressResponse(total_resources=2, verified_resources=3)

@@ -12,7 +12,7 @@
 
 ## 状态、依据和执行纪律
 
-- 2026-10-04：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0 已完成契约与回归；A1 开始，A2–A7 待实施。未升级开发库、未启动付费模型验收。
+- 2026-10-05：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0/A1 已完成契约和数据库基础；A2 开始，A3–A7 待实施。未升级开发库、未启动付费模型验收。
 - 依据：[设计](2026-10-04-textbook-async-preparation-timeline-design.md)及两轮 SB3 实测记录。此增量不改原 Task 8 完成结论。
 - Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skills-textbook-refactor`；分支当前 `feature/more-to-skills-textbook-refactor`。下面精确文件路径相对此目录。
 - 读取根目录、src/server 与 web 的 AGENTS.md；界面遵守 DESIGN.md。保留用户修改的业务动作文档和未追踪 PDF，不重置、不纳入提交。
@@ -38,6 +38,10 @@
 6. 重跑上述测试确认通过；更新 CHANGELOG 并提交本 task。若实现要调整契约，先回写设计，不能靠 any/宽松 payload 绕过。
 
 ## Task A1：迁移与数据库准备/计时账本
+
+状态：已完成。隔离PG教材回归38 passed，双连接准备容量补测1 passed，相关单测66 passed；Ruff通过。旧另建数据库的迁移对照用例后续排除。084仅在测试库升级，开发库未迁移。来源IO和恢复故障矩阵归A2/A3，phase测量和统计聚合归A4。
+
+代码证据调整：`retry_book_job()`原有回归要求新建job且仅复制未完成item，保留该入口；request_round递增并以previous_job_id串联，不能仅从新job.total_items推导原批次N/M。A4/A5负责串联成功份数与当前轮计时样本。新增家庭级受理幂等表，避免不同来源复用同一受理键未被原textbook级唯一约束捕获。
 
 **Files:**
 - Create: `migrations/versions/084_textbook_preparation_timing.py`（实施时核对 head）。

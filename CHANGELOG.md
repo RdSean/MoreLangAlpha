@@ -2,6 +2,13 @@
 
 ## 2026-10-04
 
+### 开发 A1：来源准备与 attempt 数据账本
+
+- 新增084迁移：pending来源保留固定元数据、ready必须具备完整冻结指针；兼容旧source前缀及精确attempt子前缀。新增请求轮次、前序job关联、家庭级受理幂等记录、attempt与phase span表，旧冻结时间和计时不补造。
+- claim用PG事务锁限制全部署来源准备并发1，ready任务走原运行队列；token/取消fence控制来源提交，结构失败保留ready原文。attempt终态由数据库触发器与原业务提交同事务记录，当前紧凑快照及历史分页不公开运行输入、对象键或token。
+- 保留现有新job重试行为，通过previous_job_id/request_round串联轮次；仅复制未完成项，保留成功份数的跨轮投影在A4/A5实现。集成fixture新增langalpha_test硬保护。
+- 隔离PG教材回归38 passed，另补双连接准备容量回归1 passed；排除旧另建数据库的迁移对照用例。相关后端单测66 passed、DTO18 passed、Ruff通过。开发库仍未升级；来源IO、恢复与真实存储故障验收待A2/A3。
+
 ### 开发 A0：教材准备与计时公共契约
 
 - 工作台区分 selected_source 元数据与 ready 原文；pending/preparing/failed/cancelled 不可暴露 FrozenBookSource，ready 必须有有效摘要，旧冻结时间可以未知。受理响应区分 accepted_new/reused。

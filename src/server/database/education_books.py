@@ -143,15 +143,60 @@ async def create_textbook_with_initial_job(
     expected_prefix = (
         f"education/{UUID(str(household_id))}/textbooks/{textbook_id}/source/"
     )
-    snapshot_prefix = str(_source_value(source, "snapshot_prefix"))
-    if snapshot_prefix != expected_prefix:
+    pending = source.get("source_status") == "pending"
+    snapshot_prefix = None if pending else str(_source_value(source, "snapshot_prefix"))
+    if not pending and snapshot_prefix != expected_prefix:
         raise ValueError("source.snapshot_prefix does not match the textbook identity")
+    if pending and (
+        not source.get("selected_source") or not source.get("preparation_descriptor")
+    ):
+        raise ValueError("pending source requires pinned metadata and descriptor")
     for field in ("markdown_key", "blocks_key", "report_key"):
         value = source.get(field)
         if value is not None and not str(value).startswith(expected_prefix):
             raise ValueError(f"source.{field} does not belong to the textbook snapshot")
     async with get_db_connection() as conn, conn.transaction():
         async with conn.cursor(row_factory=dict_row) as cur:
+            # Serialize household acceptance, including competing sources using one key.
+            await cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"book-accept:{household_id}",),
+            )
+            await cur.execute(
+                "SELECT 1 FROM education_memberships WHERE household_id=%s AND user_id=%s AND role='parent'",
+                (household_id, parent_user_id),
+            )
+            if await cur.fetchone() is None:
+                raise PermissionError(
+                    "Parent membership is required to create a textbook"
+                )
+            request_payload = {
+                "parse_job_id": source_parse_job_id,
+                "primary_artifact_id": primary_artifact_id,
+                "title": title,
+                "follow_up_request": follow_up_request,
+            }
+            await cur.execute(
+                "SELECT * FROM education_book_creation_requests WHERE household_id=%s AND idempotency_key=%s",
+                (household_id, idempotency_key),
+            )
+            previous = await cur.fetchone()
+            if previous is not None:
+                if previous["request_payload"] != request_payload:
+                    raise ValueError(
+                        "Textbook idempotency key was used with different parameters"
+                    )
+                await cur.execute(
+                    "SELECT item_id FROM education_book_job_items WHERE job_id=%s AND kind='structure'",
+                    (previous["job_id"],),
+                )
+                item = await cur.fetchone()
+                return {
+                    "textbook_id": previous["textbook_id"],
+                    "job_id": previous["job_id"],
+                    "item_id": item["item_id"],
+                    "acceptance": "reused",
+                }
             await cur.execute(
                 """
                 INSERT INTO education_textbooks (
@@ -163,11 +208,12 @@ async def create_textbook_with_initial_job(
                     source_parse_completed_at, source_content_sha256,
                     source_size_bytes, source_snapshot_prefix,
                     source_markdown_key, source_blocks_key, source_report_key,
-                    source_asset_manifest, source_snapshot, created_by_user_id
+                    source_asset_manifest, source_snapshot, created_by_user_id,
+                    source_status, selected_source, preparation_descriptor, source_frozen_at
                 )
                 SELECT
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 FROM education_memberships AS memberships
                 WHERE memberships.household_id = %s
                   AND memberships.user_id = %s
@@ -193,15 +239,23 @@ async def create_textbook_with_initial_job(
                     _source_value(source, "parser_name"),
                     source.get("parser_version"),
                     _source_value(source, "parse_completed_at"),
-                    _source_value(source, "content_sha256"),
-                    _source_value(source, "size_bytes"),
+                    None if pending else _source_value(source, "content_sha256"),
+                    None if pending else _source_value(source, "size_bytes"),
                     snapshot_prefix,
-                    _source_value(source, "markdown_key"),
+                    None if pending else _source_value(source, "markdown_key"),
                     source.get("blocks_key"),
                     source.get("report_key"),
                     Jsonb(source.get("asset_manifest") or []),
                     Jsonb(source.get("snapshot") or {}),
                     parent_user_id,
+                    "pending" if pending else "ready",
+                    Jsonb(source.get("selected_source"))
+                    if source.get("selected_source")
+                    else None,
+                    Jsonb(source.get("preparation_descriptor"))
+                    if source.get("preparation_descriptor")
+                    else None,
+                    source.get("source_frozen_at"),
                     household_id,
                     parent_user_id,
                 ),
@@ -240,7 +294,17 @@ async def create_textbook_with_initial_job(
                     raise PermissionError(
                         "Parent membership is required to create a textbook"
                     )
-                return dict(existing)
+                await cur.execute(
+                    "INSERT INTO education_book_creation_requests VALUES (%s,%s,%s,%s,%s)",
+                    (
+                        household_id,
+                        idempotency_key,
+                        Jsonb(request_payload),
+                        existing["textbook_id"],
+                        existing["job_id"],
+                    ),
+                )
+                return {**dict(existing), "acceptance": "reused"}
 
             await cur.execute(
                 """
@@ -271,7 +335,98 @@ async def create_textbook_with_initial_job(
                 """,
                 (item_id, job_id),
             )
-    return {"textbook_id": textbook_id, "job_id": job_id, "item_id": item_id}
+            await cur.execute(
+                "INSERT INTO education_book_creation_requests VALUES (%s,%s,%s,%s,%s)",
+                (
+                    household_id,
+                    idempotency_key,
+                    Jsonb(request_payload),
+                    textbook_id,
+                    job_id,
+                ),
+            )
+    return {
+        "textbook_id": textbook_id,
+        "job_id": job_id,
+        "item_id": item_id,
+        "acceptance": "accepted_new",
+    }
+
+
+async def commit_prepared_book_source(
+    *,
+    item_id: str | UUID,
+    attempt_token: UUID,
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    """Publish one complete immutable snapshot under the structure attempt fence."""
+    from src.server.database.education_book_jobs import _lock_book_job_for_item
+
+    async with get_db_connection() as conn, conn.transaction():
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await _lock_book_job_for_item(cur, item_id=item_id)
+            await cur.execute(
+                """SELECT b.*,i.attempt_token,i.status AS item_status,i.kind AS item_kind
+                FROM education_book_job_items i JOIN education_book_jobs j ON j.job_id=i.job_id
+                JOIN education_textbooks b ON b.textbook_id=j.textbook_id
+                WHERE i.item_id=%s FOR UPDATE OF i,b""",
+                (item_id,),
+            )
+            book = await cur.fetchone()
+            if (
+                book is None
+                or book["attempt_token"] != attempt_token
+                or book["item_status"] != "running"
+                or book["item_kind"] != "structure"
+            ):
+                raise RuntimeError("Book source attempt is stale")
+            prefix = f"education/{book['household_id']}/textbooks/{book['textbook_id']}/source/attempts/{attempt_token}/"
+            if source.get("snapshot_prefix") != prefix:
+                raise ValueError("Book source prefix does not match the attempt")
+            if any(
+                source.get(key) != book[column]
+                for key, column in (
+                    ("document_id", "source_document_id"),
+                    ("parse_job_id", "source_parse_job_id"),
+                    ("primary_artifact_id", "source_primary_artifact_id"),
+                )
+            ):
+                raise ValueError("Book source does not match pinned provenance")
+            for key in ("markdown_key", "blocks_key", "report_key"):
+                value = source.get(key)
+                if value is not None and (
+                    not str(value).startswith(prefix) or ".." in str(value)
+                ):
+                    raise ValueError("Book source key does not belong to the attempt")
+            if book["source_status"] == "ready":
+                if book["source_snapshot_prefix"] != prefix or book[
+                    "source_content_sha256"
+                ] != source.get("content_sha256"):
+                    raise RuntimeError("Book source is already immutable")
+                return dict(book)
+            await cur.execute(
+                """UPDATE education_textbooks SET source_status='ready',source_frozen_at=NOW(),
+                  source_snapshot_prefix=%s,source_markdown_key=%s,source_blocks_key=%s,source_report_key=%s,
+                  source_content_sha256=%s,source_size_bytes=%s,source_asset_manifest=%s,source_snapshot=%s,
+                  updated_at=NOW() WHERE textbook_id=%s RETURNING *""",
+                (
+                    prefix,
+                    _source_value(source, "markdown_key"),
+                    source.get("blocks_key"),
+                    source.get("report_key"),
+                    _source_value(source, "content_sha256"),
+                    _source_value(source, "size_bytes"),
+                    Jsonb(source.get("asset_manifest") or []),
+                    Jsonb(source.get("snapshot") or {}),
+                    book["textbook_id"],
+                ),
+            )
+            ready = await cur.fetchone()
+            await cur.execute(
+                "UPDATE education_book_job_items SET execution_phase='runtime_queue',updated_at=NOW() WHERE item_id=%s",
+                (item_id,),
+            )
+            return dict(ready)
 
 
 async def _lock_structure_job(cur, *, job_id: str | UUID) -> UUID:

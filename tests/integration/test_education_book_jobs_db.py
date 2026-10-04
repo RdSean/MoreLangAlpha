@@ -144,6 +144,80 @@ async def _seed_book(
     return {**created, "household_id": household_id}
 
 
+async def test_two_workers_share_one_preparation_slot_and_ready_books_bypass_it(
+    patched_get_db_connection, seed_user,
+):
+    import asyncio
+    from src.server.database.education_book_jobs import claim_next_book_item
+
+    books = [await _seed_book(patched_get_db_connection, parent_user_id=seed_user["user_id"]) for _ in range(3)]
+    async with patched_get_db_connection() as conn:
+        for book in books[:2]:
+            await conn.execute(
+                """UPDATE education_textbooks SET source_status='pending',source_content_sha256=NULL,
+                source_size_bytes=NULL,source_snapshot_prefix=NULL,source_markdown_key=NULL,
+                source_blocks_key=NULL,source_report_key=NULL,selected_source='{}',preparation_descriptor='{}'
+                WHERE textbook_id=%s""", (book["textbook_id"],),
+            )
+    claims = await asyncio.gather(*[
+        claim_next_book_item(worker_id=f"prep-{index}", lease_seconds=30, preparation_only=True)
+        for index in range(2)
+    ])
+    assert sum(claim is not None for claim in claims) == 1
+    runtime = await claim_next_book_item(worker_id="runtime", lease_seconds=30)
+    assert runtime["textbook_id"] == books[2]["textbook_id"]
+
+
+async def test_attempt_ledger_preserves_terminal_and_retry_round(
+    patched_get_db_connection,
+    seed_user,
+):
+    from src.server.database.education_book_jobs import (
+        claim_next_book_item,
+        fail_book_item,
+        retry_book_job,
+        get_book_job_for_parent,
+    )
+
+    book = await _seed_book(
+        patched_get_db_connection, parent_user_id=seed_user["user_id"]
+    )
+    claimed = await claim_next_book_item(worker_id="timing-a", lease_seconds=30)
+    assert claimed["execution_phase"] == "runtime_queue"
+    await fail_book_item(
+        item_id=claimed["item_id"],
+        attempt_token=claimed["attempt_token"],
+        safe_error="Failed",
+        stop_remaining=True,
+    )
+    retried = await retry_book_job(
+        source_job_id=book["job_id"],
+        requested_by_user_id=seed_user["user_id"],
+        idempotency_key="timing-retry",
+        identity=IDENTITY,
+    )
+    assert retried["request_round"] == 2
+    assert retried["previous_job_id"] == book["job_id"]
+    second = await claim_next_book_item(worker_id="timing-b", lease_seconds=30)
+    assert second["queued_at"] > claimed["queued_at"]
+    async with patched_get_db_connection() as conn:
+        rows = await (
+            await conn.execute(
+                "SELECT * FROM education_book_job_attempts ORDER BY claimed_at"
+            )
+        ).fetchall()
+        assert len(rows) == 2
+        assert rows[0]["status"] == "failed"
+        assert rows[0]["terminal_at"] is not None
+        assert rows[0]["attempt_token"] != rows[1]["attempt_token"]
+        assert rows[1]["request_round"] == 2
+    snapshot = await get_book_job_for_parent(
+        job_id=retried["job_id"], parent_user_id=seed_user["user_id"]
+    )
+    assert snapshot["server_now"] is not None
+    assert snapshot["items"][0]["timing_summary"]["total_ms"] is None
+
+
 async def _seed_claimed_material_job(
     connection_factory,
     *,

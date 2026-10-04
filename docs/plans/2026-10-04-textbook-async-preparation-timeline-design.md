@@ -101,7 +101,7 @@ POST 只做权限、参数、来源所属关系、解析已完成、主产物匹
 
 “PTC 执行”包含模型响应、工具和运行衔接，不叫“纯模型思考耗时”。精确 LLM 次数、TTFT、tokens 不属于首版 UI；LangSmith 缺失问题另列改进，不让前端统计依赖外部 trace 完整性，也不重复建一套通用 PTC 计费层。
 
-job 增加 request_round/round_accepted_at：首次受理为第 1 轮，用户手动重试在同一事务递增轮次并重设起点；准备崩溃后的自动恢复只增加 attempt，不新开用户请求轮次。持久 `education_book_job_attempts` 保留每次 attempt 所属轮次、排队起点、claim/start、状态、token/execution/run 关联及安全计时状态；`education_book_job_phase_spans` 保存固定阶段的每段测量窗口（唯一 segment_id，开始/结束/状态/同进程 measured_duration_ms）。恢复提交另起一段，不跨进程续用 monotonic 或重复累计同一段。
+job 增加 request_round/round_accepted_at：首次受理为第 1 轮，用户手动重试沿用现有“新建job、复制未完成项”的入口，在同一事务将新job轮次递增并重设起点，以previous_job_id串联；准备崩溃后的自动恢复只增加 attempt，不新开用户请求轮次。持久 `education_book_job_attempts` 保留每次 attempt 所属轮次、排队起点、claim/start、状态、token/execution/run 关联及安全计时状态；`education_book_job_phase_spans` 保存固定阶段的每段测量窗口（唯一 segment_id，开始/结束/状态/同进程 measured_duration_ms）。恢复提交另起一段，不跨进程续用 monotonic 或重复累计同一段。
 
 job/item 快照只带当前 attempt 的紧凑汇总。历史 attempt/批量统计详情按 item 游标分页，不在每次 SSE/5 秒快照里重复传全部时间窗口、正文或来源清单。状态/产物成功仍取现有 job/item，不由计时状态决定。
 

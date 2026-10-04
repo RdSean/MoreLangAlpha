@@ -32,8 +32,13 @@ BookStructureStatus = Literal["queued", "running", "ready", "failed"]
 BookActivityStatus = Literal["available", "unavailable"]
 BookSourceStatus = Literal["pending", "preparing", "ready", "failed", "cancelled"]
 BookExecutionPhase = Literal[
-    "initial_queue", "source_freezing", "runtime_queue", "sandbox_preparation",
-    "input_staging", "ptc_execution", "finalization",
+    "initial_queue",
+    "source_freezing",
+    "runtime_queue",
+    "sandbox_preparation",
+    "input_staging",
+    "ptc_execution",
+    "finalization",
 ]
 BookTimingStatus = Literal["available", "partial", "unavailable"]
 
@@ -83,7 +88,10 @@ class BookPreparationProgressResponse(_StrictModel):
 
     @model_validator(mode="after")
     def _verified_is_bounded(self) -> BookPreparationProgressResponse:
-        if self.total_resources is not None and self.verified_resources > self.total_resources:
+        if (
+            self.total_resources is not None
+            and self.verified_resources > self.total_resources
+        ):
             raise ValueError("verified resources cannot exceed total")
         return self
 

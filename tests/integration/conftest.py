@@ -137,6 +137,10 @@ async def test_db_pool(test_db_uri):
     yields the pool, then tears down by truncating all tables.
     """
     import psycopg
+    from psycopg.conninfo import conninfo_to_dict
+
+    if conninfo_to_dict(test_db_uri).get("dbname") != "langalpha_test":
+        raise RuntimeError("Destructive integration fixtures require langalpha_test")
 
     # Nuke the whole schema for a clean slate before migrations. A named
     # drop-list goes stale every time a migration adds a table (it silently
@@ -147,6 +151,10 @@ async def test_db_pool(test_db_uri):
     async with await psycopg.AsyncConnection.connect(
         test_db_uri, autocommit=False
     ) as conn:
+        if (await (await conn.execute("SELECT current_database()")).fetchone())[
+            0
+        ] != "langalpha_test":
+            raise RuntimeError("Refusing schema reset outside langalpha_test")
         async with conn.cursor() as cur:
             await cur.execute("DROP SCHEMA public CASCADE")
             await cur.execute("CREATE SCHEMA public")
