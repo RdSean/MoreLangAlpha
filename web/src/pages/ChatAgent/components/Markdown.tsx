@@ -554,12 +554,34 @@ function stripFrontMatter(content: string): string {
 /**
  * Escape dollar signs used as currency (e.g. $129.82) so remark-math
  * does not treat them as inline-math delimiters.
- * Matches a lone $ followed by an optional sign and a digit.
- * Leaves $$ (display math) untouched via negative lookbehind/lookahead.
+ * Preserve paired math, escaped characters and URLs before escaping unpaired
+ * numeric dollars. Closing inline delimiters cannot follow opening brackets,
+ * introduce another amount, or cross into a URL or Markdown emphasis.
  */
 function escapeCurrencyDollars(content: string): string {
   if (!content || typeof content !== 'string') return content;
-  return content.replace(/(?<!\$)\$(?!\$)(?=[-+]?\d)/g, '\\$');
+  return content.replace(
+    /\\[\s\S]|https?:\/\/[^\s<>"']+|\$\$[\s\S]*?\$\$|(?<!\$)\$(?![\s$])(?:\\[^\n]|(?!https?:\/\/)[^\\$\n])*?[^\s\\$([{]\$(?![-+]?\d)|(?<!\$)\$(?!\$)(?=[-+]?\d)/g,
+    (token) => {
+      if (token === '$') return '\\$';
+      if (!/^\$[-+]?\d/.test(token)) return token;
+      // TeX groups may contain stars (2^{**}); bare Markdown emphasis belongs
+      // to prose and must not consume a later formula's opening dollar.
+      let groupDepth = 0;
+      for (let i = 1; i < token.length - 1; i += 1) {
+        if (token[i] === '\\') { i += 1; continue; }
+        if (token[i] === '{') groupDepth += 1;
+        if (token[i] === '}') groupDepth -= 1;
+        if (groupDepth !== 0) continue;
+        const marker = token.slice(i, i + 2);
+        if (marker === '**' || marker === '__'
+          || (i === token.length - 2 && /[*_]/.test(token[i]) && /\s/.test(token[i - 1]))) {
+          return `\\${token}`;
+        }
+      }
+      return token;
+    },
+  );
 }
 
 /**
