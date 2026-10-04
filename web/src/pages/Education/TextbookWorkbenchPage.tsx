@@ -81,68 +81,6 @@ export default function TextbookWorkbenchPage() {
       ? findNode(structure.data.structure.nodes, selectedNodeId)
       : undefined;
   const requestedView = searchParams.get('view');
-  const readerView: 'material' | 'source' = selectedNode
-    ? 'source'
-    : requestedView === 'material' && selectedKnowledgePoint?.material_available
-      ? 'material'
-      : 'source';
-
-  useEffect(() => {
-    if (!structure.data) return;
-    const validKp = selectedSkillKpId
-      ? structure.data.knowledge_points.find(
-          (entry) => entry.skill_kp_id === selectedSkillKpId,
-        )
-      : undefined;
-    const validNode = selectedNodeId
-      ? findNode(structure.data.structure.nodes, selectedNodeId)
-      : undefined;
-    const next = new URLSearchParams(searchParams);
-    let changed = false;
-    if (!validKp && !validNode) {
-      const firstKnowledgePoint = structure.data.knowledge_points[0];
-      const firstNode = structure.data.structure.nodes[0];
-      if (firstKnowledgePoint) {
-        next.set('kp', firstKnowledgePoint.skill_kp_id);
-        next.delete('node');
-        next.set(
-          'view',
-          firstKnowledgePoint.material_available ? 'material' : 'source',
-        );
-        changed = true;
-      } else if (firstNode) {
-        next.set('node', firstNode.id);
-        next.delete('kp');
-        next.set('view', 'source');
-        changed = true;
-      }
-    } else if (validNode && requestedView !== 'source') {
-      next.set('view', 'source');
-      changed = true;
-    } else if (
-      validKp &&
-      requestedView !== 'source' &&
-      requestedView !== 'material'
-    ) {
-      next.set('view', validKp.material_available ? 'material' : 'source');
-      changed = true;
-    } else if (
-      validKp &&
-      requestedView === 'material' &&
-      !validKp.material_available
-    ) {
-      next.set('view', 'source');
-      changed = true;
-    }
-    if (changed) setSearchParams(next, { replace: true });
-  }, [
-    requestedView,
-    searchParams,
-    selectedNodeId,
-    selectedSkillKpId,
-    setSearchParams,
-    structure.data,
-  ]);
 
   const sourceRange = selectedKnowledgePoint
     ? {
@@ -192,7 +130,13 @@ export default function TextbookWorkbenchPage() {
     Boolean(activityJobId),
   );
   const visibleActivityJob =
-    activity.data?.job_id === activityJobId ? activity.data : undefined;
+    activity.data?.job_id === activityJobId &&
+    activity.data?.textbook_id === textbookId
+      ? activity.data
+      : undefined;
+  const activityOwnershipMismatch = Boolean(
+    activityJobId && activity.data && !visibleActivityJob,
+  );
   const currentJob = workbench.data?.current_job;
   useEffect(() => {
     if (
@@ -227,10 +171,103 @@ export default function TextbookWorkbenchPage() {
     activity.liveAfterSeq,
   );
   const timing = projectBookTiming(visibleActivityJob, elapsedNow);
+  const readableKnowledgePoints = useMemo(() => {
+    const ready = new Set(
+      structure.data?.knowledge_points
+        .filter((point) => point.material_available)
+        .map((point) => point.skill_kp_id),
+    );
+    for (const item of visibleActivityJob?.items ?? []) {
+      if (item.kind !== 'material' || item.status !== 'succeeded') continue;
+      const point = structure.data?.knowledge_points.find(
+        (point) => point.knowledge_point_id === item.knowledge_point_id,
+      );
+      if (point) ready.add(point.skill_kp_id);
+    }
+    if (
+      material.data &&
+      material.data.textbook_id === textbookId &&
+      material.data.material_available
+    )
+      ready.add(material.data.skill_kp_id);
+    return ready;
+  }, [structure.data, visibleActivityJob, material.data, textbookId]);
+  const readerView: 'material' | 'source' = selectedNode
+    ? 'source'
+    : requestedView === 'material' &&
+        selectedSkillKpId &&
+        readableKnowledgePoints.has(selectedSkillKpId)
+      ? 'material'
+      : 'source';
+
+  useEffect(() => {
+    if (!structure.data) return;
+    const validKp = selectedSkillKpId
+      ? structure.data.knowledge_points.find(
+          (entry) => entry.skill_kp_id === selectedSkillKpId,
+        )
+      : undefined;
+    const validNode = selectedNodeId
+      ? findNode(structure.data.structure.nodes, selectedNodeId)
+      : undefined;
+    const next = new URLSearchParams(searchParams);
+    let changed = false;
+    if (!validKp && !validNode) {
+      const firstKnowledgePoint = structure.data.knowledge_points[0];
+      const firstNode = structure.data.structure.nodes[0];
+      if (firstKnowledgePoint) {
+        next.set('kp', firstKnowledgePoint.skill_kp_id);
+        next.delete('node');
+        next.set(
+          'view',
+          readableKnowledgePoints.has(firstKnowledgePoint.skill_kp_id)
+            ? 'material'
+            : 'source',
+        );
+        changed = true;
+      } else if (firstNode) {
+        next.set('node', firstNode.id);
+        next.delete('kp');
+        next.set('view', 'source');
+        changed = true;
+      }
+    } else if (validNode && requestedView !== 'source') {
+      next.set('view', 'source');
+      changed = true;
+    } else if (
+      validKp &&
+      requestedView !== 'source' &&
+      requestedView !== 'material'
+    ) {
+      next.set(
+        'view',
+        readableKnowledgePoints.has(validKp.skill_kp_id)
+          ? 'material'
+          : 'source',
+      );
+      changed = true;
+    } else if (
+      validKp &&
+      requestedView === 'material' &&
+      !readableKnowledgePoints.has(validKp.skill_kp_id)
+    ) {
+      next.set('view', 'source');
+      changed = true;
+    }
+    if (changed) setSearchParams(next, { replace: true });
+  }, [
+    requestedView,
+    searchParams,
+    selectedNodeId,
+    selectedSkillKpId,
+    setSearchParams,
+    structure.data,
+    readableKnowledgePoints,
+  ]);
   const statisticsOpen = statisticsJobId === activityJobId;
   const statistics = useBookJobStatistics(
     activityJobId,
-    statisticsOpen && showProcessing,
+    statisticsOpen && showProcessing && Boolean(visibleActivityJob),
   );
   const recoverableJob =
     workbench.data?.recent_job &&
@@ -269,7 +306,10 @@ export default function TextbookWorkbenchPage() {
     updateSearch((next) => {
       next.set('kp', skillKpId);
       next.delete('node');
-      next.set('view', target.material_available ? 'material' : 'source');
+      next.set(
+        'view',
+        readableKnowledgePoints.has(skillKpId) ? 'material' : 'source',
+      );
       next.delete('panel');
     });
     setNavigatorOpen(false);
@@ -363,7 +403,10 @@ export default function TextbookWorkbenchPage() {
                 : '正在分析教材结构';
 
   return (
-    <main className="textbook-workbench" data-testid="textbook-workbench">
+    <main
+      className={cn('textbook-workbench', showProcessing && 'is-processing')}
+      data-testid="textbook-workbench"
+    >
       <header className="textbook-workbench-header">
         <div className="flex min-w-0 items-center gap-2">
           <Link
@@ -382,7 +425,10 @@ export default function TextbookWorkbenchPage() {
             <Menu className="size-4" aria-hidden="true" />
           </button>
           <div className="min-w-0">
-            <p className="break-words text-sm font-semibold text-foreground sm:text-base">
+            <p
+              className="line-clamp-2 break-words text-sm font-semibold text-foreground sm:text-base"
+              title={workbench.data.title}
+            >
               {workbench.data.title}
             </p>
             <p className="truncate text-xs text-muted-foreground">
@@ -492,7 +538,27 @@ export default function TextbookWorkbenchPage() {
         )}
 
         <section className="flex min-h-0 min-w-0 flex-col">
-          {showProcessing ? (
+          {activityOwnershipMismatch ? (
+            <div className="grid h-full place-content-center gap-4 p-6 text-center">
+              <p className="text-sm text-destructive" role="alert">
+                该处理任务不属于当前教材
+              </p>
+              <Button
+                variant="outline"
+                className="min-h-11"
+                onClick={() =>
+                  updateSearch((next) => {
+                    next.delete('activity');
+                    if (workbench.data.structure_status === 'ready')
+                      next.delete('panel');
+                    else next.set('panel', 'processing');
+                  }, true)
+                }
+              >
+                返回当前教材
+              </Button>
+            </div>
+          ) : showProcessing ? (
             visibleActivityJob ? (
               <BookProcessingView
                 key={visibleActivityJob.job_id}
@@ -504,6 +570,8 @@ export default function TextbookWorkbenchPage() {
                 timing={timing}
                 liveActivity={liveActivity}
                 projection={activityProjection}
+                sourceStatus={workbench.data.source_status}
+                knowledgePoints={structure.data?.knowledge_points}
                 onReturnToReading={() =>
                   updateSearch((next) => {
                     if (workbench.data.structure_status === 'ready')

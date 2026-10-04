@@ -1,5 +1,11 @@
 import { createFormatter } from '@/lib/format';
-import type { BookExecutionPhase, BookJob, BookTimingStatus } from '../types';
+import type {
+  BookExecutionPhase,
+  BookJob,
+  BookJobItem,
+  BookSourceStatus,
+  BookTimingStatus,
+} from '../types';
 import { isTerminalBookJobStatus } from './bookActivityProjection';
 
 export const BOOK_PHASE_LABELS: Record<BookExecutionPhase, string> = {
@@ -33,13 +39,131 @@ export interface BookTimingProjection {
   phases: { phase: BookExecutionPhase; ms: number | null; active: boolean }[];
 }
 
+export function hasMatchingBookTiming(
+  job: BookJob,
+  item: BookJobItem,
+): boolean {
+  return Boolean(
+    item.timing_summary &&
+      item.timing_summary.attempt === item.attempt &&
+      item.timing_summary.request_round === (job.request_round ?? 1),
+  );
+}
+
+function latestExecuted(
+  items: readonly BookJobItem[],
+): BookJobItem | undefined {
+  return [...items]
+    .filter((item) => item.attempt > 0 && item.status !== 'not_run')
+    .sort((left, right) => {
+      const leftStart = Date.parse(
+        left.started_at ?? left.timing_summary?.claimed_at ?? '',
+      );
+      const rightStart = Date.parse(
+        right.started_at ?? right.timing_summary?.claimed_at ?? '',
+      );
+      return (
+        (Number.isFinite(rightStart) ? rightStart : 0) -
+          (Number.isFinite(leftStart) ? leftStart : 0) ||
+        right.position - left.position
+      );
+    })[0];
+}
+
+export function selectBookExecutionItem(job: BookJob): BookJobItem | null {
+  return (
+    job.items.find((item) => item.status === 'running') ??
+    latestExecuted(job.items) ??
+    [...job.items]
+      .sort((left, right) => left.position - right.position)
+      .find((item) => item.status === 'queued') ??
+    null
+  );
+}
+
+export function selectBookTimingItem(job: BookJob): BookJobItem | null {
+  const item = selectBookExecutionItem(job);
+  return item && hasMatchingBookTiming(job, item) ? item : null;
+}
+
+export type BookMilestoneStatus =
+  | 'waiting'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'not_run';
+export const BOOK_MILESTONE_STATUS_LABELS: Record<BookMilestoneStatus, string> =
+  {
+    waiting: '等待',
+    running: '进行中',
+    completed: '已完成',
+    failed: '处理失败',
+    cancelled: '已取消',
+    not_run: '未执行',
+  };
+
+export function projectBookServiceMilestones(
+  job: BookJob,
+  sourceStatus?: BookSourceStatus,
+) {
+  const item = selectBookExecutionItem(job);
+  const phases = (
+    Object.keys(BOOK_PHASE_LABELS) as BookExecutionPhase[]
+  ).filter((phase) => job.kind === 'structure' || phase !== 'source_freezing');
+  const currentPhase =
+    item?.execution_phase ??
+    (job.status === 'queued' ? 'initial_queue' : undefined);
+  const currentIndex = currentPhase ? phases.indexOf(currentPhase) : -1;
+  const terminal = isTerminalBookJobStatus(job.status);
+  return phases.map(
+    (
+      phase,
+      index,
+    ): { phase: BookExecutionPhase; status: BookMilestoneStatus } => {
+      let status: BookMilestoneStatus = terminal ? 'not_run' : 'waiting';
+      if (
+        item?.status === 'succeeded' ||
+        (currentIndex >= 0 && index < currentIndex)
+      )
+        status = 'completed';
+      else if (index === currentIndex) {
+        status =
+          item?.status === 'failed'
+            ? 'failed'
+            : item?.status === 'cancelled'
+              ? 'cancelled'
+              : terminal
+                ? job.status === 'cancelled'
+                  ? 'cancelled'
+                  : 'failed'
+                : phase === 'initial_queue' || phase === 'runtime_queue'
+                  ? 'waiting'
+                  : 'running';
+      }
+      if (phase === 'source_freezing' && sourceStatus) {
+        status =
+          sourceStatus === 'ready'
+            ? 'completed'
+            : sourceStatus === 'failed'
+              ? 'failed'
+              : sourceStatus === 'cancelled'
+                ? 'cancelled'
+                : sourceStatus === 'preparing'
+                  ? 'running'
+                  : 'waiting';
+      }
+      return { phase, status };
+    },
+  );
+}
+
 export function projectBookTiming(
   job: BookJob | undefined,
   now: number | null,
 ): BookTimingProjection {
   const terminal = job ? isTerminalBookJobStatus(job.status) : false;
-  const item =
-    job?.items.find((entry) => entry.status === 'running') ?? job?.items.at(-1);
+  const item = job ? selectBookTimingItem(job) : null;
   const timing =
     item?.timing_summary?.attempt === item?.attempt &&
     item?.timing_summary?.request_round === (job?.request_round ?? 1)

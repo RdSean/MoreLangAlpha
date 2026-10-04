@@ -4,6 +4,7 @@ import {
   Check,
   ChevronDown,
   Circle,
+  Maximize2,
   Minus,
   X,
 } from 'lucide-react';
@@ -48,8 +49,12 @@ export function BookActivityPanel({
 }: BookActivityPanelProps) {
   const activity = projection ?? projectBookActivity(job, events);
   const [diagnosticJobId, setDiagnosticJobId] = useState<string | null>(null);
+  const [diagnosticLimit, setDiagnosticLimit] = useState(50);
   const diagnosticsOpen = diagnosticJobId === job.job_id;
-  useEffect(() => setDiagnosticJobId(null), [job.job_id]);
+  useEffect(() => {
+    setDiagnosticJobId(null);
+    setDiagnosticLimit(50);
+  }, [job.job_id]);
   const terminalError =
     job.status === 'failed' || job.status === 'partially_succeeded';
 
@@ -91,10 +96,12 @@ export function BookActivityPanel({
         {onOpenProcessing && (
           <button
             type="button"
-            className="min-h-11 text-xs text-muted-foreground"
+            className="inline-flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--color-bg-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={onOpenProcessing}
+            aria-label="打开整页时间线"
+            title="打开整页时间线"
           >
-            打开整页时间线
+            <Maximize2 className="size-4" aria-hidden="true" />
           </button>
         )}
       </header>
@@ -215,13 +222,24 @@ export function BookActivityPanel({
               诊断明细（{activity.toolDetails.length}）
             </button>
             {diagnosticsOpen && (
-              <ol className="space-y-2 pb-2 pl-6 text-xs text-muted-foreground">
-                {activity.toolDetails.slice(-50).map((entry) => (
-                  <li key={entry.seq} className="break-words">
-                    {entry.message}
-                  </li>
-                ))}
-              </ol>
+              <>
+                <ol className="space-y-2 pb-2 pl-6 text-xs text-muted-foreground">
+                  {activity.toolDetails.slice(-diagnosticLimit).map((entry) => (
+                    <li key={entry.seq} className="break-words">
+                      {entry.message}
+                    </li>
+                  ))}
+                </ol>
+                {diagnosticLimit < activity.toolDetails.length && (
+                  <button
+                    type="button"
+                    className="min-h-11 text-xs text-muted-foreground"
+                    onClick={() => setDiagnosticLimit(diagnosticLimit + 50)}
+                  >
+                    更早的诊断
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}

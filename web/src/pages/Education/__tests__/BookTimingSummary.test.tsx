@@ -17,6 +17,55 @@ afterEach(() => {
 });
 
 describe('reliable book timing', () => {
+  it('selects the latest executed matching attempt after a failed batch with a not-run tail', () => {
+    const base = processingJob();
+    const first = {
+      ...base.items[0],
+      item_id: 'material-1',
+      kind: 'material' as const,
+      status: 'succeeded' as const,
+      position: 1,
+      started_at: '2026-10-05T00:00:02Z',
+      timing_summary: {
+        ...base.items[0].timing_summary!,
+        terminal_at: '2026-10-05T00:00:04Z',
+        total_ms: 4000,
+      },
+    };
+    const failed = {
+      ...first,
+      item_id: 'material-2',
+      position: 2,
+      status: 'failed' as const,
+      started_at: '2026-10-05T00:00:05Z',
+      timing_summary: {
+        ...first.timing_summary,
+        queued_at: '2026-10-05T00:00:04Z',
+        terminal_at: '2026-10-05T00:00:09Z',
+        total_ms: 5000,
+      },
+    };
+    const tail = {
+      ...first,
+      item_id: 'material-3',
+      position: 3,
+      status: 'not_run' as const,
+      attempt: 0,
+      started_at: null,
+      timing_summary: null,
+    };
+    const job = processingJob({
+      kind: 'materials',
+      status: 'partially_succeeded',
+      items: [failed, first, tail],
+    });
+    expect(projectBookTiming(job, null).attemptMs).toBe(5000);
+    failed.timing_summary.request_round = 0;
+    expect(projectBookTiming(job, null).attemptMs).toBeNull();
+    expect(
+      projectBookTiming(job, null).phases.every((phase) => phase.ms === null),
+    ).toBe(true);
+  });
   it('adds recorded prior segments to the live window but preserves interrupted gaps as unknown', () => {
     const job = processingJob();
     const phase = job.items[0].timing_summary!.phases[0];

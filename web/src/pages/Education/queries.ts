@@ -332,14 +332,15 @@ export function useBookActivity(
   const visible = usePageVisibility();
   const terminal = TERMINAL_MANAGED_BOOK_STATUSES.has(job.data?.status ?? 'queued');
   const snapshotJobId = job.data?.job_id;
+  const belongsToTextbook = Boolean(job.data && job.data.job_id === jobId && job.data.textbook_id === textbookId);
 
   useEffect(() => {
-    if (!enabled || !textbookId || !snapshotJobId) return;
+    if (!enabled || !textbookId || !snapshotJobId || !belongsToTextbook) return;
     void queryClient.invalidateQueries({
       queryKey: queryKeys.education.textbook(textbookId),
     });
     void queryClient.invalidateQueries({ queryKey: queryKeys.education.bookStatistics(snapshotJobId) });
-  }, [enabled, textbookId, queryClient, snapshotJobId, job.data?.status, job.data?.succeeded_items]);
+  }, [enabled, textbookId, queryClient, snapshotJobId, belongsToTextbook, job.data?.status, job.data?.succeeded_items]);
 
   useEffect(() => {
     eventsRef.current = [];
@@ -349,10 +350,10 @@ export function useBookActivity(
     setConnectionState('connecting');
     setLiveAfterSeq(null);
     setStreamTerminal(false);
-  }, [jobId, enabled]);
+  }, [jobId, textbookId, enabled]);
 
   useEffect(() => {
-    if (!enabled || !jobId || !visible || (terminal && !streamEnabled)) return;
+    if (!enabled || !jobId || !visible || !belongsToTextbook || (terminal && !streamEnabled)) return;
     const abortController = new AbortController();
     let disposed = false;
     let replayBoundary: number | null = null;
@@ -453,11 +454,11 @@ export function useBookActivity(
       window.clearInterval(fallbackTimer);
       scheduler.dispose();
     };
-  }, [enabled, jobId, queryClient, terminal, textbookId, visible, streamEnabled]);
+  }, [enabled, jobId, queryClient, terminal, textbookId, visible, streamEnabled, belongsToTextbook]);
 
   return {
     ...job,
-    events,
+    events: belongsToTextbook ? events : [],
     connectionState,
     liveAfterSeq,
     streamTerminal,

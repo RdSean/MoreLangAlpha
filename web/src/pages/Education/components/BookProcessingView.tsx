@@ -4,10 +4,15 @@ import { useTranslation } from 'react-i18next';
 import { createDateFormatter } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Loader } from '@/components/ui/loader';
-import type { BookActivityEvent, BookJob, BookJobStatistics } from '../types';
+import type {
+  BookActivityEvent,
+  BookJob,
+  BookJobStatistics,
+  BookSourceStatus,
+  KnowledgePointProjection,
+} from '../types';
 import { BookTimingSummary } from './BookTimingSummary';
 import {
-  BOOK_PHASE_LABELS,
   formatBookDuration,
   type BookTimingProjection,
 } from './bookTimingProjection';
@@ -15,11 +20,14 @@ import {
   isTerminalBookJobStatus,
   projectBookActivity,
   BOOK_JOB_STATUS_LABELS,
+  isAgentBookActivity,
   type BookActivityProjection,
 } from './bookActivityProjection';
 import { BookLiveActivity, BookLiveActivityView } from './BookLiveActivity';
 import type { BookLiveActivityProjection } from './useBookLiveActivity';
 import { ActivityIcon } from './BookActivityPanel';
+import { BookServiceMilestones } from './BookServiceMilestones';
+import { BookMaterialDeliveryList } from './BookMaterialDeliveryList';
 
 interface Props {
   job: BookJob;
@@ -30,6 +38,8 @@ interface Props {
   timing: BookTimingProjection;
   liveActivity?: BookLiveActivityProjection;
   projection?: BookActivityProjection;
+  sourceStatus?: BookSourceStatus;
+  knowledgePoints?: readonly KnowledgePointProjection[];
   onReturnToReading: () => void;
   onOpenMaterial?: (skillKpId: string) => void;
   historyOpen?: boolean;
@@ -50,6 +60,8 @@ export function BookProcessingView({
   timing,
   liveActivity,
   projection,
+  sourceStatus,
+  knowledgePoints,
   onReturnToReading,
   onOpenMaterial,
   historyOpen,
@@ -145,7 +157,10 @@ export function BookProcessingView({
                   className="mt-1 break-words text-sm font-medium"
                   aria-live="polite"
                 >
-                  {activity.currentDescription}
+                  {activity.currentStage &&
+                  isAgentBookActivity(activity.currentStage)
+                    ? 'PTC 执行中'
+                    : activity.currentDescription}
                 </p>
                 {progress && (
                   <p className="mt-2 text-sm tabular-nums">
@@ -183,24 +198,19 @@ export function BookProcessingView({
               活动暂不可用，任务状态仍会继续更新。
             </p>
           )}
-          <ol className="book-service-timeline" aria-label="服务里程碑">
-            {timing.phases
-              .filter((phase) => phase.active || phase.ms !== null)
-              .map((phase) => (
-                <li
-                  key={phase.phase}
-                  className="flex min-h-11 items-start justify-between gap-4 py-2 text-sm"
-                >
-                  <span>
-                    {BOOK_PHASE_LABELS[phase.phase]}
-                    {phase.active ? ' · 进行中' : ''}
-                  </span>
-                  <span className="shrink-0 tabular-nums text-muted-foreground">
-                    {formatBookDuration(phase.ms)}
-                  </span>
-                </li>
-              ))}
-          </ol>
+          <BookServiceMilestones
+            job={job}
+            timing={timing}
+            sourceStatus={sourceStatus}
+            agentActions={activity.agentActions}
+          />
+          <BookMaterialDeliveryList
+            key={job.job_id}
+            job={job}
+            knowledgePoints={knowledgePoints}
+            agentActions={activity.agentActions}
+            onOpenMaterial={onOpenMaterial}
+          />
           <BookActivityTimeline
             activity={activity}
             job={job}
@@ -386,11 +396,17 @@ export function BookActivityTimeline({
       .filter((item) => item.status === 'succeeded')
       .map((item) => item.item_id),
   );
-  const completed = activity.groups.filter(
+  const factualGroups = activity.groups
+    .map((group) => ({
+      ...group,
+      events: group.events.filter((entry) => !isAgentBookActivity(entry)),
+    }))
+    .filter((group) => group.events.length > 0);
+  const completed = factualGroups.filter(
     (group) => group.itemId && completedIds.has(group.itemId),
   );
   const collapse = completed.length > 10;
-  const groups = activity.groups.filter(
+  const groups = factualGroups.filter(
     (group) => !collapse || !group.itemId || !completedIds.has(group.itemId),
   );
   const formatTime = createDateFormatter({

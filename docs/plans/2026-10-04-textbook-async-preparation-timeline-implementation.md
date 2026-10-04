@@ -135,6 +135,8 @@
 
 状态：实现与组件/mock回归已完成。全教育146 passed，连同图书馆入口165 passed；pnpm build、改动TS/TSX ESLint和diff检查通过，首屏357.9kB gzip。核心受理/路由/共享时钟回归先失败再通过；补齐恢复累计片段、partial缺口、默认panel持久化、N/N来源清单状态、quote布局fence、终态历史按需订阅、阅读位置及记录分页。自审补回查看历史job时current_job的5秒工作台快照巡检，当前任务结束即停，不新增SSE。202跳转实际由DocumentsPage/DocumentDetailPage拥有，按证据小改两处，另提取共享useBookLiveActivity保持布局切换状态。保留既有工具告警；父代理两阶段复核、真实浏览器/亮暗/移动端与端到端验收待A6，开发库未迁移、未启新服务、未调用付费模型，不将mock测试称为真实工作流通过。
 
+审查修正：补齐教材/job归属、服务阶段状态与PTC节点下的Agent上报、批量可靠终态/旧版可读、首份提交与目录缓存竞态；最近执行项计时缺失不借用前项。根据浏览器反馈调整窄屏目录抽屉、标题分行及超长标题边界，补回紧凑诊断分页。教育155 passed、改动ESLint/build/diff检查通过，首屏358.0kB gzip；独立复审及A6浏览器、真实PG/MinIO与HTTP验收继续由主任务记录，不宣称付费模型通过。
+
 **Files:**
 - Create: `web/src/pages/Education/components/BookProcessingView.tsx`。
 - Create: `web/src/pages/Education/components/BookTimingSummary.tsx`。

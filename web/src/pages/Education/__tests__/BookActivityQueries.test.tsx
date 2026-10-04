@@ -104,6 +104,40 @@ describe('createCoalescedRefreshScheduler', () => {
 });
 
 describe('useBookActivity', () => {
+  it('does not subscribe before confirming that the snapshot belongs to the route textbook', async () => {
+    let resolve!: (job: BookJob) => void;
+    vi.spyOn(educationApi, 'getBookJob').mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const watch = vi
+      .spyOn(educationApi, 'watchBookActivity')
+      .mockImplementation(
+        (_id, options) =>
+          new Promise((done) =>
+            options.signal?.addEventListener('abort', () => done()),
+          ),
+      );
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const view = renderHook(() => useBookActivity('job-1', 'book-1'), {
+      wrapper: wrapper(client),
+    });
+    expect(watch).not.toHaveBeenCalled();
+    await act(async () => {
+      resolve({ ...runningJob(), textbook_id: 'book-2' });
+    });
+    await waitFor(() =>
+      expect(view.result.current.data?.textbook_id).toBe('book-2'),
+    );
+    expect(watch).not.toHaveBeenCalled();
+
+    expect(view.result.current.events).toEqual([]);
+    view.unmount();
+  });
   it('keeps the current workbench fresh while another historical job is selected, then stops polling', async () => {
     vi.useFakeTimers();
     const active: TextbookWorkbench = { textbook_id: 'book-1', title: '教材', structure_status: 'running',

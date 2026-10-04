@@ -55,6 +55,8 @@ const pageState = vi.hoisted(() => ({
   assignmentsRefetch: vi.fn(),
   sourceSlice: vi.fn(),
   activityHook: vi.fn(),
+  statisticsHook: vi.fn(),
+  firstMaterialReady: false,
   activityJob: undefined as ReturnType<typeof processingJob> | undefined,
   members: [
     { user_id: 'parent-1', name: '陈女士', role: 'parent' },
@@ -148,40 +150,68 @@ const pageState = vi.hoisted(() => ({
 }));
 
 vi.mock('../queries', () => ({
-  useTextbookWorkbench: () => ({ data: pageState.workbench, isLoading: false, isError: false }),
-  useManagedBookStructure: (_id: string, enabled: boolean) => ({ data: enabled ? pageState.structure : undefined, isLoading: false, isError: false }),
-  useManagedBookSourceSlice: (bookId: string, startLine: number, endLine: number) => ({
+  useTextbookWorkbench: () => ({
+    data: pageState.workbench,
+    isLoading: false,
+    isError: false,
+  }),
+  useManagedBookStructure: (_id: string, enabled: boolean) => ({
+    data: enabled ? pageState.structure : undefined,
+    isLoading: false,
+    isError: false,
+  }),
+  useManagedBookSourceSlice: (
+    bookId: string,
+    startLine: number,
+    endLine: number,
+  ) => ({
     data: pageState.sourceSlice(bookId, startLine, endLine),
     isLoading: false,
   }),
-  useManagedKnowledgePointMaterial: (_bookId: string, knowledgePointId: string) => ({
-    data: knowledgePointId === 'kp-db-2'
-      ? {
-        textbook_id: 'book-1',
-        knowledge_point_id: 'kp-db-2',
-        skill_kp_id: 'sports-training',
-        material_available: true,
-        markdown: '# 已有冠军训练讲义\n\n[回到全球运动](materials/kp-db-1.md)',
-        generated_at: '2026-10-02T06:00:00Z',
-        depth: 'lesson',
-        requirements: null,
-        content_sha256: 'b'.repeat(64),
-      }
-      : {
-        textbook_id: 'book-1',
-        knowledge_point_id: knowledgePointId,
-        skill_kp_id: 'sports-global-game',
-        material_available: false,
-        markdown: null,
-        generated_at: null,
-        depth: null,
-        requirements: null,
-        content_sha256: null,
-      },
+  useManagedKnowledgePointMaterial: (
+    _bookId: string,
+    knowledgePointId: string,
+  ) => ({
+    data:
+      knowledgePointId === 'kp-db-1' && pageState.firstMaterialReady
+        ? readyMaterial
+        : knowledgePointId === 'kp-db-2'
+          ? {
+              textbook_id: 'book-1',
+              knowledge_point_id: 'kp-db-2',
+              skill_kp_id: 'sports-training',
+              material_available: true,
+              markdown:
+                '# 已有冠军训练讲义\n\n[回到全球运动](materials/kp-db-1.md)',
+              generated_at: '2026-10-02T06:00:00Z',
+              depth: 'lesson',
+              requirements: null,
+              content_sha256: 'b'.repeat(64),
+            }
+          : {
+              textbook_id: 'book-1',
+              knowledge_point_id: knowledgePointId,
+              skill_kp_id: 'sports-global-game',
+              material_available: false,
+              markdown: null,
+              generated_at: null,
+              depth: null,
+              requirements: null,
+              content_sha256: null,
+            },
     isLoading: false,
   }),
-  useBookActivity: (...args: unknown[]) => { pageState.activityHook(...args); return { data: pageState.activityJob, events: [], connectionState: 'connected' }; },
-  useBookJobStatistics: () => ({ data: undefined, isLoading: false, isError: false }),
+  useBookActivity: (...args: unknown[]) => { pageState.activityHook(...args);
+    return {
+      data: pageState.activityJob,
+      events: [],
+      connectionState: 'connected',
+    };
+  },
+  useBookJobStatistics: (...args: unknown[]) => {
+    pageState.statisticsHook(...args);
+    return { data: undefined, isLoading: false, isError: false };
+  },
   useEducationMembers: () => ({
     data: pageState.members,
     isLoading: false,
@@ -209,9 +239,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   scrollMemory.clear();
   pageState.activityJob = undefined;
+  pageState.firstMaterialReady = false;
   pageState.workbench.structure_status = 'ready';
   pageState.workbench.source_status = 'ready';
-  pageState.workbench.current_job = null;
+    pageState.workbench.current_job = null;
   pageState.workbench.recent_job = null;
   pageState.createJob.mockResolvedValue({ job_id: 'job-created' });
   pageState.cancelJob.mockResolvedValue({ job_id: 'job-active' });
@@ -398,6 +429,57 @@ function renderWorkbench(initialEntry = '/textbooks/book-1') {
 }
 
 describe('TextbookWorkbenchPage', () => {
+  it('opens the first submitted lesson while the structure cache still says unavailable', async () => {
+    const job = processingJob({ kind: 'materials' });
+    job.items[0] = {
+      ...job.items[0],
+      kind: 'material',
+      status: 'succeeded',
+      knowledge_point_id: 'kp-db-1',
+      skill_kp_id: 'sports-global-game',
+      knowledge_point_title: '足球如何成为全球运动',
+    };
+    pageState.activityJob = job;
+    pageState.firstMaterialReady = true;
+    renderWorkbench(
+      '/textbooks/book-1?kp=sports-training&view=material&activity=job-1&panel=processing',
+    );
+    await userEvent
+      .setup()
+      .click(
+        screen.getByRole('button', { name: '阅读讲义：足球如何成为全球运动' }),
+      );
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      'kp=sports-global-game&view=material',
+    );
+
+    expect(screen.getByText('这是一份已经提交的讲义。')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '讲义' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+  it('rejects a foreign textbook activity URL and returns without losing the reader selection', async () => {
+    pageState.activityJob = processingJob({ textbook_id: 'book-2' });
+    renderWorkbench(
+      '/textbooks/book-1?kp=sports-training&view=material&activity=job-1&panel=processing',
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '该处理任务不属于当前教材',
+    );
+    expect(
+      screen.queryByRole('heading', { name: '处理时间线' }),
+    ).not.toBeInTheDocument();
+    expect(pageState.statisticsHook).toHaveBeenCalledWith('job-1', false);
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: '返回当前教材' }));
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      '?kp=sports-training&view=material',
+    );
+    expect(screen.getByTestId('location')).not.toHaveTextContent('activity');
+    expect(screen.getByText('已有冠军训练讲义')).toBeInTheDocument();
+  });
   it('defaults pending sources without a directory to processing and allows a manual reading return', async () => {
     pageState.workbench.structure_status = 'queued';
     pageState.workbench.source_status = 'pending';

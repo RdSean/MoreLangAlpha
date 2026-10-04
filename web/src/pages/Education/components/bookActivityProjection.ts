@@ -72,6 +72,18 @@ export interface BookActivityProjection {
     events: BookActivityEvent[];
   }[];
   toolDetails: BookActivityEvent[];
+  agentActions: BookActivityEvent[];
+}
+
+export function isAgentBookActivity(entry: BookActivityEvent): boolean {
+  return (
+    entry.kind === 'progress' &&
+    entry.metadata.origin !== 'service' &&
+    typeof entry.metadata.stage === 'string' &&
+    Object.values(PROGRESS_STAGES).some((stages) =>
+      stages.has(entry.metadata.stage as string),
+    )
+  );
 }
 
 function itemLabel(item: BookJobItem | undefined) {
@@ -193,5 +205,6 @@ export function projectBookActivity(
     milestones,
     groups,
     toolDetails: events.filter((entry) => entry.kind === 'tool'),
+    agentActions: milestones.filter(isAgentBookActivity),
   };
 }

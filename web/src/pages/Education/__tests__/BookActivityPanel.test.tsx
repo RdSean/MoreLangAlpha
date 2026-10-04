@@ -426,6 +426,22 @@ describe('watchBookActivity', () => {
 });
 
 describe('RoutedBookActivityPanel', () => {
+  it('pages compact diagnostics by 50 records and resets the window on a different job', () => {
+    const events = Array.from({ length: 120 }, (_, index) => event(index + 1, 'tool', 'material-2', `诊断 ${index}`));
+    const view = render(<BookActivityPanel job={job()} events={events} />);
+    fireEvent.click(screen.getByRole('button', { name: '诊断明细（120）' }));
+    expect(screen.getByText('诊断 119')).toBeInTheDocument();
+    expect(screen.queryByText('诊断 0')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '更早的诊断' }));
+    expect(screen.getByText('诊断 20')).toBeInTheDocument();
+    expect(screen.queryByText('诊断 0')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '更早的诊断' }));
+    expect(screen.getByText('诊断 0')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '更早的诊断' })).not.toBeInTheDocument();
+    view.rerender(<BookActivityPanel job={job({ job_id: 'job-2' })} events={events} />);
+    fireEvent.click(screen.getByRole('button', { name: '诊断明细（120）' }));
+    expect(screen.queryByText('诊断 0')).not.toBeInTheDocument();
+  });
   it('unmounts diagnostics by default and resets them when switching jobs', () => {
     const events = [event(1, 'tool', 'material-2', 'Running Bash')];
     const view = render(<BookActivityPanel job={job()} events={events} />);
