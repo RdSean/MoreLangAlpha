@@ -237,7 +237,7 @@ Task 8 已开始：真实模型结构和中间知识点讲义提交成功，语�
 
 ## 后续优化
 
-2026-10-04 新增待审阅的[异步准备与整页计时设计](2026-10-04-textbook-async-preparation-timeline-design.md)及[实施计划](2026-10-04-textbook-async-preparation-timeline-implementation.md)。拟将来源冻结纳入现有结构 item 的模型前阶段、在同一工作台提供整页处理视图，并持久统计每轮/attempt 的服务区间；这是原 Task 8 之后的独立增量，尚未开发，不修改既有验收结论或重建旧加工页。
+2026-10-05 [异步准备与整页计时设计](2026-10-04-textbook-async-preparation-timeline-design.md)及[实施计划](2026-10-04-textbook-async-preparation-timeline-implementation.md)的A0–A5已开发并通过独立审查，A6非付费验收与A7文档收口已完成，开发库升级084–086。来源冻结现已纳入现有structure item的模型前阶段；同一工作台增加整页处理视图并持久统计每轮/attempt服务区间。真实付费结构/单讲义/小批次尚待授权，证据及未测边界见[验收记录](2026-10-04-textbook-async-preparation-timeline-results.md)。这是原Task8后的独立增量，不修改既有日期、完成依据或验收结论，不重建旧加工页。
 
 2026-10-03 托管交付契约、受限系统提示与分段计时已实施；真实小样本指标和学科内容缺口见[优化记录](2026-10-03-managed-textbook-execution-optimization-results.md)，后续边界见[独立优化计划](2026-10-03-managed-textbook-execution-optimization.md)。这些是原 Task 8 收口后的改良，不倒改上述完成依据；学科改良、大教材与长期负载仍分别验收和授权。
 

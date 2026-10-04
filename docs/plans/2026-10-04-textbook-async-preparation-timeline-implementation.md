@@ -12,7 +12,7 @@
 
 ## 状态、依据和执行纪律
 
-- 2026-10-05：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0–A4 已完成契约、数据库基础、快速受理、后台准备/恢复及持久计时统计；A5–A7 待实施。未升级开发库、未启动付费模型验收。
+- 2026-10-05：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0–A5代码开发及两阶段独立审查、A6非付费验收、A7文档收口已完成；开发库已升级084–086，当前worktree的8000与0.0.0.0:5177运行。真实付费结构/单讲义/小批次及完整已登录工作流待单独授权，不宣称全部真实验收完成。实际证据及未测边界见[验收记录](2026-10-04-textbook-async-preparation-timeline-results.md)。
 - 依据：[设计](2026-10-04-textbook-async-preparation-timeline-design.md)及两轮 SB3 实测记录。此增量不改原 Task 8 完成结论。
 - Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skills-textbook-refactor`；分支当前 `feature/more-to-skills-textbook-refactor`。下面精确文件路径相对此目录。
 - 读取根目录、src/server 与 web 的 AGENTS.md；界面遵守 DESIGN.md。保留用户修改的业务动作文档和未追踪 PDF，不重置、不纳入提交。
@@ -133,13 +133,13 @@
 
 ## Task A5：工作台整页时间线与共用计时组件
 
-状态：实现与组件/mock回归已完成。全教育146 passed，连同图书馆入口165 passed；pnpm build、改动TS/TSX ESLint和diff检查通过，首屏357.9kB gzip。核心受理/路由/共享时钟回归先失败再通过；补齐恢复累计片段、partial缺口、默认panel持久化、N/N来源清单状态、quote布局fence、终态历史按需订阅、阅读位置及记录分页。自审补回查看历史job时current_job的5秒工作台快照巡检，当前任务结束即停，不新增SSE。202跳转实际由DocumentsPage/DocumentDetailPage拥有，按证据小改两处，另提取共享useBookLiveActivity保持布局切换状态。保留既有工具告警；父代理两阶段复核、真实浏览器/亮暗/移动端与端到端验收待A6，开发库未迁移、未启新服务、未调用付费模型，不将mock测试称为真实工作流通过。
+状态：实现及两阶段独立复核已完成，无剩余重要发现；浏览器/全量回归和开发服务升级证据见A6。最初全教育146 passed，连同图书馆入口165 passed；pnpm build、改动TS/TSX ESLint和diff检查通过，首屏357.9kB gzip。核心受理/路由/共享时钟回归先失败再通过；补齐恢复累计片段、partial缺口、默认panel持久化、N/N来源清单状态、quote布局fence、终态历史按需订阅、阅读位置及记录分页。自审补回查看历史job时current_job的5秒工作台快照巡检，当前任务结束即停，不新增SSE。202跳转实际由DocumentsPage/DocumentDetailPage拥有，按证据小改两处，另提取共享useBookLiveActivity保持布局切换状态。保留既有工具告警，未调用付费模型，不将mock测试称为真实模型工作流通过。
 
 审查修正：补齐教材/job归属、服务阶段状态与PTC节点下的Agent上报、批量可靠终态/旧版可读、首份提交与目录缓存竞态；最近执行项计时缺失不借用前项。根据浏览器反馈调整窄屏目录抽屉、标题分行及超长标题边界，补回紧凑诊断分页。教育155 passed、改动ESLint/build/diff检查通过，首屏358.0kB gzip；独立复审及A6浏览器、真实PG/MinIO与HTTP验收继续由主任务记录，不宣称付费模型通过。
 
 复审补测：首份成功而下一份queued时，非终态当前项优先queued，服务节点保持等待且无attempt不显示前项计时；terminal才选择最近执行项。initial_queue文案按structure/material/supplementary区分来源等待与执行等待。三项新增回归先失败后通过，相关47 passed及改动ESLint/build/diff检查通过；全量与端到端验收由主任务汇总。
 
-质量复审补测：访问丢失明确access_lost并停止订阅巡检与共享时钟，旧紧凑活动隐藏；失效job URL显示明确状态并可清除activity返回合法阅读。展开统计使用attempt/phase/terminal及持久窗口边界的稳定签名刷新，排除资源计数与实时计时。五项新增回归先失败后通过，相关50 passed及改动ESLint/build/diff检查通过；真实浏览器复测及独立复审由主任务汇总。
+质量复审补测：访问丢失明确access_lost并停止订阅巡检与共享时钟，旧紧凑活动隐藏；失效job URL显示明确状态并可清除activity返回合法阅读。展开统计使用attempt/phase/terminal及持久窗口边界的稳定签名刷新，排除资源计数与实时计时。五项新增回归先失败后通过，相关50 passed及改动ESLint/build/diff检查通过；独立重跑相关50项和最终复审通过，浏览器复测见A6验收记录。
 
 **Files:**
 - Create: `web/src/pages/Education/components/BookProcessingView.tsx`。
@@ -181,6 +181,8 @@
 
 ## Task A7：收口、关联文档与回退说明
 
+状态：文档收口已完成。逐项证据及回退条件归入验收记录，原计划仅补增量状态/链接，原Task8日期、依据和结论保留；用户未提交业务细则/PDF不提交。当前分支/worktree保留，不merge/push。真实付费验收与明确未测项仍开放，不把代码收口等同于整个真实工作流验收。
+
 **Files:** 本设计/计划、结果记录、`docs/plans/2026-09-30-more-to-skills-implementation.md` 与 CHANGELOG。
 
 1. 核对每项要求与验证证据，完成项逐 task 更新，不一次性预勾。
@@ -188,7 +190,9 @@
 3. 回退：新UI可切回紧凑阅读视图，但老后端不能读取pending来源；必须先暂停新受理、等待/明确收尾活跃准备任务再回退。不能直接downgrade删除pending/attempt计时记录。迁移回退检查真实数据并拒绝不满足条件的降级，不以清空教材代替兼容。
 4. 留下下一阶段独立议题：SB3语义切分质量、LangSmith上传完整性、长期负载；本轮不捆绑模型参数或Skill改动。最终仅在真实证据齐全后标记该增量完成。
 
-## 审阅确认点
+## 已审阅的设计确认点
+
+以下四项随2026-10-04设计审阅和本轮开发授权确认，不重新启动需求讨论；付费模型验收和删除已有教材仍须单独授权。
 
 1. 是否采用原结构 item 的准备子阶段，而非新增队列/加工页？
 2. 是否接受生成后进入整页时间线，但可随时返回阅读，完成后手动进入结果、不强制跳转？
