@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { isAxiosError } from 'axios';
 import {
   Activity,
   ArrowLeft,
@@ -137,6 +138,17 @@ export default function TextbookWorkbenchPage() {
   const activityOwnershipMismatch = Boolean(
     activityJobId && activity.data && !visibleActivityJob,
   );
+  const activityAccessLost =
+    activity.accessLost ||
+    (isAxiosError(activity.error) &&
+      [401, 403, 404].includes(activity.error.response?.status ?? 0));
+  const unavailableActivityMessage = activityAccessLost
+    ? isAxiosError(activity.error)
+      ? '处理任务不存在或已不可访问'
+      : '处理活动已不可访问，计时已停止'
+    : activity.isError && !visibleActivityJob
+      ? '处理活动暂不可用'
+      : null;
   const currentJob = workbench.data?.current_job;
   useEffect(() => {
     if (
@@ -152,7 +164,9 @@ export default function TextbookWorkbenchPage() {
   const showActivityPanel =
     Boolean(searchParams.get('activity')) && !showProcessing;
   const connected =
-    activity.connectionState === 'connected' && !activity.streamTerminal;
+    activity.connectionState === 'connected' &&
+    !activity.streamTerminal &&
+    !activityAccessLost;
   const elapsedNow = useBookElapsedTime(visibleActivityJob, connected);
   const activityProjection = useMemo(
     () =>
@@ -267,7 +281,10 @@ export default function TextbookWorkbenchPage() {
   const statisticsOpen = statisticsJobId === activityJobId;
   const statistics = useBookJobStatistics(
     activityJobId,
-    statisticsOpen && showProcessing && Boolean(visibleActivityJob),
+    statisticsOpen &&
+      showProcessing &&
+      Boolean(visibleActivityJob) &&
+      !activityAccessLost,
   );
   const recoverableJob =
     workbench.data?.recent_job &&
@@ -498,7 +515,10 @@ export default function TextbookWorkbenchPage() {
       <div
         className={cn(
           'textbook-workbench-grid',
-          showActivityPanel && visibleActivityJob && 'has-activity',
+          showActivityPanel &&
+            visibleActivityJob &&
+            !activityAccessLost &&
+            'has-activity',
           !structure.data && 'without-nav',
         )}
       >
@@ -538,10 +558,14 @@ export default function TextbookWorkbenchPage() {
         )}
 
         <section className="flex min-h-0 min-w-0 flex-col">
-          {activityOwnershipMismatch ? (
+          {activityOwnershipMismatch ||
+          ((showProcessing || showActivityPanel) &&
+            unavailableActivityMessage) ? (
             <div className="grid h-full place-content-center gap-4 p-6 text-center">
               <p className="text-sm text-destructive" role="alert">
-                该处理任务不属于当前教材
+                {activityOwnershipMismatch
+                  ? '该处理任务不属于当前教材'
+                  : unavailableActivityMessage}
               </p>
               <Button
                 variant="outline"
@@ -551,7 +575,11 @@ export default function TextbookWorkbenchPage() {
                     next.delete('activity');
                     if (workbench.data.structure_status === 'ready')
                       next.delete('panel');
-                    else next.set('panel', 'processing');
+                    else
+                      next.set(
+                        'panel',
+                        activityOwnershipMismatch ? 'processing' : 'reading',
+                      );
                   }, true)
                 }
               >
@@ -660,7 +688,7 @@ export default function TextbookWorkbenchPage() {
           )}
         </section>
 
-        {visibleActivityJob && showActivityPanel && (
+        {visibleActivityJob && showActivityPanel && !activityAccessLost && (
           <div className="textbook-workbench-activity">
             <BookActivityPanel
               job={visibleActivityJob}

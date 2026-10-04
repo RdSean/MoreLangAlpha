@@ -139,6 +139,8 @@
 
 复审补测：首份成功而下一份queued时，非终态当前项优先queued，服务节点保持等待且无attempt不显示前项计时；terminal才选择最近执行项。initial_queue文案按structure/material/supplementary区分来源等待与执行等待。三项新增回归先失败后通过，相关47 passed及改动ESLint/build/diff检查通过；全量与端到端验收由主任务汇总。
 
+质量复审补测：访问丢失明确access_lost并停止订阅巡检与共享时钟，旧紧凑活动隐藏；失效job URL显示明确状态并可清除activity返回合法阅读。展开统计使用attempt/phase/terminal及持久窗口边界的稳定签名刷新，排除资源计数与实时计时。五项新增回归先失败后通过，相关50 passed及改动ESLint/build/diff检查通过；真实浏览器复测及独立复审由主任务汇总。
+
 **Files:**
 - Create: `web/src/pages/Education/components/BookProcessingView.tsx`。
 - Create: `web/src/pages/Education/components/BookTimingSummary.tsx`。

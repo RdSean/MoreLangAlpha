@@ -11,6 +11,7 @@ import {
   useTextbookWorkbench,
 } from '../queries';
 import type { BookActivityPage, BookJob, TextbookWorkbench } from '../types';
+import { useBookElapsedTime } from '../components/useBookElapsedTime';
 
 const NOW = '2026-10-02T06:00:00Z';
 
@@ -104,6 +105,59 @@ describe('createCoalescedRefreshScheduler', () => {
 });
 
 describe('useBookActivity', () => {
+  it('freezes timing and never reopens delivery after connected activity loses access', async () => {
+    let visibility: DocumentVisibilityState = 'visible';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+    const get = vi.spyOn(educationApi, 'getBookJob').mockResolvedValue({ ...runningJob(), server_now: NOW });
+    let options: educationApi.WatchBookActivityOptions | undefined;
+    const watch = vi.spyOn(educationApi, 'watchBookActivity').mockImplementation((_id, supplied) => {
+      options = supplied;
+      return new Promise((resolve) => supplied.signal?.addEventListener('abort', () => resolve()));
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
+    const view = renderHook(() => {
+      const activity = useBookActivity('job-1', 'book-1');
+      return { activity, now: useBookElapsedTime(activity.data, activity.connectionState === 'connected') };
+    }, { wrapper: wrapper(client) });
+    await waitFor(() => expect(options).toBeDefined());
+    act(() => options?.onConnectionChange?.('connected'));
+    expect(view.result.current.activity.connectionState).toBe('connected');
+    vi.useFakeTimers();
+    act(() => options?.onAccessLost?.());
+    expect(view.result.current.activity.connectionState).toBe('access_lost');
+    expect(view.result.current.now).toBe(Date.parse(NOW));
+    get.mockClear();
+    await act(async () => {
+      visibility = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+      visibility = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(view.result.current.now).toBe(Date.parse(NOW));
+    expect(watch).toHaveBeenCalledTimes(1);
+    expect(get).not.toHaveBeenCalled();
+    view.unmount();
+  });
+  it('refreshes statistics on attempt and phase boundaries while ignoring resource and live time updates', async () => {
+    const snapshot = runningJob();
+    vi.spyOn(educationApi, 'getBookJob').mockResolvedValue(snapshot);
+    vi.spyOn(educationApi, 'watchBookActivity').mockImplementation((_id, options) => new Promise((resolve) => options.signal?.addEventListener('abort', () => resolve())));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const view = renderHook(() => useBookActivity('job-1', 'book-1'), { wrapper: wrapper(client) });
+    await waitFor(() => expect(view.result.current.data).toBeDefined());
+    invalidate.mockClear();
+    const recovered = { ...snapshot, items: [{ ...snapshot.items[0], attempt: 2, execution_phase: 'sandbox_preparation' as const }] };
+    act(() => client.setQueryData(queryKeys.education.bookJob('job-1'), recovered));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.education.bookStatistics('job-1') }));
+    invalidate.mockClear();
+    const staging = { ...recovered, items: [{ ...recovered.items[0], execution_phase: 'input_staging' as const }] };
+    act(() => client.setQueryData(queryKeys.education.bookJob('job-1'), staging));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.education.bookStatistics('job-1') }));
+    invalidate.mockClear();
+    await act(async () => client.setQueryData(queryKeys.education.bookJob('job-1'), { ...staging, server_now: '2026-10-02T06:00:06Z', items: [{ ...staging.items[0], preparation_progress: { verified_resources: 3, total_resources: 4 } }] }));
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: queryKeys.education.bookStatistics('job-1') });
+    view.unmount();
+  });
   it('does not subscribe before confirming that the snapshot belongs to the route textbook', async () => {
     let resolve!: (job: BookJob) => void;
     vi.spyOn(educationApi, 'getBookJob').mockImplementation(

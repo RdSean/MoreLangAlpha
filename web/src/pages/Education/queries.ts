@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import { isAxiosError } from 'axios';
 import { queryKeys } from '@/lib/queryKeys';
 import * as educationApi from './api';
 import type {
@@ -329,6 +330,10 @@ export function useBookActivity(
   const [liveAfterSeq, setLiveAfterSeq] = useState<number | null>(null);
   const [streamTerminal, setStreamTerminal] = useState(false);
   const [streamError, setStreamError] = useState<unknown>(null);
+  const [streamAccessLost, setStreamAccessLost] = useState(false);
+  const accessLost = streamAccessLost || (
+    isAxiosError(job.error) && [401, 403, 404].includes(job.error.response?.status ?? 0)
+  );
   const visible = usePageVisibility();
   const terminal = TERMINAL_MANAGED_BOOK_STATUSES.has(job.data?.status ?? 'queued');
   const snapshotJobId = job.data?.job_id;
@@ -339,21 +344,37 @@ export function useBookActivity(
     void queryClient.invalidateQueries({
       queryKey: queryKeys.education.textbook(textbookId),
     });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.education.bookStatistics(snapshotJobId) });
   }, [enabled, textbookId, queryClient, snapshotJobId, belongsToTextbook, job.data?.status, job.data?.succeeded_items]);
+
+  // Only durable boundaries refresh history; resource counts and live durations do not.
+  const statisticsRevision = JSON.stringify([
+    job.data?.request_round, job.data?.status, job.data?.succeeded_items, job.data?.finished_at,
+    job.data?.items.map((item) => [
+      item.item_id, item.attempt, item.status, item.execution_phase, item.finished_at,
+      item.timing_summary?.status, item.timing_summary?.terminal_at,
+      item.timing_summary?.phases.map((phase) => [
+        phase.phase, phase.status, phase.segment_count, phase.started_at, phase.ended_at,
+      ]),
+    ]),
+  ]);
+  useEffect(() => {
+    if (!enabled || !snapshotJobId || !belongsToTextbook || accessLost) return;
+    void queryClient.invalidateQueries({ queryKey: queryKeys.education.bookStatistics(snapshotJobId) });
+  }, [enabled, snapshotJobId, belongsToTextbook, queryClient, accessLost, statisticsRevision]);
 
   useEffect(() => {
     eventsRef.current = [];
     lastProcessedSeqRef.current = 0;
     setEvents([]);
     setStreamError(null);
+    setStreamAccessLost(false);
     setConnectionState('connecting');
     setLiveAfterSeq(null);
     setStreamTerminal(false);
   }, [jobId, textbookId, enabled]);
 
   useEffect(() => {
-    if (!enabled || !jobId || !visible || !belongsToTextbook || (terminal && !streamEnabled)) return;
+    if (!enabled || !jobId || !visible || !belongsToTextbook || accessLost || (terminal && !streamEnabled)) return;
     const abortController = new AbortController();
     let disposed = false;
     let replayBoundary: number | null = null;
@@ -403,6 +424,7 @@ export function useBookActivity(
         setEvents([]);
         setLiveAfterSeq(null);
         setStreamError(new Error('教材活动已不可访问'));
+        setStreamAccessLost(true);
         disposed = true;
         abortController.abort();
         window.clearInterval(fallbackTimer);
@@ -454,12 +476,13 @@ export function useBookActivity(
       window.clearInterval(fallbackTimer);
       scheduler.dispose();
     };
-  }, [enabled, jobId, queryClient, terminal, textbookId, visible, streamEnabled, belongsToTextbook]);
+  }, [enabled, jobId, queryClient, terminal, textbookId, visible, streamEnabled, belongsToTextbook, accessLost]);
 
   return {
     ...job,
     events: belongsToTextbook ? events : [],
-    connectionState,
+    connectionState: accessLost ? 'access_lost' as const : connectionState,
+    accessLost,
     liveAfterSeq,
     streamTerminal,
     streamError,

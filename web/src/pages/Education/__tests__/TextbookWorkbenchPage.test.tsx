@@ -57,6 +57,8 @@ const pageState = vi.hoisted(() => ({
   activityHook: vi.fn(),
   statisticsHook: vi.fn(),
   firstMaterialReady: false,
+  activityError: null as unknown,
+  activityAccessLost: false,
   activityJob: undefined as ReturnType<typeof processingJob> | undefined,
   members: [
     { user_id: 'parent-1', name: '陈女士', role: 'parent' },
@@ -206,6 +208,9 @@ vi.mock('../queries', () => ({
       data: pageState.activityJob,
       events: [],
       connectionState: 'connected',
+      accessLost: pageState.activityAccessLost,
+      isError: Boolean(pageState.activityError),
+      error: pageState.activityError,
     };
   },
   useBookJobStatistics: (...args: unknown[]) => {
@@ -240,6 +245,8 @@ beforeEach(() => {
   scrollMemory.clear();
   pageState.activityJob = undefined;
   pageState.firstMaterialReady = false;
+  pageState.activityError = null;
+  pageState.activityAccessLost = false;
   pageState.workbench.structure_status = 'ready';
   pageState.workbench.source_status = 'ready';
     pageState.workbench.current_job = null;
@@ -429,6 +436,24 @@ function renderWorkbench(initialEntry = '/textbooks/book-1') {
 }
 
 describe('TextbookWorkbenchPage', () => {
+  it('hides a cached compact activity after access is lost', () => {
+    pageState.activityJob = processingJob();
+    pageState.activityAccessLost = true;
+    renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1');
+    expect(screen.getByRole('alert')).toHaveTextContent('处理活动已不可访问，计时已停止');
+    expect(screen.queryByRole('complementary', { name: '教材处理活动' })).not.toBeInTheDocument();
+  });
+  it.each(['missing', 'access_lost'])('returns to legal reading from a %s activity without losing selection', async (failure) => {
+    if (failure === 'missing') pageState.activityError = { isAxiosError: true, response: { status: 404 } };
+    else { pageState.activityJob = processingJob(); pageState.activityAccessLost = true; }
+    renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1&panel=processing');
+    expect(screen.getByRole('alert')).toHaveTextContent(failure === 'missing' ? '处理任务不存在或已不可访问' : '处理活动已不可访问，计时已停止');
+    expect(screen.queryByRole('heading', { name: '处理时间线' })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: '返回当前教材' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('?kp=sports-training&view=material');
+    expect(screen.getByTestId('location')).not.toHaveTextContent('activity');
+    expect(screen.getByText('已有冠军训练讲义')).toBeInTheDocument();
+  });
   it('opens the first submitted lesson while the structure cache still says unavailable', async () => {
     const job = processingJob({ kind: 'materials' });
     job.items[0] = {
