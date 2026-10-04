@@ -152,6 +152,7 @@ export function useTextbookWorkbench(textbookId: string | undefined) {
     queryFn: () => educationApi.getTextbookWorkbench(textbookId ?? ''),
     enabled: Boolean(textbookId),
     staleTime: 5_000,
+    refetchInterval: (query) => query.state.data?.current_job ? 5_000 : false,
   });
 }
 

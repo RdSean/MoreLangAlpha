@@ -8,8 +8,9 @@ import {
   createCoalescedRefreshScheduler,
   useBookActivity,
   useBookJobStatistics,
+  useTextbookWorkbench,
 } from '../queries';
-import type { BookActivityPage, BookJob } from '../types';
+import type { BookActivityPage, BookJob, TextbookWorkbench } from '../types';
 
 const NOW = '2026-10-02T06:00:00Z';
 
@@ -103,6 +104,24 @@ describe('createCoalescedRefreshScheduler', () => {
 });
 
 describe('useBookActivity', () => {
+  it('keeps the current workbench fresh while another historical job is selected, then stops polling', async () => {
+    vi.useFakeTimers();
+    const active: TextbookWorkbench = { textbook_id: 'book-1', title: '教材', structure_status: 'running',
+      materials: { total: 0, ready: 0 }, current_job: runningJob(), source: null, source_status: 'pending',
+      current_structure_id: null, recent_job: null, assigned_student_count: 0, updated_at: NOW };
+    const complete = { ...active, current_job: null };
+    const get = vi.spyOn(educationApi, 'getTextbookWorkbench').mockResolvedValue(complete);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(queryKeys.education.textbookWorkbench('book-1'), active);
+    const view = renderHook(() => useTextbookWorkbench('book-1'), { wrapper: wrapper(client) });
+    await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+    expect(get).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2); });
+    expect(get).toHaveBeenCalledOnce();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(get).toHaveBeenCalledOnce();
+    view.unmount();
+  });
   it('invalidates on-demand statistics after committed material progress changes', async () => {
     vi.spyOn(educationApi, 'getBookJob').mockResolvedValue(runningJob());
     vi.spyOn(educationApi, 'watchBookActivity').mockImplementation((_id, options) => new Promise((resolve) => options.signal?.addEventListener('abort', () => resolve())));
