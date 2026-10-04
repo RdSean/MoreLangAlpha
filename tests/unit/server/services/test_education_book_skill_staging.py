@@ -10,6 +10,28 @@ from src.server.services import education_book_jobs
 from src.server.services.education_book_structure import get_more_to_skills_identity
 
 
+def test_student_material_guidance_keeps_line_anchors_out_of_reading_text():
+    root = (
+        Path(__file__).resolve().parents[4]
+        / "plugins/langalpha_local/skills/more-to-skills"
+    )
+    skill = (root / "SKILL.md").read_text()
+    material_rules = skill.split("## Step 7 — 逐条生成材料", 1)[1].split(
+        "## Step 8 — 生成附加材料", 1
+    )[0]
+    language = (root / "reference/material-language.md").read_text()
+    general = (root / "reference/material-general.md").read_text()
+
+    assert "讲义不展示源文件行号" in material_rules
+    assert "结构 JSON 的 anchor" in material_rules
+    assert "在材料里注明出处行号" not in material_rules
+    assert "并给行号" not in material_rules
+    assert "源文件行：" not in material_rules + language + general
+    assert "脚注编号" in language
+    assert "粗体" in language
+    assert "自然融入" in language
+
+
 def test_tool_script_change_invalidates_frozen_catalog(monkeypatch, tmp_path):
     from src.server.services import education_book_structure as structure
 
