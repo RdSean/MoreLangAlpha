@@ -2,6 +2,11 @@
 
 ## 2026-10-05
 
+### 修复 A4 全量回归：统计接口路由白名单
+
+- 全后台回归定位到教材cutover路由白名单未包含新statistics接口；补齐允许的家长统计入口，继续禁止旧加工/审核路由。
+- 聚焦4 passed；全量单测重跑7982 passed、8 deselected、1 xfailed、40 warnings，后端全目录Ruff通过。首轮因该白名单1 failed，未将失败或非教材告警隐去；未改开发库与业务数据。
+
 ### 开发 A4：持久分段计时、来源活动与统计快照
 
 - 新增086迁移，将claim等待、来源ready后的运行等待与attempt终态总区间同事务记录；来源冻结、sandbox、输入staging、实际消费workflow到terminal回调、验收提交保存独立monotonic测量，不将PTC执行称为纯模型思考。恢复验收从sandbox重连前另开段，关闭旧开放窗口并拒绝迟到补写中断耗时。

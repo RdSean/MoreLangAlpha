@@ -62,6 +62,7 @@ def test_only_workbench_jobs_assignments_and_learning_routes_remain():
         "/textbooks/{textbook_id}/assignments",
         "/book-jobs/{job_id}",
         "/book-jobs/{job_id}/events",
+        "/book-jobs/{job_id}/statistics",
         "/book-jobs/{job_id}/cancel",
         "/book-jobs/{job_id}/retry",
         "/learning",
