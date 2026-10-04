@@ -71,9 +71,10 @@ function latestExecuted(
 }
 
 export function selectBookExecutionItem(job: BookJob): BookJobItem | null {
+  if (isTerminalBookJobStatus(job.status))
+    return latestExecuted(job.items) ?? null;
   return (
     job.items.find((item) => item.status === 'running') ??
-    latestExecuted(job.items) ??
     [...job.items]
       .sort((left, right) => left.position - right.position)
       .find((item) => item.status === 'queued') ??

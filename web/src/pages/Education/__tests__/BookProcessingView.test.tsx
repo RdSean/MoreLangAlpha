@@ -5,6 +5,51 @@ import { projectBookTiming } from '../components/bookTimingProjection';
 import { processingJob } from './bookProcessingFixtures';
 
 describe('BookProcessingView', () => {
+  it('keeps the next queued lesson waiting after the first lesson was submitted', () => {
+    const base = processingJob();
+    const completed = {
+      ...base.items[0],
+      kind: 'material' as const,
+      status: 'succeeded' as const,
+      execution_phase: 'finalization' as const,
+      skill_kp_id: 'first',
+      knowledge_point_title: '首份讲义',
+    };
+    const queued = {
+      ...completed,
+      item_id: 'item-next',
+      status: 'queued' as const,
+      position: 2,
+      attempt: 0,
+      started_at: null,
+      execution_phase: 'initial_queue' as const,
+      timing_summary: null,
+      skill_kp_id: 'next',
+      knowledge_point_title: '下一份讲义',
+    };
+    const job = processingJob({
+      kind: 'materials',
+      succeeded_items: 1,
+      total_items: 2,
+      items: [completed, queued],
+    });
+    const timing = projectBookTiming(job, null);
+    render(
+      <BookProcessingView
+        job={job}
+        events={[]}
+        connected={false}
+        timing={timing}
+        onReturnToReading={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('知识点：下一份讲义')).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'PTC 执行' })).toHaveTextContent('等待');
+    expect(screen.getByRole('listitem', { name: 'PTC 执行' })).not.toHaveTextContent('已完成');
+    expect(screen.getByRole('listitem', { name: '验收提交' })).toHaveTextContent('等待');
+    expect(timing.attemptMs).toBeNull();
+    expect(timing.phases.every((phase) => phase.ms === null)).toBe(true);
+  });
   it('shows waiting service stages and does not equate N/N resource count with frozen source readiness', () => {
     const job = processingJob();
     job.items[0].preparation_progress = {

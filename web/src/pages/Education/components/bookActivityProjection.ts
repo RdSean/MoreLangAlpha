@@ -96,7 +96,11 @@ function itemLabel(item: BookJobItem | undefined) {
 
 function fallbackDescription(item: BookJobItem | null, kind: BookJob['kind']) {
   if (item?.execution_phase === 'source_freezing') return '正在准备教材来源';
-  if (item?.execution_phase === 'initial_queue') return '等待准备教材来源';
+  if (item?.execution_phase === 'initial_queue') {
+    if (item.kind === 'material') return '等待讲义执行';
+    if (item.kind === 'supplementary') return '等待附加材料执行';
+    return '等待准备教材来源';
+  }
   if (item?.execution_phase === 'runtime_queue') return '等待执行容量';
   if (item?.execution_phase === 'sandbox_preparation')
     return '正在准备运行环境';

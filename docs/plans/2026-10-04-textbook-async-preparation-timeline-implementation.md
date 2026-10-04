@@ -137,6 +137,8 @@
 
 审查修正：补齐教材/job归属、服务阶段状态与PTC节点下的Agent上报、批量可靠终态/旧版可读、首份提交与目录缓存竞态；最近执行项计时缺失不借用前项。根据浏览器反馈调整窄屏目录抽屉、标题分行及超长标题边界，补回紧凑诊断分页。教育155 passed、改动ESLint/build/diff检查通过，首屏358.0kB gzip；独立复审及A6浏览器、真实PG/MinIO与HTTP验收继续由主任务记录，不宣称付费模型通过。
 
+复审补测：首份成功而下一份queued时，非终态当前项优先queued，服务节点保持等待且无attempt不显示前项计时；terminal才选择最近执行项。initial_queue文案按structure/material/supplementary区分来源等待与执行等待。三项新增回归先失败后通过，相关47 passed及改动ESLint/build/diff检查通过；全量与端到端验收由主任务汇总。
+
 **Files:**
 - Create: `web/src/pages/Education/components/BookProcessingView.tsx`。
 - Create: `web/src/pages/Education/components/BookTimingSummary.tsx`。
