@@ -12,7 +12,7 @@
 
 ## 状态、依据和执行纪律
 
-- 2026-10-04：待审阅，Task A0–A7 均未实施。只创建计划，不自动进入开发。
+- 2026-10-04：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0 已完成契约与回归；A1 开始，A2–A7 待实施。未升级开发库、未启动付费模型验收。
 - 依据：[设计](2026-10-04-textbook-async-preparation-timeline-design.md)及两轮 SB3 实测记录。此增量不改原 Task 8 完成结论。
 - Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skills-textbook-refactor`；分支当前 `feature/more-to-skills-textbook-refactor`。下面精确文件路径相对此目录。
 - 读取根目录、src/server 与 web 的 AGENTS.md；界面遵守 DESIGN.md。保留用户修改的业务动作文档和未追踪 PDF，不重置、不纳入提交。
@@ -21,6 +21,8 @@
 - 不复制/打印/提交 .env 或浏览器凭据，不操作未知 Docker/volume。存储沿用用户确认的 localhost:9000 与当前 .env；仅访问明确教材/测试前缀，保留图书馆原件。
 
 ## Task A0：冻结 DTO、时间口径和状态转换
+
+状态：已完成公共 DTO。后端 18 passed、前端契约 3 passed、pnpm typecheck、改动 Ruff 通过。计时投影/真实边界验证在 A4/A5 实施，不将 DTO 测试称为工作流验收。
 
 **Files:**
 - Modify: `src/server/app/education/book_models.py`。

@@ -161,6 +161,57 @@ export type BookJobItemStatus =
   | 'not_run';
 export type BookJobItemKind = 'structure' | 'material' | 'supplementary';
 export type BookActivityStatus = 'available' | 'unavailable';
+export type BookSourceStatus = 'pending' | 'preparing' | 'ready' | 'failed' | 'cancelled';
+export type BookExecutionPhase = 'initial_queue' | 'source_freezing' | 'runtime_queue'
+  | 'sandbox_preparation' | 'input_staging' | 'ptc_execution' | 'finalization';
+export type BookTimingStatus = 'available' | 'partial' | 'unavailable';
+
+export interface BookPreparationProgress {
+  total_resources: number | null;
+  verified_resources: number;
+}
+
+export interface BookPhaseTiming {
+  phase: BookExecutionPhase;
+  status: BookTimingStatus;
+  started_at: string | null;
+  ended_at: string | null;
+  measured_ms: number | null;
+  segment_count: number;
+}
+
+export interface BookAttemptTiming {
+  attempt: number;
+  request_round: number;
+  status: BookTimingStatus;
+  queued_at: string | null;
+  claimed_at: string | null;
+  terminal_at: string | null;
+  total_ms: number | null;
+  phases: BookPhaseTiming[];
+}
+
+export interface BookAttemptStatistics {
+  item_id: string;
+  kind: BookJobItemKind;
+  status: BookJobItemStatus;
+  knowledge_point_title: string | null;
+  timing: BookAttemptTiming;
+}
+
+export interface BookJobStatistics {
+  job_id: string;
+  request_round: number;
+  server_now: string;
+  status: BookTimingStatus;
+  round_total_ms: number | null;
+  material_sample_count: number;
+  material_median_ms: number | null;
+  material_longest_ms: number | null;
+  supplementary: BookAttemptStatistics[];
+  attempts: BookAttemptStatistics[];
+  next_cursor: string | null;
+}
 
 export interface BookJobItem {
   item_id: string;
@@ -174,6 +225,10 @@ export interface BookJobItem {
   safe_error: string | null;
   started_at: string | null;
   finished_at: string | null;
+  execution_phase?: BookExecutionPhase | null;
+  queued_at?: string | null;
+  preparation_progress?: BookPreparationProgress | null;
+  timing_summary?: BookAttemptTiming | null;
 }
 
 export interface BookJobSummary {
@@ -191,6 +246,9 @@ export interface BookJobSummary {
   started_at: string | null;
   finished_at: string | null;
   safe_error: string | null;
+  request_round?: number;
+  round_accepted_at?: string | null;
+  server_now?: string | null;
 }
 
 export interface BookJob extends BookJobSummary {
@@ -242,7 +300,7 @@ export interface FrozenBookSource {
   content_sha256: string;
   size_bytes: number;
   image_count: number;
-  frozen_at: string;
+  frozen_at: string | null;
 }
 
 export type BookSourceCandidate = Omit<FrozenBookSource, 'frozen_at'>;
@@ -257,6 +315,7 @@ export interface CreateManagedTextbookInput {
 export interface CreateManagedTextbookResponse {
   textbook_id: string;
   job_id: string;
+  acceptance: 'accepted_new' | 'reused';
 }
 
 export interface ManagedTextbookSummary {
@@ -266,10 +325,14 @@ export interface ManagedTextbookSummary {
   materials: BookMaterialCounts;
   current_job: BookJobSummary | null;
   updated_at: string;
+  source_status?: BookSourceStatus;
 }
 
 export interface TextbookWorkbench extends ManagedTextbookSummary {
-  source: FrozenBookSource;
+  source: FrozenBookSource | null;
+  source_status: BookSourceStatus;
+  selected_source?: BookSourceCandidate | null;
+  source_frozen_at?: string | null;
   current_structure_id: string | null;
   recent_job: BookJobSummary | null;
   assigned_student_count: number;

@@ -2,6 +2,12 @@
 
 ## 2026-10-04
 
+### 开发 A0：教材准备与计时公共契约
+
+- 工作台区分 selected_source 元数据与 ready 原文；pending/preparing/failed/cancelled 不可暴露 FrozenBookSource，ready 必须有有效摘要，旧冻结时间可以未知。受理响应区分 accepted_new/reused。
+- 固定七类服务区间、请求轮次、当前 attempt 紧凑计时、准备资源计数和分页统计 DTO；未记录耗时为 null，不用资源数冒充交付份数，不开放对象键或模型私有字段。
+- 回归先失败后通过：后端 DTO 18 passed、前端契约 3 passed、TypeScript 与改动 Ruff 通过。仅完成契约，尚未执行异步冻结、迁移开发库或调用付费模型。
+
 ### 计划：教材异步准备、统计计时与整页时间线
 
 - 新增待审阅设计与实施细则：请求先绑定固定图书馆来源并快速受理，现有结构 item 后台执行来源复制/校验；复用 PG 租约、取消、SSE 和恢复，准备不计作结构成功，不新增 Redis 队列或旧加工路由。

@@ -229,3 +229,83 @@ def test_kp_projection_keeps_database_and_skill_identifiers_distinct() -> None:
     )
 
     assert str(projection.knowledge_point_id) != projection.skill_kp_id
+
+
+def _workbench_payload():
+    return {
+        "textbook_id": "txt-test", "title": "Book", "structure_status": "queued",
+        "materials": {"total": 0, "ready": 0},
+        "updated_at": datetime.now(timezone.utc),
+        "source_status": "pending", "source": None,
+        "selected_source": {
+            "document_id": "doc-1", "parse_job_id": "parse-1",
+            "primary_artifact_id": "artifact-1", "filename": "book.md",
+            "media_type": "text/markdown", "parser_id": "parser-1",
+            "parser_name": "Parser", "completed_at": datetime.now(timezone.utc),
+            "content_sha256": "a" * 64, "size_bytes": 12, "image_count": 3,
+        },
+    }
+
+
+def test_pending_source_is_metadata_only():
+    from src.server.app.education.book_models import TextbookWorkbenchResponse
+
+    payload = _workbench_payload()
+    result = TextbookWorkbenchResponse.model_validate(payload)
+    assert result.source is None
+    assert result.source_frozen_at is None
+    payload["source"] = dict(payload["selected_source"], frozen_at=None)
+    with pytest.raises(ValidationError, match="ready"):
+        TextbookWorkbenchResponse.model_validate(payload)
+
+
+def test_ready_source_requires_verified_digest_but_old_frozen_time_can_be_unknown():
+    from src.server.app.education.book_models import TextbookWorkbenchResponse
+
+    payload = _workbench_payload()
+    payload["source_status"] = "ready"
+    with pytest.raises(ValidationError, match="ready"):
+        TextbookWorkbenchResponse.model_validate(payload)
+    payload["source"] = dict(payload["selected_source"], frozen_at=None)
+    assert TextbookWorkbenchResponse.model_validate(payload).source.frozen_at is None
+    payload["source"]["content_sha256"] = None
+    with pytest.raises(ValidationError):
+        TextbookWorkbenchResponse.model_validate(payload)
+
+
+def test_acceptance_explicitly_distinguishes_new_and_reused():
+    from src.server.app.education.book_models import CreateBookResponse
+
+    ids = {"textbook_id": UUID(int=1), "job_id": UUID(int=2)}
+    assert CreateBookResponse(**ids, acceptance="accepted_new").acceptance == "accepted_new"
+    assert CreateBookResponse(**ids, acceptance="reused").acceptance == "reused"
+    with pytest.raises(ValidationError):
+        CreateBookResponse(**ids, acceptance="unknown")
+
+
+def test_timing_unknown_is_not_zero_and_progress_is_not_delivery_count():
+    from src.server.app.education.book_models import (
+        BookAttemptTimingResponse, BookPreparationProgressResponse,
+    )
+
+    timing = BookAttemptTimingResponse(attempt=1, request_round=2)
+    assert timing.total_ms is None
+    assert timing.status == "unavailable"
+    assert timing.phases == []
+    progress = BookPreparationProgressResponse(total_resources=129, verified_resources=129)
+    assert progress.model_dump() == {"total_resources": 129, "verified_resources": 129}
+    with pytest.raises(ValidationError):
+        BookPreparationProgressResponse(total_resources=2, verified_resources=3)
+    with pytest.raises(ValidationError):
+        BookAttemptTimingResponse(attempt=1, request_round=1, total_ms=-1)
+
+
+def test_service_phases_are_finite_and_actions_do_not_claim_duration():
+    from src.server.app.education.book_models import BookPhaseTimingResponse
+
+    phase = BookPhaseTimingResponse(phase="ptc_execution")
+    assert phase.measured_ms is None
+    with pytest.raises(ValidationError):
+        BookPhaseTimingResponse(phase="model_thinking")
+    with pytest.raises(ValidationError):
+        BookPhaseTimingResponse(phase="finalization", object_key="private")

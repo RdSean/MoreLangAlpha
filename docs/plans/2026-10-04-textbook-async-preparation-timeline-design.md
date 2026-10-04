@@ -2,7 +2,7 @@
 
 ## 状态与范围
 
-2026-10-04 待用户审阅的设计草案；本轮只写文档，不执行迁移、改代码、启动模型或修改配置。继续使用 more-to-skills-textbook-refactor worktree。
+2026-10-04 设计已审阅，用户授权按实施计划开发。继续使用 more-to-skills-textbook-refactor worktree；付费模型验收和删除已有教材仍需单独确认。
 
 用户要求：消除“添加并分析”长时间阻塞的 loading；教材结构加工及知识点讲义生成均展示统计计时；参考 Mentrix 截图的整页纵向时间线，但沿用 LangAlpha 工作台、权限和视觉规范。
 
@@ -47,6 +47,8 @@ POST 只做权限、参数、来源所属关系、解析已完成、主产物匹
 教材增加 `source_status`：pending/preparing/ready/failed/cancelled，以及真实 `source_frozen_at`。固定来源身份和解析元数据始终非空；尚未校验的冻结 Markdown digest、size、snapshot prefix/key 不写假值，允许未就绪时为空，通过约束保证 ready 时完整且路径归属正确。
 
 工作台的 `source` 只在 ready 时返回 FrozenBookSource；另外返回安全的 selected_source 元数据和 source_status。`frozen_at` 不再使用教材 created_at 冒充。结构状态仍按任务/结构记录推导，增加 source 状态只解决准备可见性，不制造第二份任务状态真值。
+
+公共契约：受理字段 `acceptance` 为 `accepted_new` 或 `reused`；selected_source 中的摘要/大小仅为固定解析元数据，只有 source 中的摘要才代表已验证冻结内容。准备快照 `total_resources` 未知时为 null，`verified_resources` 独立于 job 交付计数。当前 attempt 的 timing_summary 与统计历史均以 null 表示无证据耗时，七类 phase 之外的 Agent 动作不生成计时区间。旧客户端/快照兼容字段默认 ready，但新 pending 必须明确给出 source_status 与 selected_source。
 
 准备中不能读尚未提交的部分来源、建半成品树、生成讲义或分配学生。来源 ready、结构仍分析时，如有已有原文入口可继续读取固定来源；结构失败后保留已冻结原文。旧教材迁移为 ready，旧冻结时间没有证据则未知，不从 created_at 补造。
 

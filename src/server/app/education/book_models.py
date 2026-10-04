@@ -30,6 +30,12 @@ BookJobItemStatus = Literal[
 BookJobItemKind = Literal["structure", "material", "supplementary"]
 BookStructureStatus = Literal["queued", "running", "ready", "failed"]
 BookActivityStatus = Literal["available", "unavailable"]
+BookSourceStatus = Literal["pending", "preparing", "ready", "failed", "cancelled"]
+BookExecutionPhase = Literal[
+    "initial_queue", "source_freezing", "runtime_queue", "sandbox_preparation",
+    "input_staging", "ptc_execution", "finalization",
+]
+BookTimingStatus = Literal["available", "partial", "unavailable"]
 
 
 class _StrictModel(BaseModel):
@@ -46,6 +52,7 @@ class CreateBookRequest(_StrictModel):
 class CreateBookResponse(_StrictModel):
     textbook_id: UUID
     job_id: UUID
+    acceptance: Literal["accepted_new", "reused"] = "accepted_new"
 
 
 class BookSourceCandidateResponse(_StrictModel):
@@ -67,7 +74,38 @@ class BookSourceListResponse(_StrictModel):
 
 
 class FrozenBookSourceResponse(BookSourceCandidateResponse):
-    frozen_at: datetime
+    frozen_at: datetime | None = None
+
+
+class BookPreparationProgressResponse(_StrictModel):
+    total_resources: int | None = Field(default=None, ge=0)
+    verified_resources: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _verified_is_bounded(self) -> BookPreparationProgressResponse:
+        if self.total_resources is not None and self.verified_resources > self.total_resources:
+            raise ValueError("verified resources cannot exceed total")
+        return self
+
+
+class BookPhaseTimingResponse(_StrictModel):
+    phase: BookExecutionPhase
+    status: BookTimingStatus = "unavailable"
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    measured_ms: int | None = Field(default=None, ge=0)
+    segment_count: int = Field(default=0, ge=0)
+
+
+class BookAttemptTimingResponse(_StrictModel):
+    attempt: int = Field(ge=1)
+    request_round: int = Field(ge=1)
+    status: BookTimingStatus = "unavailable"
+    queued_at: datetime | None = None
+    claimed_at: datetime | None = None
+    terminal_at: datetime | None = None
+    total_ms: int | None = Field(default=None, ge=0)
+    phases: list[BookPhaseTimingResponse] = Field(default_factory=list)
 
 
 class BookJobSummaryResponse(_StrictModel):
@@ -85,6 +123,9 @@ class BookJobSummaryResponse(_StrictModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     safe_error: str | None = None
+    request_round: int = Field(default=1, ge=1)
+    round_accepted_at: datetime | None = None
+    server_now: datetime | None = None
 
 
 class BookMaterialCountsResponse(_StrictModel):
@@ -105,13 +146,24 @@ class TextbookSummaryResponse(_StrictModel):
     materials: BookMaterialCountsResponse
     current_job: BookJobSummaryResponse | None = None
     updated_at: datetime
+    source_status: BookSourceStatus = "ready"
 
 
 class TextbookWorkbenchResponse(TextbookSummaryResponse):
-    source: FrozenBookSourceResponse
+    source: FrozenBookSourceResponse | None = None
+    selected_source: BookSourceCandidateResponse | None = None
+    source_frozen_at: datetime | None = None
     current_structure_id: UUID | None = None
     recent_job: BookJobSummaryResponse | None = None
     assigned_student_count: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _source_matches_readiness(self) -> TextbookWorkbenchResponse:
+        if (self.source_status == "ready") != (self.source is not None):
+            raise ValueError("only ready source may expose frozen content")
+        if self.source_status != "ready" and self.selected_source is None:
+            raise ValueError("pending source must expose selected metadata")
+        return self
 
 
 class KnowledgePointProjectionResponse(_StrictModel):
@@ -227,6 +279,32 @@ class BookJobItemResponse(_StrictModel):
     safe_error: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    execution_phase: BookExecutionPhase | None = None
+    queued_at: datetime | None = None
+    preparation_progress: BookPreparationProgressResponse | None = None
+    timing_summary: BookAttemptTimingResponse | None = None
+
+
+class BookAttemptStatisticsResponse(_StrictModel):
+    item_id: UUID
+    kind: BookJobItemKind
+    status: BookJobItemStatus
+    knowledge_point_title: str | None = None
+    timing: BookAttemptTimingResponse
+
+
+class BookJobStatisticsResponse(_StrictModel):
+    job_id: str
+    request_round: int = Field(ge=1)
+    server_now: datetime
+    status: BookTimingStatus
+    round_total_ms: int | None = Field(default=None, ge=0)
+    material_sample_count: int = Field(default=0, ge=0)
+    material_median_ms: int | None = Field(default=None, ge=0)
+    material_longest_ms: int | None = Field(default=None, ge=0)
+    supplementary: list[BookAttemptStatisticsResponse] = Field(default_factory=list)
+    attempts: list[BookAttemptStatisticsResponse] = Field(default_factory=list)
+    next_cursor: str | None = None
 
 
 class BookJobResponse(BookJobSummaryResponse):
