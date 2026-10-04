@@ -105,6 +105,8 @@ job 增加 request_round/round_accepted_at：首次受理为第 1 轮，用户�
 
 job/item 快照只带当前 attempt 的紧凑汇总。历史 attempt/批量统计详情按 item 游标分页，不在每次 SSE/5 秒快照里重复传全部时间窗口、正文或来源清单。状态/产物成功仍取现有 job/item，不由计时状态决定。
 
+实施核对：运行准备会在sandbox IO前原子登记workspace/thread，并在attempt历史保留身份（085迁移），以便无run中断重排后清理旧资源。来源和运行准备共用教材存储IO锁；候选清理持独占锁并取得幂等删除确认，不用GET返回null推断不存在，因为存储驱动的网络错误也会返回null。
+
 ### 4.2 口径和显示
 
 - 本次请求总用时：本轮 round_accepted_at 到本轮终态，包含来源准备、等待和中断恢复；各 attempt 另有自身 queued_at/终态区间。用户 retry 创建新的轮次/queued_at，不能用首次 job.created_at 把用户隔夜等待算成新一轮加工。

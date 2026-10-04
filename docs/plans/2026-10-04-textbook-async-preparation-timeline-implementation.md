@@ -12,7 +12,7 @@
 
 ## 状态、依据和执行纪律
 
-- 2026-10-05：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0/A1/A2 已完成契约、数据库基础和快速受理；A3 开始，A4–A7 待实施。未升级开发库、未启动付费模型验收。
+- 2026-10-05：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0–A3 已完成契约、数据库基础、快速受理和后台准备/恢复；A4 开始，A5–A7 待实施。未升级开发库、未启动付费模型验收。
 - 依据：[设计](2026-10-04-textbook-async-preparation-timeline-design.md)及两轮 SB3 实测记录。此增量不改原 Task 8 完成结论。
 - Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skills-textbook-refactor`；分支当前 `feature/more-to-skills-textbook-refactor`。下面精确文件路径相对此目录。
 - 读取根目录、src/server 与 web 的 AGENTS.md；界面遵守 DESIGN.md。保留用户修改的业务动作文档和未追踪 PDF，不重置、不纳入提交。
@@ -82,6 +82,8 @@
 7. 单测和隔离数据库复跑，更新 CHANGELOG、提交。此时不启动开发 worker 搭配尚未升级 schema。
 
 ## Task A3：准备调度、租约、取消、恢复和清理
+
+状态：已完成。服务单测62 passed；隔离PG与真实localhost:9000 MinIO组合52 passed、1个另建数据库的旧对照用例排除；Ruff通过。来源上传后SIGKILL真实子进程接管、PUT/ready COMMIT确认丢失、取消迟到上传、IO收尾锁、旧token及ready来源保护均有回归。审查修复GET错误误结清候选；新增085保留运行准备阶段的workspace/thread历史，开发库未迁移。未绑定open-run崩溃由既有runtime恢复器收尾，未单独注入该窗口或运行付费模型。
 
 **Files:**
 - Create: `src/server/services/education_book_preparation.py`。

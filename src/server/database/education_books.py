@@ -354,6 +354,22 @@ async def create_textbook_with_initial_job(
     }
 
 
+async def prepared_book_source_is_committed(
+    *, textbook_id: UUID, household_id: UUID, attempt_token: UUID
+) -> bool:
+    async with get_db_connection() as conn:
+        row = await (
+            await conn.execute(
+                "SELECT 1 FROM education_textbooks WHERE textbook_id=%s AND source_status='ready' AND source_snapshot_prefix=%s",
+                (
+                    textbook_id,
+                    f"education/{household_id}/textbooks/{textbook_id}/source/attempts/{attempt_token}/",
+                ),
+            )
+        ).fetchone()
+        return row is not None
+
+
 async def commit_prepared_book_source(
     *,
     item_id: str | UUID,
@@ -365,9 +381,12 @@ async def commit_prepared_book_source(
 
     async with get_db_connection() as conn, conn.transaction():
         async with conn.cursor(row_factory=dict_row) as cur:
-            await _lock_book_job_for_item(cur, item_id=item_id)
+            await _lock_book_job_for_item(
+                cur, item_id=item_id, reject_cancel_requested=True
+            )
             await cur.execute(
-                """SELECT b.*,i.attempt_token,i.status AS item_status,i.kind AS item_kind
+                """SELECT b.*,i.attempt_token,i.status AS item_status,i.kind AS item_kind,
+                i.lease_expires_at>NOW() AS lease_current,i.execution_phase
                 FROM education_book_job_items i JOIN education_book_jobs j ON j.job_id=i.job_id
                 JOIN education_textbooks b ON b.textbook_id=j.textbook_id
                 WHERE i.item_id=%s FOR UPDATE OF i,b""",
@@ -405,6 +424,11 @@ async def commit_prepared_book_source(
                 ] != source.get("content_sha256"):
                     raise RuntimeError("Book source is already immutable")
                 return dict(book)
+            if (
+                not book["lease_current"]
+                or book["execution_phase"] != "source_freezing"
+            ):
+                raise RuntimeError("Book source preparation lease is stale")
             await cur.execute(
                 """UPDATE education_textbooks SET source_status='ready',source_frozen_at=NOW(),
                   source_snapshot_prefix=%s,source_markdown_key=%s,source_blocks_key=%s,source_report_key=%s,

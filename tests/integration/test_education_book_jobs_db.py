@@ -145,27 +145,349 @@ async def _seed_book(
 
 
 async def test_two_workers_share_one_preparation_slot_and_ready_books_bypass_it(
-    patched_get_db_connection, seed_user,
+    patched_get_db_connection,
+    seed_user,
 ):
     import asyncio
     from src.server.database.education_book_jobs import claim_next_book_item
 
-    books = [await _seed_book(patched_get_db_connection, parent_user_id=seed_user["user_id"]) for _ in range(3)]
+    books = [
+        await _seed_book(patched_get_db_connection, parent_user_id=seed_user["user_id"])
+        for _ in range(3)
+    ]
     async with patched_get_db_connection() as conn:
         for book in books[:2]:
             await conn.execute(
                 """UPDATE education_textbooks SET source_status='pending',source_content_sha256=NULL,
                 source_size_bytes=NULL,source_snapshot_prefix=NULL,source_markdown_key=NULL,
                 source_blocks_key=NULL,source_report_key=NULL,selected_source='{}',preparation_descriptor='{}'
-                WHERE textbook_id=%s""", (book["textbook_id"],),
+                WHERE textbook_id=%s""",
+                (book["textbook_id"],),
             )
-    claims = await asyncio.gather(*[
-        claim_next_book_item(worker_id=f"prep-{index}", lease_seconds=30, preparation_only=True)
-        for index in range(2)
-    ])
+    claims = await asyncio.gather(
+        *[
+            claim_next_book_item(
+                worker_id=f"prep-{index}", lease_seconds=30, preparation_only=True
+            )
+            for index in range(2)
+        ]
+    )
     assert sum(claim is not None for claim in claims) == 1
     runtime = await claim_next_book_item(worker_id="runtime", lease_seconds=30)
     assert runtime["textbook_id"] == books[2]["textbook_id"]
+
+
+async def _seed_pending(connection_factory, *, parent_user_id):
+    book = await _seed_book(connection_factory, parent_user_id=parent_user_id)
+    async with connection_factory() as conn:
+        source = await (
+            await conn.execute(
+                "SELECT * FROM education_textbooks WHERE textbook_id=%s",
+                (book["textbook_id"],),
+            )
+        ).fetchone()
+        await conn.execute(
+            """UPDATE education_textbooks SET source_status='pending',source_content_sha256=NULL,
+            source_size_bytes=NULL,source_snapshot_prefix=NULL,source_markdown_key=NULL,
+            source_blocks_key=NULL,source_report_key=NULL,selected_source='{}',preparation_descriptor='{}'
+            WHERE textbook_id=%s""",
+            (book["textbook_id"],),
+        )
+    return book, source
+
+
+def _prepared_source(book, original, token):
+    prefix = f"education/{book['household_id']}/textbooks/{book['textbook_id']}/source/attempts/{token}/"
+    return {
+        "document_id": original["source_document_id"],
+        "parse_job_id": original["source_parse_job_id"],
+        "primary_artifact_id": original["source_primary_artifact_id"],
+        "snapshot_prefix": prefix,
+        "markdown_key": f"{prefix}artifacts/document.md",
+        "content_sha256": "a" * 64,
+        "size_bytes": 128,
+    }
+
+
+@pytest.mark.parametrize("fence", ["expired", "cancelled"])
+async def test_preparation_callbacks_reject_expired_lease_or_cancel_intent(
+    patched_get_db_connection,
+    seed_user,
+    fence,
+):
+    from src.server.database.education_book_jobs import (
+        claim_next_preparation_item,
+        assert_book_preparation_current,
+        update_book_preparation_progress,
+        request_book_job_cancel,
+        renew_book_item_lease,
+        record_candidate_object,
+    )
+    from src.server.database.education_books import commit_prepared_book_source
+
+    book, original = await _seed_pending(
+        patched_get_db_connection, parent_user_id=seed_user["user_id"]
+    )
+    item = await claim_next_preparation_item(worker_id="prep", lease_seconds=30)
+    if fence == "expired":
+        async with patched_get_db_connection() as conn:
+            await conn.execute(
+                "UPDATE education_book_job_items SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE item_id=%s",
+                (item["item_id"],),
+            )
+    else:
+        await request_book_job_cancel(job_id=book["job_id"])
+    with pytest.raises(RuntimeError):
+        await assert_book_preparation_current(
+            item_id=item["item_id"], attempt_token=item["attempt_token"]
+        )
+    with pytest.raises(RuntimeError):
+        await update_book_preparation_progress(
+            item_id=item["item_id"],
+            attempt_token=item["attempt_token"],
+            verified_resources=1,
+            total_resources=1,
+        )
+    with pytest.raises(RuntimeError):
+        await commit_prepared_book_source(
+            item_id=item["item_id"],
+            attempt_token=item["attempt_token"],
+            source=_prepared_source(book, original, item["attempt_token"]),
+        )
+    with pytest.raises(RuntimeError):
+        await record_candidate_object(
+            item_id=item["item_id"],
+            attempt_token=item["attempt_token"],
+            content_key=_prepared_source(book, original, item["attempt_token"])[
+                "markdown_key"
+            ],
+        )
+    assert not await renew_book_item_lease(
+        item_id=item["item_id"],
+        attempt_token=item["attempt_token"],
+        worker_id="prep",
+        lease_seconds=30,
+    )
+
+
+async def test_cancel_before_claim_marks_unprepared_source_cancelled(
+    patched_get_db_connection, seed_user
+):
+    from src.server.database.education_book_jobs import mark_book_job_cancelled
+
+    book, _ = await _seed_pending(
+        patched_get_db_connection, parent_user_id=seed_user["user_id"]
+    )
+    await mark_book_job_cancelled(
+        job_id=book["job_id"], item_id=None, attempt_token=None
+    )
+    async with patched_get_db_connection() as conn:
+        row = await (
+            await conn.execute(
+                "SELECT source_status FROM education_textbooks WHERE textbook_id=%s",
+                (book["textbook_id"],),
+            )
+        ).fetchone()
+    assert row["source_status"] == "cancelled"
+
+
+async def test_ready_to_runtime_keeps_attempt_and_expired_recovery_keeps_source(
+    patched_get_db_connection, seed_user
+):
+    from src.server.database.education_book_jobs import (
+        claim_next_preparation_item,
+        claim_next_book_item,
+        requeue_expired_book_preparation,
+    )
+    from src.server.database.education_books import commit_prepared_book_source
+
+    book, original = await _seed_pending(
+        patched_get_db_connection, parent_user_id=seed_user["user_id"]
+    )
+    item = await claim_next_preparation_item(worker_id="prep", lease_seconds=30)
+    await commit_prepared_book_source(
+        item_id=item["item_id"],
+        attempt_token=item["attempt_token"],
+        source=_prepared_source(book, original, item["attempt_token"]),
+    )
+    runtime = await claim_next_book_item(worker_id="runtime", lease_seconds=30)
+    assert runtime["attempt_token"] == item["attempt_token"]
+    assert runtime["attempt"] == 1
+    async with patched_get_db_connection() as conn:
+        await conn.execute(
+            "UPDATE education_book_job_items SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE item_id=%s",
+            (item["item_id"],),
+        )
+    assert await requeue_expired_book_preparation(
+        item_id=item["item_id"], attempt_token=item["attempt_token"]
+    )
+    assert (
+        await claim_next_preparation_item(worker_id="prep-2", lease_seconds=30) is None
+    )
+    retry = await claim_next_book_item(worker_id="runtime-2", lease_seconds=30)
+    assert retry["attempt_token"] != item["attempt_token"]
+    assert retry["source_status"] == "ready"
+    assert retry["attempt"] == 2
+
+
+async def test_runtime_identity_is_registered_before_sandbox_and_retained_after_requeue(
+    patched_get_db_connection, seed_user
+):
+    from src.server.database.education_book_jobs import (
+        claim_next_book_item,
+        create_book_item_runtime,
+        requeue_expired_book_preparation,
+        list_old_book_attempts_for_cleanup,
+    )
+
+    await _seed_book(patched_get_db_connection, parent_user_id=seed_user["user_id"])
+    item = await claim_next_book_item(worker_id="runtime", lease_seconds=30)
+    identity = {
+        "attempt_token": str(item["attempt_token"]),
+        "execution_id": str(item["execution_id"]),
+    }
+    runtime = await create_book_item_runtime(
+        item_id=item["item_id"], attempt_token=item["attempt_token"], identity=identity
+    )
+    async with patched_get_db_connection() as conn:
+        row = await (
+            await conn.execute(
+                "SELECT * FROM education_book_job_items WHERE item_id=%s",
+                (item["item_id"],),
+            )
+        ).fetchone()
+        assert str(row["managed_workspace_id"]) == runtime["workspace_id"]
+        assert str(row["managed_thread_id"]) == runtime["thread_id"]
+        assert row["run_id"] is None
+        await conn.execute(
+            "UPDATE education_book_job_items SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE item_id=%s",
+            (item["item_id"],),
+        )
+    assert await requeue_expired_book_preparation(
+        item_id=item["item_id"], attempt_token=item["attempt_token"]
+    )
+    retry = await claim_next_book_item(worker_id="runtime-2", lease_seconds=30)
+    assert retry["managed_workspace_id"] is None
+    old = await list_old_book_attempts_for_cleanup()
+    assert str(old[0]["managed_workspace_id"]) == runtime["workspace_id"]
+    assert str(old[0]["managed_thread_id"]) == runtime["thread_id"]
+    with pytest.raises(RuntimeError):
+        await create_book_item_runtime(
+            item_id=item["item_id"],
+            attempt_token=item["attempt_token"],
+            identity=identity,
+        )
+    async with patched_get_db_connection() as conn:
+        assert (
+            await (
+                await conn.execute(
+                    "SELECT count(*) AS n FROM workspaces WHERE config->'managed_execution'->>'attempt_token'=%s",
+                    (str(item["attempt_token"]),),
+                )
+            ).fetchone()
+        )["n"] == 1
+
+
+async def test_sigkill_releases_preparation_io_lock_and_new_worker_fences_old_attempt(
+    patched_get_db_connection,
+    seed_user,
+    test_db_uri,
+):
+    import asyncio
+    import os
+    import sys
+    from src.server.database.education_book_jobs import (
+        claim_next_preparation_item,
+        requeue_expired_book_preparation,
+        record_candidate_object,
+        get_book_item_candidate_cleanup_context,
+        assert_book_preparation_current,
+    )
+    from src.server.database.education_book_deletion import book_candidate_cleanup_guard
+
+    book, original = await _seed_pending(
+        patched_get_db_connection, parent_user_id=seed_user["user_id"]
+    )
+    item = await claim_next_preparation_item(worker_id="process-a", lease_seconds=30)
+    candidate = _prepared_source(book, original, item["attempt_token"])["markdown_key"]
+    await record_candidate_object(
+        item_id=item["item_id"],
+        attempt_token=item["attempt_token"],
+        content_key=candidate,
+    )
+    script = """
+import asyncio, os
+from uuid import UUID
+from src.server.database import education_book_deletion as deletion
+deletion.get_db_connection_string = lambda: os.environ['PREPARATION_TEST_DB_URI']
+async def main():
+    async with deletion.book_item_storage_guard(item_id=UUID(os.environ['PREPARATION_TEST_ITEM']), preparation=True):
+        print('LOCKED', flush=True)
+        await asyncio.Event().wait()
+asyncio.run(main())
+"""
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        script,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env={
+            **os.environ,
+            "PREPARATION_TEST_DB_URI": test_db_uri,
+            "PREPARATION_TEST_ITEM": str(item["item_id"]),
+        },
+    )
+    try:
+        assert await asyncio.wait_for(process.stdout.readline(), 20) == b"LOCKED\n"
+        async with patched_get_db_connection() as conn:
+            await conn.execute(
+                "UPDATE education_book_job_items SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE item_id=%s",
+                (item["item_id"],),
+            )
+        assert not await requeue_expired_book_preparation(
+            item_id=item["item_id"], attempt_token=item["attempt_token"]
+        )
+        from unittest.mock import patch
+
+        with patch(
+            "src.server.database.education_book_deletion.get_db_connection_string",
+            return_value=test_db_uri,
+        ):
+            async with book_candidate_cleanup_guard(
+                textbook_id=book["textbook_id"]
+            ) as settled:
+                assert not settled
+        process.kill()
+        await asyncio.wait_for(process.wait(), 10)
+        assert await requeue_expired_book_preparation(
+            item_id=item["item_id"], attempt_token=item["attempt_token"]
+        )
+        retry = await claim_next_preparation_item(
+            worker_id="process-b", lease_seconds=30
+        )
+        assert retry["attempt"] == 2
+        assert retry["attempt_token"] != item["attempt_token"]
+        with pytest.raises(RuntimeError):
+            await assert_book_preparation_current(
+                item_id=item["item_id"], attempt_token=item["attempt_token"]
+            )
+        archived = await get_book_item_candidate_cleanup_context(
+            item_id=item["item_id"], attempt_token=item["attempt_token"]
+        )
+        assert archived["candidate_objects"] == [candidate]
+        async with patched_get_db_connection() as conn:
+            attempt = await (
+                await conn.execute(
+                    "SELECT status FROM education_book_job_attempts WHERE attempt_token=%s",
+                    (item["attempt_token"],),
+                )
+            ).fetchone()
+        assert attempt["status"] == "interrupted"
+    finally:
+        if process.returncode is None:
+            process.kill()
+        await process.wait()
 
 
 async def test_attempt_ledger_preserves_terminal_and_retry_round(
@@ -183,7 +505,7 @@ async def test_attempt_ledger_preserves_terminal_and_retry_round(
         patched_get_db_connection, parent_user_id=seed_user["user_id"]
     )
     claimed = await claim_next_book_item(worker_id="timing-a", lease_seconds=30)
-    assert claimed["execution_phase"] == "runtime_queue"
+    assert claimed["execution_phase"] == "sandbox_preparation"
     await fail_book_item(
         item_id=claimed["item_id"],
         attempt_token=claimed["attempt_token"],
@@ -891,6 +1213,7 @@ async def test_terminal_candidate_cleanup_uses_only_recorded_keys(
         "knowledge_point_id": None,
         "textbook_id": created["textbook_id"],
         "household_id": created["household_id"],
+        "ready_source_prefix": f"education/{created['household_id']}/textbooks/{created['textbook_id']}/source/",
     }
 
     assert await forget_book_candidate_object(

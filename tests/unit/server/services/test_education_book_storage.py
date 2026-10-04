@@ -20,6 +20,96 @@ def isolated_storage_guard(monkeypatch):
 
     monkeypatch.setattr(storage, "book_item_storage_guard", guard)
 
+    @asynccontextmanager
+    async def cleanup_guard(*, textbook_id):
+        yield True
+
+    monkeypatch.setattr(
+        storage, "book_candidate_cleanup_guard", cleanup_guard, raising=False
+    )
+
+
+@pytest.mark.asyncio
+async def test_structure_candidate_cleanup_preserves_ready_source_after_failure(
+    monkeypatch,
+):
+    from src.server.services import education_book_storage as storage
+
+    item_id, token, household, book = [uuid4() for _ in range(4)]
+    prefix = f"education/{household}/textbooks/{book}/source/attempts/{token}/"
+    monkeypatch.setattr(
+        storage,
+        "get_book_item_candidate_cleanup_context",
+        AsyncMock(
+            return_value={
+                "kind": "structure",
+                "household_id": household,
+                "textbook_id": book,
+                "ready_source_prefix": prefix,
+                "candidate_objects": [
+                    f"{prefix}artifacts/book.md",
+                    f"{prefix}manifest.json",
+                ],
+            }
+        ),
+    )
+    delete, read, forget = (
+        AsyncMock(return_value=True),
+        AsyncMock(),
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(storage, "_delete", delete)
+    monkeypatch.setattr(storage, "_read", read)
+    monkeypatch.setattr(storage, "forget_book_candidate_object", forget)
+    assert (
+        await storage.cleanup_book_item_candidates(item_id=item_id, attempt_token=token)
+        == 2
+    )
+    delete.assert_not_awaited()
+    read.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_candidate_cleanup_defers_until_upload_io_has_settled(monkeypatch):
+    from contextlib import asynccontextmanager
+    from src.server.services import education_book_storage as storage
+
+    item_id, token, household, book, kp = [uuid4() for _ in range(5)]
+
+    @asynccontextmanager
+    async def active_upload(*, textbook_id):
+        yield False
+
+    monkeypatch.setattr(
+        storage, "book_candidate_cleanup_guard", active_upload, raising=False
+    )
+    monkeypatch.setattr(
+        storage,
+        "get_book_item_candidate_cleanup_context",
+        AsyncMock(
+            return_value={
+                "kind": "material",
+                "household_id": household,
+                "textbook_id": book,
+                "knowledge_point_id": kp,
+                "candidate_objects": [
+                    f"education/{household}/textbooks/{book}/materials/{kp}/attempts/{token}/book.md"
+                ],
+            }
+        ),
+    )
+    delete = AsyncMock(return_value=True)
+    monkeypatch.setattr(storage, "_delete", delete)
+    monkeypatch.setattr(storage, "_read", AsyncMock(return_value=b"bytes"))
+    monkeypatch.setattr(
+        storage, "forget_book_candidate_object", AsyncMock(return_value=True)
+    )
+    assert (
+        await storage.cleanup_book_item_candidates(item_id=item_id, attempt_token=token)
+        == 0
+    )
+    delete.assert_not_awaited()
+
 
 @pytest.mark.asyncio
 async def test_read_material_bytes_verifies_owned_pointer_and_digest(
@@ -555,8 +645,10 @@ async def test_cleanup_candidates_deletes_only_uncommitted_explicit_keys(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_cleanup_keeps_candidate_while_registered_upload_is_not_visible(
+@pytest.mark.parametrize("delete_confirmed", [True, False])
+async def test_cleanup_requires_delete_confirmation_when_get_returns_none(
     monkeypatch,
+    delete_confirmed,
 ):
     from src.server.services import education_book_storage as storage
 
@@ -584,7 +676,7 @@ async def test_cleanup_keeps_candidate_while_registered_upload_is_not_visible(
         ),
     )
     monkeypatch.setattr(storage, "_read", AsyncMock(return_value=None))
-    delete = AsyncMock(return_value=True)
+    delete = AsyncMock(return_value=delete_confirmed)
     forget = AsyncMock(return_value=True)
     monkeypatch.setattr(storage, "_delete", delete)
     monkeypatch.setattr(storage, "forget_book_candidate_object", forget)
@@ -594,6 +686,11 @@ async def test_cleanup_keeps_candidate_while_registered_upload_is_not_visible(
         attempt_token=attempt_token,
     )
 
-    assert cleaned == 0
-    delete.assert_not_awaited()
-    forget.assert_not_awaited()
+    assert cleaned == int(delete_confirmed)
+    delete.assert_awaited_once_with(candidate)
+    if delete_confirmed:
+        forget.assert_awaited_once_with(
+            item_id=item_id, attempt_token=attempt_token, content_key=candidate
+        )
+    else:
+        forget.assert_not_awaited()

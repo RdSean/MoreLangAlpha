@@ -63,6 +63,37 @@ CLAIMED = {
 @pytest.fixture(autouse=True)
 def _default_no_pending_book_cancellations(monkeypatch):
     from src.server.services import education_book_recovery
+    from src.server.services import education_book_jobs
+
+    monkeypatch.setattr(
+        education_book_jobs, "claim_next_preparation_item", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        education_book_jobs, "has_book_runtime_work", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        education_book_jobs,
+        "list_old_book_attempts_for_cleanup",
+        AsyncMock(return_value=[]),
+    )
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def guard(**kwargs):
+        yield
+
+    monkeypatch.setattr(education_book_jobs, "book_item_storage_guard", guard)
+
+    @asynccontextmanager
+    async def cleanup_guard(**kwargs):
+        yield True
+
+    monkeypatch.setattr(
+        education_book_jobs,
+        "book_candidate_cleanup_guard",
+        cleanup_guard,
+        raising=False,
+    )
 
     monkeypatch.setattr(
         education_book_recovery,
@@ -966,8 +997,9 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
     workspace_id = "743b2b72-f79c-45e8-aafd-b6941e1cbbc1"
     thread_id = "1e0d57be-2b7e-4ed2-8daf-246c408d09ec"
     run_id = "e21b6198-85c6-41e2-b22b-2662851bc782"
-    create_workspace = AsyncMock(return_value={"workspace_id": workspace_id})
-    create_thread = AsyncMock(return_value={"conversation_thread_id": thread_id})
+    create_runtime = AsyncMock(
+        return_value={"workspace_id": workspace_id, "thread_id": thread_id}
+    )
     resolve_config = AsyncMock(return_value=object())
     sandbox = object()
     provision = AsyncMock(return_value=type("Session", (), {"sandbox": sandbox})())
@@ -1010,8 +1042,7 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
             schema_sha256=CLAIMED["schema_sha256"],
         )
     )
-    monkeypatch.setattr(education_book_jobs, "create_workspace", create_workspace)
-    monkeypatch.setattr(education_book_jobs, "create_thread", create_thread)
+    monkeypatch.setattr(education_book_jobs, "create_book_item_runtime", create_runtime)
     monkeypatch.setattr(
         education_book_jobs, "resolve_managed_education_agent_config", resolve_config
     )
@@ -1629,6 +1660,7 @@ async def test_settled_item_cleanup_retries_candidates_and_managed_runtime(monke
     from src.server.services import education_book_jobs
 
     cleanup_item = {
+        "textbook_id": CLAIMED["textbook_id"],
         "item_id": CLAIMED["item_id"],
         "attempt_token": CLAIMED["attempt_token"],
         "managed_workspace_id": UUID("743b2b72-f79c-45e8-aafd-b6941e1cbbc1"),
@@ -1665,6 +1697,32 @@ async def test_settled_item_cleanup_retries_candidates_and_managed_runtime(monke
         workspace_id=str(cleanup_item["managed_workspace_id"]),
         thread_id=str(cleanup_item["managed_thread_id"]),
     )
+
+
+@pytest.mark.asyncio
+async def test_terminal_runtime_cleanup_waits_for_launch_io_to_settle(monkeypatch):
+    from contextlib import asynccontextmanager
+    from src.server.services import education_book_jobs as jobs
+
+    item = {
+        **CLAIMED,
+        "managed_workspace_id": UUID("743b2b72-f79c-45e8-aafd-b6941e1cbbc1"),
+        "managed_thread_id": None,
+    }
+    monkeypatch.setattr(
+        jobs, "list_book_items_for_terminal_cleanup", AsyncMock(return_value=[item])
+    )
+    monkeypatch.setattr(jobs, "cleanup_book_item_candidates", AsyncMock(return_value=0))
+    cleanup = AsyncMock()
+    monkeypatch.setattr(jobs, "cleanup_managed_book_runtime", cleanup)
+
+    @asynccontextmanager
+    async def guard(**kwargs):
+        yield False
+
+    monkeypatch.setattr(jobs, "book_candidate_cleanup_guard", guard)
+    assert await jobs.cleanup_settled_book_items_once() == 0
+    cleanup.assert_not_awaited()
 
 
 @pytest.mark.asyncio

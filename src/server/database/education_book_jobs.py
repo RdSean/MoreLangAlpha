@@ -30,8 +30,10 @@ async def claim_next_book_item(
         async with conn.cursor(row_factory=dict_row) as cur:
             if preparation_only:
                 await cur.execute(
-                    "SELECT pg_advisory_xact_lock(hashtextextended('book-source-capacity', 0))"
+                    "SELECT pg_try_advisory_xact_lock(hashtextextended('book-source-capacity', 0)) AS locked"
                 )
+                if not (await cur.fetchone())["locked"]:
+                    return None
                 await cur.execute(
                     "SELECT 1 FROM education_book_job_items WHERE status='running' AND execution_phase='source_freezing' LIMIT 1"
                 )
@@ -50,7 +52,9 @@ async def claim_next_book_item(
                       SELECT 1
                       FROM education_book_job_items AS items
                       WHERE items.job_id = jobs.job_id
-                        AND items.status = 'queued'
+                        AND (items.status = 'queued' OR (NOT %s AND items.status='running'
+                          AND items.execution_phase='runtime_queue' AND items.run_id IS NULL
+                          AND items.lease_expires_at>NOW()))
                         AND NOT EXISTS (
                             SELECT 1
                             FROM education_book_job_items AS earlier
@@ -63,7 +67,7 @@ async def claim_next_book_item(
                 FOR UPDATE OF jobs SKIP LOCKED
                 LIMIT 1
                 """,
-                (preparation_only, preparation_only),
+                (preparation_only, preparation_only, preparation_only),
             )
             candidate_job = await cur.fetchone()
             if candidate_job is None:
@@ -72,7 +76,8 @@ async def claim_next_book_item(
                 """
                 SELECT items.item_id
                 FROM education_book_job_items AS items
-                WHERE items.job_id = %s AND items.status = 'queued'
+                WHERE items.job_id = %s AND (items.status = 'queued' OR (NOT %s
+                  AND items.status='running' AND items.execution_phase='runtime_queue' AND items.run_id IS NULL))
                   AND NOT EXISTS (
                       SELECT 1
                       FROM education_book_job_items AS earlier
@@ -84,7 +89,7 @@ async def claim_next_book_item(
                 FOR UPDATE OF items
                 LIMIT 1
                 """,
-                (candidate_job["job_id"],),
+                (candidate_job["job_id"], preparation_only),
             )
             candidate = await cur.fetchone()
             if candidate is None:
@@ -92,14 +97,17 @@ async def claim_next_book_item(
             await cur.execute(
                 """
                 UPDATE education_book_job_items
-                SET status = 'running', attempt = attempt + 1,
-                    attempt_token = %s, execution_id = %s,
+                SET status = 'running', attempt = attempt + CASE WHEN status='queued' THEN 1 ELSE 0 END,
+                    attempt_token = CASE WHEN status='queued' THEN %s ELSE attempt_token END,
+                    execution_id = CASE WHEN status='queued' THEN %s ELSE execution_id END,
                     lease_owner = %s,
                     lease_expires_at = NOW() + make_interval(secs => %s),
-                    started_at = NOW(), finished_at = NULL, safe_error = NULL,
+                    started_at = CASE WHEN status='queued' THEN NOW() ELSE started_at END,
+                    finished_at = NULL, safe_error = NULL,
                     execution_phase = %s,
                     updated_at = NOW()
-                WHERE item_id = %s AND status = 'queued'
+                WHERE item_id = %s AND (status = 'queued' OR (status='running'
+                  AND execution_phase='runtime_queue' AND run_id IS NULL AND lease_expires_at>NOW()))
                 RETURNING *
                 """,
                 (
@@ -107,7 +115,7 @@ async def claim_next_book_item(
                     execution_id,
                     worker_id,
                     lease_seconds,
-                    "source_freezing" if preparation_only else "runtime_queue",
+                    "source_freezing" if preparation_only else "sandbox_preparation",
                     candidate["item_id"],
                 ),
             )
@@ -164,6 +172,114 @@ async def claim_next_book_item(
             )
             claimed = await cur.fetchone()
             return dict(claimed) if claimed is not None else None
+
+
+async def claim_next_preparation_item(
+    *, worker_id: str, lease_seconds: int
+) -> dict[str, Any] | None:
+    return await claim_next_book_item(
+        worker_id=worker_id, lease_seconds=lease_seconds, preparation_only=True
+    )
+
+
+async def has_book_runtime_work() -> bool:
+    async with get_db_connection() as conn:
+        row = await (
+            await conn.execute(
+                """SELECT 1 FROM education_book_job_items i
+            JOIN education_book_jobs j ON j.job_id=i.job_id
+            JOIN education_textbooks b ON b.textbook_id=j.textbook_id
+            WHERE j.status IN ('queued','running') AND j.cancel_requested_at IS NULL AND b.source_status='ready'
+              AND (i.status='queued' OR (i.status='running' AND i.execution_phase='runtime_queue' AND i.run_id IS NULL)) LIMIT 1"""
+            )
+        ).fetchone()
+        return row is not None
+
+
+async def assert_book_preparation_current(
+    *, item_id: UUID, attempt_token: UUID
+) -> None:
+    async with get_db_connection() as conn:
+        row = await (
+            await conn.execute(
+                """SELECT 1 FROM education_book_job_items i JOIN education_book_jobs j ON j.job_id=i.job_id
+            WHERE i.item_id=%s AND i.attempt_token=%s AND i.status='running'
+              AND i.execution_phase='source_freezing' AND i.lease_expires_at>NOW()
+              AND j.cancel_requested_at IS NULL""",
+                (item_id, attempt_token),
+            )
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Book preparation is stale or cancelled")
+
+
+async def update_book_preparation_progress(
+    *, item_id: UUID, attempt_token: UUID, verified_resources: int, total_resources: int
+) -> None:
+    if not 0 <= verified_resources <= total_resources:
+        raise ValueError("Invalid preparation progress")
+    async with get_db_connection() as conn, conn.transaction():
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await _lock_book_job_for_item(
+                cur, item_id=item_id, reject_cancel_requested=True
+            )
+            await cur.execute(
+                """UPDATE education_book_job_attempts a SET total_resources=%s,verified_resources=%s
+                FROM education_book_job_items i WHERE i.item_id=%s AND i.attempt_token=%s
+                  AND i.status='running' AND i.execution_phase='source_freezing'
+                  AND i.lease_expires_at>NOW()
+                  AND a.item_id=i.item_id AND a.attempt_token=i.attempt_token
+                  AND a.verified_resources<=%s AND (a.total_resources IS NULL OR a.total_resources=%s)
+                RETURNING a.attempt_id""",
+                (
+                    total_resources,
+                    verified_resources,
+                    item_id,
+                    attempt_token,
+                    verified_resources,
+                    total_resources,
+                ),
+            )
+            if await cur.fetchone() is None:
+                raise RuntimeError("Book preparation progress is stale")
+
+
+async def requeue_expired_book_preparation(
+    *, item_id: UUID, attempt_token: UUID
+) -> bool:
+    """Fence a no-run attempt only after its storage IO session has released."""
+    async with get_db_connection() as conn, conn.transaction():
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await _lock_book_job_for_item(cur, item_id=item_id)
+            await cur.execute(
+                "SELECT j.textbook_id FROM education_book_jobs j JOIN education_book_job_items i ON i.job_id=j.job_id WHERE i.item_id=%s",
+                (item_id,),
+            )
+            book = await cur.fetchone()
+            await cur.execute(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended(%s,0)) AS locked",
+                (f"education-book-storage:{book['textbook_id']}",),
+            )
+            if not (await cur.fetchone())["locked"]:
+                return False
+            await cur.execute(
+                """UPDATE education_book_job_items SET status='queued',attempt_token=NULL,execution_id=NULL,
+                queued_at=NOW(),started_at=NULL,finished_at=NULL,execution_phase='initial_queue',
+                lease_owner=NULL,lease_expires_at=NULL,candidate_objects='[]',
+                managed_workspace_id=NULL,managed_thread_id=NULL,updated_at=NOW()
+                WHERE item_id=%s AND attempt_token=%s AND status='running' AND run_id IS NULL
+                  AND execution_phase IN ('source_freezing','runtime_queue','sandbox_preparation','input_staging')
+                  AND lease_expires_at<NOW() RETURNING job_id""",
+                (item_id, attempt_token),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                return False
+            await cur.execute(
+                "UPDATE education_textbooks SET source_status='pending',updated_at=NOW() WHERE textbook_id=%s AND source_status='preparing'",
+                (book["textbook_id"],),
+            )
+            return True
 
 
 async def request_book_job_cancel(*, job_id: str | UUID) -> dict[str, Any] | None:
@@ -246,6 +362,8 @@ async def bind_book_item_runtime(
                     run_id = %s, updated_at = NOW()
                 WHERE item_id = %s AND status = 'running'
                   AND attempt_token = %s
+                  AND lease_expires_at>NOW()
+                  AND EXISTS (SELECT 1 FROM education_book_jobs j WHERE j.job_id=education_book_job_items.job_id AND j.cancel_requested_at IS NULL)
                   AND (
                       run_id IS NULL OR (
                           managed_workspace_id = %s
@@ -293,6 +411,8 @@ async def renew_book_item_lease(
                     updated_at = NOW()
                 WHERE item_id = %s AND status = 'running'
                   AND attempt_token = %s
+                  AND EXISTS (SELECT 1 FROM education_book_jobs j WHERE j.job_id=education_book_job_items.job_id AND j.cancel_requested_at IS NULL)
+                  AND (run_id IS NOT NULL OR lease_expires_at>NOW())
                 """,
                 (worker_id, lease_seconds, item_id, attempt_token),
             )
@@ -390,9 +510,10 @@ async def list_book_items_for_terminal_cleanup(
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
-                SELECT items.item_id, items.attempt_token,
+                SELECT items.item_id, items.attempt_token, jobs.textbook_id,
                        items.managed_workspace_id, items.managed_thread_id
                 FROM education_book_job_items AS items
+                JOIN education_book_jobs jobs ON jobs.job_id=items.job_id
                 LEFT JOIN workspaces
                   ON workspaces.workspace_id = items.managed_workspace_id
                 LEFT JOIN conversation_threads AS threads
@@ -726,6 +847,12 @@ async def mark_book_job_cancelled(
                 (job_id,),
             )
             cancelled_items = [dict(row) for row in await cur.fetchall()]
+            await cur.execute(
+                """UPDATE education_textbooks b SET source_status='cancelled',updated_at=NOW()
+                FROM education_book_jobs j WHERE j.job_id=%s AND j.textbook_id=b.textbook_id
+                  AND j.kind='structure' AND b.source_status<>'ready'""",
+                (job_id,),
+            )
             runtime_contexts = [
                 {
                     key: row[key]
@@ -1153,11 +1280,15 @@ async def record_candidate_object(
 
     async with get_db_connection() as conn, conn.transaction():
         async with conn.cursor(row_factory=dict_row) as cur:
+            await _lock_book_job_for_item(
+                cur, item_id=item_id, reject_cancel_requested=True
+            )
             await cur.execute(
                 """
                 SELECT candidate_objects FROM education_book_job_items
                 WHERE item_id = %s AND status = 'running'
                   AND attempt_token = %s
+                  AND (execution_phase<>'source_freezing' OR lease_expires_at>NOW())
                 FOR UPDATE
                 """,
                 (item_id, attempt_token),
@@ -1178,6 +1309,82 @@ async def record_candidate_object(
                 )
 
 
+async def list_old_book_attempts_for_cleanup(
+    *, limit: int = 100
+) -> list[dict[str, Any]]:
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """SELECT a.item_id,a.attempt_token,j.textbook_id,a.managed_workspace_id,a.managed_thread_id
+                FROM education_book_job_attempts a
+                JOIN education_book_job_items i ON i.item_id=a.item_id
+                JOIN education_book_jobs j ON j.job_id=i.job_id
+                LEFT JOIN workspaces w ON w.workspace_id=a.managed_workspace_id
+                LEFT JOIN conversation_threads t ON t.conversation_thread_id=a.managed_thread_id
+                WHERE a.status<>'running' AND (a.candidate_objects<>'[]'
+                  OR w.status<>'deleted' OR t.archived_at IS NULL AND t.conversation_thread_id IS NOT NULL)
+                  AND a.attempt_token IS DISTINCT FROM i.attempt_token
+                ORDER BY a.terminal_at,a.item_id,a.attempt LIMIT %s""",
+                (limit,),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def create_book_item_runtime(
+    *, item_id: UUID, attempt_token: UUID, identity: dict[str, str]
+) -> dict[str, str]:
+    """Register workspace, audit thread and attempt ownership in one short transaction."""
+    from src.server.database.workspace import create_workspace
+    from src.server.database.conversation import create_thread
+
+    async with get_db_connection() as conn, conn.transaction():
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await _lock_book_job_for_item(
+                cur, item_id=item_id, reject_cancel_requested=True
+            )
+            await cur.execute(
+                """SELECT i.*,j.requested_by_user_id FROM education_book_job_items i
+                JOIN education_book_jobs j ON j.job_id=i.job_id
+                WHERE i.item_id=%s AND i.attempt_token=%s AND i.status='running'
+                  AND i.lease_expires_at>NOW() AND i.execution_phase='sandbox_preparation'
+                FOR UPDATE OF i""",
+                (item_id, attempt_token),
+            )
+            item = await cur.fetchone()
+            if item is None:
+                raise RuntimeError("Book runtime preparation is stale")
+            if item["managed_workspace_id"] is not None:
+                return {
+                    "workspace_id": str(item["managed_workspace_id"]),
+                    "thread_id": str(item["managed_thread_id"]),
+                }
+            workspace_id, thread_id = str(uuid4()), str(uuid4())
+            await create_workspace(
+                user_id=str(item["requested_by_user_id"]),
+                name="教材处理",
+                description="service-owned managed textbook item execution",
+                config={"managed_execution": identity},
+                workspace_id=workspace_id,
+                status="creating",
+                conn=conn,
+            )
+            await create_thread(
+                conversation_thread_id=thread_id,
+                workspace_id=workspace_id,
+                current_status="completed",
+                msg_type="ptc",
+                title="教材处理",
+                platform="education",
+                metadata={"managed_execution": identity},
+                conn=conn,
+            )
+            await cur.execute(
+                "UPDATE education_book_job_items SET managed_workspace_id=%s,managed_thread_id=%s,updated_at=NOW() WHERE item_id=%s",
+                (workspace_id, thread_id, item_id),
+            )
+            return {"workspace_id": workspace_id, "thread_id": thread_id}
+
+
 async def get_book_item_candidate_cleanup_context(
     *, item_id: str | UUID, attempt_token: UUID
 ) -> dict[str, Any] | None:
@@ -1187,19 +1394,20 @@ async def get_book_item_candidate_cleanup_context(
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
-                SELECT items.candidate_objects, items.result_snapshot,
+                SELECT COALESCE(attempts.candidate_objects,items.candidate_objects) AS candidate_objects, items.result_snapshot,
                        items.kind, items.knowledge_point_id,
-                       jobs.textbook_id, textbooks.household_id
+                       jobs.textbook_id, textbooks.household_id, textbooks.source_snapshot_prefix AS ready_source_prefix
                 FROM education_book_job_items AS items
                 JOIN education_book_jobs AS jobs ON jobs.job_id = items.job_id
                 JOIN education_textbooks AS textbooks
                   ON textbooks.textbook_id = jobs.textbook_id
-                WHERE items.item_id = %s AND items.attempt_token = %s
-                  AND items.status IN (
-                      'succeeded', 'failed', 'cancelled', 'not_run'
-                  )
+                LEFT JOIN education_book_job_attempts attempts ON attempts.item_id=items.item_id AND attempts.attempt_token=%s
+                WHERE items.item_id = %s AND (
+                    (attempts.status IS NOT NULL AND attempts.status<>'running') OR
+                    (items.attempt_token=%s AND items.status IN ('succeeded','failed','cancelled','not_run'))
+                )
                 """,
-                (item_id, attempt_token),
+                (attempt_token, item_id, attempt_token),
             )
             row = await cur.fetchone()
     return dict(row) if row is not None else None
@@ -1214,17 +1422,29 @@ async def forget_book_candidate_object(
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
-                SELECT candidate_objects
+                SELECT candidate_objects,attempt_token,status
                 FROM education_book_job_items
-                WHERE item_id = %s AND attempt_token = %s
-                  AND status IN ('succeeded', 'failed', 'cancelled', 'not_run')
+                WHERE item_id = %s
                 FOR UPDATE
                 """,
-                (item_id, attempt_token),
+                (item_id,),
             )
             row = await cur.fetchone()
             if row is None:
                 return False
+            await cur.execute(
+                """UPDATE education_book_job_attempts SET candidate_objects=candidate_objects-%s
+                WHERE item_id=%s AND attempt_token=%s AND status<>'running' RETURNING attempt_id""",
+                (content_key, item_id, attempt_token),
+            )
+            archived = await cur.fetchone() is not None
+            if row["attempt_token"] != attempt_token or row["status"] not in {
+                "succeeded",
+                "failed",
+                "cancelled",
+                "not_run",
+            }:
+                return archived
             candidates = list(row["candidate_objects"] or [])
             if content_key not in candidates:
                 return True

@@ -23,7 +23,10 @@ from src.server.database.education_book_jobs import (
     start_item_attempt,
 )
 from src.server.database.education_books import get_current_structure
-from src.server.database.education_book_deletion import book_item_storage_guard
+from src.server.database.education_book_deletion import (
+    book_item_storage_guard,
+    book_candidate_cleanup_guard,
+)
 from src.server.database.session_lock import await_settled
 from src.utils.storage import delete_object, get_bytes, upload_bytes
 
@@ -85,7 +88,9 @@ async def _read(key: str) -> bytes | None:
 
 
 async def _delete(key: str) -> bool:
-    return await asyncio.to_thread(delete_object, key)
+    return await await_settled(
+        asyncio.ensure_future(asyncio.to_thread(delete_object, key))
+    )
 
 
 def _committed_candidate_keys(result_snapshot: object) -> set[str]:
@@ -119,6 +124,8 @@ def _candidate_cleanup_prefix(
         )
     if context.get("kind") == "supplementary":
         return f"{base}supplementary/{item_id}/attempts/{attempt_token}/"
+    if context.get("kind") == "structure":
+        return f"{base}source/attempts/{attempt_token}/"
     raise ValueError("Textbook candidate cleanup context is invalid")
 
 
@@ -132,30 +139,43 @@ async def cleanup_book_item_candidates(*, item_id: UUID, attempt_token: UUID) ->
         )
         if context is None or not context.get("candidate_objects"):
             return 0
-        committed = _committed_candidate_keys(context.get("result_snapshot"))
-        expected_prefix = _candidate_cleanup_prefix(
-            context,
-            item_id=item_id,
-            attempt_token=attempt_token,
-        )
-        cleaned = 0
-        for raw_key in context.get("candidate_objects") or []:
-            key = str(raw_key)
-            if not key.startswith(expected_prefix) or ".." in PurePosixPath(key).parts:
-                logger.error("Refusing to clean invalid textbook candidate key %r", key)
-                continue
-            if key not in committed:
-                if await _read(key) is None:
+        async with book_candidate_cleanup_guard(
+            textbook_id=UUID(str(context["textbook_id"]))
+        ) as settled:
+            if not settled:
+                return 0
+            context = await get_book_item_candidate_cleanup_context(
+                item_id=item_id, attempt_token=attempt_token
+            )
+            if context is None:
+                return 0
+            committed = _committed_candidate_keys(context.get("result_snapshot"))
+            expected_prefix = _candidate_cleanup_prefix(
+                context, item_id=item_id, attempt_token=attempt_token
+            )
+            ready_prefix = context.get("ready_source_prefix")
+            cleaned = 0
+            for raw_key in context.get("candidate_objects") or []:
+                key = str(raw_key)
+                if (
+                    not key.startswith(expected_prefix)
+                    or ".." in PurePosixPath(key).parts
+                ):
+                    logger.error(
+                        "Refusing to clean invalid textbook candidate key %r", key
+                    )
                     continue
-                if not await _delete(key):
-                    continue
-            if await forget_book_candidate_object(
-                item_id=item_id,
-                attempt_token=attempt_token,
-                content_key=key,
-            ):
-                cleaned += 1
-        return cleaned
+                referenced_source = isinstance(ready_prefix, str) and key.startswith(
+                    ready_prefix
+                )
+                if key not in committed and not referenced_source:
+                    if not await _delete(key):
+                        continue
+                if await forget_book_candidate_object(
+                    item_id=item_id, attempt_token=attempt_token, content_key=key
+                ):
+                    cleaned += 1
+            return cleaned
     except Exception:
         logger.exception("Could not settle textbook candidate objects for %s", item_id)
         return 0

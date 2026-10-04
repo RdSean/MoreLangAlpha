@@ -13,6 +13,7 @@ from src.server.database.education_book_jobs import (
     list_book_items_for_recovery,
     mark_book_job_cancelled,
     renew_book_item_lease,
+    requeue_expired_book_preparation,
 )
 from src.server.database.education_book_activity import BookActivityWriteError
 from src.server.database.runs.lifecycle import get_run, request_run_cancel
@@ -109,6 +110,21 @@ async def reconcile_book_jobs_once(
             continue
     for item in await list_book_items_for_recovery(limit=limit):
         run_id = item.get("run_id")
+        if run_id is None and item.get("execution_phase") in {
+            "source_freezing",
+            "runtime_queue",
+            "sandbox_preparation",
+            "input_staging",
+        }:
+            try:
+                if await requeue_expired_book_preparation(
+                    item_id=item["item_id"], attempt_token=item["attempt_token"]
+                ):
+                    await publish_book_activity_hint(item["job_id"], None)
+                    reconciled += 1
+            except RuntimeError:
+                pass
+            continue
         run = await get_run(str(run_id)) if run_id is not None else None
         status = run.get("status") if run is not None else None
         if status == "in_progress":

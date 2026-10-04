@@ -19,6 +19,10 @@ from ptc_agent.core.sandbox.runtime import SandboxGoneError, SandboxTransientErr
 from src.server.database.education_book_jobs import (
     bind_book_item_runtime,
     claim_next_book_item,
+    claim_next_preparation_item,
+    has_book_runtime_work,
+    list_old_book_attempts_for_cleanup,
+    create_book_item_runtime,
     fail_book_item,
     list_book_items_for_terminal_cleanup,
     mark_book_job_cancelled,
@@ -26,11 +30,14 @@ from src.server.database.education_book_jobs import (
     renew_book_item_lease,
 )
 from src.server.database.education_book_activity import BookActivityWriteError
-from src.server.database.conversation import create_thread, update_thread_fields
+from src.server.database.conversation import update_thread_fields
+from src.server.database.education_book_deletion import (
+    book_item_storage_guard,
+    book_candidate_cleanup_guard,
+)
 from src.server.database.runs.lifecycle import QuerySpec
 from src.server.database.education_books import commit_book_structure
 from src.server.database.runs.lifecycle import request_run_cancel
-from src.server.database.workspace import create_workspace
 from src.config.settings import get_education_book_workflow_timeout
 from src.server.services.education_book_storage import (
     BookStorageError,
@@ -131,20 +138,37 @@ async def cleanup_settled_book_items_once(*, limit: int = 100) -> int:
     """Retry exact-key and service-owned runtime cleanup after process exits."""
 
     cleaned = 0
+    for attempt in await list_old_book_attempts_for_cleanup(limit=limit):
+        cleaned += await cleanup_book_item_candidates(
+            item_id=attempt["item_id"], attempt_token=attempt["attempt_token"]
+        )
+        await _cleanup_settled_book_runtime(attempt)
     for item in await list_book_items_for_terminal_cleanup(limit=limit):
         await cleanup_book_item_candidates(
             item_id=UUID(str(item["item_id"])),
             attempt_token=UUID(str(item["attempt_token"])),
         )
-        workspace_id = item.get("managed_workspace_id")
-        thread_id = item.get("managed_thread_id")
-        if workspace_id is not None and thread_id is not None:
-            await cleanup_managed_book_runtime(
-                workspace_id=str(workspace_id),
-                thread_id=str(thread_id),
-            )
+        if not await _cleanup_settled_book_runtime(item):
+            continue
         cleaned += 1
     return cleaned
+
+
+async def _cleanup_settled_book_runtime(item: Mapping[str, Any]) -> bool:
+    workspace_id = item.get("managed_workspace_id")
+    if workspace_id is None:
+        return True
+    async with book_candidate_cleanup_guard(
+        textbook_id=UUID(str(item["textbook_id"]))
+    ) as settled:
+        if not settled:
+            return False
+        thread_id = item.get("managed_thread_id")
+        await cleanup_managed_book_runtime(
+            workspace_id=str(workspace_id),
+            thread_id=str(thread_id) if thread_id is not None else None,
+        )
+    return True
 
 
 def _is_book_infrastructure_error(exc: Exception) -> bool:
@@ -703,6 +727,15 @@ async def launch_book_item(
     item: Mapping[str, Any],
     capacity_reservation: str,
 ) -> dict[str, str]:
+    async with book_item_storage_guard(item_id=UUID(str(item["item_id"]))):
+        return await _launch_book_item(
+            item=item, capacity_reservation=capacity_reservation
+        )
+
+
+async def _launch_book_item(
+    *, item: Mapping[str, Any], capacity_reservation: Any = None
+) -> dict[str, str]:
     """Launch one claimed item through the normal root-run execution spine."""
 
     item = dict(item)
@@ -722,25 +755,12 @@ async def launch_book_item(
     )
     try:
         await activity_observer.report_service_stage("service_preparing")
-        workspace = await create_workspace(
-            user_id=str(item["requested_by_user_id"]),
-            name="教材处理",
-            description="service-owned managed textbook item execution",
-            config={"managed_execution": identity},
-            workspace_id=workspace_id,
-            status="creating",
+        runtime = await create_book_item_runtime(
+            item_id=item["item_id"],
+            attempt_token=UUID(identity["attempt_token"]),
+            identity=identity,
         )
-        workspace_id = str(workspace["workspace_id"])
-        thread = await create_thread(
-            conversation_thread_id=str(uuid4()),
-            workspace_id=workspace_id,
-            current_status="completed",
-            msg_type="ptc",
-            title="教材处理",
-            platform="education",
-            metadata={"managed_execution": identity},
-        )
-        thread_id = str(thread["conversation_thread_id"])
+        workspace_id, thread_id = runtime["workspace_id"], runtime["thread_id"]
         agent_config = await resolve_managed_education_agent_config(
             parent_user_id=str(item["requested_by_user_id"])
         )
@@ -1001,6 +1021,7 @@ class EducationBookJobService:
         self.poll_interval = poll_interval
         self._stop_event = asyncio.Event()
         self._loop_task: asyncio.Task[None] | None = None
+        self._preparation_tasks: set[asyncio.Task[None]] = set()
 
     @classmethod
     def get_instance(cls) -> "EducationBookJobService":
@@ -1032,6 +1053,27 @@ class EducationBookJobService:
         )
 
         await cleanup_deleted_textbooks_once()
+        if not self._preparation_tasks:
+            preparing = await claim_next_preparation_item(
+                worker_id=self.worker_id, lease_seconds=self.lease_seconds
+            )
+            if preparing is not None:
+                from src.server.services.education_book_preparation import (
+                    prepare_book_item,
+                )
+
+                task = asyncio.create_task(
+                    prepare_book_item(
+                        item=preparing,
+                        worker_id=self.worker_id,
+                        lease_seconds=self.lease_seconds,
+                    )
+                )
+                self._preparation_tasks.add(task)
+                task.add_done_callback(self._preparation_tasks.discard)
+                return 1
+        if not await has_book_runtime_work():
+            return 0
         executor = LocalRunExecutor.get_instance()
         capacity_reservation = await executor.reserve_capacity()
         if capacity_reservation is None:
@@ -1116,14 +1158,17 @@ class EducationBookJobService:
 
     async def stop(self) -> None:
         self._stop_event.set()
-        if self._loop_task is None:
-            return
-        self._loop_task.cancel()
-        try:
-            await self._loop_task
-        except asyncio.CancelledError:
-            pass
+        if self._loop_task is not None:
+            self._loop_task.cancel()
+            try:
+                await self._loop_task
+            except asyncio.CancelledError:
+                pass
         self._loop_task = None
+        tasks = tuple(self._preparation_tasks)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _loop(self) -> None:
         while not self._stop_event.is_set():

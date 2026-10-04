@@ -18,6 +18,7 @@ import pytest
 
 from tests.integration.test_education_assets_minio import _require_local_minio
 from tests.integration.test_education_book_jobs_db import _seed_claimed_material_job
+from tests.integration.test_education_book_jobs_db import _seed_pending
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -148,6 +149,313 @@ async def _item_state(connection_factory, item_id):
             (item_id,),
         )
         return await cur.fetchone()
+
+
+@pytest.mark.parametrize(
+    "fault", ["put_ack_loss", "ready_ack_loss", "cancel_upload", "sigkill"]
+)
+async def test_real_source_preparation_faults_preserve_original_and_fence_ready(
+    patched_get_db_connection,
+    seed_user,
+    test_db_uri,
+    monkeypatch,
+    fault,
+):
+    _require_local_minio()
+    import hashlib
+    from uuid import uuid4
+    from psycopg.types.json import Jsonb
+    from src.server.database import education_books as books
+    from src.server.database.education_book_jobs import (
+        claim_next_preparation_item,
+        mark_book_job_cancelled,
+        fail_book_item,
+        requeue_expired_book_preparation,
+    )
+    from src.server.database.education_book_deletion import delete_textbook_for_parent
+    from src.server.services import education_book_preparation as preparation
+    from src.server.services import education_book_storage as storage
+    from src.server.services import education_textbook_source_snapshots as snapshots
+    from src.utils.storage import s3_compatible as s3
+
+    book, original = await _seed_pending(
+        patched_get_db_connection, parent_user_id=seed_user["user_id"]
+    )
+    original_key = f"education/integration-{uuid4()}/parsed/document.md"
+    markdown = b"# Pinned test source\n\nOriginal remains immutable.\n"
+    descriptor = {
+        "job": {
+            "document_id": original["source_document_id"],
+            "status": "completed",
+            "primary_artifact_id": original["source_primary_artifact_id"],
+            "original_filename": "test.pdf",
+            "media_type": "application/pdf",
+            "document_format": "pdf",
+            "parser_id": "datalab",
+            "parser_name": "Datalab",
+            "parser_version": "2",
+            "completed_at": "2026-10-01T00:00:00+00:00",
+        },
+        "artifacts": [
+            {
+                "artifact_id": original["source_primary_artifact_id"],
+                "artifact_kind": "primary_document",
+                "media_type": "text/markdown",
+                "format": "gfm",
+                "relative_path": "document.md",
+                "storage_key": original_key,
+                "expected_sha256": hashlib.sha256(markdown).hexdigest(),
+            }
+        ],
+    }
+    async with patched_get_db_connection() as conn:
+        await conn.execute(
+            "UPDATE education_textbooks SET selected_source=%s,preparation_descriptor=%s WHERE textbook_id=%s",
+            (
+                Jsonb(
+                    {
+                        "parse_job_id": original["source_parse_job_id"],
+                        "primary_artifact_id": original["source_primary_artifact_id"],
+                    }
+                ),
+                Jsonb(descriptor),
+                book["textbook_id"],
+            ),
+        )
+    item = await claim_next_preparation_item(worker_id="fault-prep", lease_seconds=60)
+    prefix = f"education/{book['household_id']}/textbooks/{book['textbook_id']}/source/attempts/{item['attempt_token']}/"
+    keys = [f"{prefix}artifacts/document.md", f"{prefix}manifest.json"]
+    monkeypatch.setattr(
+        preparation, "publish_book_activity_hint", lambda *args: asyncio.sleep(0)
+    )
+    assert await snapshots._write_object(
+        original_key, markdown, "text/markdown", max_size=1024
+    )
+    try:
+        if fault == "put_ack_loss":
+            async with _put_response_proxy(
+                s3.StorageConfig.ENDPOINT_URL, interrupt_body=False
+            ) as (endpoint, receipts):
+                fault_client = boto3.client(
+                    "s3",
+                    aws_access_key_id=s3.StorageConfig.ACCESS_KEY_ID,
+                    aws_secret_access_key=s3.StorageConfig.SECRET_ACCESS_KEY,
+                    region_name=s3.StorageConfig.REGION,
+                    endpoint_url=endpoint,
+                    config=Config(
+                        signature_version="s3v4",
+                        s3={"addressing_style": "path"},
+                        retries={"total_max_attempts": 1},
+                        connect_timeout=3,
+                        read_timeout=3,
+                    ),
+                )
+
+                async def lost_upload(key, content, content_type, **kwargs):
+                    await asyncio.to_thread(
+                        fault_client.put_object,
+                        Bucket=s3.StorageConfig.BUCKET_NAME,
+                        Key=key,
+                        Body=content,
+                        ContentType=content_type,
+                    )
+                    return True
+
+                try:
+                    with monkeypatch.context() as patch:
+                        patch.setattr(snapshots, "_write_object", lost_upload)
+                        await preparation.prepare_book_item(
+                            item=item, worker_id="fault-prep", lease_seconds=60
+                        )
+                finally:
+                    fault_client.close()
+            assert receipts == [{"status": 200, "size": len(markdown)}]
+        elif fault == "ready_ack_loss":
+            async with _commit_response_proxy(test_db_uri) as (proxy_uri, receipts):
+
+                @asynccontextmanager
+                async def proxy_connection():
+                    async with await psycopg.AsyncConnection.connect(
+                        proxy_uri, autocommit=True, row_factory=dict_row
+                    ) as conn:
+                        yield conn
+
+                async def lost_ready(**kwargs):
+                    with monkeypatch.context() as patch:
+                        patch.setattr(books, "get_db_connection", proxy_connection)
+                        return await books.commit_prepared_book_source(**kwargs)
+
+                with monkeypatch.context() as patch:
+                    patch.setattr(
+                        preparation, "commit_prepared_book_source", lost_ready
+                    )
+                    await preparation.prepare_book_item(
+                        item=item, worker_id="fault-prep", lease_seconds=60
+                    )
+                assert receipts == ["COMMIT CommandComplete discarded"]
+            await fail_book_item(
+                item_id=item["item_id"],
+                attempt_token=item["attempt_token"],
+                safe_error="Structure failed",
+                stop_remaining=True,
+            )
+        elif fault == "cancel_upload":
+            entered, release = asyncio.Event(), asyncio.Event()
+            normal_write = snapshots._write_object
+
+            async def slow_upload(*args, **kwargs):
+                entered.set()
+                await release.wait()
+                return await normal_write(*args, **kwargs)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(snapshots, "_write_object", slow_upload)
+                task = asyncio.create_task(
+                    preparation.prepare_book_item(
+                        item=item, worker_id="fault-prep", lease_seconds=60
+                    )
+                )
+                try:
+                    await asyncio.wait_for(entered.wait(), 10)
+                    await mark_book_job_cancelled(
+                        job_id=item["job_id"],
+                        item_id=item["item_id"],
+                        attempt_token=item["attempt_token"],
+                    )
+                    assert (
+                        await storage.cleanup_book_item_candidates(
+                            item_id=item["item_id"], attempt_token=item["attempt_token"]
+                        )
+                        == 0
+                    )
+                    with pytest.raises(ValueError, match="仍在提交"):
+                        await delete_textbook_for_parent(
+                            parent_user_id=seed_user["user_id"],
+                            textbook_id=book["textbook_id"],
+                        )
+                finally:
+                    release.set()
+                    await asyncio.wait_for(task, 10)
+        else:
+            import os
+            import sys
+            import json
+
+            script = """
+import asyncio, os, json
+from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+load_dotenv()
+import psycopg
+from psycopg.rows import dict_row
+from src.server.database import education_book_jobs as jobs, education_books as books, education_book_deletion as deletion
+from src.server.services import education_book_preparation as prep, education_textbook_source_snapshots as snapshots
+@asynccontextmanager
+async def connection():
+    async with await psycopg.AsyncConnection.connect(os.environ['SOURCE_FAULT_DB'], autocommit=True, row_factory=dict_row) as conn:
+        yield conn
+jobs.get_db_connection = books.get_db_connection = connection
+deletion.get_db_connection_string = lambda: os.environ['SOURCE_FAULT_DB']
+prep.publish_book_activity_hint = lambda *args: asyncio.sleep(0)
+write = snapshots._write_object
+async def paused_write(*args, **kwargs):
+    result = await write(*args, **kwargs)
+    print('UPLOADED', flush=True)
+    await asyncio.Event().wait()
+    return result
+snapshots._write_object = paused_write
+asyncio.run(prep.prepare_book_item(item=json.loads(os.environ['SOURCE_FAULT_ITEM']), worker_id='fault-prep', lease_seconds=60))
+"""
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-c",
+                script,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={
+                    **os.environ,
+                    "SOURCE_FAULT_DB": test_db_uri,
+                    "SOURCE_FAULT_ITEM": json.dumps(item, default=str),
+                },
+            )
+
+            async def wait_uploaded():
+                while line := await process.stdout.readline():
+                    if line == b"UPLOADED\n":
+                        return
+                raise AssertionError("Preparation child exited before upload")
+
+            try:
+                await asyncio.wait_for(wait_uploaded(), 20)
+                assert await snapshots._read_object(keys[0]) == markdown
+                async with patched_get_db_connection() as conn:
+                    await conn.execute(
+                        "UPDATE education_book_job_items SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE item_id=%s",
+                        (item["item_id"],),
+                    )
+                assert not await requeue_expired_book_preparation(
+                    item_id=item["item_id"], attempt_token=item["attempt_token"]
+                )
+                process.kill()
+                await asyncio.wait_for(process.wait(), 10)
+                assert await requeue_expired_book_preparation(
+                    item_id=item["item_id"], attempt_token=item["attempt_token"]
+                )
+                retry = await claim_next_preparation_item(
+                    worker_id="fault-prep-2", lease_seconds=60
+                )
+                assert retry["attempt_token"] != item["attempt_token"]
+                retry_prefix = f"education/{book['household_id']}/textbooks/{book['textbook_id']}/source/attempts/{retry['attempt_token']}/"
+                keys.extend(
+                    [
+                        f"{retry_prefix}artifacts/document.md",
+                        f"{retry_prefix}manifest.json",
+                    ]
+                )
+                await preparation.prepare_book_item(
+                    item=retry, worker_id="fault-prep-2", lease_seconds=60
+                )
+                await fail_book_item(
+                    item_id=retry["item_id"],
+                    attempt_token=retry["attempt_token"],
+                    safe_error="Structure failed",
+                    stop_remaining=True,
+                )
+            finally:
+                if process.returncode is None:
+                    process.kill()
+                await process.wait()
+        async with patched_get_db_connection() as conn:
+            state = await (
+                await conn.execute(
+                    "SELECT source_status,source_markdown_key FROM education_textbooks WHERE textbook_id=%s",
+                    (book["textbook_id"],),
+                )
+            ).fetchone()
+        assert (
+            state["source_status"]
+            == {
+                "put_ack_loss": "failed",
+                "ready_ack_loss": "ready",
+                "cancel_upload": "cancelled",
+                "sigkill": "ready",
+            }[fault]
+        )
+        assert await snapshots._read_object(original_key) == markdown
+        await storage.cleanup_book_item_candidates(
+            item_id=item["item_id"], attempt_token=item["attempt_token"]
+        )
+        if fault in {"ready_ack_loss", "sigkill"}:
+            assert (
+                await snapshots._read_object(state["source_markdown_key"]) == markdown
+            )
+            if fault == "sigkill":
+                assert await snapshots._read_object(keys[0]) is None
+        else:
+            assert state["source_markdown_key"] is None
+            assert all([await snapshots._read_object(key) is None for key in keys])
+    finally:
+        await snapshots.cleanup_snapshot_objects([original_key, *keys])
 
 
 @pytest.mark.parametrize("interrupt_body", [True, False])

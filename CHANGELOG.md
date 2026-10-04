@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-10-05
+
+### 开发 A3：教材后台准备、恢复与存储收尾
+
+- 来源冻结由现有structure item的有界后台任务执行；PG全局准备锁与running状态限制全部署并发1，长复制不占PTC reservation，扫描继续取消/恢复。ready后同一attempt进入运行队列，结构重试复用已冻结原文。
+- 无run租约过期只在存储IO锁释放后重排新token；取消意图、过期租约和旧token拒绝候选登记、进度及ready提交。保留旧attempt候选，独占存储锁协调恢复、删除和清理，删除确认失败保留登记，ready来源引用不删除。
+- 新增085迁移保留每attempt的workspace/thread身份；sandbox创建前短事务原子登记运行归属，中断后旧资源仍可回收。start_run/bind间崩溃沿用现有运行恢复器，不改PTC核心。
+- 服务单测62 passed；仅langalpha_test的PG与真实localhost:9000 MinIO组合52 passed（排除另建数据库的旧对照测试）。验证PUT响应丢失、ready COMMIT ACK丢失、真实冻结上传后SIGKILL/跨进程接管、取消迟到上传、活跃IO禁止删除、结构失败保留原文及原解析对象。独立审查修复GET失败误结清候选的回归，Ruff通过。
+- 开发库尚未迁移，未启用新worker、未调用付费模型、未删除现有教材；计时持久边界与界面验收继续A4–A6。
+
 ## 2026-10-04
 
 ### 开发 A2：教材快速受理与固定来源清单

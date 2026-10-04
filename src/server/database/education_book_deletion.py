@@ -14,7 +14,7 @@ from src.server.database.session_lock import await_settled
 
 
 @asynccontextmanager
-async def book_item_storage_guard(*, item_id: UUID):
+async def book_item_storage_guard(*, item_id: UUID, preparation: bool = False):
     """Pin only a session lock, not a transaction, across external uploads."""
     # Do not pin an app-pool slot while storage helpers borrow from that pool.
     async with await AsyncConnection.connect(
@@ -34,6 +34,14 @@ async def book_item_storage_guard(*, item_id: UUID):
                 raise LookupError("Textbook storage item was not found")
             key = f"education-book-storage:{row['textbook_id']}"
         try:
+            if preparation:
+                await await_settled(
+                    asyncio.ensure_future(
+                        conn.execute(
+                            "SELECT pg_advisory_lock(hashtextextended('book-source-capacity', 0))"
+                        )
+                    )
+                )
             await await_settled(
                 asyncio.ensure_future(
                     conn.execute(
@@ -56,6 +64,33 @@ async def book_item_storage_guard(*, item_id: UUID):
                     raise
 
             await await_settled(asyncio.ensure_future(release()))
+
+
+@asynccontextmanager
+async def book_candidate_cleanup_guard(*, textbook_id: UUID):
+    """Skip cleanup while any process still owns storage IO for this textbook."""
+    async with await AsyncConnection.connect(
+        get_db_connection_string(), autocommit=True, prepare_threshold=0
+    ) as conn:
+        key = f"education-book-storage:{textbook_id}"
+        row = await (
+            await conn.execute(
+                "SELECT pg_try_advisory_lock(hashtextextended(%s,0))", (key,)
+            )
+        ).fetchone()
+        if not row[0]:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            await await_settled(
+                asyncio.ensure_future(
+                    conn.execute(
+                        "SELECT pg_advisory_unlock(hashtextextended(%s,0))", (key,)
+                    )
+                )
+            )
 
 
 async def delete_textbook_for_parent(
