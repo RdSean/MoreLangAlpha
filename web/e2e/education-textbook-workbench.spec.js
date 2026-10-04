@@ -1,5 +1,7 @@
 import { configureSSE, expect, getCapturedRequests, mockAPI, resetMockServer, test } from './fixtures.js';
 
+test.use({ screenshot: 'only-on-failure' });
+
 const parent = {
   user_id: 'parent-1',
   email: 'parent@example.test',
@@ -218,6 +220,8 @@ async function mockWorkbench(page) {
     'GET /education/textbooks/book-1/source': sourceSlice,
     'GET /education/textbooks/book-1/knowledge-points/*/material': material,
     'GET /education/book-jobs/job-1': job,
+    'GET /education/book-jobs/job-1/events': (route) => fulfillActivity(route,
+      activityFrame([], { status: 'succeeded', high_water_seq: 0 })),
   });
 }
 
@@ -538,6 +542,9 @@ test('activity reconnects after the first 200 of 500 events without skipping or 
   await expect(panel.getByText('Running Read 500', { exact: true })).toHaveCount(0);
   await panel.getByRole('button', { name: '诊断明细（500）' }).click();
   await expect(panel.getByText('Running Read 500', { exact: true })).toBeVisible();
+  for (let pageIndex = 0; pageIndex < 6; pageIndex += 1) {
+    await panel.getByRole('button', { name: '更早的诊断' }).click();
+  }
   await expect(panel.getByText('Running Read 200', { exact: true })).toHaveCount(1);
   expect(page.url()).toBe(readingURL);
   expect(await reader.evaluate((element) => element.scrollTop)).toBe(readingScroll);
@@ -739,7 +746,6 @@ test('375px long activity and titles keep cancellation, reader, and directory co
   await expectNoHorizontalOverflow(page);
   await expect(page.getByRole('button', { name: '取消本次生成' })).toBeVisible();
   await expect(page.getByRole('button', { name: '取消本次生成' })).toBeEnabled();
-  await page.getByRole('button', { name: '取消本次生成' }).click({ trial: true });
   await testInfo.attach('mobile-control-layout', {
     contentType: 'application/json',
     body: JSON.stringify(await page.evaluate(() => {
@@ -748,11 +754,12 @@ test('375px long activity and titles keep cancellation, reader, and directory co
         const element = document.querySelector(selector);
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
-        return { selector, x: rect.x, width: rect.width, scrollLeft: element.scrollLeft, clientWidth: element.clientWidth, scrollWidth: element.scrollWidth, minWidth: style.minWidth, overflowX: style.overflowX, gridTemplateColumns: style.gridTemplateColumns };
+        return { selector, x: rect.x, y: rect.y, height: rect.height, width: rect.width, scrollLeft: element.scrollLeft, clientWidth: element.clientWidth, scrollWidth: element.scrollWidth, minWidth: style.minWidth, overflowX: style.overflowX, gridTemplateColumns: style.gridTemplateColumns };
       });
     }), null, 2),
   });
   await page.screenshot({ path: testInfo.outputPath('activity-long-mobile.png'), animations: 'disabled' });
+  await page.getByRole('button', { name: '取消本次生成' }).click({ trial: true });
   await expect(page.getByRole('button', { name: '打开教材目录' })).toBeInViewport();
   await expect(page.getByRole('button', { name: '取消本次生成' })).toBeInViewport();
   await page.getByRole('button', { name: '打开教材目录' }).click();

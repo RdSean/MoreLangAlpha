@@ -163,6 +163,8 @@
 
 ## Task A6：故障/权限/计时一致性与真实界面验收
 
+状态：开发与非付费验收已完成，付费完整工作流待用户单独授权。真实HTTP/隔离PG 3 passed；最终仅langalpha_test与真实localhost:9000 MinIO组合77 passed、1 deselected。浏览器新19项/旧15项，最后全套33 passed、1 failed，上滚1px断言修正后聚焦1 passed；不写成一次全套全绿。后端全量7982 passed、8 deselected、1 xpassed；前端276文件/2689 passed，lint/build通过。核对活跃任务和消费者后开发库升级084–086，8000/0.0.0.0:5177本机及LAN可用。误运行旧临时对照库测试、未测屏幕阅读器/真实模型等边界详见[验收记录](2026-10-04-textbook-async-preparation-timeline-results.md)，未删已有教材、未改Skill/模型参数。
+
 **Files:**
 - Modify: `web/e2e/education-textbook-workbench.spec.js`。
 - Create: `web/e2e/education-textbook-processing.spec.js`。
