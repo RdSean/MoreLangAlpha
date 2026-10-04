@@ -366,22 +366,31 @@ def delete_object(key: str) -> bool:
         return False
 
 
-def list_object_keys(prefix: str) -> list[str]:
+def list_object_keys(prefix: str, *, strict: bool = False) -> list[str]:
     """Return every object key under one exact bucket prefix."""
     try:
         client = get_oss_client()
-        request = oss.ListObjectsV2Request(
-            bucket=OSSConfig.BUCKET_NAME,
-            prefix=prefix,
-        )
-        result = client.list_objects_v2(request)
-        return [
-            item.key
-            for item in getattr(result, "contents", [])
-            if isinstance(getattr(item, "key", None), str)
-        ]
+        keys: list[str] = []
+        token = None
+        while True:
+            request = oss.ListObjectsV2Request(
+                bucket=OSSConfig.BUCKET_NAME, prefix=prefix, continuation_token=token,
+            )
+            result = client.list_objects_v2(request)
+            keys.extend(
+                item.key for item in getattr(result, "contents", [])
+                if isinstance(getattr(item, "key", None), str)
+            )
+            if not getattr(result, 'is_truncated', False):
+                return keys
+            next_token = getattr(result, 'next_continuation_token', None)
+            if not next_token or next_token == token:
+                raise RuntimeError('Storage listing pagination is incomplete')
+            token = next_token
     except Exception:
         logger.exception("Unexpected error listing objects under %s", prefix)
+        if strict:
+            raise
         return []
 
 

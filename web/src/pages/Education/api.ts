@@ -206,6 +206,10 @@ export async function listManagedTextbooks(): Promise<ManagedTextbookSummary[]> 
   return data;
 }
 
+export async function deleteManagedTextbook(textbookId: string): Promise<void> {
+  await api.delete(`/api/v1/education/textbooks/${encodeURIComponent(textbookId)}`);
+}
+
 export async function listManagedBookSources(): Promise<BookSourceCandidate[]> {
   const { data } = await api.get<{ items: BookSourceCandidate[] }>(
     '/api/v1/education/textbook-sources',

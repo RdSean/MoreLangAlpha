@@ -27,6 +27,7 @@ async def _reset_fmp_singleton():
     """Close and reset the FMP client singleton after each test."""
     yield
     from data_client.fmp import close_fmp_client
+
     await close_fmp_client()
 
 
@@ -36,6 +37,7 @@ async def _reset_ginlix_singleton():
     yield
     try:
         import plugins.langalpha_market_data.price_data_mcp_server as mod
+
         if hasattr(mod, "_ginlix_http") and mod._ginlix_http is not None:
             await mod._ginlix_http.aclose()
             mod._ginlix_http = None
@@ -49,6 +51,7 @@ async def _reset_ginlix_singleton():
 
 # Tables in dependency (FK) order -- children first so TRUNCATE CASCADE is safe
 _ALL_TABLES = [
+    "education_book_deletion_cleanup",
     "platform_secret_rollouts",
     "automation_executions",
     "automations",
@@ -155,7 +158,8 @@ async def test_db_pool(test_db_uri):
     # Now create the pool for actual test operations
     pool = AsyncConnectionPool(
         conninfo=test_db_uri,
-        min_size=1,
+        # Keep two sessions ready for cross-connection locking contracts.
+        min_size=2,
         max_size=5,
         kwargs={
             "autocommit": True,
@@ -245,6 +249,12 @@ async def patched_get_db_connection(test_db_pool):
     from contextlib import ExitStack
 
     with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "src.server.database.education_book_deletion.get_db_connection_string",
+                lambda: test_db_pool.conninfo,
+            )
+        )
         for target in targets:
             stack.enter_context(patch(target, _test_get_db_connection))
         yield _test_get_db_connection

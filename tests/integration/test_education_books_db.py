@@ -26,6 +26,258 @@ from src.server.services.education_book_structure import (
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
+async def test_textbook_deletion_removes_relations_and_records_cleanup(
+    patched_get_db_connection, seed_user
+):
+    from src.server.database.education_book_deletion import delete_textbook_for_parent
+
+    parent = seed_user["user_id"]
+    async with patched_get_db_connection() as conn:
+        household = await _seed_parent_household(conn, parent_user_id=parent)
+    created, _, snapshot = await _create_committed_book(
+        parent_user_id=parent, household_id=household
+    )
+    from src.server.database.education_book_jobs import (
+        create_materials_job,
+        start_item_attempt,
+        finalize_material,
+        record_candidate_object,
+    )
+    from src.server.database.education_learning import (
+        assign_textbook_students,
+        get_or_create_student_learning_space,
+    )
+
+    kp = snapshot["knowledge_points"][0]["knowledge_point_id"]
+    job = await create_materials_job(
+        textbook_id=created["textbook_id"],
+        requested_by_user_id=parent,
+        knowledge_point_ids=[kp],
+        depth="lesson",
+        requirements=None,
+        replace_existing=False,
+        include_supplementary=False,
+        idempotency_key="delete-material",
+        identity=IDENTITY,
+    )
+    token = uuid4()
+    await start_item_attempt(item_id=job["items"][0]["item_id"], attempt_token=token)
+    await record_candidate_object(
+        item_id=job["items"][0]["item_id"],
+        attempt_token=token,
+        content_key=f"education/{household}/textbooks/{created['textbook_id']}/materials/test.md",
+    )
+    await finalize_material(
+        item_id=job["items"][0]["item_id"],
+        attempt_token=token,
+        content_key=f"education/{household}/textbooks/{created['textbook_id']}/materials/test.md",
+        content_sha256="d" * 64,
+        size_bytes=10,
+        generation_params={},
+    )
+    student = f"student-{uuid4().hex}"
+    async with patched_get_db_connection() as conn:
+        await conn.execute(
+            "INSERT INTO users (user_id, name) VALUES (%s, %s)", (student, "Student")
+        )
+        await conn.execute(
+            "INSERT INTO education_memberships (household_id,user_id,role,display_name) VALUES (%s,%s,'student','Student')",
+            (household, student),
+        )
+        await conn.execute(
+            "INSERT INTO documents (document_id,owner_user_id,original_filename,media_type,document_format,source_storage_key,source_size_bytes,source_sha256) SELECT source_document_id,%s,source_filename,source_media_type,source_format,'documents/' || %s || '/' || source_document_id || '/source',source_size_bytes,source_content_sha256 FROM education_textbooks WHERE textbook_id=%s",
+            (parent, parent, created["textbook_id"]),
+        )
+    [assignment] = await assign_textbook_students(
+        textbook_id=created["textbook_id"],
+        student_user_ids=[student],
+        assigned_by_user_id=parent,
+    )
+    space = await get_or_create_student_learning_space(
+        student_user_id=student, assignment_id=assignment["assignment_id"]
+    )
+    async with patched_get_db_connection() as conn:
+        await conn.execute(
+            "INSERT INTO education_learning_kp_progress (assignment_id,textbook_id,knowledge_point_id,status) VALUES (%s,%s,%s,'read')",
+            (assignment["assignment_id"], created["textbook_id"], kp),
+        )
+        await conn.execute(
+            "INSERT INTO education_learning_items (item_id,assignment_id,textbook_id,knowledge_point_id,kind,content) VALUES (%s,%s,%s,%s,'note','test')",
+            (uuid4(), assignment["assignment_id"], created["textbook_id"], kp),
+        )
+    await delete_textbook_for_parent(
+        parent_user_id=parent, textbook_id=created["textbook_id"]
+    )
+    async with patched_get_db_connection() as conn:
+        assert (
+            await (
+                await conn.execute(
+                    "SELECT count(*) AS n FROM education_textbooks WHERE textbook_id=%s",
+                    (created["textbook_id"],),
+                )
+            ).fetchone()
+        )["n"] == 0
+        assert (
+            await (
+                await conn.execute(
+                    "SELECT count(*) AS n FROM education_book_jobs WHERE textbook_id=%s",
+                    (created["textbook_id"],),
+                )
+            ).fetchone()
+        )["n"] == 0
+        assert (
+            await (
+                await conn.execute(
+                    "SELECT count(*) AS n FROM education_book_structures WHERE textbook_id=%s",
+                    (created["textbook_id"],),
+                )
+            ).fetchone()
+        )["n"] == 0
+        row = await (
+            await conn.execute(
+                "SELECT * FROM education_book_deletion_cleanup WHERE textbook_id=%s",
+                (created["textbook_id"],),
+            )
+        ).fetchone()
+        assert str(row["household_id"]) == household
+        for table in (
+            "education_textbook_assignments",
+            "education_learning_items",
+            "education_learning_kp_progress",
+            "education_book_knowledge_points",
+        ):
+            assert (
+                await (
+                    await conn.execute(
+                        f"SELECT count(*) AS n FROM {table} WHERE textbook_id=%s",
+                        (created["textbook_id"],),
+                    )
+                ).fetchone()
+            )["n"] == 0
+        assert (
+            await (
+                await conn.execute(
+                    "SELECT count(*) AS n FROM education_book_materials WHERE knowledge_point_id=%s",
+                    (kp,),
+                )
+            ).fetchone()
+        )["n"] == 0
+        assert (
+            await (
+                await conn.execute(
+                    "SELECT count(*) AS n FROM conversation_threads WHERE conversation_thread_id=%s",
+                    (space["conversation_thread_id"],),
+                )
+            ).fetchone()
+        )["n"] == 0
+        assert (
+            await (
+                await conn.execute(
+                    "SELECT count(*) AS n FROM workspaces WHERE workspace_id=%s",
+                    (space["workspace_id"],),
+                )
+            ).fetchone()
+        )["n"] == 1
+        assert (
+            await (
+                await conn.execute(
+                    "SELECT source_storage_key FROM documents WHERE owner_user_id=%s",
+                    (parent,),
+                )
+            ).fetchone()
+        )["source_storage_key"].startswith(f"documents/{parent}/doc-")
+    with pytest.raises(LookupError):
+        await delete_textbook_for_parent(
+            parent_user_id=parent, textbook_id=created["textbook_id"]
+        )
+
+
+async def test_textbook_deletion_blocks_active_job(
+    patched_get_db_connection, seed_user
+):
+    from src.server.database.education_book_deletion import delete_textbook_for_parent
+    from src.server.database.education_books import create_textbook_with_initial_job
+
+    parent = seed_user["user_id"]
+    async with patched_get_db_connection() as conn:
+        household = await _seed_parent_household(conn, parent_user_id=parent)
+    book = uuid4()
+    await create_textbook_with_initial_job(
+        textbook_id=book,
+        parent_user_id=parent,
+        household_id=household,
+        title="Delete test",
+        slug=uuid4().hex,
+        source=_source(
+            suffix=uuid4().hex, household_id=household, textbook_id=str(book)
+        ),
+        idempotency_key="create",
+        identity=IDENTITY,
+    )
+    with pytest.raises(ValueError, match="进行中"):
+        await delete_textbook_for_parent(parent_user_id=parent, textbook_id=book)
+
+
+async def test_textbook_deletion_hides_foreign_household(
+    patched_get_db_connection, seed_user
+):
+    from src.server.database.education_book_deletion import delete_textbook_for_parent
+
+    parent = seed_user["user_id"]
+    async with patched_get_db_connection() as conn:
+        household = await _seed_parent_household(conn, parent_user_id=parent)
+    created, _, _ = await _create_committed_book(
+        parent_user_id=parent, household_id=household
+    )
+    with pytest.raises(LookupError):
+        await delete_textbook_for_parent(
+            parent_user_id="other-parent", textbook_id=created["textbook_id"]
+        )
+
+
+async def test_textbook_deletion_refuses_inflight_storage(
+    patched_get_db_connection, seed_user, test_db_pool, monkeypatch
+):
+    monkeypatch.setattr(
+        "src.server.database.education_book_deletion.get_db_connection_string",
+        lambda: test_db_pool.conninfo,
+    )
+
+    # The guard must not borrow a pool slot needed by nested storage writes.
+    async def no_pool_slot():
+        raise AssertionError("storage guard borrowed an app-pool connection")
+
+    from src.server.database.education_book_deletion import (
+        delete_textbook_for_parent,
+        book_item_storage_guard,
+    )
+
+    parent = seed_user["user_id"]
+    async with patched_get_db_connection() as conn:
+        household = await _seed_parent_household(conn, parent_user_id=parent)
+    created, _, _ = await _create_committed_book(
+        parent_user_id=parent, household_id=household
+    )
+    from unittest.mock import patch
+
+    with patch(
+        "src.server.database.education_book_deletion.get_db_connection", no_pool_slot
+    ):
+        async with book_item_storage_guard(item_id=created["item_id"]):
+            pass
+    async with book_item_storage_guard(item_id=created["item_id"]):
+        with pytest.raises(ValueError, match="提交"):
+            await delete_textbook_for_parent(
+                parent_user_id=parent, textbook_id=created["textbook_id"]
+            )
+    await delete_textbook_for_parent(
+        parent_user_id=parent, textbook_id=created["textbook_id"]
+    )
+    with pytest.raises(LookupError):
+        async with book_item_storage_guard(item_id=created["item_id"]):
+            pytest.fail("deleted item cannot upload")
+
+
 async def _seed_parent_household(db_conn, *, parent_user_id: str) -> str:
     household_id = str(uuid4())
     async with db_conn.transaction():

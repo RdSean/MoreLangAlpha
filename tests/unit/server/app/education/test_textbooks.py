@@ -16,6 +16,7 @@ import src.server.app.education.textbooks as textbook_routes
 from src.server.services.education_textbooks import (
     TextbookNotFoundError,
     TextbookPermissionError,
+    TextbookTransitionError,
 )
 from src.server.utils.api import get_current_user_id
 
@@ -30,6 +31,31 @@ TEXTBOOK = {
 
 MANAGED_JOB_ID = UUID("9998bb1a-687a-4d45-815d-5b1dd6ed2f17")
 KNOWLEDGE_POINT_ID = UUID("4c3f4d0c-a508-4bff-a89f-a3a584a2fe86")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error,code",
+    [
+        (None, 204),
+        (TextbookPermissionError("parent only"), 403),
+        (TextbookNotFoundError("not found"), 404),
+        (TextbookTransitionError("active"), 409),
+    ],
+)
+async def test_delete_textbook_http_contract(client, monkeypatch, error, code):
+    client._transport.app.dependency_overrides[get_current_user_id] = lambda: 'parent-1'
+    delete = AsyncMock(side_effect=error)
+    monkeypatch.setattr(textbook_routes, "delete_managed_textbook", delete)
+    response = await client.delete(
+        f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}"
+    )
+    assert response.status_code == code
+    delete.assert_awaited_once_with(
+        parent_user_id="parent-1", textbook_id=UUID(TEXTBOOK["textbook_id"])
+    )
+    if code == 204:
+        assert not response.content
 
 
 @pytest.mark.asyncio

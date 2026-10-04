@@ -47,6 +47,7 @@ from src.server.services.education_textbooks import (
     TextbookTransitionError,
     assign_managed_textbook,
     create_managed_textbook,
+    delete_managed_textbook,
     create_managed_textbook_job,
     cancel_managed_textbook_job,
     get_managed_knowledge_point_material,
@@ -184,6 +185,15 @@ async def get_family_textbook(textbook_id: UUID, user_id: CurrentUserId):
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
+
+
+@router.delete("/textbooks/{textbook_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_family_textbook(textbook_id: UUID, user_id: CurrentUserId):
+    try:
+        await delete_managed_textbook(parent_user_id=user_id, textbook_id=textbook_id)
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(

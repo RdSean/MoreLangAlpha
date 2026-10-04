@@ -23,6 +23,7 @@ from src.server.database.education_book_jobs import (
     start_item_attempt,
 )
 from src.server.database.education_books import get_current_structure
+from src.server.database.education_book_deletion import book_item_storage_guard
 from src.server.database.session_lock import await_settled
 from src.utils.storage import delete_object, get_bytes, upload_bytes
 
@@ -183,6 +184,22 @@ async def store_material(
     markdown: bytes,
     generation_params: dict[str, Any],
 ) -> dict[str, Any]:
+    async with book_item_storage_guard(item_id=item_id):
+        return await _store_material(
+            item_id=item_id,
+            attempt_token=attempt_token,
+            markdown=markdown,
+            generation_params=generation_params,
+        )
+
+
+async def _store_material(
+    *,
+    item_id: UUID,
+    attempt_token: UUID,
+    markdown: bytes,
+    generation_params: dict[str, Any],
+) -> dict[str, Any]:
     """Register, upload, verify, then atomically publish one material."""
 
     if not markdown:
@@ -232,6 +249,18 @@ async def store_material(
 
 
 async def store_supplementary(
+    *,
+    item_id: UUID,
+    attempt_token: UUID,
+    files: Mapping[str, bytes],
+) -> dict[str, Any]:
+    async with book_item_storage_guard(item_id=item_id):
+        return await _store_supplementary(
+            item_id=item_id, attempt_token=attempt_token, files=files
+        )
+
+
+async def _store_supplementary(
     *,
     item_id: UUID,
     attempt_token: UUID,

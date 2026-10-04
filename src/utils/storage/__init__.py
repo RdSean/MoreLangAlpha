@@ -136,7 +136,9 @@ if STORAGE_PROVIDER == "none":
     def delete_object(key: str) -> bool:
         return False
 
-    def list_object_keys(prefix: str) -> list[str]:
+    def list_object_keys(prefix: str, *, strict: bool = False) -> list[str]:
+        if strict:
+            raise RuntimeError('Storage is disabled')
         return []
 
     def get_public_url(key: str) -> str:

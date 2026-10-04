@@ -7,13 +7,20 @@ import TextbooksPage from '../TextbooksPage';
 
 const state = vi.hoisted(() => ({
   textbooks: [] as Array<Record<string, unknown>>,
+  role: 'parent',
+  remove: vi.fn(),
 }));
 
 vi.mock('../queries', () => ({
   useManagedTextbookLibrary: () => ({ data: state.textbooks, isLoading: false }),
+  useDeleteManagedTextbook: () => ({ mutateAsync: state.remove, isPending: false }),
 }));
 
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ member: { role: state.role } }) }));
+
 beforeEach(() => {
+  state.role = 'parent';
+  state.remove.mockReset().mockResolvedValue(undefined);
   state.textbooks = [{
     textbook_id: 'textbook-1',
     title: '英语第二册',
@@ -25,6 +32,41 @@ beforeEach(() => {
 });
 
 describe('TextbooksPage', () => {
+  it('requires confirmation and preserves the library source', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><TextbooksPage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: '删除 英语第二册' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('图书馆原文件及解析产物会保留');
+    expect(state.remove).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '取消' }));
+    expect(state.remove).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '删除 英语第二册' }));
+    await user.click(screen.getByRole('button', { name: '永久删除' }));
+    expect(state.remove).toHaveBeenCalledWith('textbook-1');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('does not expose deletion to students', () => {
+    state.role = 'student';
+    render(<MemoryRouter><TextbooksPage /></MemoryRouter>);
+    expect(screen.queryByRole('button', { name: '删除 英语第二册' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the confirmation open and shows a failed deletion', async () => {
+    state.remove.mockRejectedValue({ response: { data: { detail: '教材正在被修改，请稍后重试' } } });
+    const user = userEvent.setup();
+    render(<MemoryRouter><TextbooksPage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: '删除 英语第二册' }));
+    await user.click(screen.getByRole('button', { name: '永久删除' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('教材正在被修改');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('disables deletion while a task is active', () => {
+    state.textbooks[0].current_job = { job_id: 'active', status: 'running' };
+    render(<MemoryRouter><TextbooksPage /></MemoryRouter>);
+    expect(screen.getByRole('button', { name: '删除 英语第二册' })).toBeDisabled();
+  });
   it('opens a textbook directly in its workbench', async () => {
     const user = userEvent.setup();
     function LocationProbe() {

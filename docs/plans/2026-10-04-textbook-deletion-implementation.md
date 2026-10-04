@@ -29,3 +29,11 @@ Run: cd web && pnpm exec vitest run src/pages/Education/__tests__/TextbooksPage.
 ### Task 3: 验证与收口
 
 运行后端聚焦回归、Ruff、前端测试/build和git diff --check。检查5177/8000及LAN可用性，浏览器确认列表和确认框桌面/手机布局。真实删除只针对验收数据且动作前确认。更新中文CHANGELOG与本计划验收记录，原子提交，不纳入用户业务活动文档/PDF或本地配置。
+
+## 验收记录（2026-10-04）
+
+- Task 1、2、3已实施。开发库升级083；集成测试仅使用langalpha_test。
+- 后端聚焦99 passed；完整教材集成文件17 passed；教育前端16文件117 passed；pnpm build、Ruff和改动ESLint通过。
+- 独立复核发现上传锁占应用池槽位引发嵌套借用饥饿，已改为独立短生命周期连接，新增不借应用池回归；外部IO不持数据库事务。
+- 浏览器验证家长列表、桌面/375px确认框及取消；手机document宽度与scrollWidth均375px。未点击永久删除现有用户教材。删除和来源保留的实际数据库行为通过专用集成数据验证。
+- 前端0.0.0.0:5177可从当前LAN地址访问，后端8000启动。对象清理在事务提交后由持久队列重试；共享PTC账本、checkpoint和学生Flash工作区保留，不声称运行数据的取证级擦除。

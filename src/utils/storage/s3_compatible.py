@@ -531,7 +531,7 @@ def delete_object(key: str) -> bool:
         return False
 
 
-def list_object_keys(prefix: str) -> list[str]:
+def list_object_keys(prefix: str, *, strict: bool = False) -> list[str]:
     """Return every object key under one exact bucket prefix."""
     try:
         client = _get_client()
@@ -548,6 +548,8 @@ def list_object_keys(prefix: str) -> list[str]:
         return keys
     except Exception:
         logger.exception("Unexpected error listing objects under %s", prefix)
+        if strict:
+            raise
         return []
 
 

@@ -1730,6 +1730,12 @@ async def test_managed_runtime_cleanup_skips_workspace_file_backup(monkeypatch):
 async def test_queue_service_reconciles_then_claims_one_persisted_item(monkeypatch):
     from src.server.services import education_book_jobs
 
+    deleted_cleanup = AsyncMock(return_value=0)
+    monkeypatch.setattr(
+        "src.server.services.education_book_deletion.cleanup_deleted_textbooks_once",
+        deleted_cleanup,
+    )
+
     reconcile = AsyncMock(return_value=0)
     cleanup = AsyncMock(return_value=0)
     reserve = AsyncMock(return_value="reservation-1")
@@ -1770,6 +1776,7 @@ async def test_queue_service_reconciles_then_claims_one_persisted_item(monkeypat
         lease_seconds=60,
     )
     cleanup.assert_awaited_once_with()
+    deleted_cleanup.assert_awaited_once_with()
     claim.assert_awaited_once_with(
         worker_id="book-worker-a",
         lease_seconds=60,
@@ -1793,6 +1800,11 @@ async def test_queue_service_does_not_claim_or_allocate_when_executor_is_full(
     monkeypatch,
 ):
     from src.server.services import education_book_jobs
+
+    monkeypatch.setattr(
+        "src.server.services.education_book_deletion.cleanup_deleted_textbooks_once",
+        AsyncMock(return_value=0),
+    )
 
     reconcile = AsyncMock(return_value=0)
     cleanup = AsyncMock(return_value=0)
@@ -1826,6 +1838,11 @@ async def test_queue_service_renews_claim_while_launch_is_still_staging(monkeypa
     import asyncio
 
     from src.server.services import education_book_jobs
+
+    monkeypatch.setattr(
+        "src.server.services.education_book_deletion.cleanup_deleted_textbooks_once",
+        AsyncMock(return_value=0),
+    )
 
     reconcile = AsyncMock(return_value=0)
     cleanup = AsyncMock(return_value=0)

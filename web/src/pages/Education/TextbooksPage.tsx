@@ -1,7 +1,13 @@
-import { Activity, BookOpenCheck, ChevronRight, Library } from 'lucide-react';
+import { useState } from 'react';
+import { Activity, BookOpenCheck, ChevronRight, Library, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useManagedTextbookLibrary } from './queries';
-import type { BookStructureStatus } from './types';
+import { useAuth } from '@/contexts/AuthContext';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useDeleteManagedTextbook, useManagedTextbookLibrary } from './queries';
+import { educationErrorMessage } from './errorMessage';
+import type { BookStructureStatus, ManagedTextbookSummary } from './types';
 
 const STRUCTURE_STATUS: Record<BookStructureStatus, string> = {
   queued: '等待结构分析',
@@ -11,8 +17,22 @@ const STRUCTURE_STATUS: Record<BookStructureStatus, string> = {
 };
 
 export default function TextbooksPage() {
+  const { member } = useAuth();
   const library = useManagedTextbookLibrary();
+  const deletion = useDeleteManagedTextbook();
+  const [target, setTarget] = useState<ManagedTextbookSummary | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const textbooks = library.data ?? [];
+  const remove = async () => {
+    if (!target || deletion.isPending) return;
+    setDeleteError(null);
+    try {
+      await deletion.mutateAsync(target.textbook_id);
+      setTarget(null);
+    } catch (error) {
+      setDeleteError(educationErrorMessage(error, '删除失败，请稍后重试。'));
+    }
+  };
 
   return (
     <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="textbook-library-page">
@@ -50,7 +70,7 @@ export default function TextbooksPage() {
                   <th scope="col" className="px-3 py-3 font-medium">结构</th>
                   <th scope="col" className="px-3 py-3 font-medium">讲义</th>
                   <th scope="col" className="px-3 py-3 font-medium">处理活动</th>
-                  <th scope="col" className="px-3 py-3"><span className="sr-only">打开教材</span></th>
+                  <th scope="col" className="px-3 py-3"><span className="sr-only">教材操作</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -74,6 +94,21 @@ export default function TextbooksPage() {
                       ) : <span className="text-muted-foreground">无进行中任务</span>}
                     </td>
                     <td className="px-3 py-4 text-right">
+                      {member?.role === 'parent' && (
+                        <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                          <span className="inline-flex">
+                            <Button
+                              variant="ghost" size="icon"
+                              aria-label={`删除 ${textbook.title}`}
+                              disabled={Boolean(textbook.current_job) || deletion.isPending}
+                              onClick={() => { setDeleteError(null); setTarget(textbook); }}
+                              className="size-11 text-muted-foreground hover:text-destructive"
+                            ><Trash2 className="size-4" aria-hidden="true" /></Button>
+                          </span>
+                        </TooltipTrigger><TooltipContent>
+                          {textbook.current_job ? '请先取消加工任务并等待结束' : '删除教材'}
+                        </TooltipContent></Tooltip></TooltipProvider>
+                      )}
                       <Link
                         to={`/textbooks/${textbook.textbook_id}`}
                         aria-label={`打开 ${textbook.title}`}
@@ -89,6 +124,23 @@ export default function TextbooksPage() {
           </div>
         )}
       </div>
+      <Dialog open={target !== null} onOpenChange={(open) => { if (!open && !deletion.isPending) setTarget(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>永久删除教材</DialogTitle>
+            <DialogDescription className="break-words">
+              删除“{target?.title}”及其结构、讲义、加工记录、学生授权和学习记录，无法恢复。图书馆原文件及解析产物会保留。
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && <p role="alert" className="text-sm text-destructive">{deleteError}</p>}
+          <DialogFooter>
+            <Button variant="outline" disabled={deletion.isPending} onClick={() => setTarget(null)}>取消</Button>
+            <Button variant="destructive" disabled={deletion.isPending} onClick={() => void remove()}>
+              <Trash2 className="mr-2 size-4" aria-hidden="true" />{deletion.isPending ? '正在删除…' : '永久删除'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

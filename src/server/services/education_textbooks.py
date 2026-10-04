@@ -209,6 +209,41 @@ async def list_managed_textbooks(*, parent_user_id: str) -> list[dict[str, Any]]
     return [_managed_summary(row) for row in rows]
 
 
+async def delete_managed_textbook(*, parent_user_id: str, textbook_id: UUID) -> None:
+    from psycopg.errors import DeadlockDetected, LockNotAvailable
+    from src.server.database.education_book_deletion import delete_textbook_for_parent
+    from src.server.database.conversation import thread_exists_key
+    from src.server.services.thread_lifecycle_feed import publish_thread_deleted
+    from src.utils.cache.redis_cache import get_cache_client
+
+    if await get_household_context_for_parent(parent_user_id) is None:
+        raise TextbookPermissionError("只有家长可以删除教材")
+    try:
+        threads = await delete_textbook_for_parent(
+            parent_user_id=parent_user_id, textbook_id=textbook_id
+        )
+    except LookupError as exc:
+        raise TextbookNotFoundError(str(exc)) from exc
+    except ValueError as exc:
+        raise TextbookTransitionError(str(exc)) from exc
+    except (DeadlockDetected, LockNotAvailable) as exc:
+        raise TextbookTransitionError("教材正在被修改，请稍后重试") from exc
+    for thread in threads:
+        try:
+            cache = get_cache_client()
+            if cache.enabled and cache.client:
+                await cache.client.delete(
+                    thread_exists_key(str(thread["conversation_thread_id"]))
+                )
+            await publish_thread_deleted(
+                user_id=thread["user_id"],
+                thread_id=str(thread["conversation_thread_id"]),
+                workspace_id=str(thread["workspace_id"]),
+            )
+        except Exception:
+            logger.exception("Could not publish deleted learning thread hint")
+
+
 async def get_managed_textbook_workbench(
     *, parent_user_id: str, textbook_id: str | UUID
 ) -> dict[str, Any]:

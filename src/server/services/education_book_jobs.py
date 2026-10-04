@@ -1027,6 +1027,11 @@ class EducationBookJobService:
             lease_seconds=self.lease_seconds,
         )
         await cleanup_settled_book_items_once()
+        from src.server.services.education_book_deletion import (
+            cleanup_deleted_textbooks_once,
+        )
+
+        await cleanup_deleted_textbooks_once()
         executor = LocalRunExecutor.get_instance()
         capacity_reservation = await executor.reserve_capacity()
         if capacity_reservation is None:

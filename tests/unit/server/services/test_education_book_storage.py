@@ -9,6 +9,18 @@ from uuid import uuid4
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def isolated_storage_guard(monkeypatch):
+    from contextlib import asynccontextmanager
+    from src.server.services import education_book_storage as storage
+
+    @asynccontextmanager
+    async def guard(*, item_id):
+        yield
+
+    monkeypatch.setattr(storage, "book_item_storage_guard", guard)
+
+
 @pytest.mark.asyncio
 async def test_read_material_bytes_verifies_owned_pointer_and_digest(
     monkeypatch,
