@@ -220,7 +220,7 @@ async def test_freeze_book_source_cleans_only_tracked_keys_after_normalization_f
 
 
 @pytest.mark.asyncio
-async def test_create_from_library_cleans_snapshot_when_source_race_returns_existing(
+async def test_create_from_library_source_race_returns_existing_without_freezing(
     monkeypatch,
 ) -> None:
     from src.server.services import education_textbook_source_snapshots as snapshots
@@ -235,8 +235,8 @@ async def test_create_from_library_cleans_snapshot_when_source_race_returns_exis
     monkeypatch.setattr(snapshots, "uuid4", lambda: reserved_id)
     monkeypatch.setattr(
         snapshots,
-        "get_existing_textbook_for_source",
-        AsyncMock(return_value=None),
+        "preflight_book_source",
+        AsyncMock(return_value={"source_status": "pending"}),
     )
     freeze = AsyncMock(
         return_value=snapshots.FrozenTextbookSource(
@@ -274,19 +274,13 @@ async def test_create_from_library_cleans_snapshot_when_source_race_returns_exis
         ),
     )
 
-    freeze.assert_awaited_once_with(
-        owner_user_id="parent-1",
-        parse_job_id="parse-1",
-        primary_artifact_id="artifact-1",
-        household_id=str(household_id),
-        textbook_id=str(reserved_id),
-    )
-    cleanup.assert_awaited_once_with(written_keys)
+    freeze.assert_not_awaited()
+    cleanup.assert_not_awaited()
     assert result["textbook_id"] == existing_id
 
 
 @pytest.mark.asyncio
-async def test_create_from_library_preserves_snapshot_after_ambiguous_commit(
+async def test_create_from_library_keeps_ambiguous_commit_for_idempotent_retry_without_cleanup(
     monkeypatch,
 ) -> None:
     from src.server.services import education_textbook_source_snapshots as snapshots
@@ -294,17 +288,12 @@ async def test_create_from_library_preserves_snapshot_after_ambiguous_commit(
 
     household_id = uuid4()
     reserved_id = uuid4()
-    recovered = {
-        "textbook_id": reserved_id,
-        "job_id": uuid4(),
-        "item_id": uuid4(),
-    }
     written_keys = (
         f"education/{household_id}/textbooks/{reserved_id}/source/manifest.json",
     )
     monkeypatch.setattr(snapshots, "uuid4", lambda: reserved_id)
-    lookup = AsyncMock(side_effect=[None, recovered])
-    monkeypatch.setattr(snapshots, "get_existing_textbook_for_source", lookup)
+    lookup = AsyncMock(return_value={"source_status": "pending"})
+    monkeypatch.setattr(snapshots, "preflight_book_source", lookup)
     monkeypatch.setattr(
         snapshots,
         "freeze_book_source",
@@ -326,23 +315,20 @@ async def test_create_from_library_preserves_snapshot_after_ambiguous_commit(
     cleanup = AsyncMock()
     monkeypatch.setattr(snapshots, "cleanup_snapshot_objects", cleanup)
 
-    result = await snapshots.create_textbook_from_library_source(
-        parent_user_id="parent-1",
-        household_id=str(household_id),
-        title="Book",
-        slug="book",
-        parse_job_id="parse-1",
-        primary_artifact_id="artifact-1",
-        idempotency_key="create-1",
-        identity=MoreToSkillsIdentity(
-            version="2.1.0",
-            skill_sha256="a" * 64,
-            schema_sha256="b" * 64,
-        ),
-    )
-
-    assert result == recovered
-    assert lookup.await_count == 2
+    with pytest.raises(RuntimeError, match="connection lost after commit"):
+        await snapshots.create_textbook_from_library_source(
+            parent_user_id="parent-1",
+            household_id=str(household_id),
+            title="Book",
+            slug="book",
+            parse_job_id="parse-1",
+            primary_artifact_id="artifact-1",
+            idempotency_key="create-1",
+            identity=MoreToSkillsIdentity(
+                version="2.1.0", skill_sha256="a" * 64, schema_sha256="b" * 64
+            ),
+        )
+    assert lookup.await_count == 1
     cleanup.assert_not_awaited()
 
 

@@ -363,7 +363,24 @@ async def test_pending_book_is_atomically_bound_without_fake_frozen_fields(
     ):
         source[field] = None
     source["source_status"] = "pending"
-    source["selected_source"] = {"content_sha256": "a" * 64, "size_bytes": 128}
+    source["selected_source"] = {
+        key: source[key]
+        for key in (
+            "document_id",
+            "parse_job_id",
+            "primary_artifact_id",
+            "filename",
+            "media_type",
+            "parser_id",
+            "parser_name",
+        )
+    }
+    source["selected_source"].update(
+        content_sha256="a" * 64,
+        size_bytes=128,
+        image_count=0,
+        completed_at=source["parse_completed_at"],
+    )
     source["preparation_descriptor"] = {
         "resources": [],
         "primary_artifact_id": source["primary_artifact_id"],
@@ -383,6 +400,15 @@ async def test_pending_book_is_atomically_bound_without_fake_frozen_fields(
     reused = await create_textbook_with_initial_job(**request)
     assert reused["acceptance"] == "reused"
     assert reused["textbook_id"] == created["textbook_id"]
+    from src.server.services.education_textbooks import get_managed_textbook_workbench
+    from src.server.app.education.book_models import TextbookWorkbenchResponse
+
+    pending_workbench = TextbookWorkbenchResponse.model_validate(
+        await get_managed_textbook_workbench(parent_user_id=parent, textbook_id=book_id)
+    )
+    assert pending_workbench.source_status == "pending"
+    assert pending_workbench.source is None
+    assert pending_workbench.selected_source.content_sha256 == "a" * 64
     async with patched_get_db_connection() as conn:
         row = await (
             await conn.execute(

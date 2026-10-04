@@ -12,7 +12,7 @@
 
 ## 状态、依据和执行纪律
 
-- 2026-10-05：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0/A1 已完成契约和数据库基础；A2 开始，A3–A7 待实施。未升级开发库、未启动付费模型验收。
+- 2026-10-05：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0/A1/A2 已完成契约、数据库基础和快速受理；A3 开始，A4–A7 待实施。未升级开发库、未启动付费模型验收。
 - 依据：[设计](2026-10-04-textbook-async-preparation-timeline-design.md)及两轮 SB3 实测记录。此增量不改原 Task 8 完成结论。
 - Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skills-textbook-refactor`；分支当前 `feature/more-to-skills-textbook-refactor`。下面精确文件路径相对此目录。
 - 读取根目录、src/server 与 web 的 AGENTS.md；界面遵守 DESIGN.md。保留用户修改的业务动作文档和未追踪 PDF，不重置、不纳入提交。
@@ -61,6 +61,8 @@
 8. 重跑集成与 DTO 测试，确认准备失败不变成 partially_succeeded、ready 来源在结构失败后保留。更新 CHANGELOG、提交；开发库尚不升级，等关联消费者一起完成。
 
 ## Task A2：快速受理和冻结后台化
+
+状态：受理与冻结辅助函数已完成，调度接入归A3。聚焦后端68 passed，隔离PG工作台投影2 passed，Ruff/diff检查通过。禁止对象IO的受理回归先失败后通过；固定清单冻结与资源计数为内存存储回归，未进行真实MinIO验收或付费模型调用。
 
 **Files:**
 - Modify: `src/server/services/education_textbook_source_snapshots.py`。

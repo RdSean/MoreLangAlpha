@@ -44,7 +44,7 @@ KNOWLEDGE_POINT_ID = UUID("4c3f4d0c-a508-4bff-a89f-a3a584a2fe86")
     ],
 )
 async def test_delete_textbook_http_contract(client, monkeypatch, error, code):
-    client._transport.app.dependency_overrides[get_current_user_id] = lambda: 'parent-1'
+    client._transport.app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
     delete = AsyncMock(side_effect=error)
     monkeypatch.setattr(textbook_routes, "delete_managed_textbook", delete)
     response = await client.delete(
@@ -404,12 +404,13 @@ async def test_parent_lists_managed_textbook_sources(client):
 
 
 @pytest.mark.asyncio
-async def test_parent_creates_managed_textbook_from_one_frozen_source(client):
+async def test_parent_accepts_managed_textbook_with_one_pinned_source(client):
     app = client._transport.app
     app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
     created = {
         "textbook_id": TEXTBOOK["textbook_id"],
         "job_id": str(MANAGED_JOB_ID),
+        "acceptance": "accepted_new",
     }
     with patch.object(
         textbook_routes,
@@ -427,7 +428,7 @@ async def test_parent_creates_managed_textbook_from_one_frozen_source(client):
             },
         )
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     assert response.json() == created
     create.assert_awaited_once_with(
         parent_user_id="parent-1",
@@ -793,7 +794,7 @@ async def test_parent_create_serializes_uuid_identifiers_from_database(client):
             },
         )
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     assert response.json()["textbook_id"] == str(textbook_id)
     assert response.json()["job_id"] == str(job_id)
 

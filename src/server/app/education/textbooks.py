@@ -161,7 +161,7 @@ async def list_textbooks(user_id: CurrentUserId):
 @router.post(
     "/textbooks",
     response_model=CreateBookResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def create_family_textbook(body: CreateBookRequest, user_id: CurrentUserId):
     try:

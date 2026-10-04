@@ -109,6 +109,7 @@ def _managed_summary(row: Mapping[str, Any]) -> dict[str, Any]:
         },
         "current_job": row.get("current_job"),
         "updated_at": row["updated_at"],
+        "source_status": row.get("source_status", "ready"),
     }
 
 
@@ -201,6 +202,7 @@ async def create_managed_textbook(
     return {
         "textbook_id": str(created["textbook_id"]),
         "job_id": str(created["job_id"]),
+        "acceptance": created["acceptance"],
     }
 
 
@@ -259,7 +261,11 @@ async def get_managed_textbook_workbench(
             "source": {
                 **_managed_source_candidate(row),
                 "frozen_at": row["frozen_at"],
-            },
+            }
+            if summary["source_status"] == "ready"
+            else None,
+            "selected_source": row.get("selected_source"),
+            "source_frozen_at": row.get("frozen_at"),
             "current_structure_id": row["current_structure_id"],
             "recent_job": row.get("recent_job"),
             "assigned_student_count": int(row["assigned_student_count"]),
@@ -327,6 +333,8 @@ async def get_managed_textbook_source(
     )
     if row is None:
         raise TextbookNotFoundError("Textbook source not found")
+    if row.get("source_status", "ready") != "ready":
+        raise TextbookTransitionError(f"Textbook source is {row['source_status']}")
     prefix = str(row["source_snapshot_prefix"])
     markdown_key = str(row["source_markdown_key"])
     if not markdown_key.startswith(prefix):

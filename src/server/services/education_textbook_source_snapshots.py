@@ -6,7 +6,8 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Iterable
+import re
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -16,11 +17,9 @@ from src.config.settings import get_document_parsing_config
 from src.server.database.documents import list_artifacts
 from src.server.database.education_books import (
     create_textbook_with_initial_job,
-    get_existing_textbook_for_source,
     get_owned_parse_job,
 )
 from src.server.database.session_lock import await_settled
-from src.server.services.education_book_timing import book_phase
 from src.utils.storage import delete_object, get_bytes, upload_bytes
 
 
@@ -52,11 +51,18 @@ def _uuid_component(value: str, label: str) -> str:
         raise ValueError(f"{label} must be a UUID") from exc
 
 
-def build_snapshot_prefix(*, household_id: str, textbook_id: str) -> str:
+def build_snapshot_prefix(
+    *, household_id: str, textbook_id: str, attempt_token: UUID | None = None
+) -> str:
     """Derive the sole private single-source book layout."""
     household = _uuid_component(household_id, "household_id")
     textbook = _uuid_component(textbook_id, "textbook_id")
-    return f"education/{household}/textbooks/{textbook}/source/"
+    prefix = f"education/{household}/textbooks/{textbook}/source/"
+    return (
+        f"{prefix}attempts/{UUID(str(attempt_token))}/"
+        if attempt_token is not None
+        else prefix
+    )
 
 
 def _validated_relative_path(value: str) -> str:
@@ -127,25 +133,39 @@ async def freeze_parse_job_source(
     producer_job_id: str,
     household_id: str,
     textbook_id: str,
+    pinned_bundle: dict[str, Any] | None = None,
+    attempt_token: UUID | None = None,
+    before_write: Callable[[str], Awaitable[None]] | None = None,
+    on_verified: Callable[[int, int], Awaitable[None]] | None = None,
+    check_cancelled: Callable[[], Awaitable[None]] | None = None,
 ) -> FrozenTextbookSource:
     """Copy one completed parse bundle and return only safe queueing metadata."""
     prefix = build_snapshot_prefix(
         household_id=household_id,
         textbook_id=textbook_id,
+        attempt_token=attempt_token,
     )
-    job = await get_owned_parse_job(
-        owner_user_id=owner_user_id,
-        producer_job_id=producer_job_id,
+    job = (
+        pinned_bundle["job"]
+        if pinned_bundle is not None
+        else await get_owned_parse_job(
+            owner_user_id=owner_user_id,
+            producer_job_id=producer_job_id,
+        )
     )
     if not job or str(job.get("document_id") or "") != str(document_id):
         raise TextbookSourceSnapshotError("The parse job source was not found")
     if str(job.get("status") or "") != "completed":
         raise TextbookSourceSnapshotError("The parse job source is not completed")
 
-    artifacts = await list_artifacts(
-        owner_user_id=owner_user_id,
-        document_id=document_id,
-        producer_job_id=producer_job_id,
+    artifacts = (
+        pinned_bundle["artifacts"]
+        if pinned_bundle is not None
+        else await list_artifacts(
+            owner_user_id=owner_user_id,
+            document_id=document_id,
+            producer_job_id=producer_job_id,
+        )
     )
     primary_artifacts = [
         artifact
@@ -198,13 +218,22 @@ async def freeze_parse_job_source(
     reserved_destination_keys: set[str] = set()
     max_upload_bytes = get_document_parsing_config().max_upload_bytes
     try:
-        for artifact in validated_artifacts:
+        for verified_count, artifact in enumerate(validated_artifacts, start=1):
+            if check_cancelled is not None:
+                await check_cancelled()
             content = await _read_object(artifact["storage_key"])
             if content is None:
                 raise TextbookSourceSnapshotError(
                     "A parse artifact is no longer available"
                 )
             digest = hashlib.sha256(content).hexdigest()
+            if (
+                artifact.get("expected_sha256") is not None
+                and artifact["expected_sha256"] != digest
+            ):
+                raise TextbookSourceSnapshotError(
+                    "A parse artifact differs from its pinned digest"
+                )
             relative_path = artifact["relative_path"]
             destination_relative_path = f"artifacts/{relative_path}"
             destination_key = f"{prefix}{destination_relative_path}"
@@ -213,6 +242,8 @@ async def freeze_parse_job_source(
                     "A snapshot destination key would be reused"
                 )
             reserved_destination_keys.add(destination_key)
+            if before_write is not None:
+                await before_write(destination_key)
             try:
                 uploaded = await _write_object(
                     destination_key,
@@ -248,6 +279,8 @@ async def freeze_parse_job_source(
                     "schema_version": artifact.get("schema_version"),
                 }
             )
+            if on_verified is not None:
+                await on_verified(verified_count, len(validated_artifacts))
 
         manifest_bytes = json.dumps(
             {
@@ -272,6 +305,10 @@ async def freeze_parse_job_source(
                 "A snapshot destination key would be reused"
             )
         reserved_destination_keys.add(manifest_key)
+        if check_cancelled is not None:
+            await check_cancelled()
+        if before_write is not None:
+            await before_write(manifest_key)
         try:
             uploaded_manifest = await _write_object(
                 manifest_key,
@@ -419,12 +456,21 @@ async def freeze_book_source(
     primary_artifact_id: str,
     household_id: str,
     textbook_id: str,
+    pinned_bundle: dict[str, Any] | None = None,
+    attempt_token: UUID | None = None,
+    before_write: Callable[[str], Awaitable[None]] | None = None,
+    on_verified: Callable[[int, int], Awaitable[None]] | None = None,
+    check_cancelled: Callable[[], Awaitable[None]] | None = None,
 ) -> FrozenTextbookSource:
     """Freeze one library bundle into the new single-source textbook layout."""
 
-    job = await get_owned_parse_job(
-        owner_user_id=owner_user_id,
-        producer_job_id=parse_job_id,
+    job = (
+        pinned_bundle["job"]
+        if pinned_bundle is not None
+        else await get_owned_parse_job(
+            owner_user_id=owner_user_id,
+            producer_job_id=parse_job_id,
+        )
     )
     if not job or str(job.get("status") or "") != "completed":
         raise TextbookSourceSnapshotError("The parse job source is not completed")
@@ -435,18 +481,34 @@ async def freeze_book_source(
     document_id = str(job.get("document_id") or "")
     if not document_id:
         raise TextbookSourceSnapshotError("The parse job source was not found")
+    options: dict[str, Any] = {}
+    if pinned_bundle is not None:
+        options["pinned_bundle"] = pinned_bundle
+    if attempt_token is not None:
+        options["attempt_token"] = attempt_token
+    for name, callback in (
+        ("before_write", before_write),
+        ("on_verified", on_verified),
+        ("check_cancelled", check_cancelled),
+    ):
+        if callback is not None:
+            options[name] = callback
     frozen = await freeze_parse_job_source(
         owner_user_id=owner_user_id,
         document_id=document_id,
         producer_job_id=parse_job_id,
         household_id=household_id,
         textbook_id=textbook_id,
+        **options,
     )
     prefix = build_snapshot_prefix(
         household_id=household_id,
         textbook_id=textbook_id,
+        attempt_token=attempt_token,
     )
     try:
+        if check_cancelled is not None:
+            await check_cancelled()
         return await _normalize_book_source(
             frozen=frozen,
             document_id=document_id,
@@ -476,55 +538,161 @@ async def create_textbook_from_library_source(
     idempotency_key: str,
     identity: MoreToSkillsIdentity,
 ) -> dict[str, Any]:
-    """Preflight, freeze, and atomically create one source-bound textbook."""
-
-    existing = await get_existing_textbook_for_source(
+    """Pin metadata and accept the structure item without storage or runtime IO."""
+    source = await preflight_book_source(
+        owner_user_id=parent_user_id,
+        parse_job_id=parse_job_id,
+        primary_artifact_id=primary_artifact_id,
+    )
+    return await create_textbook_with_initial_job(
+        textbook_id=uuid4(),
         parent_user_id=parent_user_id,
         household_id=household_id,
-        source_parse_job_id=parse_job_id,
-        source_primary_artifact_id=primary_artifact_id,
+        title=title,
+        slug=slug,
+        source=source,
+        idempotency_key=idempotency_key,
+        identity=identity,
     )
-    if existing is not None:
-        return existing
 
-    textbook_id = uuid4()
-    with book_phase({"textbook_id": textbook_id}, "source_freezing"):
-        frozen = await freeze_book_source(
-            owner_user_id=parent_user_id,
-            parse_job_id=parse_job_id,
-            primary_artifact_id=primary_artifact_id,
-            household_id=household_id,
-            textbook_id=str(textbook_id),
+
+async def preflight_book_source(
+    *,
+    owner_user_id: str,
+    parse_job_id: str,
+    primary_artifact_id: str,
+) -> dict[str, Any]:
+    """Fix completed provenance and resource metadata; never fetch object bytes."""
+    job = await get_owned_parse_job(
+        owner_user_id=owner_user_id, producer_job_id=parse_job_id
+    )
+    if not job or job.get("status") != "completed":
+        raise TextbookSourceSnapshotError("The parse job source is not completed")
+    if job.get("primary_artifact_id") != primary_artifact_id:
+        raise TextbookSourceSnapshotError(
+            "The selected primary artifact does not belong to the parse job"
         )
-    try:
-        created = await create_textbook_with_initial_job(
-            textbook_id=textbook_id,
-            parent_user_id=parent_user_id,
-            household_id=household_id,
-            title=title,
-            slug=slug,
-            source=frozen.source,
-            idempotency_key=idempotency_key,
-            identity=identity,
+    for field in (
+        "document_id",
+        "original_filename",
+        "media_type",
+        "document_format",
+        "parser_id",
+        "parser_name",
+        "completed_at",
+    ):
+        if not job.get(field):
+            raise TextbookSourceSnapshotError("The parse source metadata is incomplete")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(job.get("source_sha256") or "")):
+        raise TextbookSourceSnapshotError("The original source digest is invalid")
+    if (
+        not isinstance(job.get("source_size_bytes"), int)
+        or job["source_size_bytes"] < 0
+    ):
+        raise TextbookSourceSnapshotError("The original source size is invalid")
+    artifacts = await list_artifacts(
+        owner_user_id=owner_user_id,
+        document_id=job["document_id"],
+        producer_job_id=parse_job_id,
+    )
+    primary = [
+        artifact
+        for artifact in artifacts
+        if artifact.get("artifact_kind") == "primary_document"
+    ]
+    if len(primary) != 1 or primary[0].get("artifact_id") != primary_artifact_id:
+        raise TextbookSourceSnapshotError(
+            "A parse job source must contain exactly one matching primary document"
         )
-    except BaseException as create_error:
-        try:
-            recovered = await get_existing_textbook_for_source(
-                parent_user_id=parent_user_id,
-                household_id=household_id,
-                source_parse_job_id=parse_job_id,
-                source_primary_artifact_id=primary_artifact_id,
+    if (
+        str(primary[0].get("media_type") or "").split(";", 1)[0].lower()
+        != _MARKDOWN_MEDIA_TYPE
+        or str(primary[0].get("format") or "").lower() not in _MARKDOWN_FORMATS
+    ):
+        raise TextbookSourceSnapshotError("The primary parse artifact must be Markdown")
+    paths: set[str] = set()
+    resources = []
+    fields = (
+        "artifact_id",
+        "artifact_kind",
+        "format",
+        "media_type",
+        "relative_path",
+        "storage_key",
+        "schema_name",
+        "schema_version",
+    )
+    for artifact in artifacts:
+        path = _validated_relative_path(str(artifact.get("relative_path") or ""))
+        if path in paths:
+            raise TextbookSourceSnapshotError(
+                "A parse bundle contains duplicate artifact paths"
             )
-        except BaseException:
-            raise create_error
-        if recovered is None:
-            await cleanup_snapshot_objects(frozen.written_keys)
-            raise
-        if UUID(str(recovered["textbook_id"])) != textbook_id:
-            await cleanup_snapshot_objects(frozen.written_keys)
-        if isinstance(create_error, asyncio.CancelledError):
-            raise
-        return recovered
-    if UUID(str(created["textbook_id"])) != textbook_id:
-        await cleanup_snapshot_objects(frozen.written_keys)
-    return created
+        paths.add(path)
+        expected_key = f"documents/{job['document_id']}/artifacts/{parse_job_id}/{path}"
+        if (
+            artifact.get("storage_key") != expected_key
+            or artifact.get("document_id") != job["document_id"]
+            or artifact.get("producer_job_id") != parse_job_id
+        ):
+            raise TextbookSourceSnapshotError(
+                "A parse artifact does not belong to the fixed source bundle"
+            )
+        resource = {field: artifact.get(field) for field in fields}
+        metadata = artifact.get("metadata") or {}
+        digest = metadata.get("sha256") if isinstance(metadata, dict) else None
+        if digest is not None:
+            if not re.fullmatch(r"[0-9a-f]{64}", str(digest)):
+                raise TextbookSourceSnapshotError("A parse artifact digest is invalid")
+            resource["expected_sha256"] = digest
+        resources.append(resource)
+    completed_at = job["completed_at"]
+    if hasattr(completed_at, "isoformat"):
+        completed_at = completed_at.isoformat()
+    safe_job = {
+        field: job[field]
+        for field in (
+            "document_id",
+            "original_filename",
+            "media_type",
+            "document_format",
+            "parser_id",
+            "parser_name",
+            "primary_artifact_id",
+        )
+    }
+    safe_job.update(
+        status="completed",
+        completed_at=completed_at,
+        parser_version=job.get("parser_version"),
+    )
+    selected = {
+        "document_id": job["document_id"],
+        "parse_job_id": parse_job_id,
+        "primary_artifact_id": primary_artifact_id,
+        "filename": job["original_filename"],
+        "media_type": job["media_type"],
+        "parser_id": job["parser_id"],
+        "parser_name": job["parser_name"],
+        "completed_at": completed_at,
+        "content_sha256": job["source_sha256"],
+        "size_bytes": job["source_size_bytes"],
+        "image_count": sum(
+            resource["artifact_kind"] == "embedded_image" for resource in resources
+        ),
+    }
+    return {
+        "source_status": "pending",
+        "document_id": job["document_id"],
+        "parse_job_id": parse_job_id,
+        "primary_artifact_id": primary_artifact_id,
+        "filename": job["original_filename"],
+        "media_type": job["media_type"],
+        "format": job["document_format"],
+        "parser_id": job["parser_id"],
+        "parser_name": job["parser_name"],
+        "parser_version": job.get("parser_version"),
+        "parse_completed_at": completed_at,
+        "selected_source": selected,
+        "preparation_descriptor": {"job": safe_job, "artifacts": resources},
+    }

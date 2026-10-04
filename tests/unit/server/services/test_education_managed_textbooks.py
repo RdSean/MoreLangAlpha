@@ -31,6 +31,7 @@ async def test_create_managed_textbook_freezes_identity_and_household(monkeypatc
             "textbook_id": TEXTBOOK_ID,
             "job_id": UUID("9998bb1a-687a-4d45-815d-5b1dd6ed2f17"),
             "item_id": UUID("86f03a73-7604-4097-905b-768e6ad0f644"),
+            "acceptance": "accepted_new",
         }
     )
     monkeypatch.setattr(
@@ -59,6 +60,7 @@ async def test_create_managed_textbook_freezes_identity_and_household(monkeypatc
     assert result == {
         "textbook_id": str(TEXTBOOK_ID),
         "job_id": "9998bb1a-687a-4d45-815d-5b1dd6ed2f17",
+        "acceptance": "accepted_new",
     }
     assert create.await_args.kwargs["household_id"] == str(HOUSEHOLD_ID)
     assert create.await_args.kwargs["title"] == "英语第二册"
@@ -119,6 +121,25 @@ async def test_source_slice_reads_verified_frozen_markdown(monkeypatch):
         expected_sha256="a" * 64,
         max_bytes=len(markdown),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["pending", "preparing", "failed", "cancelled"])
+async def test_unready_source_returns_explicit_conflict_without_reading_storage(
+    monkeypatch, status
+):
+    monkeypatch.setattr(
+        textbooks,
+        "get_managed_source_for_user",
+        AsyncMock(return_value={"textbook_id": TEXTBOOK_ID, "source_status": status}),
+    )
+    read = AsyncMock(side_effect=AssertionError("unready source read"))
+    monkeypatch.setattr(textbooks, "read_snapshot_artifact_bytes", read)
+    with pytest.raises(textbooks.TextbookTransitionError, match=status):
+        await textbooks.get_managed_textbook_source(
+            user_id="parent-1", textbook_id=TEXTBOOK_ID, start_line=1, end_line=2
+        )
+    read.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -67,7 +67,8 @@ async def get_owned_parse_job(
                        jobs.status, jobs.parser_id, jobs.parser_name,
                        jobs.parser_version, jobs.completed_at,
                        documents.original_filename, documents.media_type,
-                       documents.document_format
+                       documents.document_format, documents.source_sha256,
+                       documents.source_size_bytes
                 FROM document_parse_jobs AS jobs
                 JOIN documents ON documents.document_id = jobs.document_id
                 WHERE jobs.job_id = %s AND documents.owner_user_id = %s
@@ -946,7 +947,8 @@ async def _managed_textbook_rows(
                textbooks.source_parse_completed_at AS completed_at,
                textbooks.source_content_sha256 AS content_sha256,
                textbooks.source_size_bytes AS size_bytes,
-               textbooks.created_at AS frozen_at,
+               textbooks.source_frozen_at AS frozen_at,
+               textbooks.source_status, textbooks.selected_source,
                COALESCE(source_counts.image_count, 0)::int AS image_count,
                COALESCE(assignments.assigned_student_count, 0)::int
                    AS assigned_student_count
@@ -1093,7 +1095,7 @@ async def get_managed_source_for_user(
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
-                SELECT textbooks.textbook_id, textbooks.source_snapshot_prefix,
+                SELECT textbooks.textbook_id, textbooks.source_status, textbooks.source_snapshot_prefix,
                        textbooks.source_markdown_key,
                        textbooks.source_content_sha256,
                        textbooks.source_size_bytes,

@@ -36,6 +36,8 @@ def _parse_job(*, status: str = "completed") -> dict[str, object]:
         "parser_version": "2",
         "completed_at": "2026-09-16T10:00:00+00:00",
         "primary_sha256": "f" * 64,
+        "source_sha256": "f" * 64,
+        "source_size_bytes": 1024,
     }
 
 
@@ -133,6 +135,116 @@ def test_snapshot_prefix_uses_the_single_source_book_identity():
     )
 
     assert prefix == (f"education/{HOUSEHOLD_ID}/textbooks/{TEXTBOOK_ID}/source/")
+
+
+@pytest.mark.asyncio
+async def test_acceptance_pins_metadata_without_any_object_io(monkeypatch):
+    from src.server.services.education_book_structure import MoreToSkillsIdentity
+
+    primary = _artifact(
+        artifact_id=PRIMARY_ARTIFACT_ID,
+        artifact_kind="primary_document",
+        relative_path="document.md",
+        storage_key=f"documents/{DOCUMENT_ID}/artifacts/{PRODUCER_JOB_ID}/document.md",
+    )
+    monkeypatch.setattr(
+        snapshots, "get_owned_parse_job", AsyncMock(return_value=_parse_job())
+    )
+    monkeypatch.setattr(snapshots, "list_artifacts", AsyncMock(return_value=[primary]))
+    forbidden_read = AsyncMock(side_effect=AssertionError("request read object bytes"))
+    forbidden_write = AsyncMock(side_effect=AssertionError("request uploaded bytes"))
+    monkeypatch.setattr(snapshots, "_read_object", forbidden_read)
+    monkeypatch.setattr(snapshots, "_write_object", forbidden_write)
+    create = AsyncMock(
+        return_value={
+            "textbook_id": TEXTBOOK_ID,
+            "job_id": TEXTBOOK_ID,
+            "acceptance": "accepted_new",
+        }
+    )
+    monkeypatch.setattr(snapshots, "create_textbook_with_initial_job", create)
+    result = await snapshots.create_textbook_from_library_source(
+        parent_user_id="parent-1",
+        household_id=HOUSEHOLD_ID,
+        title="Book",
+        slug="book",
+        parse_job_id=PRODUCER_JOB_ID,
+        primary_artifact_id=PRIMARY_ARTIFACT_ID,
+        idempotency_key="fast-accept",
+        identity=MoreToSkillsIdentity(
+            version="2", skill_sha256="a" * 64, schema_sha256="b" * 64
+        ),
+    )
+    assert result["acceptance"] == "accepted_new"
+    source = create.await_args.kwargs["source"]
+    assert source["source_status"] == "pending"
+    assert source.get("markdown_key") is None
+    assert source.get("content_sha256") is None
+    assert source["selected_source"]["content_sha256"] == "f" * 64
+    assert (
+        source["preparation_descriptor"]["artifacts"][0]["artifact_id"]
+        == PRIMARY_ARTIFACT_ID
+    )
+    forbidden_read.assert_not_awaited()
+    forbidden_write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_background_freeze_uses_pinned_bundle_and_reports_only_readback_verified_resources(
+    monkeypatch,
+):
+    from uuid import UUID
+
+    content = b"# Fixed book\n"
+    artifact = _artifact(
+        artifact_id=PRIMARY_ARTIFACT_ID,
+        artifact_kind="primary_document",
+        relative_path="document.md",
+        storage_key=f"documents/{DOCUMENT_ID}/artifacts/{PRODUCER_JOB_ID}/document.md",
+    )
+    artifact["metadata"] = {"sha256": sha256(content).hexdigest()}
+    uploads, _ = _configure_store(
+        monkeypatch,
+        job=_parse_job(),
+        artifacts=[artifact],
+        objects={str(artifact["storage_key"]): content},
+    )
+    pinned = await snapshots.preflight_book_source(
+        owner_user_id="parent-1",
+        parse_job_id=PRODUCER_JOB_ID,
+        primary_artifact_id=PRIMARY_ARTIFACT_ID,
+    )
+    lookup = AsyncMock(side_effect=AssertionError("background reread latest bundle"))
+    monkeypatch.setattr(snapshots, "get_owned_parse_job", lookup)
+    monkeypatch.setattr(snapshots, "list_artifacts", lookup)
+    token = UUID(int=1)
+    candidates: list[str] = []
+    progress: list[tuple[int, int]] = []
+
+    async def before_write(key):
+        assert key not in uploads
+        candidates.append(key)
+
+    async def verified(count, total):
+        assert len(uploads) == count
+        progress.append((count, total))
+
+    frozen = await snapshots.freeze_book_source(
+        owner_user_id="parent-1",
+        parse_job_id=PRODUCER_JOB_ID,
+        primary_artifact_id=PRIMARY_ARTIFACT_ID,
+        household_id=HOUSEHOLD_ID,
+        textbook_id=TEXTBOOK_ID,
+        pinned_bundle=pinned["preparation_descriptor"],
+        attempt_token=token,
+        before_write=before_write,
+        on_verified=verified,
+    )
+    assert progress == [(1, 1)]
+    assert candidates == list(uploads)
+    assert f"/source/attempts/{token}/" in frozen.source["markdown_key"]
+    assert frozen.source["content_sha256"] == sha256(content).hexdigest()
+    lookup.assert_not_awaited()
 
 
 @pytest.mark.asyncio
