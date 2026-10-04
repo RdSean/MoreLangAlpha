@@ -168,6 +168,9 @@ async def test_parent_authorized_job_snapshot_is_consistent_during_finalize(
         def cursor(self, *args, **kwargs):
             return CursorProxy(self._connection.cursor(*args, **kwargs))
 
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
     @asynccontextmanager
     async def interleaved_connection():
         async with patched_get_db_connection() as connection:
@@ -217,6 +220,8 @@ async def test_parent_authorized_job_snapshot_is_consistent_during_finalize(
         ("running", "running"),
         ("succeeded", "succeeded"),
     }
+    timing = snapshot["items"][0]["timing_summary"]
+    assert (timing["terminal_at"] is None) == (snapshot["items"][0]["status"] == "running")
 
 
 async def test_detail_budget_bounds_rows_bytes_and_keeps_terminal_events(

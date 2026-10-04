@@ -17,6 +17,7 @@ from src.server.app.education.book_models import (
     CreateBookRequest,
     CreateBookResponse,
     BookJobResponse,
+    BookJobStatisticsResponse,
     KnowledgePointMaterialResponse,
     StudentBookAssignmentResponse,
     StudentBookStructureResponse,
@@ -32,6 +33,7 @@ from src.server.app.education.models import (
 )
 from src.server.database.education_book_jobs import get_book_job_for_parent
 from src.server.services.education_book_activity import BookActivityService
+from src.server.services.education_book_timing import get_book_job_statistics
 from src.server.services.education_learning_assets import (
     add_learning_item,
     edit_learning_item,
@@ -118,6 +120,7 @@ async def stream_managed_book_job_events(
         job_id=job_id,
         parent_user_id=user_id,
     )
+
     if job is None:
         raise _managed_book_job_not_found()
 
@@ -140,6 +143,24 @@ async def stream_managed_book_job_events(
         media_type="text/event-stream",
         headers=_BOOK_PROGRESS_SSE_HEADERS,
     )
+
+
+@router.get("/book-jobs/{job_id}/statistics", response_model=BookJobStatisticsResponse)
+async def managed_book_job_statistics(
+    job_id: UUID,
+    user_id: CurrentUserId,
+    cursor: str | None = Query(None, max_length=80),
+    limit: int = Query(50, ge=1, le=100),
+):
+    try:
+        result = await get_book_job_statistics(
+            job_id=job_id, parent_user_id=user_id, cursor=cursor, limit=limit
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise _managed_book_job_not_found()
+    return BookJobStatisticsResponse.model_validate(result)
 
 
 @router.get("/textbook-sources", response_model=BookSourceListResponse)

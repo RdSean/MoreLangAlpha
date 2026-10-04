@@ -64,6 +64,9 @@ CLAIMED = {
 def _default_no_pending_book_cancellations(monkeypatch):
     from src.server.services import education_book_recovery
     from src.server.services import education_book_jobs
+    from src.server.services import education_book_timing
+    monkeypatch.setattr(education_book_timing, "begin_book_phase", AsyncMock(return_value=UUID("11111111-1111-1111-1111-111111111111")))
+    monkeypatch.setattr(education_book_timing, "end_book_phase", AsyncMock())
 
     monkeypatch.setattr(
         education_book_jobs, "claim_next_preparation_item", AsyncMock(return_value=None)
@@ -1013,7 +1016,9 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
     bind = AsyncMock()
     graph = object()
     build_graph = AsyncMock(return_value=(graph, {"messages": []}, {"metadata": {}}))
-    workflow = object()
+    async def workflow_events():
+        yield "real-event"
+    workflow = workflow_events()
     handler_kwargs = {}
 
     class Handler:
@@ -1123,7 +1128,7 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
     assert set(preparation) == {"sandbox_preparation", "input_staging"}
     assert all(value >= 0 for value in preparation.values())
     observer.report_service_stage.assert_awaited_once_with("service_preparing")
-    assert started["workflow_generator"] is workflow
+    assert [event async for event in started["workflow_generator"]] == ["real-event"]
     assert started["graph"] is graph
     assert started["capacity_reservation"] == "reservation-1"
     observer_factory.assert_called_once_with(

@@ -12,7 +12,7 @@
 
 ## 状态、依据和执行纪律
 
-- 2026-10-05：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0–A3 已完成契约、数据库基础、快速受理和后台准备/恢复；A4 开始，A5–A7 待实施。未升级开发库、未启动付费模型验收。
+- 2026-10-05：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0–A4 已完成契约、数据库基础、快速受理、后台准备/恢复及持久计时统计；A5–A7 待实施。未升级开发库、未启动付费模型验收。
 - 依据：[设计](2026-10-04-textbook-async-preparation-timeline-design.md)及两轮 SB3 实测记录。此增量不改原 Task 8 完成结论。
 - Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skills-textbook-refactor`；分支当前 `feature/more-to-skills-textbook-refactor`。下面精确文件路径相对此目录。
 - 读取根目录、src/server 与 web 的 AGENTS.md；界面遵守 DESIGN.md。保留用户修改的业务动作文档和未追踪 PDF，不重置、不纳入提交。
@@ -107,6 +107,8 @@
 7. 补真实子进程中断准备/跨进程接管；同时验证仅已结束且 IO 已收尾任务可删，图书馆原文件/解析记录不变。更新 CHANGELOG、提交。
 
 ## Task A4：持久分段计时、准备活动和快照 API
+
+状态：已完成。相关单测120 passed；隔离PG与真实localhost:9000 MinIO组合74 passed、1个另建数据库的旧对照用例排除；Ruff/diff检查通过。新增086记录等待和终态事务边界；实际workflow消费至terminal回调、恢复提交独立窗口、准确准备计数及活动预算、同连接快照、跨轮完成数与本轮样本均有回归。独立审查补齐中断开放段、恢复重连前边界和首次来源计时缺失的partial投影。计时状态从持久区间推导，attempt表的默认timing_status字段不作为API真值；缺失不补造。开发库未迁移、前端未接入，不宣称付费模型或真实UI工作流通过。
 
 **Files:**
 - Modify: `src/server/services/education_book_timing.py`。

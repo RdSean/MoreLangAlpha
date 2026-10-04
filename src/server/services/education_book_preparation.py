@@ -20,8 +20,11 @@ from src.server.database.education_books import (
     prepared_book_source_is_committed,
 )
 from src.server.services.education_textbook_source_snapshots import freeze_book_source
-from src.server.services.education_book_activity import publish_book_activity_hint
-from src.server.services.education_book_timing import book_phase
+from src.server.services.education_book_activity import (
+    publish_book_activity_hint,
+    BookActivityObserver,
+)
+from src.server.services.education_book_timing import book_phase, measured_book_phase
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,12 @@ async def prepare_book_item(
     token = UUID(str(item["attempt_token"]))
     finished = asyncio.Event()
     owner = asyncio.current_task()
+    observer = BookActivityObserver(
+        job_id=item["job_id"],
+        item_id=item_id,
+        attempt_token=token,
+        item_kind="structure",
+    )
 
     async def current() -> None:
         await assert_book_preparation_current(item_id=item_id, attempt_token=token)
@@ -50,6 +59,7 @@ async def prepare_book_item(
             verified_resources=count,
             total_resources=total,
         )
+        await observer.report_preparation_progress(count, total)
 
     async def heartbeat() -> None:
         while not finished.is_set():
@@ -82,24 +92,25 @@ async def prepare_book_item(
             try:
                 descriptor = item["preparation_descriptor"]
                 await verified(0, len(descriptor["artifacts"]))
-                with book_phase(item, "source_freezing"):
-                    frozen = await freeze_book_source(
-                        owner_user_id=item["requested_by_user_id"],
-                        parse_job_id=item["selected_source"]["parse_job_id"],
-                        primary_artifact_id=item["selected_source"][
-                            "primary_artifact_id"
-                        ],
-                        household_id=str(item["household_id"]),
-                        textbook_id=str(item["textbook_id"]),
-                        pinned_bundle=descriptor,
-                        attempt_token=token,
-                        before_write=before_write,
-                        on_verified=verified,
-                        check_cancelled=current,
-                    )
-                    await commit_prepared_book_source(
-                        item_id=item_id, attempt_token=token, source=frozen.source
-                    )
+                async with measured_book_phase(item, "source_freezing"):
+                    with book_phase(item, "source_freezing"):
+                        frozen = await freeze_book_source(
+                            owner_user_id=item["requested_by_user_id"],
+                            parse_job_id=item["selected_source"]["parse_job_id"],
+                            primary_artifact_id=item["selected_source"][
+                                "primary_artifact_id"
+                            ],
+                            household_id=str(item["household_id"]),
+                            textbook_id=str(item["textbook_id"]),
+                            pinned_bundle=descriptor,
+                            attempt_token=token,
+                            before_write=before_write,
+                            on_verified=verified,
+                            check_cancelled=current,
+                        )
+                        await commit_prepared_book_source(
+                            item_id=item_id, attempt_token=token, source=frozen.source
+                        )
             finally:
                 finished.set()
                 await lease_task

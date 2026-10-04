@@ -25,7 +25,7 @@ from src.server.services.education_book_jobs import (
     finalize_book_item,
 )
 from src.server.services.education_book_activity import publish_book_activity_hint
-from src.server.services.education_book_timing import book_phase
+from src.server.services.education_book_timing import book_phase, measured_book_phase
 from src.server.services.runs.cancel import publish_cancel_nudge
 from src.server.services.runs.executor import LocalRunExecutor
 from src.server.services.workspace_manager import WorkspaceManager
@@ -38,27 +38,32 @@ async def recover_completed_book_item(item: Mapping[str, Any]) -> dict[str, Any]
     if workspace_id is None:
         raise RuntimeError("Managed textbook attempt has no workspace")
     execution_id = str(UUID(str(item["execution_id"])))
-    session = await WorkspaceManager.get_instance().recover_managed_textbook_session(
-        workspace_id=str(workspace_id),
-        policy=education_book_policy(execution_id),
-    )
     recovered_item = dict(item)
-    if recovered_item.get("operation") == "structure":
-        source = await _read_storage_object(str(recovered_item["source_markdown_key"]))
-        if source is None:
-            raise RuntimeError("Frozen textbook Markdown is unavailable")
-        try:
-            recovered_item["source_total_lines"] = len(
-                source.decode("utf-8").splitlines()
+    async with measured_book_phase(recovered_item, "finalization"):
+        with book_phase(recovered_item, "recovery_finalization"):
+            session = (
+                await WorkspaceManager.get_instance().recover_managed_textbook_session(
+                    workspace_id=str(workspace_id),
+                    policy=education_book_policy(execution_id),
+                )
             )
-        except UnicodeDecodeError as exc:
-            raise RuntimeError("Frozen textbook Markdown is not UTF-8") from exc
-    with book_phase(recovered_item, "recovery_finalization"):
-        return await finalize_book_item(
-            item=recovered_item,
-            task=build_execution_task(recovered_item),
-            sandbox=session.sandbox,
-        )
+            if recovered_item.get("operation") == "structure":
+                source = await _read_storage_object(
+                    str(recovered_item["source_markdown_key"])
+                )
+                if source is None:
+                    raise RuntimeError("Frozen textbook Markdown is unavailable")
+                try:
+                    recovered_item["source_total_lines"] = len(
+                        source.decode("utf-8").splitlines()
+                    )
+                except UnicodeDecodeError as exc:
+                    raise RuntimeError("Frozen textbook Markdown is not UTF-8") from exc
+            return await finalize_book_item(
+                item=recovered_item,
+                task=build_execution_task(recovered_item),
+                sandbox=session.sandbox,
+            )
 
 
 async def _signal_cancelled_book_runtime(

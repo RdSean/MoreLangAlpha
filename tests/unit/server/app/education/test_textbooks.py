@@ -34,6 +34,17 @@ KNOWLEDGE_POINT_ID = UUID("4c3f4d0c-a508-4bff-a89f-a3a584a2fe86")
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("result,code", [(None,404), (ValueError("Invalid statistics cursor"),400)])
+async def test_statistics_http_rejects_inaccessible_job_or_invalid_cursor(client, monkeypatch, result, code):
+    client._transport.app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    statistics = AsyncMock(side_effect=result if isinstance(result,Exception) else None, return_value=result)
+    monkeypatch.setattr(textbook_routes, "get_book_job_statistics", statistics)
+    response = await client.get(f"/api/v1/education/book-jobs/{MANAGED_JOB_ID}/statistics?limit=1&cursor=invalid")
+    assert response.status_code == code
+    statistics.assert_awaited_once_with(job_id=MANAGED_JOB_ID, parent_user_id="parent-1", cursor="invalid", limit=1)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "error,code",
     [

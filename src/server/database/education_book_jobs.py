@@ -964,7 +964,8 @@ async def get_book_job_for_parent(
     """Return the public job snapshot when the user is a parent in its household."""
 
     job_id = UUID(str(job_id))
-    async with get_db_connection() as conn:
+    async with get_db_connection() as conn, conn.transaction():
+        await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
@@ -1016,14 +1017,23 @@ async def get_book_job_for_parent(
             job = await cur.fetchone()
             if job is None:
                 return None
+            from src.server.database.education_book_timing import (
+                get_current_attempt_summaries,
+                get_material_chain_progress,
+            )
+
+            timings = await get_current_attempt_summaries(job_id=job_id, conn=conn)
+            material_progress = (
+                await get_material_chain_progress(job_id=job_id, conn=conn)
+                if job["kind"] == "materials"
+                else None
+            )
 
     result = dict(job)
     result["job_id"] = str(result["job_id"])
     result["textbook_id"] = str(result["textbook_id"])
     result["items"] = [dict(item) for item in result["items"]]
-    from src.server.database.education_book_timing import get_current_attempt_summaries
-
-    timings = await get_current_attempt_summaries(job_id=job_id)
+    result["material_progress"] = material_progress
     for item in result["items"]:
         current = timings.get(str(item["item_id"]))
         item["timing_summary"] = current["timing"] if current else None

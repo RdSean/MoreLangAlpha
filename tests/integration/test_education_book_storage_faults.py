@@ -348,13 +348,13 @@ from dotenv import load_dotenv
 load_dotenv()
 import psycopg
 from psycopg.rows import dict_row
-from src.server.database import education_book_jobs as jobs, education_books as books, education_book_deletion as deletion
+from src.server.database import education_book_jobs as jobs, education_books as books, education_book_deletion as deletion, education_book_timing as timing, education_book_activity as activity
 from src.server.services import education_book_preparation as prep, education_textbook_source_snapshots as snapshots
 @asynccontextmanager
 async def connection():
     async with await psycopg.AsyncConnection.connect(os.environ['SOURCE_FAULT_DB'], autocommit=True, row_factory=dict_row) as conn:
         yield conn
-jobs.get_db_connection = books.get_db_connection = connection
+jobs.get_db_connection = books.get_db_connection = timing.get_db_connection = activity.get_db_connection = connection
 deletion.get_db_connection_string = lambda: os.environ['SOURCE_FAULT_DB']
 prep.publish_book_activity_hint = lambda *args: asyncio.sleep(0)
 write = snapshots._write_object

@@ -12,6 +12,42 @@ import pytest
 
 
 @pytest.mark.asyncio
+async def test_resource_confirmation_is_coalesced_at_one_second_and_stops_at_budget():
+    from src.server.services.education_book_activity import BookActivityObserver
+
+    now = [0.0]
+    append = AsyncMock(
+        side_effect=[
+            {"outcome": "stored", "high_water_seq": 1},
+            {"outcome": "budget_exhausted", "high_water_seq": 2},
+        ]
+    )
+    observer = BookActivityObserver(
+        job_id=uuid4(),
+        item_id=uuid4(),
+        attempt_token=uuid4(),
+        item_kind="structure",
+        append=append,
+        publish=AsyncMock(),
+        monotonic=lambda: now[0],
+    )
+    await observer.report_preparation_progress(0, 10)
+    await observer.report_preparation_progress(1, 10)
+    now[0] = 0.5
+    await observer.report_preparation_progress(2, 10)
+    now[0] = 1.0
+    await observer.report_preparation_progress(3, 10)
+    now[0] = 2.0
+    await observer.report_preparation_progress(10, 10)
+    assert append.await_count == 2
+    assert [
+        call.kwargs["metadata"]["verified_resources"] for call in append.await_args_list
+    ] == [1, 3]
+    assert all(call.kwargs["kind"] == "resource" for call in append.await_args_list)
+    assert "attempt_token" not in append.await_args.kwargs["metadata"]
+
+
+@pytest.mark.asyncio
 async def test_service_stages_are_fenced_nonterminal_and_cannot_be_agent_reported():
     from src.server.services.education_book_activity import BookActivityObserver
 

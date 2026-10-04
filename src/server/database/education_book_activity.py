@@ -251,6 +251,8 @@ async def append_book_activity_event(
                   ON items.job_id = jobs.job_id
                 WHERE jobs.job_id = %s AND items.item_id = %s
                   AND items.attempt_token = %s AND items.status = 'running'
+                  AND jobs.cancel_requested_at IS NULL
+                  AND (items.execution_phase<>'source_freezing' OR items.lease_expires_at>NOW())
                 FOR UPDATE OF jobs, items
                 """,
                 (job_id, item_id, attempt_token),

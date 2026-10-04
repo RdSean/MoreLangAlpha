@@ -2,6 +2,14 @@
 
 ## 2026-10-05
 
+### 开发 A4：持久分段计时、来源活动与统计快照
+
+- 新增086迁移，将claim等待、来源ready后的运行等待与attempt终态总区间同事务记录；来源冻结、sandbox、输入staging、实际消费workflow到terminal回调、验收提交保存独立monotonic测量，不将PTC执行称为纯模型思考。恢复验收从sandbox重连前另开段，关闭旧开放窗口并拒绝迟到补写中断耗时。
+- job与statistics使用同连接只读repeatable-read快照；新增家长统计API及稳定游标，保留全部历史attempt。重试链的可靠讲义完成数含上轮成功项，中位/最长仅采本轮成功material，附加材料单列。计时可用性由持久区间推导，缺失、时钟倒退和故障返回partial/unavailable，不以相减补造耗时。
+- 准备verified计数先持久化，再至多每秒一条resource活动；明细预算耗尽仍可读取准确计数，取消、过期租约与旧token拒绝活动写入。沿用PG/SSE与原活动预算，不依赖LangSmith。
+- 相关单测120 passed；仅langalpha_test及真实localhost:9000 MinIO组合74 passed、1个另建数据库的旧对照用例排除。覆盖幂等结束、恢复中快照、来源计时缺失、业务成功不被计时故障覆盖、跨轮统计、预算及原存储故障矩阵；新增审查回归先失败再通过，独立复核无阻塞项，Ruff/diff检查通过。
+- 开发库未迁移，未调用付费模型、未删除已有教材；前端整页timeline与真实界面/模型验收仍待A5–A6，不将后台测试称为完整用户工作流通过。
+
 ### 开发 A3：教材后台准备、恢复与存储收尾
 
 - 来源冻结由现有structure item的有界后台任务执行；PG全局准备锁与running状态限制全部署并发1，长复制不占PTC reservation，扫描继续取消/恢复。ready后同一attempt进入运行队列，结构重试复用已冻结原文。

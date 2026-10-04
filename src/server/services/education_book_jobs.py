@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from contextlib import aclosing
 import hashlib
 import json
 import logging
@@ -50,7 +51,11 @@ from src.server.services.education_book_activity import (
     publish_book_activity_hint,
 )
 from src.server.services.education_book_progress import progress_contract
-from src.server.services.education_book_timing import book_phase
+from src.server.services.education_book_timing import (
+    book_phase,
+    measured_book_phase,
+    BookPhaseRecorder,
+)
 from src.server.services.education_book_structure import (
     MoreToSkillsIdentity,
     TrustedBookSource,
@@ -765,17 +770,17 @@ async def _launch_book_item(
             parent_user_id=str(item["requested_by_user_id"])
         )
         policy = education_book_policy(identity["execution_id"])
-        with book_phase(item, "sandbox_preparation", measurements=timings):
-            session = await WorkspaceManager.get_instance().provision_managed_textbook_session(
-                workspace_id=workspace_id,
-                policy=policy,
-            )
-        with book_phase(item, "input_staging", measurements=timings):
-            staged = await stage_book_execution(
-                item=item,
-                task=task,
-                sandbox=session.sandbox,
-            )
+        async with measured_book_phase(item, "sandbox_preparation"):
+            with book_phase(item, "sandbox_preparation", measurements=timings):
+                session = await WorkspaceManager.get_instance().provision_managed_textbook_session(
+                    workspace_id=workspace_id,
+                    policy=policy,
+                )
+        async with measured_book_phase(item, "input_staging"):
+            with book_phase(item, "input_staging", measurements=timings):
+                staged = await stage_book_execution(
+                    item=item, task=task, sandbox=session.sandbox
+                )
         item.update(staged)
         run_id = str(uuid4())
         item["run_id"] = run_id
@@ -842,7 +847,16 @@ async def _launch_book_item(
             event_observer=activity_observer,
         )
 
+        execution_timing = BookPhaseRecorder(item, "ptc_execution")
+
         async def on_terminal(task_info: Any, status: str) -> None:
+            await execution_timing.finish(
+                "succeeded"
+                if status == "completed"
+                else "cancelled"
+                if status == "cancelled"
+                else "failed"
+            )
             retain_runtime_for_recovery = False
             try:
                 stop_remaining = status != "completed" and not (
@@ -854,12 +868,11 @@ async def _launch_book_item(
                         await activity_observer.report_service_stage(
                             "service_finalizing"
                         )
-                        with book_phase(item, "finalization"):
-                            result = await finalize_book_item(
-                                item=item,
-                                task=task,
-                                sandbox=session.sandbox,
-                            )
+                        async with measured_book_phase(item, "finalization"):
+                            with book_phase(item, "finalization"):
+                                result = await finalize_book_item(
+                                    item=item, task=task, sandbox=session.sandbox
+                                )
                         await publish_book_activity_hint(
                             item["job_id"],
                             result.get("high_water_seq")
@@ -916,10 +929,17 @@ async def _launch_book_item(
             input_state=input_state,
             config=graph_config,
         )
+
+        async def measured_workflow():
+            await execution_timing.start()
+            async with aclosing(workflow):
+                async for event in workflow:
+                    yield event
+
         await LocalRunExecutor.get_instance().start_run(
             thread_id=thread_id,
             run_id=run_id,
-            workflow_generator=workflow,
+            workflow_generator=measured_workflow(),
             metadata={
                 "workspace_id": workspace_id,
                 "managed_execution": identity,

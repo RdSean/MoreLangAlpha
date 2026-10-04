@@ -116,6 +116,11 @@ class BookAttemptTimingResponse(_StrictModel):
     phases: list[BookPhaseTimingResponse] = Field(default_factory=list)
 
 
+class BookBatchProgressResponse(_StrictModel):
+    completed: int = Field(ge=0)
+    total: int = Field(ge=0)
+
+
 class BookJobSummaryResponse(_StrictModel):
     job_id: str
     kind: BookJobKind
@@ -134,6 +139,7 @@ class BookJobSummaryResponse(_StrictModel):
     request_round: int = Field(default=1, ge=1)
     round_accepted_at: datetime | None = None
     server_now: datetime | None = None
+    material_progress: BookBatchProgressResponse | None = None
 
 
 class BookMaterialCountsResponse(_StrictModel):
@@ -296,7 +302,7 @@ class BookJobItemResponse(_StrictModel):
 class BookAttemptStatisticsResponse(_StrictModel):
     item_id: UUID
     kind: BookJobItemKind
-    status: BookJobItemStatus
+    status: BookJobItemStatus | Literal["interrupted"]
     knowledge_point_title: str | None = None
     timing: BookAttemptTimingResponse
 

@@ -93,6 +93,7 @@ class BookActivityObserver:
         self._tool_budget_exhausted = False
         self._pending_drops = 0
         self._last_drop_flush_at: float | None = None
+        self._resource_reported_at: float | None = None
 
     async def __call__(self, event_type: str, data: Mapping[str, Any]) -> None:
         if self._details_disabled:
@@ -132,6 +133,32 @@ class BookActivityObserver:
             logger.warning(
                 "Textbook service progress unavailable for job %s", self.job_id
             )
+
+    async def report_preparation_progress(self, verified: int, total: int) -> None:
+        """The accurate counter is persisted separately; detail delivery is bounded."""
+        if self._details_disabled or self._budget_exhausted or verified <= 0:
+            return
+        now = self._monotonic()
+        if (
+            self._resource_reported_at is not None
+            and now - self._resource_reported_at < 1
+        ):
+            return
+        self._resource_reported_at = now
+        try:
+            await self._store(
+                dedupe_key=f"resource:{self.item_id}:{self.attempt_token}:{verified}",
+                kind="resource",
+                status="running",
+                message="已校验教材来源资源",
+                metadata={
+                    "origin": "service",
+                    "verified_resources": verified,
+                    "total_resources": total,
+                },
+            )
+        except Exception:
+            logger.warning("Book resource activity unavailable for job %s", self.job_id)
 
     async def _observe_tool_calls(self, data: Mapping[str, Any]) -> None:
         calls = data.get("tool_calls")
