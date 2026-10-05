@@ -23,6 +23,8 @@ for (const theme of ['light', 'dark']) {
       const timeline = page.getByRole('region', { name: '教材处理时间线' });
       const enter = timeline.getByRole('button', { name: '进入学习空间', exact: true });
       await expect(enter).toBeVisible();
+      await expect(timeline.locator('.book-processing-title-row .book-processing-status')).toHaveText('已完成');
+      await expect(timeline.locator('.book-service-glyph.is-completed')).toHaveCount(6);
       await expect(timeline.getByText('28,000', { exact: true })).toBeVisible();
       await expect(timeline.getByText('总耗时', { exact: true })).toBeVisible();
       const fit = await timeline.getByTestId('book-processing-scroll').evaluate((element) => element.scrollHeight <= element.clientHeight + 2);

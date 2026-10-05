@@ -48,7 +48,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 0 0 12px;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--color-border-muted);
 }
 .book-processing-scroll {
   min-height: 0;
@@ -58,14 +59,67 @@
   scrollbar-gutter: stable;
 }
 .book-processing-content {
-  max-width: 660px;
+  max-width: 740px;
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   margin: 0 auto;
-  padding: 20px 28px;
+  padding: 28px 24px 16px;
   overflow-wrap: anywhere;
+}
+.book-processing-frame {
+  flex-shrink: 0;
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius);
+  background: var(--color-bg-tool-card);
+}
+.book-processing-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.book-processing-status {
+  flex-shrink: 0;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-page);
+}
+.book-processing-status[data-status='succeeded'] {
+  color: var(--color-text-primary);
+}
+.book-processing-status[data-status='failed'] {
+  color: var(--color-loss);
+}
+.book-processing-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px 6px 20px;
+}
+.book-processing-commands {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+.book-processing-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 0 20px 12px;
+  line-height: 18px;
+}
+.book-processing-tip > svg {
+  margin-top: 2px;
+}
+.book-processing-body {
+  border-top: 1px solid var(--color-border-muted);
+  padding: 12px 20px;
 }
 .book-timing-summary dd {
   margin-left: 0;
@@ -73,6 +127,7 @@
   font-variant-numeric: tabular-nums;
 }
 .book-service-timeline {
+  flex-shrink: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -100,15 +155,15 @@
   position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
   padding: 0 0 12px;
   min-height: 32px;
 }
 .book-service-node:not(:last-child)::before {
   content: '';
   position: absolute;
-  left: 7px;
-  top: 16px;
+  left: 9px;
+  top: 20px;
   bottom: 0;
   width: 1px;
   background: var(--color-border-muted);
@@ -118,9 +173,28 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 16px;
+  flex: 0 0 20px;
   height: 20px;
-  background: var(--color-bg-page);
+  border-radius: 50%;
+  background: var(--color-bg-tool-card);
+}
+.book-service-glyph.is-completed {
+  background: var(--color-accent-primary);
+  color: var(--color-text-on-accent);
+}
+.book-service-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px 88px;
+  align-items: start;
+  gap: 10px;
+  line-height: 20px;
+}
+.book-service-status,
+.book-service-duration {
+  text-align: right;
+}
+.book-service-duration {
+  white-space: nowrap;
 }
 .book-service-detail {
   display: flex;
@@ -143,6 +217,16 @@
   margin-bottom: 4px;
   min-width: 0;
 }
+.book-processing-content > .book-waiting-quote {
+  margin-top: auto;
+  margin-bottom: 0;
+  padding-top: 20px;
+}
+.book-activity-content > .book-waiting-quote {
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 12px;
+}
 .book-material-delivery {
   margin-top: 8px;
 }
@@ -151,6 +235,10 @@
   margin-top: 12px;
   padding-top: 12px;
   text-align: center;
+}
+.book-processing-frame > .book-processing-completion {
+  margin-top: 0;
+  padding: 12px 20px 16px;
 }
 .book-processing-completion dd {
   margin-left: 0;
@@ -284,11 +372,29 @@
 
 @media (max-width: 767px) {
   .book-processing-header {
-    gap: 8px;
-    padding: 0 0 10px;
+    padding: 12px 14px;
   }
   .book-processing-content {
-    padding: 16px 20px;
+    padding: 16px 12px 12px;
+  }
+  .book-processing-content > .book-waiting-quote {
+    padding-top: 8px;
+  }
+  .book-processing-actions {
+    padding: 4px 6px 4px 14px;
+  }
+  .book-processing-actions > h2 {
+    font-size: 12px;
+  }
+  .book-processing-tip {
+    padding: 0 14px 10px;
+  }
+  .book-processing-body {
+    padding: 10px 14px;
+  }
+  .book-service-row {
+    grid-template-columns: minmax(0, 1fr) 48px 64px;
+    gap: 8px;
   }
   .book-navigator-tab {
     min-height: 44px;

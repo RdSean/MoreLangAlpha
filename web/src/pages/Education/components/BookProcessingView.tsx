@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, StopCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import type {
@@ -39,6 +39,8 @@ interface Props {
   source?: FrozenBookSource | null;
   onReturnToReading: () => void;
   onOpenMaterial?: (skillKpId: string) => void;
+  onCancel?: () => void;
+  cancelPending?: boolean;
 }
 
 export function BookProcessingView({
@@ -56,6 +58,8 @@ export function BookProcessingView({
   source,
   onReturnToReading,
   onOpenMaterial,
+  onCancel,
+  cancelPending = false,
 }: Props) {
   const { t } = useTranslation();
   const activity = projection ?? projectBookActivity(job, events);
@@ -71,8 +75,10 @@ export function BookProcessingView({
         data-testid="book-processing-scroll"
       >
         <div className="book-processing-content">
+          <div className="book-processing-frame">
           <header className="book-processing-header">
             <div className="min-w-0 flex-1">
+              <div className="book-processing-title-row">
               <h1 className="book-processing-title font-bold" title={bookTitle}>
                 {bookTitle ||
                   t(
@@ -81,32 +87,61 @@ export function BookProcessingView({
                       : 'bookProcessing.materials',
                   )}
               </h1>
+              {terminal && (
+                <span className="book-processing-status" data-status={job.status}>
+                  {t(`bookProcessing.status.${job.status}`)}
+                </span>
+              )}
+              </div>
               {bookSourceInfo(source) && (
                 <p className="mt-1 text-xs text-muted-foreground">
                   {bookSourceInfo(source)}
                 </p>
               )}
-              <p className="mt-1 text-xs text-muted-foreground">
+            </div>
+          </header>
+          <div className="book-processing-actions">
+            <h2 className="min-w-0 text-sm font-semibold">
                 {t(
                   job.kind === 'structure'
                     ? 'bookProcessing.structure'
                     : 'bookProcessing.materials',
-                )}{' '}
-                · {t(`bookProcessing.status.${job.status}`)}
-              </p>
-            </div>
+                )}
+            </h2>
             {!terminal && (
+              <div className="book-processing-commands">
+              {onCancel && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="min-h-11 px-2 text-muted-foreground"
+                  disabled={cancelPending}
+                  onClick={onCancel}
+                  aria-label={t('bookProcessing.cancelRequest')}
+                >
+                  <StopCircle className="mr-1.5 size-3.5" aria-hidden="true" />
+                  {t('common.cancel')}
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
-                className="min-h-11 shrink-0"
+                className="min-h-11 shrink-0 px-2"
                 onClick={onReturnToReading}
               >
                 <ArrowLeft className="mr-1.5 size-3.5" aria-hidden="true" />
                 {t('bookProcessing.reading')}
               </Button>
+              </div>
             )}
-          </header>
+          </div>
+          {!terminal && (
+            <p className="book-processing-tip text-xs text-muted-foreground">
+              <ArrowUpRight className="size-3.5 shrink-0" aria-hidden="true" />
+              {t('bookProcessing.backgroundTip')}
+            </p>
+          )}
+          <div className="book-processing-body">
           <div className="book-processing-meta text-xs text-muted-foreground">
             {activity.currentItem && job.kind === 'materials' && (
               <p
@@ -154,6 +189,20 @@ export function BookProcessingView({
             connected={connected}
             activityUnavailable={activity.activityUnavailable}
           />
+          <BookMaterialDeliveryList
+            job={job}
+            knowledgePoints={knowledgePoints}
+            onOpenMaterial={onOpenMaterial}
+          />
+          </div>
+          {terminal && (
+            <BookProcessingCompletion
+              job={job}
+              totalMs={timing.roundMs}
+              onEnterLearning={onReturnToReading}
+            />
+          )}
+          </div>
           {!terminal &&
             activity.currentItem &&
             !activity.activityUnavailable &&
@@ -169,18 +218,6 @@ export function BookProcessingView({
                 liveAfterSeq={liveAfterSeq}
               />
             ))}
-          <BookMaterialDeliveryList
-            job={job}
-            knowledgePoints={knowledgePoints}
-            onOpenMaterial={onOpenMaterial}
-          />
-          {terminal && (
-            <BookProcessingCompletion
-              job={job}
-              totalMs={timing.roundMs}
-              onEnterLearning={onReturnToReading}
-            />
-          )}
         </div>
       </div>
     </section>

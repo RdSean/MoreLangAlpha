@@ -539,6 +539,36 @@ describe('TextbookWorkbenchPage', () => {
     expect(screen.queryByRole('button', { name: '活动' })).not.toBeInTheDocument();
   });
 
+  it('hides student assignment during structure processing and moves cancel into the timeline', () => {
+    pageState.activityJob = processingJob();
+    pageState.workbench.current_job = pageState.activityJob;
+    renderWorkbench('/textbooks/book-1?activity=job-1&panel=processing');
+    expect(screen.queryByRole('button', { name: '给学生使用' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '取消本次生成' }).closest('.book-processing-view')).not.toBeNull();
+    expect(screen.getAllByRole('button', { name: '取消本次生成' })).toHaveLength(1);
+  });
+
+  it('keeps one cancel control beside the compact processing title while reading', () => {
+    pageState.activityJob = processingJob();
+    pageState.workbench.current_job = pageState.activityJob;
+    renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1');
+    expect(screen.getByRole('button', { name: '取消本次生成' }).closest('aside')).not.toBeNull();
+    expect(screen.getAllByRole('button', { name: '取消本次生成' })).toHaveLength(1);
+  });
+
+  it.each(['error', 'loading', 'foreign', 'access_lost'])('keeps cancellation reachable when the full activity is %s', async (state) => {
+    pageState.workbench.current_job = processingJob();
+    if (state === 'error') pageState.activityError = { isAxiosError: true, response: { status: 503 } };
+    if (state === 'foreign') pageState.activityJob = processingJob({ textbook_id: 'book-2' });
+    if (state === 'access_lost') {
+      pageState.activityJob = processingJob();
+      pageState.activityAccessLost = true;
+    }
+    renderWorkbench('/textbooks/book-1?activity=job-1&panel=processing');
+    await userEvent.setup().click(screen.getByRole('button', { name: '取消本次生成' }));
+    expect(pageState.cancelJob).toHaveBeenCalledWith('job-1');
+  });
+
   it('dismisses completed processing when entering learning and preserves the reader selection', async () => {
     pageState.activityJob = processingJob({ status: 'succeeded' });
     renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1&panel=processing');

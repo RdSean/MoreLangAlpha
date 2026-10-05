@@ -17,6 +17,7 @@
     "status": { "queued": "等待开始", "running": "处理中", "succeeded": "已完成", "partially_succeeded": "部分完成", "failed": "处理失败", "cancelled": "已取消", "waiting": "等待", "completed": "已完成", "not_run": "未执行" },
     "phase": { "initial_queue": "受理等待", "source_freezing": "来源准备", "runtime_queue": "执行等待", "sandbox_preparation": "运行环境准备", "input_staging": "输入文件准备", "ptc_execution": "PTC 执行", "finalization": "验收提交" },
     "phaseRunning": "进行中",
+    "cancelRequest": "取消本次生成", "backgroundTip": "可以离开此页面，任务会在后台继续；返回后可查看进度。", "reportedAt": "上报时间 {{time}}",
     "terminal": { "material": "讲义已提交", "structure": "教材结构已提交", "supplementary": "附加材料已提交", "item": "处理项已完成", "job": "任务已完成" },
     "stage": { "service_preparing": "正在准备处理文件", "service_source_preparing": "正在准备教材来源", "service_finalizing": "正在验收并提交产物" }
   },

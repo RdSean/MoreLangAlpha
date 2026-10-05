@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
 import { BookProcessingView } from '../components/BookProcessingView';
@@ -7,6 +7,39 @@ import { processingJob } from './bookProcessingFixtures';
 beforeEach(() => { void i18n.changeLanguage('zh-CN'); });
 
 describe('BookProcessingView', () => {
+  it('places cancellation with the processing title and offers a background reading exit', () => {
+    const job = processingJob();
+    const onCancel = vi.fn();
+    const onReturn = vi.fn();
+    const props = { job, events: [], connected: true, timing: projectBookTiming(job, null), onReturnToReading: onReturn, onCancel, cancelPending: false };
+    const view = render(<BookProcessingView {...props} bookTitle="原书" />);
+    const actions = screen.getByRole('heading', { name: '教材结构' }).parentElement!;
+    fireEvent.click(within(actions).getByRole('button', { name: '取消本次生成' }));
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(screen.getByText('可以离开此页面，任务会在后台继续；返回后可查看进度。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '返回阅读' }).querySelector('svg')).not.toBeNull();
+    view.rerender(<BookProcessingView {...props} cancelPending />);
+    expect(screen.getByRole('button', { name: '取消本次生成' })).toBeDisabled();
+  });
+
+  it('shows a terminal badge beside the book title without cancellation', () => {
+    const job = processingJob({ status: 'succeeded' });
+    job.items[0].status = 'succeeded';
+    render(<BookProcessingView job={job} bookTitle="原书" events={[]} connected={false} timing={projectBookTiming(job, null)} onReturnToReading={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.getByRole('heading', { name: '原书' }).parentElement?.querySelector('.book-processing-status')).toHaveTextContent('已完成');
+    expect(screen.queryByRole('button', { name: '取消本次生成' })).not.toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: '来源准备' }).querySelector('.book-service-glyph.is-completed')).not.toBeNull();
+  });
+
+  it('separates stage names from their aligned status and reliable elapsed time', () => {
+    const job = processingJob();
+    render(<BookProcessingView job={job} events={[]} connected={false} timing={projectBookTiming(job, Date.parse(job.server_now!))} onReturnToReading={vi.fn()} />);
+    const source = screen.getByRole('listitem', { name: '来源准备' });
+    expect(source.querySelector('.book-service-phase')).toHaveTextContent('来源准备');
+    expect(source.querySelector('.book-service-phase')).not.toHaveTextContent('进行中');
+    expect(source.querySelector('.book-service-status')).toHaveTextContent('进行中');
+    expect(source.querySelector('.book-service-duration')).toHaveTextContent('8 秒');
+  });
   it('keeps tool diagnostics in the PTC phase and resets disclosure when the phase changes', () => {
     const job = processingJob();
     job.items[0].execution_phase = 'ptc_execution';
@@ -211,9 +244,7 @@ describe('BookProcessingView', () => {
     expect(ptc).toHaveTextContent('未记录');
     expect(ptc).toHaveTextContent('正在组织教材结构');
     expect(screen.getAllByText('正在组织教材结构')).toHaveLength(1);
-    expect(
-      screen.getByText('正在组织教材结构').closest('li')?.querySelector('time'),
-    ).toHaveAttribute('dateTime', events[0].created_at);
+    expect(screen.getByText('正在组织教材结构').closest('li')?.querySelector('time')).toBeNull();
     expect(
       screen
         .getByText('正在组织教材结构')

@@ -22,10 +22,26 @@ for (const theme of ['light', 'dark']) {
       await page.goto('/textbooks/book-1?activity=job-1&panel=processing&kp=reading&view=source');
       const timeline = page.getByRole('region', { name: '教材处理时间线' });
       await expect(timeline).toBeVisible();
+      await expect(timeline.getByRole('button', { name: '取消本次生成' })).toBeVisible();
+      await expect(page.locator('.textbook-workbench-header').getByRole('button', { name: '取消本次生成' })).toHaveCount(0);
+      await expect(timeline.getByText('可以离开此页面，任务会在后台继续；返回后可查看进度。')).toBeVisible();
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       const bounds = await layoutBounds(page);
       expect(bounds.page).toBe(bounds.viewport);
       expect(bounds.timeline).toBeGreaterThan(200);
+      const frame = await timeline.locator('.book-processing-frame').evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { border: style.borderTopWidth, background: style.backgroundColor, y: element.getBoundingClientRect().y };
+      });
+      expect(frame.border).toBe('1px');
+      expect(frame.background).not.toBe('rgba(0, 0, 0, 0)');
+      expect(frame.y - (await timeline.boundingBox()).y).toBeLessThanOrEqual(32);
+      const ptc = timeline.getByRole('listitem', { name: 'PTC 执行' });
+      const phase = await ptc.locator('.book-service-phase').boundingBox();
+      const status = await ptc.locator('.book-service-status').boundingBox();
+      const duration = await ptc.locator('.book-service-duration').boundingBox();
+      expect(status.x).toBeGreaterThan(phase.x + phase.width);
+      expect(duration.x).toBeGreaterThan(status.x + status.width);
       await page.evaluate(() => document.fonts.ready);
       const elapsed = timeline.getByTestId('book-processing-elapsed');
       const initial = await elapsed.textContent();
@@ -57,6 +73,7 @@ test('verified N/N waits for source commit and refresh retains the processing vi
   await page.goto('/textbooks/book-1');
   const timeline = page.getByRole('region', { name: '教材处理时间线' });
   await expect(timeline.getByText('已校验 2/3 个资源')).toBeVisible();
+  await expect(page.getByRole('button', { name: '给学生使用' })).toHaveCount(0);
   await expect(page).toHaveURL(/panel=processing/);
   snapshot = { ...snapshot, items: [{ ...snapshot.items[0], preparation_progress: { verified_resources: 3, total_resources: 3 } }] };
   await expect(timeline.getByText('已校验 3/3 个资源')).toBeVisible({ timeout: 8000 });
@@ -88,6 +105,23 @@ test('reading, compact and full layouts share one stream and restore reading pos
   await expect(reader).toBeVisible();
   await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThanOrEqual(before - 2);
   expect(streamRequests).toBe(1);
+});
+
+test('cancel remains reachable when the activity snapshot fails', async ({ page }) => {
+  const snapshot = processingJob({ kind: 'materials' });
+  await installProcessingMocks(page, { getJob: () => snapshot, ready: true });
+  let cancelled = false;
+  await mockAPI(page, {
+    'GET /education/book-jobs/job-1': (route) => route.fulfill({ status: 503, body: '{}' }),
+    'POST /education/book-jobs/job-1/cancel': (route) => {
+      cancelled = true;
+      return json(route, { ...snapshot, status: 'cancelled' });
+    },
+  });
+  await page.goto('/textbooks/book-1?activity=job-1&panel=processing');
+  await expect(page.getByRole('alert')).toHaveText('处理活动暂不可用');
+  await page.locator('.textbook-workbench-header').getByRole('button', { name: '取消本次生成' }).click();
+  await expect.poll(() => cancelled).toBe(true);
 });
 
 test('activity updates replace the latest report without growing the timeline', async ({ page }) => {

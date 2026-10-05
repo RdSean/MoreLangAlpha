@@ -635,7 +635,8 @@ for (const activityStatus of ['available', 'unavailable']) {
     expect(jobRequests).toBeGreaterThan(previousRequests);
     await expect(panel.getByText('正在撰写讲义', { exact: true })).toHaveCount(0);
     await expect(panel.getByText('知识点：冠军的训练方法', { exact: true })).toBeVisible();
-    await expect(panel.getByRole('listitem', { name: 'PTC 执行' })).toContainText('PTC 执行 · 进行中未记录');
+    await expect(panel.getByRole('listitem', { name: 'PTC 执行' }).locator('.book-service-status')).toHaveText('进行中');
+    await expect(panel.getByRole('listitem', { name: 'PTC 执行' }).locator('.book-service-duration')).toHaveText('未记录');
     if (activityStatus === 'unavailable') await expect(panel.getByText('活动暂不可用，任务状态仍会继续更新。')).toBeVisible();
     const activityRequests = (await getCapturedRequests()).filter((request) => request.url.startsWith('/api/v1/education/book-jobs/job-1/events'));
     expect(activityRequests).toHaveLength(1);

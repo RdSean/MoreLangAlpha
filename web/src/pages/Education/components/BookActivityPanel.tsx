@@ -1,4 +1,4 @@
-import { Maximize2, X } from 'lucide-react';
+import { Maximize2, StopCircle, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import type { BookActivityEvent, BookJob, BookSourceStatus } from '../types';
@@ -30,6 +30,8 @@ interface BookActivityPanelProps {
   liveActivity?: BookLiveActivityProjection;
   projection?: BookActivityProjection;
   sourceStatus?: BookSourceStatus;
+  onCancel?: () => void;
+  cancelPending?: boolean;
 }
 
 export function BookActivityPanel({
@@ -44,13 +46,15 @@ export function BookActivityPanel({
   liveActivity,
   projection,
   sourceStatus,
+  onCancel,
+  cancelPending = false,
 }: BookActivityPanelProps) {
   const { t } = useTranslation();
   const activity = projection ?? projectBookActivity(job, events);
   const terminal = isTerminalBookJobStatus(job.status);
   return (
     <aside
-      className="flex min-h-0 flex-col border-l bg-background"
+      className="flex min-h-0 flex-col border-l bg-[var(--color-bg-tool-card)]"
       aria-label={t('bookProcessing.activityPanel')}
     >
       <header className="flex items-center justify-between gap-2 border-b px-4 py-2">
@@ -62,6 +66,18 @@ export function BookActivityPanel({
           )}
         </h2>
         <div className="flex items-center">
+          {!terminal && onCancel && (
+            <button
+              type="button"
+              className="inline-flex size-11 items-center justify-center text-muted-foreground disabled:opacity-50"
+              onClick={onCancel}
+              disabled={cancelPending}
+              aria-label={t('bookProcessing.cancelRequest')}
+              title={t('bookProcessing.cancelRequest')}
+            >
+              <StopCircle className="size-4" aria-hidden="true" />
+            </button>
+          )}
           {onOpenProcessing && (
             <button
               type="button"
@@ -86,7 +102,7 @@ export function BookActivityPanel({
           )}
         </div>
       </header>
-      <div className="min-h-0 overflow-y-auto px-4 py-3">
+      <div className="book-activity-content flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-3">
         <div className="mb-3 text-xs text-muted-foreground">
           <p>
             {t(`bookProcessing.status.${job.status}`)}

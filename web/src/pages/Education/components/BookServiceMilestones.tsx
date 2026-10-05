@@ -118,11 +118,11 @@ export function BookServiceMilestones({
             aria-label={phase}
             className="book-service-node"
           >
-            <span className="book-service-glyph" aria-hidden="true">
+            <span className={`book-service-glyph${milestone.status === 'completed' ? ' is-completed' : ''}`} aria-hidden="true">
               {milestone.status === 'running' ? (
                 <Loader size={14} />
               ) : milestone.status === 'completed' ? (
-                <Check className="size-3.5 text-muted-foreground" />
+                <Check className="size-3" strokeWidth={3} />
               ) : milestone.status === 'failed' ? (
                 <AlertCircle className="size-3.5 text-destructive" />
               ) : milestone.status === 'cancelled' ||
@@ -133,11 +133,14 @@ export function BookServiceMilestones({
               )}
             </span>
             <div className="min-w-0 flex-1">
-              <div className="flex items-start justify-between gap-3 text-sm">
-                <span className="min-w-0 break-words">
-                  {animatedText(`${phase} · ${status}`, active)}
+              <div className="book-service-row text-sm">
+                <span className="book-service-phase min-w-0 break-words">
+                  {animatedText(phase, active)}
                 </span>
-                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                <span className="book-service-status text-xs text-muted-foreground">
+                  {animatedText(status, active)}
+                </span>
+                <span className="book-service-duration text-xs tabular-nums text-muted-foreground">
                   {formatBookDuration(
                     timing.phases.find(
                       (entry) => entry.phase === milestone.phase,
@@ -148,17 +151,11 @@ export function BookServiceMilestones({
               {report && (
                 <div
                   className="book-service-detail text-xs text-muted-foreground"
-                  title={bookActivityText(report)}
+                  title={`${bookActivityText(report)} · ${t('bookProcessing.reportedAt', { time: formatTime(Date.parse(report.created_at)) })}`}
                 >
                   <span className="truncate">
                     {animatedText(bookActivityText(report), active)}
                   </span>
-                  <time
-                    dateTime={report.created_at}
-                    className="shrink-0 tabular-nums"
-                  >
-                    {formatTime(Date.parse(report.created_at))}
-                  </time>
                 </div>
               )}
               {progress && current && (
@@ -197,17 +194,11 @@ export function BookServiceMilestones({
                     {diagnosticsOpen && (
                       <p
                         className="book-service-detail"
-                        title={bookActivityText(diagnostic)}
+                        title={`${bookActivityText(diagnostic)} · ${t('bookProcessing.reportedAt', { time: formatTime(Date.parse(diagnostic.created_at)) })}`}
                       >
                         <span className="truncate">
                           {bookActivityText(diagnostic)}
                         </span>
-                        <time
-                          dateTime={diagnostic.created_at}
-                          className="shrink-0 tabular-nums"
-                        >
-                          {formatTime(Date.parse(diagnostic.created_at))}
-                        </time>
                       </p>
                     )}
                   </div>

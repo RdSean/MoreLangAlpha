@@ -165,6 +165,12 @@ export default function TextbookWorkbenchPage() {
   const processingActive = Boolean(currentJob && !isTerminalBookJobStatus(visibleActivityJob?.job_id === currentJob.job_id ? visibleActivityJob.status : currentJob.status));
   const showActivityPanel =
     Boolean(searchParams.get('activity')) && !showProcessing;
+  const cancellationInTimeline =
+    processingActive &&
+    visibleActivityJob?.job_id === currentJob?.job_id &&
+    !activityOwnershipMismatch &&
+    !unavailableActivityMessage &&
+    (showProcessing || showActivityPanel);
   const connected =
     activity.connectionState === 'connected' &&
     !activity.streamTerminal &&
@@ -450,7 +456,7 @@ export default function TextbookWorkbenchPage() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-          {currentJob && (
+          {processingActive && !cancellationInTimeline && (
             <Button
               variant="outline"
               className="min-h-11 px-3"
@@ -458,7 +464,7 @@ export default function TextbookWorkbenchPage() {
               onClick={() => void cancelCurrentJob()}
             >
               <StopCircle className="size-4 sm:mr-2" aria-hidden="true" />
-              <span>取消本次生成</span>
+              <span>{t('bookProcessing.cancelRequest')}</span>
             </Button>
           )}
           {!currentJob && recoverableJob && (
@@ -488,7 +494,7 @@ export default function TextbookWorkbenchPage() {
             <Activity className="size-4 sm:mr-2" aria-hidden="true" />
             <span className="hidden sm:inline">{t('bookProcessing.activity')}</span>
           </Button>}
-          <Button
+          {workbench.data.structure_status === 'ready' && !(processingActive && currentJob?.kind === 'structure') && <Button
             variant="outline"
             className="min-h-11 px-3"
             aria-label="给学生使用"
@@ -496,7 +502,7 @@ export default function TextbookWorkbenchPage() {
           >
             <Users className="size-4 sm:mr-2" aria-hidden="true" />
             <span className="hidden sm:inline">给学生使用</span>
-          </Button>
+          </Button>}
         </div>
       </header>
 
@@ -598,6 +604,8 @@ export default function TextbookWorkbenchPage() {
                 projection={activityProjection}
                 sourceStatus={workbench.data.source_status}
                 knowledgePoints={structure.data?.knowledge_points}
+                onCancel={processingActive && currentJob?.job_id === visibleActivityJob.job_id ? () => void cancelCurrentJob() : undefined}
+                cancelPending={mutations.cancelJob.isPending}
                 onReturnToReading={() =>
                   updateSearch((next) => {
                     if (isTerminalBookJobStatus(visibleActivityJob.status))
@@ -690,6 +698,8 @@ export default function TextbookWorkbenchPage() {
               }
               timing={timing}
               sourceStatus={workbench.data.source_status}
+              onCancel={processingActive && currentJob?.job_id === visibleActivityJob.job_id ? () => void cancelCurrentJob() : undefined}
+              cancelPending={mutations.cancelJob.isPending}
               liveActivity={liveActivity}
               projection={activityProjection}
               onOpenProcessing={() =>
