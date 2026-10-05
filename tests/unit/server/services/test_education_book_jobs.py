@@ -1124,6 +1124,9 @@ async def test_launch_book_item_binds_normal_root_run_and_finalizes_from_termina
     )
     assert build_graph.await_args.kwargs["operation"] == "structure"
     assert build_graph.await_args.kwargs["execution_id"] == str(CLAIMED["execution_id"])
+    from src.server.services.education_book_usage import BookTokenTracker
+
+    assert isinstance(build_graph.return_value[2]["callbacks"][0], BookTokenTracker)
     preparation = build_graph.return_value[2]["metadata"]["education_preparation_ms"]
     assert set(preparation) == {"sandbox_preparation", "input_staging"}
     assert all(value >= 0 for value in preparation.values())

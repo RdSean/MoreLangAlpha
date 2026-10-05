@@ -72,6 +72,7 @@ class BookSourceCandidateResponse(_StrictModel):
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     size_bytes: int = Field(ge=0)
     image_count: int = Field(ge=0)
+    page_count: int | None = Field(default=None, ge=1)
 
 
 class BookSourceListResponse(_StrictModel):
@@ -321,6 +322,14 @@ class BookJobStatisticsResponse(_StrictModel):
     next_cursor: str | None = None
 
 
+class BookTokenUsageResponse(_StrictModel):
+    status: Literal["available", "partial"]
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
+    recorded_calls: int = Field(ge=1)
+
+
 class BookJobResponse(BookJobSummaryResponse):
     textbook_id: str
     depth: BookMaterialDepth | None = None
@@ -328,6 +337,7 @@ class BookJobResponse(BookJobSummaryResponse):
     replace_existing: bool = False
     include_supplementary: bool = False
     items: list[BookJobItemResponse] = Field(default_factory=list)
+    token_usage: BookTokenUsageResponse | None = None
 
 
 class BookActivityEventResponse(_StrictModel):

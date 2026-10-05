@@ -1023,6 +1023,9 @@ async def get_book_job_for_parent(
             )
 
             timings = await get_current_attempt_summaries(job_id=job_id, conn=conn)
+            from src.server.database.education_book_usage import get_book_usage
+
+            token_usage = await get_book_usage(job_id=job_id, conn=conn)
             material_progress = (
                 await get_material_chain_progress(job_id=job_id, conn=conn)
                 if job["kind"] == "materials"
@@ -1034,6 +1037,7 @@ async def get_book_job_for_parent(
     result["textbook_id"] = str(result["textbook_id"])
     result["items"] = [dict(item) for item in result["items"]]
     result["material_progress"] = material_progress
+    result["token_usage"] = token_usage
     for item in result["items"]:
         current = timings.get(str(item["item_id"]))
         item["timing_summary"] = current["timing"] if current else None

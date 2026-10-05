@@ -51,6 +51,7 @@ from src.server.services.education_book_activity import (
     publish_book_activity_hint,
 )
 from src.server.services.education_book_progress import progress_contract
+from src.server.services.education_book_usage import BookTokenTracker, persist_book_usage
 from src.server.services.education_book_timing import (
     book_phase,
     measured_book_phase,
@@ -839,6 +840,8 @@ async def _launch_book_item(
             task_schema_version=task["schema_version"],
         )
         graph_config["metadata"]["education_preparation_ms"] = dict(timings)
+        token_tracker = BookTokenTracker()
+        graph_config["callbacks"] = [*graph_config.get("callbacks", []), token_tracker]
         handler = RunSSEProducer(
             thread_id=thread_id,
             run_id=run_id,
@@ -856,6 +859,11 @@ async def _launch_book_item(
                 else "cancelled"
                 if status == "cancelled"
                 else "failed"
+            )
+            await persist_book_usage(
+                item_id=item["item_id"],
+                attempt_token=UUID(identity["attempt_token"]),
+                tracker=token_tracker,
             )
             retain_runtime_for_recovery = False
             try:

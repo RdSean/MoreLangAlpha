@@ -83,6 +83,8 @@ class TextbookProcessingError(TextbookError):
 
 
 def _managed_source_candidate(row: Mapping[str, Any]) -> dict[str, Any]:
+    from src.server.services.education_book_source_metadata import original_page_count
+
     return {
         "document_id": str(row["document_id"]),
         "parse_job_id": str(row["parse_job_id"]),
@@ -95,6 +97,7 @@ def _managed_source_candidate(row: Mapping[str, Any]) -> dict[str, Any]:
         "content_sha256": str(row["content_sha256"]),
         "size_bytes": int(row["size_bytes"]),
         "image_count": int(row["image_count"]),
+        "page_count": original_page_count(row.get("page_count"), str(row["media_type"])),
     }
 
 

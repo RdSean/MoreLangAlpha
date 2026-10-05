@@ -681,6 +681,9 @@ async def preflight_book_source(
             resource["artifact_kind"] == "embedded_image" for resource in resources
         ),
     }
+    from src.server.services.education_book_source_metadata import original_page_count
+
+    selected["page_count"] = original_page_count(job.get("page_count"), job["media_type"])
     return {
         "source_status": "pending",
         "document_id": job["document_id"],

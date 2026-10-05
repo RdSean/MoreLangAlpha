@@ -38,6 +38,7 @@ def _parse_job(*, status: str = "completed") -> dict[str, object]:
         "primary_sha256": "f" * 64,
         "source_sha256": "f" * 64,
         "source_size_bytes": 1024,
+        "page_count": 24,
     }
 
 
@@ -181,6 +182,7 @@ async def test_acceptance_pins_metadata_without_any_object_io(monkeypatch):
     assert source.get("markdown_key") is None
     assert source.get("content_sha256") is None
     assert source["selected_source"]["content_sha256"] == "f" * 64
+    assert source["selected_source"]["page_count"] == 24
     assert (
         source["preparation_descriptor"]["artifacts"][0]["artifact_id"]
         == PRIMARY_ARTIFACT_ID

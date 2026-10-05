@@ -68,9 +68,14 @@ async def get_owned_parse_job(
                        jobs.parser_version, jobs.completed_at,
                        documents.original_filename, documents.media_type,
                        documents.document_format, documents.source_sha256,
-                       documents.source_size_bytes
+                       documents.source_size_bytes,
+                       inspections.summary->'page_count' AS page_count
                 FROM document_parse_jobs AS jobs
                 JOIN documents ON documents.document_id = jobs.document_id
+                LEFT JOIN document_inspections AS inspections
+                  ON inspections.inspection_id = jobs.inspection_id
+                 AND inspections.document_id = jobs.document_id
+                 AND inspections.status = 'completed'
                 WHERE jobs.job_id = %s AND documents.owner_user_id = %s
                 """,
                 (producer_job_id, owner_user_id),
@@ -781,9 +786,14 @@ async def list_book_source_candidates_for_parent(
                        jobs.completed_at,
                        documents.source_sha256 AS content_sha256,
                        documents.source_size_bytes AS size_bytes,
-                       COALESCE(images.image_count, 0)::int AS image_count
+                       COALESCE(images.image_count, 0)::int AS image_count,
+                       inspections.summary->'page_count' AS page_count
                 FROM document_parse_jobs AS jobs
                 JOIN documents ON documents.document_id = jobs.document_id
+                LEFT JOIN document_inspections AS inspections
+                  ON inspections.inspection_id = jobs.inspection_id
+                 AND inspections.document_id = jobs.document_id
+                 AND inspections.status = 'completed'
                 JOIN document_artifacts AS primary_artifacts
                   ON primary_artifacts.artifact_id = jobs.primary_artifact_id
                  AND primary_artifacts.producer_job_id = jobs.job_id
@@ -971,6 +981,7 @@ async def _managed_textbook_rows(
                textbooks.source_parse_completed_at AS completed_at,
                textbooks.source_content_sha256 AS content_sha256,
                textbooks.source_size_bytes AS size_bytes,
+               textbooks.selected_source->'page_count' AS page_count,
                textbooks.source_frozen_at AS frozen_at,
                textbooks.source_status, textbooks.selected_source,
                COALESCE(source_counts.image_count, 0)::int AS image_count,
