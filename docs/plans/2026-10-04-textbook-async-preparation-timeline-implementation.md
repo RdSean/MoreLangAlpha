@@ -12,7 +12,7 @@
 
 ## 状态、依据和执行纪律
 
-- 2026-10-05：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0–A5代码开发及两阶段独立审查、A6非付费验收、A7文档收口已完成；开发库已升级084–086，当前worktree的8000与0.0.0.0:5177运行。真实付费结构/单讲义/小批次及完整已登录工作流待单独授权，不宣称全部真实验收完成。实际证据及未测边界见[验收记录](2026-10-04-textbook-async-preparation-timeline-results.md)。
+- 2026-10-05：设计和计划已审阅，用户授权在当前 worktree 连续实施。A0–A5代码开发及两阶段独立审查、A6非付费验收、A7文档收口已完成；随后单独授权的真实小教材结构/单讲义/两份批次均成功，通过正常登录界面核对UI/PG计时。开发库已升级084–086，当前worktree的8000与0.0.0.0:5177运行。真实故障流程、完整多worker模型加工、内容质量与负载等边界见[验收记录](2026-10-04-textbook-async-preparation-timeline-results.md)，不宣称全部真实场景通过。
 - 依据：[设计](2026-10-04-textbook-async-preparation-timeline-design.md)及两轮 SB3 实测记录。此增量不改原 Task 8 完成结论。
 - Worktree：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skills-textbook-refactor`；分支当前 `feature/more-to-skills-textbook-refactor`。下面精确文件路径相对此目录。
 - 读取根目录、src/server 与 web 的 AGENTS.md；界面遵守 DESIGN.md。保留用户修改的业务动作文档和未追踪 PDF，不重置、不纳入提交。
@@ -163,7 +163,7 @@
 
 ## Task A6：故障/权限/计时一致性与真实界面验收
 
-状态：开发与非付费验收已完成，付费完整工作流待用户单独授权。真实HTTP/隔离PG 3 passed；最终仅langalpha_test与真实localhost:9000 MinIO组合77 passed、1 deselected。浏览器新19项/旧15项，最后全套33 passed、1 failed，上滚1px断言修正后聚焦1 passed；不写成一次全套全绿。后端全量7982 passed、8 deselected、1 xpassed；前端276文件/2689 passed，lint/build通过。核对活跃任务和消费者后开发库升级084–086，8000/0.0.0.0:5177本机及LAN可用。误运行旧临时对照库测试、未测屏幕阅读器/真实模型等边界详见[验收记录](2026-10-04-textbook-async-preparation-timeline-results.md)，未删已有教材、未改Skill/模型参数。
+状态：开发、非付费验收及用户单独授权的真实小样本成功流程已完成。真实结构122.417秒、单讲义47.112秒、两份批次125.715秒，3 job/4 item成功、22个服务区间关闭且非负；正常登录Chrome核对整页/紧凑/阅读、刷新、终态停表、375px暗色移动阅读，原9份教材未更新。真实HTTP/隔离PG 3 passed；最终仅langalpha_test与真实localhost:9000 MinIO组合77 passed、1 deselected。浏览器新19项/旧15项，最后全套33 passed、1 failed，上滚1px断言修正后聚焦1 passed；不写成一次全套全绿。后端全量7982 passed、8 deselected、1 xpassed；前端276文件/2689 passed，lint/build通过。核对活跃任务和消费者后开发库升级084–086，8000/0.0.0.0:5177本机及LAN可用。误运行旧临时对照库测试、未测真实失败/取消/重试、多worker模型加工及屏幕阅读器等边界详见[验收记录](2026-10-04-textbook-async-preparation-timeline-results.md)，未删已有教材、未改Skill/模型参数。
 
 **Files:**
 - Modify: `web/e2e/education-textbook-workbench.spec.js`。
@@ -181,7 +181,7 @@
 
 ## Task A7：收口、关联文档与回退说明
 
-状态：文档收口已完成。逐项证据及回退条件归入验收记录，原计划仅补增量状态/链接，原Task8日期、依据和结论保留；用户未提交业务细则/PDF不提交。当前分支/worktree保留，不merge/push。真实付费验收与明确未测项仍开放，不把代码收口等同于整个真实工作流验收。
+状态：文档收口已完成，并补记用户授权后的真实结构、单讲义和批次验收。逐项证据、明确未测边界及回退条件归入验收记录，原计划仅补增量状态/链接，原Task8日期、依据和结论保留；用户未提交业务细则/PDF不提交。当前分支/worktree保留，不merge/push，不把小样本成功等同于所有真实工作流场景或教学质量均通过。
 
 **Files:** 本设计/计划、结果记录、`docs/plans/2026-09-30-more-to-skills-implementation.md` 与 CHANGELOG。
 
