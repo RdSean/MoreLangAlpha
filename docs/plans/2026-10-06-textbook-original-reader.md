@@ -31,6 +31,6 @@
 
 ## 状态
 
-- O1：已实施，相关单元/HTTP60 passed、Ruff通过；真实读取待O3。
-- O2：已实施，相关前端285 passed、相关ESLint及build通过；新PDF浏览器七项通过，联合回归待O3。JSON回退收紧为明确PDF页序标签，学生共享组件保留原有两tab。
-- O3：待实施。
+- O1：已完成，相关单元/HTTP60 passed、Ruff通过；O3真实PG/MinIO只读原文件样本通过。
+- O2：已完成，相关前端285 passed、相关ESLint及build通过；新PDF浏览器七项通过。JSON回退收紧为明确PDF页序标签，学生共享组件保留原有两tab。
+- O3：已完成，最终四文件联合浏览器35 passed（2.9分钟）；本机/LAN与后端health通过，保留服务运行。浏览器HTTP/SSE为fixture，未新增付费模型验收；初轮失败、修正及未测边界见`2026-10-06-textbook-original-reader-results.md`。
