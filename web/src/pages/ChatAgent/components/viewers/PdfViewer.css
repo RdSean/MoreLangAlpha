@@ -70,6 +70,14 @@
   align-items: center;
 }
 
+.pdf-document-wrapper.fit-width {
+  justify-content: flex-start;
+}
+.pdf-document-wrapper.fit-width .react-pdf__Document {
+  flex-shrink: 0;
+  margin-inline: auto;
+}
+
 .pdf-document-wrapper .react-pdf__Page {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   border-radius: 2px;

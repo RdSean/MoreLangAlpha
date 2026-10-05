@@ -360,6 +360,7 @@ export interface BookStructureNode {
   id: string;
   title: string;
   anchor: BookStructureAnchor;
+  page_range?: { start: number | null; end?: number | null; label?: string | null; source?: string } | null;
   children?: BookStructureNode[];
   level?: number;
   number?: string | null;

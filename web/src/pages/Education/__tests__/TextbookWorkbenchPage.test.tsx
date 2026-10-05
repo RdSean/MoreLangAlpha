@@ -25,6 +25,10 @@ const source: BookSourceSlice = {
   markdown: '# The World’s Game\n\nFootball is played around the world.',
 };
 
+vi.mock('../components/BookOriginalReader', () => ({
+  BookOriginalReader: ({ startLine, restoredPage }: { startLine?: number; restoredPage?: number }) => <div data-testid="original-file">PDF start line {startLine}; page {restoredPage ?? 'automatic'}</div>,
+}));
+
 const emptyMaterial: KnowledgePointMaterial = {
   textbook_id: 'book-1',
   knowledge_point_id: 'kp-db-1',
@@ -655,6 +659,20 @@ describe('TextbookWorkbenchPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Vocabulary Index' })).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: '生成讲义' })).not.toBeInTheDocument();
+  });
+
+  it('opens original and text directory independently and preserves the original view on refresh', async () => {
+    const user = userEvent.setup();
+    renderWorkbench('/textbooks/book-1?node=appendix&view=original&nav=source&pdfPage=12');
+    expect(await screen.findByTestId('original-file')).toHaveTextContent('PDF start line 81; page 12');
+    expect(screen.getByRole('tab', { name: '原书目录' })).toHaveAttribute('aria-selected', 'true');
+    await user.click(screen.getByRole('tab', { name: '文字目录' }));
+    expect(screen.queryByTestId('original-file')).not.toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('view=source');
+    await user.click(screen.getByRole('tab', { name: '原书目录' }));
+    await user.click(screen.getByRole('button', { name: '打开 Sports and Fitness' }));
+    expect(screen.getByTestId('original-file')).toHaveTextContent('PDF start line 1; page automatic');
+    expect(screen.getByTestId('location')).toHaveTextContent('view=original');
   });
 
   it('opens batch settings and skips selected knowledge points that already have material', async () => {

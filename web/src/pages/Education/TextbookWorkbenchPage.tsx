@@ -15,6 +15,8 @@ import { BookActivityPanel } from './components/BookActivityPanel';
 import { BookAssignmentDialog } from './components/BookAssignmentDialog';
 import { BookNavigator } from './components/BookNavigator';
 import { BookReader } from './components/BookReader';
+import { BookOriginalReader } from './components/BookOriginalReader';
+import { firstJsonPage } from './components/bookOriginalLocation';
 import { BookProcessingView } from './components/BookProcessingView';
 import { projectBookTiming } from './components/bookTimingProjection';
 import { useBookElapsedTime } from './components/useBookElapsedTime';
@@ -108,7 +110,7 @@ export default function TextbookWorkbenchPage() {
     textbookId,
     sourceRequestRange?.start,
     sourceRequestRange?.end,
-    Boolean(sourceRequestRange),
+    Boolean(sourceRequestRange) && requestedView !== 'original',
   );
   const material = useManagedKnowledgePointMaterial(
     textbookId,
@@ -212,7 +214,9 @@ export default function TextbookWorkbenchPage() {
       ready.add(material.data.skill_kp_id);
     return ready;
   }, [structure.data, visibleActivityJob, material.data, textbookId]);
-  const readerView: 'material' | 'source' = selectedNode
+  const readerView: 'material' | 'source' | 'original' = requestedView === 'original'
+    ? 'original'
+    : selectedNode
     ? 'source'
     : requestedView === 'material' &&
         selectedSkillKpId &&
@@ -251,12 +255,13 @@ export default function TextbookWorkbenchPage() {
         next.set('view', 'source');
         changed = true;
       }
-    } else if (validNode && requestedView !== 'source') {
+    } else if (validNode && requestedView !== 'source' && requestedView !== 'original') {
       next.set('view', 'source');
       changed = true;
     } else if (
       validKp &&
       requestedView !== 'source' &&
+      requestedView !== 'original' &&
       requestedView !== 'material'
     ) {
       next.set(
@@ -293,6 +298,14 @@ export default function TextbookWorkbenchPage() {
       : undefined;
 
   const selectionTitle = selectedKnowledgePoint?.title ?? selectedNode?.title;
+  const jsonPage = firstJsonPage(selectedNode ? [selectedNode] : selectedKnowledgePoint && structure.data ? selectedKnowledgePoint.node_skill_ids.flatMap((id) => {
+    const node = findNode(structure.data!.structure.nodes, id);
+    return node ? [node] : [];
+  }) : []);
+  const pageParam = Number(searchParams.get('pdfPage'));
+  const restoredPdfPage = Number.isSafeInteger(pageParam) && pageParam > 0 ? pageParam : undefined;
+  const navParam = searchParams.get('nav');
+  const navigatorView = navParam === 'source' || navParam === 'text' || navParam === 'knowledge' ? navParam : selectedNode ? requestedView === 'original' ? 'source' : 'text' : 'knowledge';
   const selectedTargets = useMemo(
     () =>
       structure.data?.knowledge_points.filter((entry) =>
@@ -320,6 +333,8 @@ export default function TextbookWorkbenchPage() {
     if (!target) return;
     updateSearch((next) => {
       next.set('kp', skillKpId);
+      next.set('nav', 'knowledge');
+      next.delete('pdfPage');
       next.delete('node');
       next.set(
         'view',
@@ -332,11 +347,13 @@ export default function TextbookWorkbenchPage() {
     setNavigatorOpen(false);
   };
 
-  const selectNode = (nodeId: string) => {
+  const selectNode = (nodeId: string, view: 'source' | 'original' = 'source') => {
     updateSearch((next) => {
       next.set('node', nodeId);
       next.delete('kp');
-      next.set('view', 'source');
+      next.set('view', view);
+      next.set('nav', view === 'original' ? 'source' : 'text');
+      next.delete('pdfPage');
       next.delete('panel');
     });
     setNavigatorOpen(false);
@@ -518,6 +535,19 @@ export default function TextbookWorkbenchPage() {
               selectedNodeId={selectedNode?.id}
               onSelectKnowledgePoint={selectKnowledgePoint}
               onSelectNode={selectNode}
+              onSelectOriginalNode={(nodeId) => selectNode(nodeId, 'original')}
+              activeView={navigatorView}
+              onNavigationChange={(view) => {
+                if (view === 'knowledge') {
+                  const target = selectedKnowledgePoint ?? structure.data?.knowledge_points[0];
+                  if (target) { selectKnowledgePoint(target.skill_kp_id); return; }
+                }
+                updateSearch((next) => {
+                  next.set('nav', view);
+                  next.set('view', view === 'source' ? 'original' : 'source');
+                  next.delete('panel');
+                });
+              }}
               batchMode={batchMode}
               batchDisabled={Boolean(currentJob)}
               onBatchModeChange={(enabled) => {
@@ -638,12 +668,17 @@ export default function TextbookWorkbenchPage() {
                       selectedKnowledgePoint ? material.data : undefined
                     }
                     source={source.data}
+                    originalAvailable
+                    originalContent={textbookId && readerView === 'original' ? <BookOriginalReader key={`${textbookId}:${selectedKnowledgePoint?.skill_kp_id ?? selectedNode?.id}`} textbookId={textbookId} startLine={sourceRange?.start} jsonPage={jsonPage} restoredPage={restoredPdfPage} onPageChange={(page) => updateSearch((next) => next.set('pdfPage', String(page)), true)} /> : undefined}
                     loading={source.isLoading || material.isLoading}
                     generationPending={mutations.createJob.isPending}
                     readingPositionKey={`textbook:${textbookId}:${selectedKnowledgePoint?.skill_kp_id ?? `node:${selectedNode?.id}`}:${readerView}`}
                     sourceHighlightRange={sourceRange}
                     onViewChange={(view) =>
-                      updateSearch((next) => next.set('view', view))
+                      updateSearch((next) => {
+                        next.set('view', view);
+                        next.set('nav', view === 'original' ? 'source' : view === 'source' ? 'text' : 'knowledge');
+                      })
                     }
                     onOpenMaterialLink={openMaterialLink}
                     onGenerate={

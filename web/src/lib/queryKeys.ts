@@ -165,6 +165,8 @@ export const queryKeys = {
     textbookWorkbench: (id: string) => [...queryKeys.education.textbook(id), 'workbench'],
     bookAssignments: (id: string) => [...queryKeys.education.textbook(id), 'assignments'],
     bookStructure: (textbookId: string) => [...queryKeys.education.textbook(textbookId), 'structure'],
+    bookOriginal: (textbookId: string) => [...queryKeys.education.textbook(textbookId), 'original'],
+    bookOriginalLocation: (textbookId: string, startLine: number) => [...queryKeys.education.textbook(textbookId), 'original-location', startLine],
     bookSourceSlice: (textbookId: string, startLine: number, endLine: number) => [
       ...queryKeys.education.textbook(textbookId),
       'source',

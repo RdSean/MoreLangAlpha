@@ -78,6 +78,23 @@ const structure: BookStructure = {
 };
 
 describe('BookNavigator', () => {
+  it('separates original PDF and text directory selection and cycles three tabs', () => {
+    const original = vi.fn();
+    const text = vi.fn();
+    render(<BookNavigator structure={structure} onSelectOriginalNode={original} onSelectNode={text} />);
+    fireEvent.click(screen.getByRole('tab', { name: '原书目录' }));
+    fireEvent.click(screen.getByRole('button', { name: "打开 The World's Game" }));
+    expect(original).toHaveBeenCalledWith('reading-a');
+    expect(text).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole('tab', { name: '原书目录' }), { key: 'ArrowRight' });
+    const textTab = screen.getByRole('tab', { name: '文字目录' });
+    expect(textTab).toHaveFocus();
+    expect(textTab).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('button', { name: "打开 The World's Game" }));
+    expect(text).toHaveBeenCalledWith('reading-a');
+    fireEvent.keyDown(textTab, { key: 'ArrowRight' });
+    expect(screen.getByRole('tab', { name: '知识点' })).toHaveFocus();
+  });
   it('supports keyboard tab switching with an associated content panel', () => {
     render(<BookNavigator structure={structure} />);
     const knowledge = screen.getByRole('tab', { name: '知识点' });

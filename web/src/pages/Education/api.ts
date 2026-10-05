@@ -250,6 +250,22 @@ export async function getManagedBookStructure(textbookId: string): Promise<BookS
   return data;
 }
 
+export async function getManagedBookOriginal(textbookId: string, signal?: AbortSignal) {
+  const response = await api.get<ArrayBuffer>(
+    `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/original`,
+    { responseType: 'arraybuffer', signal },
+  );
+  return { bytes: response.data, mediaType: String(response.headers['content-type'] ?? '') };
+}
+
+export async function getManagedBookOriginalLocation(textbookId: string, startLine: number, signal?: AbortSignal) {
+  const { data } = await api.get<{ page: number | null }>(
+    `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/original-location`,
+    { params: { start_line: startLine }, signal },
+  );
+  return data;
+}
+
 export async function getManagedBookSourceSlice(
   textbookId: string,
   startLine: number,

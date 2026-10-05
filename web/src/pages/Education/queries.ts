@@ -188,6 +188,26 @@ export function useManagedBookSourceSlice(
   });
 }
 
+export function useManagedBookOriginal(textbookId: string) {
+  return useQuery({
+    queryKey: queryKeys.education.bookOriginal(textbookId),
+    queryFn: ({ signal }) => educationApi.getManagedBookOriginal(textbookId, signal),
+    enabled: Boolean(textbookId),
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+export function useManagedBookOriginalLocation(textbookId: string, startLine?: number) {
+  return useQuery({
+    queryKey: queryKeys.education.bookOriginalLocation(textbookId, startLine ?? 0),
+    queryFn: ({ signal }) => educationApi.getManagedBookOriginalLocation(textbookId, startLine!, signal),
+    enabled: Boolean(textbookId && startLine),
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
 export function useManagedKnowledgePointMaterial(
   textbookId: string | undefined,
   knowledgePointId: string | undefined,

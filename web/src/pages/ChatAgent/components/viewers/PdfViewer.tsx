@@ -1,4 +1,6 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -17,13 +19,28 @@ interface PdfViewerProps {
   pageNumber?: number;
   onPageChange?: (page: number) => void;
   onNumPagesChange?: (pages: number) => void;
+  fitWidth?: boolean;
 }
 
-export default function PdfViewer({ data, viewMode = 'single', pageNumber: controlledPageNumber, onPageChange, onNumPagesChange }: PdfViewerProps) {
+export default function PdfViewer({ data, viewMode = 'single', pageNumber: controlledPageNumber, onPageChange, onNumPagesChange, fitWidth = false }: PdfViewerProps) {
+  const { t } = useTranslation();
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const [error, setError] = useState<Error | null>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [pageWidth, setPageWidth] = useState<number>();
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!fitWidth || !viewport) return;
+    const resize = () => {
+      if (viewport.clientWidth > 24) setPageWidth(Math.min(612, viewport.clientWidth - 24));
+    };
+    resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [fitWidth]);
 
   const scale = ZOOM_STEPS[zoomIndex];
 
@@ -68,42 +85,42 @@ export default function PdfViewer({ data, viewMode = 'single', pageNumber: contr
       {/* Controls */}
       <div className="pdf-controls">
         <div className="pdf-nav">
-          <button onClick={goToPrev} disabled={viewMode !== 'single' || currentPage <= 1} className="pdf-btn">
-            Prev
+          <button onClick={goToPrev} disabled={viewMode !== 'single' || currentPage <= 1} className="pdf-btn" aria-label={t('documents.preview.previousPage')} title={t('documents.preview.previousPage')}>
+            <ChevronLeft size={14} aria-hidden="true" />
           </button>
           <span className="pdf-page-info">
             {currentPage} / {numPages ?? '...'}
           </span>
-          <button onClick={goToNext} disabled={viewMode !== 'single' || currentPage >= (numPages || 1)} className="pdf-btn">
-            Next
+          <button onClick={goToNext} disabled={viewMode !== 'single' || currentPage >= (numPages || 1)} className="pdf-btn" aria-label={t('documents.preview.nextPage')} title={t('documents.preview.nextPage')}>
+            <ChevronRight size={14} aria-hidden="true" />
           </button>
         </div>
         <div className="pdf-zoom">
-          <button onClick={zoomOut} disabled={zoomIndex <= 0} className="pdf-btn">
-            −
+          <button onClick={zoomOut} disabled={zoomIndex <= 0} className="pdf-btn" aria-label={t('documents.preview.zoomOut')} title={t('documents.preview.zoomOut')}>
+            <Minus size={14} aria-hidden="true" />
           </button>
           <span className="pdf-zoom-info">{Math.round(scale * 100)}%</span>
-          <button onClick={zoomIn} disabled={zoomIndex >= ZOOM_STEPS.length - 1} className="pdf-btn">
-            +
+          <button onClick={zoomIn} disabled={zoomIndex >= ZOOM_STEPS.length - 1} className="pdf-btn" aria-label={t('documents.preview.zoomIn')} title={t('documents.preview.zoomIn')}>
+            <Plus size={14} aria-hidden="true" />
           </button>
         </div>
       </div>
 
       {/* Document */}
-      <div className="pdf-document-wrapper">
+      <div ref={viewportRef} className={`pdf-document-wrapper${fitWidth ? ' fit-width' : ''}`}>
         <Document
           file={fileData}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={(err: Error) => setError(err)}
           loading={
-            <div className="pdf-loading">Loading PDF...</div>
+              <div className="pdf-loading">{t('common.loading')}</div>
           }
         >
           {viewMode === 'continuous' && numPages
             ? Array.from({ length: numPages }, (_, index) => (
-              <Page key={index + 1} pageNumber={index + 1} scale={scale} loading={<div className="pdf-loading">Rendering page...</div>} />
+              <Page key={index + 1} pageNumber={index + 1} width={fitWidth ? pageWidth : undefined} scale={scale} loading={<div className="pdf-loading">{t('common.loading')}</div>} />
             ))
-            : <Page pageNumber={currentPage} scale={scale} loading={<div className="pdf-loading">Rendering page...</div>} />}
+            : <Page pageNumber={currentPage} width={fitWidth ? pageWidth : undefined} scale={scale} loading={<div className="pdf-loading">{t('common.loading')}</div>} />}
         </Document>
       </div>
     </div>

@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FileText, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -12,14 +13,16 @@ import {
 
 interface BookReaderProps {
   title: string;
-  view: 'material' | 'source';
+  view: 'material' | 'source' | 'original';
+  originalContent?: ReactNode;
+  originalAvailable?: boolean;
   material?: KnowledgePointMaterial;
   source?: BookSourceSlice;
   loading?: boolean;
   generationPending?: boolean;
   readingPositionKey?: string;
   sourceHighlightRange?: { start: number; end: number };
-  onViewChange: (view: 'material' | 'source') => void;
+  onViewChange: (view: 'material' | 'source' | 'original') => void;
   onGenerate?: (values: BookGenerationValues) => void | Promise<void>;
   onOpenMaterialLink?: (path: string) => void;
 }
@@ -29,6 +32,8 @@ export function BookReader({
   view,
   material,
   source,
+  originalContent,
+  originalAvailable = false,
   loading = false,
   generationPending = false,
   readingPositionKey,
@@ -37,6 +42,7 @@ export function BookReader({
   onGenerate,
   onOpenMaterialLink,
 }: BookReaderProps) {
+  const { t } = useTranslation();
   const [formOpen, setFormOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasMaterial = Boolean(material?.material_available && material.markdown);
@@ -75,26 +81,29 @@ export function BookReader({
           )}
         </div>
         {material && (
-          <div className="mt-3 inline-grid grid-cols-2 rounded-md bg-muted p-1" role="tablist" aria-label="阅读视图">
+          <div className={cn('mt-3 inline-grid rounded-md bg-muted p-1', originalAvailable ? 'grid-cols-3' : 'grid-cols-2')} role="tablist" aria-label="阅读视图">
             <button
               type="button"
               role="tab"
               aria-selected={view === 'material'}
               disabled={!hasMaterial}
               className={cn(
-                'min-h-10 min-w-24 rounded px-3 text-sm disabled:cursor-not-allowed disabled:opacity-45',
+                'min-h-10 rounded px-3 text-sm disabled:cursor-not-allowed disabled:opacity-45',
                 view === 'material' && 'bg-background font-medium shadow-sm',
               )}
               onClick={() => onViewChange('material')}
             >
               讲义
             </button>
+            {originalAvailable && <button type="button" role="tab" aria-selected={view === 'original'} className={cn('min-h-10 rounded px-3 text-sm', view === 'original' && 'bg-background font-medium shadow-sm')} onClick={() => onViewChange('original')}>
+              {t('bookProcessing.originalFile')}
+            </button>}
             <button
               type="button"
               role="tab"
               aria-selected={view === 'source'}
               className={cn(
-                'min-h-10 min-w-24 rounded px-3 text-sm',
+                'min-h-10 rounded px-3 text-sm',
                 view === 'source' && 'bg-background font-medium shadow-sm',
               )}
               onClick={() => onViewChange('source')}
@@ -120,9 +129,9 @@ export function BookReader({
       <div
         ref={scrollRef}
         data-testid="book-reader-scroll"
-        className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-10"
+        className={cn('min-h-0 flex-1 overflow-y-auto', view !== 'original' && 'px-4 py-6 sm:px-6 lg:px-10')}
       >
-        {loading ? (
+        {view === 'original' ? originalContent : loading ? (
           <p className="text-sm text-muted-foreground">正在加载正文…</p>
         ) : view === 'material' && hasMaterial ? (
           <EducationMarkdown
