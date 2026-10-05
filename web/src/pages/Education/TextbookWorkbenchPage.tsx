@@ -9,6 +9,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { BookActivityPanel } from './components/BookActivityPanel';
@@ -19,14 +20,14 @@ import { BookProcessingView } from './components/BookProcessingView';
 import { projectBookTiming } from './components/bookTimingProjection';
 import { useBookElapsedTime } from './components/useBookElapsedTime';
 import { useBookLiveActivity } from './components/useBookLiveActivity';
-import { projectBookActivity } from './components/bookActivityProjection';
+import { isTerminalBookJobStatus, projectBookActivity } from './components/bookActivityProjection';
+import { bookSourceInfo } from './components/bookProcessingText';
 import {
   BookGenerationForm,
   type BookGenerationValues,
 } from './components/BookGenerationForm';
 import {
   useBookActivity,
-  useBookJobStatistics,
   useManagedBookMutations,
   useManagedBookSourceSlice,
   useManagedBookStructure,
@@ -57,6 +58,7 @@ function requestId() {
 const SOURCE_CONTEXT_LINES = 12;
 
 export default function TextbookWorkbenchPage() {
+  const { t } = useTranslation();
   const { textbookId } = useParams<{ textbookId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [navigatorOpen, setNavigatorOpen] = useState(false);
@@ -64,7 +66,6 @@ export default function TextbookWorkbenchPage() {
   const [batchMode, setBatchMode] = useState(false);
   const [batchFormOpen, setBatchFormOpen] = useState(false);
   const [batchSelection, setBatchSelection] = useState<Set<string>>(new Set());
-  const [statisticsJobId, setStatisticsJobId] = useState<string | null>(null);
   const workbench = useTextbookWorkbench(textbookId);
   const structure = useManagedBookStructure(
     textbookId,
@@ -161,6 +162,7 @@ export default function TextbookWorkbenchPage() {
     next.set('panel', 'processing');
     setSearchParams(next, { replace: true });
   }, [workbench.data, searchParams, setSearchParams]);
+  const processingActive = Boolean(currentJob && !isTerminalBookJobStatus(visibleActivityJob?.job_id === currentJob.job_id ? visibleActivityJob.status : currentJob.status));
   const showActivityPanel =
     Boolean(searchParams.get('activity')) && !showProcessing;
   const connected =
@@ -278,14 +280,6 @@ export default function TextbookWorkbenchPage() {
     structure.data,
     readableKnowledgePoints,
   ]);
-  const statisticsOpen = statisticsJobId === activityJobId;
-  const statistics = useBookJobStatistics(
-    activityJobId,
-    statisticsOpen &&
-      showProcessing &&
-      Boolean(visibleActivityJob) &&
-      !activityAccessLost,
-  );
   const recoverableJob =
     workbench.data?.recent_job &&
     ['failed', 'partially_succeeded', 'cancelled'].includes(
@@ -328,6 +322,8 @@ export default function TextbookWorkbenchPage() {
         readableKnowledgePoints.has(skillKpId) ? 'material' : 'source',
       );
       next.delete('panel');
+      if (visibleActivityJob && isTerminalBookJobStatus(visibleActivityJob.status))
+        next.delete('activity');
     });
     setNavigatorOpen(false);
   };
@@ -449,7 +445,7 @@ export default function TextbookWorkbenchPage() {
               {workbench.data.title}
             </p>
             <p className="truncate text-xs text-muted-foreground">
-              {statusText}
+              {showProcessing ? bookSourceInfo(workbench.data.source ?? (workbench.data.selected_source ? { ...workbench.data.selected_source, frozen_at: null } : null)) || statusText : statusText}
             </p>
           </div>
         </div>
@@ -476,7 +472,7 @@ export default function TextbookWorkbenchPage() {
               <span>重试未完成项</span>
             </Button>
           )}
-          <Button
+          {processingActive && <Button
             variant="ghost"
             className="min-h-11 px-3"
             disabled={!activeJob}
@@ -487,11 +483,11 @@ export default function TextbookWorkbenchPage() {
                 next.delete('panel');
               })
             }
-            aria-label="活动"
+            aria-label={t('bookProcessing.activity')}
           >
             <Activity className="size-4 sm:mr-2" aria-hidden="true" />
-            <span className="hidden sm:inline">活动</span>
-          </Button>
+            <span className="hidden sm:inline">{t('bookProcessing.activity')}</span>
+          </Button>}
           <Button
             variant="outline"
             className="min-h-11 px-3"
@@ -591,6 +587,8 @@ export default function TextbookWorkbenchPage() {
               <BookProcessingView
                 key={visibleActivityJob.job_id}
                 job={visibleActivityJob}
+                bookTitle={workbench.data.title}
+                source={workbench.data.source ?? (workbench.data.selected_source ? { ...workbench.data.selected_source, frozen_at: null } : null)}
                 events={activity.events}
                 connected={connected}
                 reconnecting={activity.connectionState === 'reconnecting'}
@@ -602,23 +600,14 @@ export default function TextbookWorkbenchPage() {
                 knowledgePoints={structure.data?.knowledge_points}
                 onReturnToReading={() =>
                   updateSearch((next) => {
+                    if (isTerminalBookJobStatus(visibleActivityJob.status))
+                      next.delete('activity');
                     if (workbench.data.structure_status === 'ready')
                       next.delete('panel');
                     else next.set('panel', 'reading');
                   })
                 }
                 onOpenMaterial={selectKnowledgePoint}
-                historyOpen={statisticsOpen}
-                onHistoryOpenChange={() =>
-                  setStatisticsJobId(
-                    statisticsOpen ? null : (activityJobId ?? null),
-                  )
-                }
-                statistics={statistics.data?.pages}
-                statisticsLoading={statistics.isFetching}
-                statisticsError={statistics.isError}
-                hasMoreStatistics={statistics.hasNextPage}
-                onLoadMoreStatistics={() => void statistics.fetchNextPage()}
               />
             ) : (
               <div
@@ -700,6 +689,7 @@ export default function TextbookWorkbenchPage() {
                 updateSearch((next) => next.delete('activity'), true)
               }
               timing={timing}
+              sourceStatus={workbench.data.source_status}
               liveActivity={liveActivity}
               projection={activityProjection}
               onOpenProcessing={() =>

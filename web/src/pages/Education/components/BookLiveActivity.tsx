@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { createDateFormatter } from '@/lib/format';
 import type { BookActivityEvent, BookJob, BookJobItem } from '../types';
 import {
@@ -36,7 +37,8 @@ export function BookLiveActivityView({
 }: {
   activity: BookLiveActivityProjection;
 }) {
-  useTranslation();
+  const { t } = useTranslation();
+  const reduceMotion = useReducedMotion();
   const { active, recentAt, recentKind, quote } = activity;
   const formatTime = createDateFormatter({
     hour: '2-digit',
@@ -44,12 +46,12 @@ export function BookLiveActivityView({
     second: '2-digit',
   });
   return (
-    <div className="mt-2 text-xs text-muted-foreground" aria-live="off">
-      <p className="flex min-h-4 flex-wrap gap-x-2">
+    <div className="book-waiting-quote text-xs text-muted-foreground" aria-live="off">
+      <p className="sr-only">
         {active && recentAt !== null && (
           <>
-            <span>最近活动</span>
-            <span>{recentKind}</span>
+            <span>{t('bookProcessing.recent')}</span>
+            <span>{t(recentKind === '存储确认' ? 'bookProcessing.storage' : 'bookProcessing.tools')}</span>
             <time
               dateTime={new Date(recentAt).toISOString()}
               className="tabular-nums"
@@ -60,20 +62,22 @@ export function BookLiveActivityView({
         )}
       </p>
       <figure
-        className="m-0 mt-2 h-28 overflow-y-auto"
-        aria-label="等待时的名句"
+        className="m-0 h-12 text-center"
+        aria-label={t('bookProcessing.quote')}
         aria-live="off"
       >
+        <AnimatePresence mode="wait" initial={false}>
         {active && quote && (
-          <>
-            <blockquote className="m-0 break-words text-sm leading-6">
+          <motion.div key={`${quote.contents}:${quote.source}`} initial={{ opacity: reduceMotion ? 1 : 0 }} animate={{ opacity: 1 }} exit={{ opacity: reduceMotion ? 1 : 0 }} transition={{ duration: reduceMotion ? 0 : 0.25 }}>
+            <blockquote className="m-0 truncate text-sm leading-6" title={quote.contents}>
               {quote.contents}
             </blockquote>
-            <figcaption className="mt-1 break-words leading-5">
-              {quote.source}
+            <figcaption className="truncate leading-5" title={quote.source}>
+              --{quote.source.split('《')[0]}
             </figcaption>
-          </>
+          </motion.div>
         )}
+        </AnimatePresence>
       </figure>
     </div>
   );

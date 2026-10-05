@@ -1,10 +1,87 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import i18n from '@/i18n';
 import { BookProcessingView } from '../components/BookProcessingView';
 import { projectBookTiming } from '../components/bookTimingProjection';
 import { processingJob } from './bookProcessingFixtures';
+beforeEach(() => { void i18n.changeLanguage('zh-CN'); });
 
 describe('BookProcessingView', () => {
+  it('keeps tool diagnostics in the PTC phase and resets disclosure when the phase changes', () => {
+    const job = processingJob();
+    job.items[0].execution_phase = 'ptc_execution';
+    const events = [{ seq: 1, job_id: job.job_id, item_id: 'item-1', kind: 'tool', status: 'running', message: 'Running Bash', metadata: {}, created_at: '2026-10-05T00:00:06Z' }];
+    const props = { job, events, connected: true, timing: projectBookTiming(job, null), onReturnToReading: vi.fn() };
+    const view = render(<BookProcessingView {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: '最新诊断' }));
+    expect(screen.getByRole('listitem', { name: 'PTC 执行' })).toHaveTextContent('Bash 执行中');
+    job.items[0].execution_phase = 'finalization';
+    view.rerender(<BookProcessingView {...props} />);
+    expect(screen.getByRole('listitem', { name: '验收提交' })).not.toHaveTextContent('Bash 执行中');
+    expect(screen.queryByRole('button', { name: '最新诊断' })).not.toBeInTheDocument();
+    job.items[0].execution_phase = 'ptc_execution';
+    view.rerender(<BookProcessingView {...props} />);
+    expect(screen.getByRole('button', { name: '最新诊断' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Bash 执行中')).not.toBeInTheDocument();
+  });
+  it('keeps only the latest current attempt report and has no growing history controls', () => {
+    const job = processingJob();
+    job.items[0].execution_phase = 'ptc_execution';
+    const events = Array.from({ length: 60 }, (_, index) => ({
+      seq: index + 1, job_id: job.job_id, item_id: 'item-1', kind: 'progress',
+      status: 'running', message: `业务动作 ${index}`,
+      metadata: { stage: 'structure_organizing', action: `action-${index}` },
+      created_at: '2026-10-05T00:00:06Z',
+    }));
+    render(<BookProcessingView job={job} events={events} connected timing={projectBookTiming(job, null)} onReturnToReading={vi.fn()} />);
+    expect(screen.getAllByText('业务动作 59')).toHaveLength(1);
+    expect(screen.queryByText('业务动作 0')).not.toBeInTheDocument();
+    expect(screen.queryByText('尝试与批量统计')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '跟随最新' })).not.toBeInTheDocument();
+  });
+
+  it('shows a manual learning entry and missing token usage after completion', () => {
+    const job = processingJob({ status: 'succeeded', finished_at: '2026-10-05T00:00:10Z' });
+    job.items[0].status = 'succeeded';
+    const enter = vi.fn();
+    render(<BookProcessingView job={job} events={[]} connected={false} timing={projectBookTiming(job, null)} onReturnToReading={enter} />);
+    expect(screen.getByText('Token 消耗')).toBeInTheDocument();
+    expect(enter).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '进入学习空间' }));
+    expect(enter).toHaveBeenCalledOnce();
+  });
+  it('uses the book title and original PDF pages, without inventing a page count', () => {
+    const job = processingJob();
+    const source = { document_id: 'doc', parse_job_id: 'parse', primary_artifact_id: 'artifact', filename: 'book.pdf', media_type: 'application/pdf', page_count: 25, parser_id: 'parser', parser_name: 'Parser', completed_at: job.created_at, content_sha256: 'sha', size_bytes: 1000, image_count: 2, frozen_at: null };
+    const props = { job, events: [], connected: false, timing: projectBookTiming(job, null), onReturnToReading: vi.fn(), bookTitle: '原始书名', source };
+    const view = render(<BookProcessingView {...props} />);
+    expect(screen.getByRole('heading', { name: '原始书名' })).toBeInTheDocument();
+    expect(screen.getByText('PDF · 25 页')).toBeInTheDocument();
+    view.rerender(<BookProcessingView {...props} source={{ ...source, page_count: null }} />);
+    expect(screen.getByText('PDF')).toBeInTheDocument();
+    expect(screen.queryByText(/25 页/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/行数/)).not.toBeInTheDocument();
+  });
+  it('labels partial token records and localizes completion to the selected language', async () => {
+    await i18n.changeLanguage('en-US');
+    const job = processingJob({ status: 'succeeded', token_usage: { status: 'partial', input_tokens: 300, output_tokens: 50, total_tokens: 350, recorded_calls: 1 } });
+    job.items[0].status = 'succeeded';
+    render(<BookProcessingView job={job} events={[]} connected={false} timing={projectBookTiming(job, null)} onReturnToReading={vi.fn()} />);
+    expect(screen.getByText('Recorded tokens')).toBeInTheDocument();
+    expect(screen.getByText('350')).toBeInTheDocument();
+    expect(screen.getByText('Partially recorded')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Enter learning space' })).toBeInTheDocument();
+    expect(screen.queryByText('未记录')).not.toBeInTheDocument();
+  });
+  it('does not place a late service or Agent report under an unrelated current phase', () => {
+    const job = processingJob();
+    job.items[0].execution_phase = 'finalization';
+    const events = [{ seq: 1, job_id: job.job_id, item_id: 'item-1', kind: 'progress', status: 'running', message: '旧输入准备', metadata: { stage: 'service_preparing', origin: 'service' }, created_at: '2026-10-05T00:00:06Z' }, { seq: 2, job_id: job.job_id, item_id: 'item-1', kind: 'progress', status: 'running', message: '旧模型动作', metadata: { stage: 'structure_organizing' }, created_at: '2026-10-05T00:00:07Z' }];
+    render(<BookProcessingView job={job} events={events} connected timing={projectBookTiming(job, null)} onReturnToReading={vi.fn()} />);
+    expect(screen.queryByText('旧输入准备')).not.toBeInTheDocument();
+    expect(screen.queryByText('旧模型动作')).not.toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: '验收提交' })).toHaveTextContent('进行中');
+  });
   it('keeps the next queued lesson waiting after the first lesson was submitted', () => {
     const base = processingJob();
     const completed = {
@@ -245,77 +322,6 @@ describe('BookProcessingView', () => {
     );
     expect(onOpen).toHaveBeenCalledWith('skill-kp-2');
   });
-  it('exposes earlier non-completed activity without mounting it by default', () => {
-    const base = processingJob();
-    const items = Array.from({ length: 60 }, (_, index) => ({
-      ...base.items[0],
-      item_id: `item-${index}`,
-      status: 'failed' as const,
-    }));
-    const job = processingJob({ items, status: 'failed' });
-    const events = items.map((item, index) => ({
-      seq: index + 1,
-      item_id: item.item_id,
-      job_id: job.job_id,
-      kind: 'item',
-      status: 'failed',
-      message: `失败项${index}`,
-      metadata: {},
-      created_at: job.created_at,
-    }));
-    render(
-      <BookProcessingView
-        job={job}
-        events={events}
-        connected={false}
-        timing={projectBookTiming(job, null)}
-        onReturnToReading={vi.fn()}
-      />,
-    );
-    expect(screen.queryByText('失败项0')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '更早的活动记录' }));
-    expect(screen.getByText('失败项0')).toBeInTheDocument();
-  });
-
-  it('keeps supplementary timing separate from material samples', () => {
-    const job = processingJob();
-    const stats = {
-      job_id: job.job_id,
-      request_round: 1,
-      server_now: job.server_now!,
-      status: 'available' as const,
-      round_total_ms: 10000,
-      material_sample_count: 0,
-      material_median_ms: null,
-      material_longest_ms: null,
-      next_cursor: null,
-      supplementary: [
-        {
-          item_id: 'extra',
-          kind: 'supplementary' as const,
-          status: 'succeeded' as const,
-          knowledge_point_title: null,
-          timing: { ...job.items[0].timing_summary!, total_ms: 2000 },
-        },
-      ],
-      attempts: [],
-    };
-    render(
-      <BookProcessingView
-        job={job}
-        events={[]}
-        connected={false}
-        timing={projectBookTiming(job, null)}
-        onReturnToReading={vi.fn()}
-        historyOpen
-        onHistoryOpenChange={vi.fn()}
-        statistics={[stats]}
-      />,
-    );
-    expect(
-      screen.getByRole('region', { name: '附加材料统计' }),
-    ).toHaveTextContent('2 秒');
-  });
   it('does not wait for a source manifest after entering the runtime queue', () => {
     const job = processingJob();
     job.items[0].execution_phase = 'runtime_queue';
@@ -334,72 +340,16 @@ describe('BookProcessingView', () => {
     );
     expect(screen.queryByText('等待来源清单确认')).not.toBeInTheDocument();
   });
-  it('bounds completed groups and never follows scroll until explicitly enabled', () => {
+  it('keeps large batch results bounded and the first committed lesson readable', () => {
     const base = processingJob();
-    const items = Array.from({ length: 30 }, (_, index) => ({
-      ...base.items[0],
-      item_id: `item-${index}`,
-      kind: 'material' as const,
-      status: 'succeeded' as const,
-      skill_kp_id: `kp-${index}`,
-      knowledge_point_title: `知识点 ${index}`,
-    }));
-    const job = processingJob({
-      kind: 'materials',
-      items,
-      status: 'succeeded',
-    });
-    const events = items.map((item, index) => ({
-      seq: index + 1,
-      item_id: item.item_id,
-      job_id: job.job_id,
-      kind: 'material',
-      status: 'succeeded',
-      message: `讲义${index}提交`,
-      metadata: {},
-      created_at: job.created_at,
-    }));
-    const scrollIntoView = vi.fn();
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
-    const view = render(
-      <BookProcessingView
-        job={job}
-        events={events}
-        connected={false}
-        timing={projectBookTiming(job, null)}
-        onReturnToReading={vi.fn()}
-      />,
-    );
-    expect(screen.queryByText('讲义0提交')).not.toBeInTheDocument();
-    expect(scrollIntoView).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '已完成记录（30）' }));
-    expect(screen.getByText('讲义0提交')).toBeInTheDocument();
-    expect(screen.queryByText('讲义29提交')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '更多已完成记录' }));
-    expect(screen.getByText('讲义29提交')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '跟随最新' }));
-    expect(scrollIntoView).toHaveBeenCalledOnce();
-    const scroller = screen.getByTestId('book-processing-scroll');
-    Object.defineProperty(scroller, 'scrollHeight', {
-      value: 1000,
-      configurable: true,
-    });
-    Object.defineProperty(scroller, 'clientHeight', {
-      value: 200,
-      configurable: true,
-    });
-    scroller.scrollTop = 100;
-    fireEvent.scroll(scroller);
-    view.rerender(
-      <BookProcessingView
-        job={job}
-        events={[...events]}
-        connected={false}
-        timing={projectBookTiming(job, null)}
-        onReturnToReading={vi.fn()}
-      />,
-    );
-    expect(scrollIntoView).toHaveBeenCalledOnce();
+    const job = processingJob({ kind: 'materials', status: 'succeeded', items: Array.from({ length: 60 }, (_, index) => ({ ...base.items[0], kind: 'material' as const, status: 'succeeded' as const, item_id: `item-${index}`, skill_kp_id: `kp-${index}`, knowledge_point_title: `知识点 ${index}` })) });
+    const open = vi.fn();
+    render(<BookProcessingView job={job} events={[]} connected={false} timing={projectBookTiming(job, null)} onReturnToReading={vi.fn()} onOpenMaterial={open} />);
+    expect(screen.getByRole('button', { name: '阅读讲义：知识点 0' })).toBeInTheDocument();
+    expect(screen.queryByText('知识点 59')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /更多已完成/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '阅读讲义：知识点 0' }));
+    expect(open).toHaveBeenCalledWith('kp-0');
   });
   it('shows verified resources without implying parsing or a finished structure', () => {
     const job = processingJob();
@@ -412,7 +362,7 @@ describe('BookProcessingView', () => {
         onReturnToReading={vi.fn()}
       />,
     );
-    expect(screen.getByText('正在准备教材来源')).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: '来源准备' })).toHaveTextContent('进行中');
     expect(screen.getByText('已校验 2/3 个资源')).toBeInTheDocument();
     expect(screen.queryByText('正在解析文档')).not.toBeInTheDocument();
     expect(screen.getByText('显示最后确认的时间')).toBeInTheDocument();
@@ -465,7 +415,7 @@ describe('BookProcessingView', () => {
       container.querySelector('[data-testid="book-processing-scroll"]'),
     ).not.toBeNull();
     expect(onReturn).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '返回阅读' }));
+    fireEvent.click(screen.getByRole('button', { name: '进入学习空间' }));
     expect(onReturn).toHaveBeenCalledOnce();
   });
 });

@@ -1,4 +1,25 @@
 {
+  "bookProcessing": {
+    "milestones": "服务里程碑", "timing": "处理计时",
+    "timeline": "教材处理时间线", "structure": "教材结构", "materials": "讲义加工",
+    "reading": "返回阅读", "learning": "进入学习空间", "ready": "书籍已梳理完成，可以进入学习空间。",
+    "partialReady": "已提交的讲义可以阅读，未完成项可重试。", "totalTime": "总耗时", "elapsed": "已用时",
+    "tokens": "Token 消耗", "recordedTokens": "已记录 Token", "partialUsage": "部分未记录", "missing": "未记录",
+    "seconds": "{{count}} 秒", "minutes": "{{minutes}} 分 {{seconds}} 秒", "hours": "{{hours}} 小时 {{minutes}} 分",
+    "pages": "{{count}} 页", "materialProgress": "已完成 {{completed}}/{{total}} 份讲义",
+    "resources": "已校验 {{verified}}/{{total}} 个资源", "unknown": "待确认", "manifest": "等待来源清单确认",
+    "unavailable": "活动暂不可用，任务状态仍会继续更新。", "confirmed": "显示最后确认的时间", "reconnecting": "正在重新连接活动流",
+    "diagnostics": "最新诊断", "recent": "最近活动", "storage": "存储确认", "tools": "工具活动", "quote": "等待时的名句",
+    "readMaterial": "阅读讲义", "readOlder": "阅读旧版讲义", "older": "旧版讲义仍可阅读", "submitted": "已提交",
+    "delivery": "讲义交付", "activity": "活动", "activityPanel": "教材处理活动", "closeActivity": "关闭处理活动", "openTimeline": "打开整页时间线",
+    "knowledge": "知识点", "sourceContents": "原书目录", "ungrouped": "未分组", "navigation": "教材导航视图",
+    "kpTitle": "知识点：{{title}}", "itemTitle": "讲义任务（本次第 {{position}} 项）", "supplementary": "全书附加材料",
+    "status": { "queued": "等待开始", "running": "处理中", "succeeded": "已完成", "partially_succeeded": "部分完成", "failed": "处理失败", "cancelled": "已取消", "waiting": "等待", "completed": "已完成", "not_run": "未执行" },
+    "phase": { "initial_queue": "受理等待", "source_freezing": "来源准备", "runtime_queue": "执行等待", "sandbox_preparation": "运行环境准备", "input_staging": "输入文件准备", "ptc_execution": "PTC 执行", "finalization": "验收提交" },
+    "phaseRunning": "进行中",
+    "terminal": { "material": "讲义已提交", "structure": "教材结构已提交", "supplementary": "附加材料已提交", "item": "处理项已完成", "job": "任务已完成" },
+    "stage": { "service_preparing": "正在准备处理文件", "service_source_preparing": "正在准备教材来源", "service_finalizing": "正在验收并提交产物" }
+  },
   "common": {
     "copy": "复制",
     "submit": "提交",

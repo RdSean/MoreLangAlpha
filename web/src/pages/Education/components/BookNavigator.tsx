@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import {
   BookOpen,
   Check,
@@ -121,6 +123,9 @@ export function BookNavigator({
   selectedKnowledgePointIds = new Set(),
   onBatchSelectionChange,
 }: BookNavigatorProps) {
+  const { t } = useTranslation();
+  const reducedMotion = useReducedMotion();
+  const tabId = useId();
   const [view, setView] = useState<'knowledge' | 'source'>('knowledge');
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(
@@ -177,25 +182,19 @@ export function BookNavigator({
   return (
     <nav className="flex h-full min-h-0 flex-col bg-background" aria-label="教材导航">
       <div className="border-b p-3">
-        <div className="grid grid-cols-2 rounded-md bg-muted p-1" role="tablist" aria-label="教材导航视图">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === 'knowledge'}
-            className={cn('min-h-10 rounded px-2 text-sm', view === 'knowledge' && 'bg-background font-medium shadow-sm')}
-            onClick={() => setView('knowledge')}
-          >
-            知识点
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === 'source'}
-            className={cn('min-h-10 rounded px-2 text-sm', view === 'source' && 'bg-background font-medium shadow-sm')}
-            onClick={() => setView('source')}
-          >
-            原书目录
-          </button>
+        <div className="book-navigator-tabs" role="tablist" aria-label={t('bookProcessing.navigation')} onKeyDown={(event) => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault();
+          const target = event.key === 'Home' ? 'knowledge' : event.key === 'End' ? 'source' : view === 'knowledge' ? 'source' : 'knowledge';
+          setView(target);
+          event.currentTarget.querySelector<HTMLButtonElement>(`[data-view="${target}"]`)?.focus();
+        }}>
+          {(['knowledge', 'source'] as const).map((tab) => (
+            <button key={tab} type="button" role="tab" id={`${tabId}-${tab}`} data-view={tab} aria-controls={`${tabId}-content`} tabIndex={view === tab ? 0 : -1} aria-selected={view === tab} className={cn('book-navigator-tab', view === tab && 'font-medium text-foreground')} onClick={() => setView(tab)}>
+              {t(tab === 'knowledge' ? 'bookProcessing.knowledge' : 'bookProcessing.sourceContents')}
+              {view === tab && <motion.span className="book-navigator-indicator" layoutId={`${tabId}-indicator`} transition={{ duration: reducedMotion ? 0 : 0.18 }} />}
+            </button>
+          ))}
         </div>
         <label className="relative mt-3 block">
           <Search className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" aria-hidden="true" />
@@ -210,10 +209,11 @@ export function BookNavigator({
         </label>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <motion.div key={view} id={`${tabId}-content`} role="tabpanel" aria-labelledby={`${tabId}-${view}`} initial={{ opacity: reducedMotion ? 1 : 0 }} animate={{ opacity: 1 }} transition={{ duration: reducedMotion ? 0 : 0.16 }} className="min-h-0 flex-1 overflow-y-auto p-2">
         {view === 'knowledge' ? (
           groups.length > 0 ? groups.map(([unitId, entries]) => {
-            const title = unitId ? nodeMap.get(unitId)?.title ?? unitId : '未分组';
+            const title = unitId ? nodeMap.get(unitId)?.title ?? unitId : t('bookProcessing.ungrouped');
+            const count = structure.knowledge_points.filter((point) => point.unit_skill_node_id === unitId).length;
             return (
               <section key={unitId ?? 'ungrouped'} data-testid={`kp-group-${unitId ?? 'ungrouped'}`} className="mb-3">
                 <div className="flex min-h-10 items-center gap-2 px-2">
@@ -227,7 +227,7 @@ export function BookNavigator({
                     />
                   )}
                   <ListTree className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <h3 className="min-w-0 break-words text-xs font-semibold uppercase text-muted-foreground">{title}</h3>
+                  <h3 className="min-w-0 break-words text-xs font-semibold text-muted-foreground">{title}（{count}）</h3>
                 </div>
                 <ul>
                   {entries.map((entry) => (
@@ -276,7 +276,7 @@ export function BookNavigator({
             </ul>
           ) : <p className="px-3 py-8 text-center text-sm text-muted-foreground">没有匹配的目录节点</p>
         )}
-      </div>
+      </motion.div>
 
       {view === 'knowledge' && structure.knowledge_points.length > 0 && onBatchModeChange && (
         <div className="border-t p-3">

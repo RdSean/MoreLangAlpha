@@ -1,4 +1,26 @@
 {
+  "bookProcessing": {
+    "milestones": "Service milestones", "timing": "Processing timing",
+    "timeline": "Textbook processing timeline", "structure": "Textbook structure", "materials": "Lesson preparation",
+    "reading": "Back to reading", "learning": "Enter learning space", "ready": "Your book is ready to explore in the learning space.",
+    "partialReady": "Submitted lessons are ready to read. Unfinished items can be retried.", "totalTime": "Total time", "elapsed": "Elapsed",
+    "tokens": "Token usage", "recordedTokens": "Recorded tokens", "partialUsage": "Partially recorded", "missing": "Not recorded",
+    "seconds": "{{count}} s", "minutes": "{{minutes}} m {{seconds}} s", "hours": "{{hours}} h {{minutes}} m",
+    "pages": "{{count}} pages", "materialProgress": "{{completed}}/{{total}} lessons complete",
+    "resources": "{{verified}}/{{total}} resources verified", "unknown": "Unknown", "manifest": "Waiting for source manifest confirmation",
+    "unavailable": "Activity is unavailable. Task status will continue to update.", "confirmed": "Showing the last confirmed time", "reconnecting": "Reconnecting activity stream",
+    "diagnostics": "Latest diagnostic", "recent": "Recent activity", "storage": "Storage confirmation", "tools": "Tool activity", "quote": "Waiting quote",
+    "readMaterial": "Read lesson", "readOlder": "Read previous lesson", "older": "The previous lesson is still available", "submitted": "Committed",
+    "delivery": "Available lessons", "activity": "Activity", "activityPanel": "Textbook processing activity", "closeActivity": "Close activity", "openTimeline": "Open full timeline",
+    "knowledge": "Knowledge points", "sourceContents": "Book contents", "ungrouped": "Ungrouped", "navigation": "Textbook navigation views",
+    "kpTitle": "Knowledge point: {{title}}", "itemTitle": "Lesson task (item {{position}})", "supplementary": "Book supplementary material",
+    "status": { "queued": "Queued", "running": "Processing", "succeeded": "Completed", "partially_succeeded": "Partially completed", "failed": "Failed", "cancelled": "Cancelled", "waiting": "Waiting", "completed": "Completed", "not_run": "Not run" },
+    "phase": { "initial_queue": "Admission wait", "source_freezing": "Source preparation", "runtime_queue": "Execution wait", "sandbox_preparation": "Runtime preparation", "input_staging": "Input preparation", "ptc_execution": "PTC execution", "finalization": "Validation and commit" },
+    "phaseRunning": "In progress",
+    "terminal": { "material": "Lesson committed", "structure": "Textbook structure committed", "supplementary": "Supplementary material committed", "item": "Item completed", "job": "Job completed" },
+    "stage": { "service_preparing": "Preparing processing files", "service_source_preparing": "Preparing textbook source", "service_finalizing": "Validating and committing output", "structure_reading": "Reading textbook structure clues", "structure_organizing": "Organizing chapter hierarchy", "structure_splitting": "Dividing knowledge points", "structure_validating": "Validating textbook structure", "material_reading": "Reading knowledge point source", "material_organizing": "Organizing lesson content", "material_writing": "Writing the lesson", "material_validating": "Validating lesson output", "supplementary_reading": "Reviewing book lessons", "supplementary_organizing": "Organizing supplementary material", "supplementary_validating": "Validating supplementary material" },
+    "action": { "reading_context": "Reading surrounding context", "examining_visuals": "Examining source diagrams", "clarifying_concepts": "Clarifying concepts and terms", "organizing_explanation": "Organizing the explanation", "explaining_source_examples": "Explaining source examples", "creating_examples": "Creating supporting examples", "explaining_exercises": "Explaining exercises", "checking_sources": "Checking sources and citations" }
+  },
   "common": {
     "copy": "Copy",
     "submit": "Submit",

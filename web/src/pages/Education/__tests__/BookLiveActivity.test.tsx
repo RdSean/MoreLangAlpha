@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
+import i18n from '@/i18n';
 import { BookLiveActivity, BookLiveActivityView } from '../components/BookLiveActivity';
 import { useBookLiveActivity } from '../components/useBookLiveActivity';
 import { loadQuotePool } from '../quotePool';
@@ -16,6 +17,7 @@ function event(seq: number, overrides: Partial<BookActivityEvent> = {}): BookAct
   return { seq, job_id: 'job-1', item_id: 'item-1', kind: 'tool', status: 'running', message: 'Running Bash', metadata: {}, created_at: new Date(now).toISOString(), ...overrides };
 }
 beforeEach(() => {
+  void i18n.changeLanguage('zh-CN');
   now = Date.parse('2026-10-03T02:00:00Z');
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   vi.mocked(loadQuotePool).mockResolvedValue(quotes);
@@ -23,6 +25,13 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('BookLiveActivity', () => {
+  it('presents one compact poem line and an author line without changing the activity trigger', () => {
+    render(<BookLiveActivityView activity={{ active: true, recentAt: now, recentKind: '工具活动', quote: { contents: '欲穷千里目，更上一层楼。', source: '王之涣《登鹳雀楼》' } }} />);
+    expect(screen.getByText('--王之涣')).toBeInTheDocument();
+    expect(screen.getByText('欲穷千里目，更上一层楼。')).toHaveAttribute('title', '欲穷千里目，更上一层楼。');
+    expect(screen.getByLabelText('等待时的名句')).toHaveClass('h-12');
+    expect(loadQuotePool).not.toHaveBeenCalled();
+  });
   it('keeps its quote and event fence when the layout remounts the presentation', async () => {
     function Harness() {
       const [layout, setLayout] = useState('page');

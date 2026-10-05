@@ -5,11 +5,13 @@ import {
   renderHook,
   screen,
 } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import i18n from '@/i18n';
 import { BookTimingSummary } from '../components/BookTimingSummary';
 import { projectBookTiming } from '../components/bookTimingProjection';
 import { useBookElapsedTime } from '../components/useBookElapsedTime';
 import { processingJob } from './bookProcessingFixtures';
+beforeEach(() => { void i18n.changeLanguage('zh-CN'); });
 
 afterEach(() => {
   vi.useRealTimers();

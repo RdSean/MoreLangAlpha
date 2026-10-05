@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { scrollMemory } from '@/lib/scrollMemory';
+import i18n from '@/i18n';
 import { BookGenerationForm } from '../components/BookGenerationForm';
 import { BookReader } from '../components/BookReader';
 import TextbookWorkbenchPage from '../TextbookWorkbenchPage';
@@ -241,6 +242,7 @@ vi.mock('../queries', () => ({
 }));
 
 beforeEach(() => {
+  void i18n.changeLanguage('zh-CN');
   vi.clearAllMocks();
   scrollMemory.clear();
   pageState.activityJob = undefined;
@@ -438,6 +440,7 @@ function renderWorkbench(initialEntry = '/textbooks/book-1') {
 describe('TextbookWorkbenchPage', () => {
   it('hides a cached compact activity after access is lost', () => {
     pageState.activityJob = processingJob();
+    pageState.workbench.current_job = pageState.activityJob;
     pageState.activityAccessLost = true;
     renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1');
     expect(screen.getByRole('alert')).toHaveTextContent('处理活动已不可访问，计时已停止');
@@ -495,7 +498,7 @@ describe('TextbookWorkbenchPage', () => {
     expect(
       screen.queryByRole('heading', { name: '处理时间线' }),
     ).not.toBeInTheDocument();
-    expect(pageState.statisticsHook).toHaveBeenCalledWith('job-1', false);
+    expect(pageState.statisticsHook).not.toHaveBeenCalled();
     await userEvent
       .setup()
       .click(screen.getByRole('button', { name: '返回当前教材' }));
@@ -511,8 +514,8 @@ describe('TextbookWorkbenchPage', () => {
     pageState.activityJob = processingJob({ status: 'queued' });
     pageState.workbench.current_job = pageState.activityJob;
     renderWorkbench();
-    expect(screen.getByRole('heading', { name: '处理时间线' })).toBeInTheDocument();
-    expect(screen.getByText('等待准备教材来源')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Reading Explorer 3' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: '受理等待' })).toHaveTextContent('等待');
     expect(screen.getByTestId('location')).toHaveTextContent('panel=processing');
     await userEvent.setup().click(screen.getByRole('button', { name: '返回阅读' }));
     expect(screen.getByTestId('location')).toHaveTextContent('panel=reading');
@@ -520,22 +523,35 @@ describe('TextbookWorkbenchPage', () => {
   });
   it('restores processing layout without a second subscription and preserves the reading selection', async () => {
     pageState.activityJob = processingJob();
+    pageState.workbench.current_job = pageState.activityJob;
     renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1&panel=processing');
-    expect(screen.getByRole('heading', { name: '处理时间线' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Reading Explorer 3' })).toBeInTheDocument();
     expect(pageState.activityHook).toHaveBeenCalledTimes(1);
     await userEvent.setup().click(screen.getByRole('button', { name: '返回阅读' }));
     expect(screen.getByTestId('location')).toHaveTextContent('kp=sports-training&view=material&activity=job-1');
     expect(screen.getByText('已有冠军训练讲义')).toBeInTheDocument();
   });
 
-  it('opens terminal activity history only on demand from a normal reader', () => {
+  it('hides activity after completion in a normal reader', () => {
     pageState.workbench.recent_job = processingJob({ status: 'succeeded' });
     renderWorkbench('/textbooks/book-1?kp=sports-training&view=material');
     expect(pageState.activityHook).toHaveBeenCalledWith(undefined, 'book-1', false);
+    expect(screen.queryByRole('button', { name: '活动' })).not.toBeInTheDocument();
+  });
+
+  it('dismisses completed processing when entering learning and preserves the reader selection', async () => {
+    pageState.activityJob = processingJob({ status: 'succeeded' });
+    renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1&panel=processing');
+    await userEvent.setup().click(screen.getByRole('button', { name: '进入学习空间' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('kp=sports-training&view=material');
+    expect(screen.getByTestId('location')).not.toHaveTextContent('activity');
+    expect(screen.queryByRole('complementary', { name: '教材处理活动' })).not.toBeInTheDocument();
+    expect(screen.getByText('已有冠军训练讲义')).toBeInTheDocument();
   });
 
   it('preserves reader scroll across full processing and compact layouts', async () => {
     pageState.activityJob = processingJob();
+    pageState.workbench.current_job = pageState.activityJob;
     renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1');
     const reader = screen.getByTestId('book-reader-scroll');
     reader.scrollTop = 184;
@@ -557,7 +573,7 @@ describe('TextbookWorkbenchPage', () => {
   it('does not leave processing when the server reports completion', () => {
     pageState.activityJob = processingJob({ status: 'succeeded' });
     renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1&panel=processing');
-    expect(screen.getByRole('heading', { name: '处理时间线' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Reading Explorer 3' })).toBeInTheDocument();
     expect(screen.getByTestId('location')).toHaveTextContent('panel=processing');
   });
   it('chooses the first KP and source view when the URL has no selection', async () => {

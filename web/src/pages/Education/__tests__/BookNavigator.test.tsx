@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import i18n from '@/i18n';
+beforeEach(() => { void i18n.changeLanguage('zh-CN'); });
 import { BookNavigator } from '../components/BookNavigator';
 import type { BookStructure } from '../types';
 
@@ -76,11 +78,22 @@ const structure: BookStructure = {
 };
 
 describe('BookNavigator', () => {
+  it('supports keyboard tab switching with an associated content panel', () => {
+    render(<BookNavigator structure={structure} />);
+    const knowledge = screen.getByRole('tab', { name: '知识点' });
+    fireEvent.keyDown(knowledge, { key: 'ArrowRight' });
+    const source = screen.getByRole('tab', { name: '原书目录' });
+    expect(source).toHaveAttribute('aria-selected', 'true');
+    expect(source).toHaveFocus();
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', source.id);
+    fireEvent.keyDown(source, { key: 'Home' });
+    expect(knowledge).toHaveAttribute('aria-selected', 'true');
+  });
   it('groups knowledge points by unit and keeps ungrouped points explicit', () => {
     render(<BookNavigator structure={structure} />);
 
-    expect(screen.getByRole('heading', { name: 'Sports and Fitness' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '未分组' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Sports and Fitness（2）' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '未分组（1）' })).toBeInTheDocument();
     expect(screen.getByText('足球如何成为全球运动')).toBeInTheDocument();
     expect(screen.getByLabelText('足球如何成为全球运动，已生成讲义')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '批量选择' })).not.toBeInTheDocument();

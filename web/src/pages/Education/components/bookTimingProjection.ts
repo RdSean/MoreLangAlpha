@@ -1,4 +1,5 @@
 import { createFormatter } from '@/lib/format';
+import i18n from '@/i18n';
 import type {
   BookExecutionPhase,
   BookJob,
@@ -209,10 +210,10 @@ export function projectBookTiming(
 
 const integer = createFormatter({ maximumFractionDigits: 0 });
 export function formatBookDuration(ms: number | null): string {
-  if (ms === null || !Number.isFinite(ms) || ms < 0) return '未记录';
+  if (ms === null || !Number.isFinite(ms) || ms < 0) return i18n.t('bookProcessing.missing');
   const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${integer(seconds)} 秒`;
+  if (seconds < 60) return i18n.t('bookProcessing.seconds', { count: seconds });
   if (seconds < 3600)
-    return `${integer(Math.floor(seconds / 60))} 分 ${integer(seconds % 60)} 秒`;
-  return `${integer(Math.floor(seconds / 3600))} 小时 ${integer(Math.floor((seconds % 3600) / 60))} 分`;
+    return i18n.t('bookProcessing.minutes', { minutes: integer(Math.floor(seconds / 60)), seconds: integer(seconds % 60) });
+  return i18n.t('bookProcessing.hours', { hours: integer(Math.floor(seconds / 3600)), minutes: integer(Math.floor((seconds % 3600) / 60)) });
 }

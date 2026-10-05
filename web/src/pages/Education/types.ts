@@ -252,6 +252,7 @@ export interface BookJobSummary {
 }
 
 export interface BookJob extends BookJobSummary {
+  token_usage?: { status: 'available' | 'partial'; input_tokens: number; output_tokens: number; total_tokens: number; recorded_calls: number } | null;
   textbook_id: string;
   depth: BookMaterialDepth | null;
   requirements: string | null;
@@ -290,6 +291,7 @@ export interface BookMaterialCounts {
 }
 
 export interface FrozenBookSource {
+  page_count?: number | null;
   document_id: string;
   parse_job_id: string;
   primary_artifact_id: string;

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import i18n from '@/i18n';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { watchBookActivity } from '../api';
@@ -10,6 +11,7 @@ import { projectBookActivity } from '../components/bookActivityProjection';
 import type { BookActivityEvent, BookJob } from '../types';
 
 const NOW = '2026-10-02T06:00:00Z';
+beforeEach(() => { void i18n.changeLanguage('zh-CN'); });
 
 function item(
   itemId: string,
@@ -26,6 +28,7 @@ function item(
     status,
     attempt: status === 'queued' ? 0 : 1,
     safe_error: null,
+    execution_phase: 'ptc_execution',
     started_at: status === 'queued' ? null : NOW,
     finished_at: ['succeeded', 'failed', 'cancelled', 'not_run'].includes(status)
       ? NOW
@@ -433,52 +436,42 @@ describe('watchBookActivity', () => {
 });
 
 describe('RoutedBookActivityPanel', () => {
-  it('pages compact diagnostics by 50 records and resets the window on a different job', () => {
+  it('shows only the latest diagnostic for the current item and resets the disclosure on a different job', () => {
     const events = Array.from({ length: 120 }, (_, index) => event(index + 1, 'tool', 'material-2', `诊断 ${index}`));
     const view = render(<BookActivityPanel job={job()} events={events} />);
-    fireEvent.click(screen.getByRole('button', { name: '诊断明细（120）' }));
+    expect(screen.queryByText('诊断 119')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '最新诊断' }));
     expect(screen.getByText('诊断 119')).toBeInTheDocument();
     expect(screen.queryByText('诊断 0')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '更早的诊断' }));
-    expect(screen.getByText('诊断 20')).toBeInTheDocument();
-    expect(screen.queryByText('诊断 0')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '更早的诊断' }));
-    expect(screen.getByText('诊断 0')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '更早的诊断' })).not.toBeInTheDocument();
-    view.rerender(<BookActivityPanel job={job({ job_id: 'job-2' })} events={events} />);
-    fireEvent.click(screen.getByRole('button', { name: '诊断明细（120）' }));
-    expect(screen.queryByText('诊断 0')).not.toBeInTheDocument();
+    view.rerender(<BookActivityPanel job={job({ job_id: 'job-2' })} events={[]} />);
+    expect(screen.queryByText('诊断 119')).not.toBeInTheDocument();
   });
   it('unmounts diagnostics by default and resets them when switching jobs', () => {
     const events = [event(1, 'tool', 'material-2', 'Running Bash')];
     const view = render(<BookActivityPanel job={job()} events={events} />);
     expect(screen.queryByText('Running Bash')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '诊断明细（1）' }));
-    expect(screen.getByText('Running Bash')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '最新诊断' }));
+    expect(screen.getByText('Bash 执行中')).toBeInTheDocument();
     view.rerender(<BookActivityPanel job={job({ job_id: 'job-2' })} events={events} />);
     expect(screen.queryByText('Running Bash')).not.toBeInTheDocument();
     view.rerender(<BookActivityPanel job={job()} events={events} />);
     expect(screen.queryByText('Running Bash')).not.toBeInTheDocument();
   });
 
-  it('renders completed action history as neutral progress and titles as plain text', () => {
-    const completed = job({ status: 'succeeded', items: [
-      { ...item('material-1', 'material', 'succeeded', 1), knowledge_point_title: '<img src=x onerror=alert(1)>' },
-    ] });
-    const view = render(<BookActivityPanel job={completed} events={[
+  it('renders a latest report neutrally and keeps titles as plain text', () => {
+    const active = job({ items: [{ ...item('material-1', 'material', 'running', 1), knowledge_point_title: '<img src=x onerror=alert(1)>' }] });
+    const view = render(<BookActivityPanel job={active} events={[
       event(1, 'progress', 'material-1', '正在澄清概念与术语', { stage: 'material_writing', action: 'clarifying_concepts' }),
-      { ...event(2, 'material', 'material-1', '讲义已提交'), status: 'succeeded' },
     ]} />);
     expect(screen.getByText('知识点：<img src=x onerror=alert(1)>')).toBeInTheDocument();
-    const progressRow = screen.getByText('正在澄清概念与术语').closest('li');
-    expect(progressRow?.querySelector('.lucide-check')).toBeNull();
+    expect(screen.getByText('正在澄清概念与术语').closest('li')?.querySelector('.lucide-check')).toBeNull();
     expect(view.container.querySelector('img')).toBeNull();
-    expect(screen.getByText('讲义已提交').closest('li')?.querySelector('.lucide-check')).not.toBeNull();
   });
-
   it('does not mark a cancelled job as successful', () => {
-    const view = render(<BookActivityPanel job={job({ status: 'cancelled' })} events={[]} />);
-    expect(view.container.querySelector('.lucide-check')).toBeNull();
+    render(<BookActivityPanel job={job({ status: 'cancelled', items: [item('material-1', 'material', 'cancelled', 1)] })} events={[]} />);
+    expect(screen.getByRole('listitem', { name: 'PTC 执行' })).toHaveTextContent('已取消');
+    expect(screen.getByRole('listitem', { name: '验收提交' })).toHaveTextContent('未执行');
     expect(screen.getAllByText('已取消').length).toBeGreaterThan(0);
   });
 
@@ -516,7 +509,7 @@ describe('RoutedBookActivityPanel', () => {
     const reader = screen.getByTestId('reader');
     reader.scrollTop = 73;
 
-    fireEvent.click(screen.getByRole('button', { name: '诊断明细（1）' }));
+    fireEvent.click(screen.getByRole('button', { name: '最新诊断' }));
 
     expect(screen.getByTestId('location')).toHaveTextContent('?kp=lesson-3&activity=job-1');
     expect(reader.scrollTop).toBe(73);
