@@ -527,9 +527,11 @@ describe('TextbookWorkbenchPage', () => {
     renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1&panel=processing');
     expect(screen.getByRole('heading', { name: 'Reading Explorer 3' })).toBeInTheDocument();
     expect(pageState.activityHook).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: /^活动$/ })).not.toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('button', { name: '返回阅读' }));
     expect(screen.getByTestId('location')).toHaveTextContent('kp=sports-training&view=material&activity=job-1');
     expect(screen.getByText('已有冠军训练讲义')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^活动$/ })).not.toBeInTheDocument();
   });
 
   it('hides activity after completion in a normal reader', () => {

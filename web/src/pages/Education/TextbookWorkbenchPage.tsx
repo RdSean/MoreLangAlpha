@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { isAxiosError } from 'axios';
 import {
-  Activity,
   ArrowLeft,
   Menu,
   RotateCcw,
@@ -117,7 +116,6 @@ export default function TextbookWorkbenchPage() {
     Boolean(selectedKnowledgePoint),
   );
 
-  const activeJob = workbench.data?.current_job ?? workbench.data?.recent_job;
   const showProcessing =
     searchParams.get('panel') === 'processing' ||
     (workbench.data?.structure_status !== 'ready' &&
@@ -478,22 +476,6 @@ export default function TextbookWorkbenchPage() {
               <span>重试未完成项</span>
             </Button>
           )}
-          {processingActive && <Button
-            variant="ghost"
-            className="min-h-11 px-3"
-            disabled={!activeJob}
-            onClick={() =>
-              activeJob &&
-              updateSearch((next) => {
-                next.set('activity', activeJob.job_id);
-                next.delete('panel');
-              })
-            }
-            aria-label={t('bookProcessing.activity')}
-          >
-            <Activity className="size-4 sm:mr-2" aria-hidden="true" />
-            <span className="hidden sm:inline">{t('bookProcessing.activity')}</span>
-          </Button>}
           {workbench.data.structure_status === 'ready' && !(processingActive && currentJob?.kind === 'structure') && <Button
             variant="outline"
             className="min-h-11 px-3"
