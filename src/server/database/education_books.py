@@ -972,6 +972,9 @@ async def _managed_textbook_rows(
                textbooks.updated_at,
                textbooks.current_structure_id,
                textbooks.source_document_id AS document_id,
+               (SELECT owner_user_id FROM documents
+                WHERE documents.document_id = textbooks.source_document_id)
+                   AS source_owner_user_id,
                textbooks.source_parse_job_id AS parse_job_id,
                textbooks.source_primary_artifact_id AS primary_artifact_id,
                textbooks.source_filename AS filename,

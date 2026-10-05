@@ -56,6 +56,8 @@ def test_only_workbench_jobs_assignments_and_learning_routes_remain():
         "/textbooks/{textbook_id}",
         "/textbooks/{textbook_id}/structure",
         "/textbooks/{textbook_id}/source",
+        "/textbooks/{textbook_id}/original",
+        "/textbooks/{textbook_id}/original-location",
         "/textbooks/{textbook_id}/knowledge-points/{knowledge_point_id}/material",
         "/textbooks/{textbook_id}/assets/{asset_id}",
         "/textbooks/{textbook_id}/jobs",

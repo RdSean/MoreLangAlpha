@@ -34,6 +34,57 @@ KNOWLEDGE_POINT_ID = UUID("4c3f4d0c-a508-4bff-a89f-a3a584a2fe86")
 
 
 @pytest.mark.asyncio
+async def test_original_stream_closes_download_and_has_private_cache_headers(
+    client, monkeypatch
+):
+    from types import SimpleNamespace
+
+    async def chunks():
+        yield b"%PDF-test"
+
+    close = AsyncMock()
+    download = SimpleNamespace(
+        filename="book.pdf",
+        media_type="application/pdf",
+        object_download=SimpleNamespace(chunks=chunks(), content_length=9, close=close),
+    )
+    opener = AsyncMock(return_value=download)
+    monkeypatch.setattr(textbook_routes, "open_book_original", opener, raising=False)
+    client._transport.app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    response = await client.get(
+        f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/original"
+    )
+    assert response.status_code == 200
+    assert response.content == b"%PDF-test"
+    assert response.headers["cache-control"] == "private, no-store"
+    close.assert_awaited_once()
+    opener.assert_awaited_once_with(
+        parent_user_id="parent-1", textbook_id=str(TEXTBOOK["textbook_id"])
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page", [None, 12])
+async def test_original_location_can_be_unknown_without_blocking_reading(
+    client, monkeypatch, page
+):
+    locate = AsyncMock(return_value={"page": page})
+    monkeypatch.setattr(
+        textbook_routes, "get_book_original_location", locate, raising=False
+    )
+    client._transport.app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    response = await client.get(
+        f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/original-location?start_line=300"
+    )
+    assert response.status_code == 200
+    assert response.json() == {"page": page}
+    invalid = await client.get(
+        f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/original-location?start_line=0"
+    )
+    assert invalid.status_code == 422
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("result,code", [(None,404), (ValueError("Invalid statistics cursor"),400)])
 async def test_statistics_http_rejects_inaccessible_job_or_invalid_cursor(client, monkeypatch, result, code):
     client._transport.app.dependency_overrides[get_current_user_id] = lambda: "parent-1"

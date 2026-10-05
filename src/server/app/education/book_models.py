@@ -380,6 +380,10 @@ class BookActivityPageResponse(_StrictModel):
         return self
 
 
+class BookOriginalLocationResponse(_StrictModel):
+    page: int | None = Field(default=None, ge=1)
+
+
 class BookAssignmentRequest(_StrictModel):
     student_user_ids: list[str] = Field(min_length=1, max_length=100)
 

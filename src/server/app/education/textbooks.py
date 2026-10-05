@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import Response, StreamingResponse
+from starlette.background import BackgroundTask
 
 from src.server.app.education.book_models import (
     BookActivityPageResponse,
@@ -13,6 +14,7 @@ from src.server.app.education.book_models import (
     BookJobCreateRequest,
     BookSourceListResponse,
     BookSourceSliceResponse,
+    BookOriginalLocationResponse,
     BookStructureResponse,
     CreateBookRequest,
     CreateBookResponse,
@@ -34,6 +36,11 @@ from src.server.app.education.models import (
 from src.server.database.education_book_jobs import get_book_job_for_parent
 from src.server.services.education_book_activity import BookActivityService
 from src.server.services.education_book_timing import get_book_job_statistics
+from src.server.services.education_book_original import (
+    get_book_original_location,
+    open_book_original,
+)
+from src.server.utils.http_headers import content_disposition
 from src.server.services.education_learning_assets import (
     add_learning_item,
     edit_learning_item,
@@ -247,6 +254,44 @@ async def get_managed_source(
             textbook_id=textbook_id,
             start_line=start_line,
             end_line=end_line,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get("/textbooks/{textbook_id}/original")
+async def get_original_file(textbook_id: UUID, user_id: CurrentUserId):
+    try:
+        download = await open_book_original(
+            parent_user_id=user_id, textbook_id=str(textbook_id)
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+    headers = {
+        "Content-Disposition": content_disposition(download.filename),
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if download.object_download.content_length is not None:
+        headers["Content-Length"] = str(download.object_download.content_length)
+    return StreamingResponse(
+        download.object_download.chunks,
+        media_type=download.media_type,
+        headers=headers,
+        background=BackgroundTask(download.object_download.close),
+    )
+
+
+@router.get(
+    "/textbooks/{textbook_id}/original-location",
+    response_model=BookOriginalLocationResponse,
+)
+async def get_original_location(
+    textbook_id: UUID, user_id: CurrentUserId, start_line: int = Query(..., ge=1)
+):
+    try:
+        return await get_book_original_location(
+            parent_user_id=user_id, textbook_id=str(textbook_id), start_line=start_line
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
