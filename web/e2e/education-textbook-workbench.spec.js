@@ -1,6 +1,6 @@
 import { configureSSE, expect, getCapturedRequests, mockAPI, resetMockServer, test } from './fixtures.js';
 
-test.use({ screenshot: 'only-on-failure' });
+test.use({ screenshot: 'only-on-failure', locale: 'zh-CN' });
 
 const parent = {
   user_id: 'parent-1',
@@ -154,6 +154,7 @@ const job = {
       skill_kp_id: 'sports-global-game',
       knowledge_point_title: '足球如何成为全球运动',
       status: 'succeeded',
+      execution_phase: 'finalization',
       attempt: 1,
       safe_error: null,
       started_at: '2026-10-02T06:00:01Z',
@@ -167,6 +168,7 @@ const job = {
       skill_kp_id: 'sports-training',
       knowledge_point_title: '冠军的训练方法',
       status: 'succeeded',
+      execution_phase: 'finalization',
       attempt: 1,
       safe_error: null,
       started_at: '2026-10-02T06:00:31Z',
@@ -234,6 +236,7 @@ function runningJob(overrides = {}) {
     items: job.items.map((item, index) => ({
       ...item,
       status: index === 0 ? 'running' : 'queued',
+      execution_phase: index === 0 ? 'ptc_execution' : 'initial_queue',
       finished_at: null,
     })),
     ...overrides,
@@ -249,7 +252,7 @@ function activityEvent(seq, overrides = {}) {
     status: 'running',
     message: `Running Read ${seq}`,
     metadata: {},
-    created_at: '2026-10-02T06:00:00Z',
+    created_at: '2026-10-02T06:00:02Z',
     ...overrides,
   };
 }
@@ -340,16 +343,18 @@ for (const width of [1440, 375]) {
     await page.goto('/textbooks/book-1?kp=sports-global-game&view=source&activity=job-1');
     const panel = page.getByRole('complementary', { name: '教材处理活动' });
     await expect(panel.getByText('正在组织讲义内容', { exact: true })).toBeVisible();
-    await expect(panel.getByText('最近活动', { exact: true })).toBeVisible();
+    await expect(panel.getByText('最近活动', { exact: true })).toHaveCount(1);
     const quote = panel.getByLabel('等待时的名句');
     await expect(quote.locator('blockquote')).not.toHaveText('');
     const firstQuote = await quote.textContent();
-    await expect(panel.getByRole('button', { name: '诊断明细（30）' })).toBeVisible();
+    await expect(panel.getByRole('button', { name: '最新诊断' })).toBeVisible();
     expect(await quote.textContent()).toBe(firstQuote);
     expect(quoteRequests).toHaveLength(2);
     await expect(panel.getByText('Running Bash hidden')).toHaveCount(0);
     await expect(panel.getByText('Finished Edit hidden')).toHaveCount(0);
-    await expect(panel.locator('ol li')).toHaveCount(0);
+    await expect(panel.getByRole('list', { name: '服务里程碑' }).locator(':scope > li')).toHaveCount(6);
+    await expect(quote.locator('figcaption')).toHaveText(/^--.+/);
+    expect((await quote.boundingBox()).height).toBe(48);
     await expectNoHorizontalOverflow(page);
     const quoteBox = await quote.boundingBox();
     const currentBox = await panel.getByText('正在组织讲义内容', { exact: true }).boundingBox();
@@ -390,7 +395,8 @@ test('desktop workbench keeps reading, batch controls, links, and activity in on
   await expect(page.getByRole('heading', { name: '生成未生成的 1 份讲义' })).toBeVisible();
   await page.getByRole('button', { name: '取消' }).click();
 
-  await page.getByRole('button', { name: '活动' }).click();
+  await expect(page.getByRole('button', { name: '活动', exact: true })).toHaveCount(0);
+  await page.goto('/textbooks/book-1?kp=sports-global-game&view=source&activity=job-1');
   const activity = page.getByRole('complementary', { name: '教材处理活动' });
   await expect(activity).toBeVisible();
   await expect(activity.getByText('已完成 2/2 份讲义')).toBeVisible();
@@ -404,7 +410,7 @@ test('375px workbench keeps the directory drawer and actions reachable without o
   await page.goto('/textbooks/book-1?kp=sports-global-game&view=source');
 
   await expect(page.getByRole('button', { name: '打开教材目录' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '活动' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '活动', exact: true })).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
 
   await page.getByRole('button', { name: '打开教材目录' }).click();
@@ -422,7 +428,7 @@ test('375px workbench keeps the directory drawer and actions reachable without o
   await expectNoHorizontalOverflow(page);
   await page.getByRole('button', { name: '取消' }).click();
 
-  await page.getByRole('button', { name: '活动' }).click();
+  await page.goto('/textbooks/book-1?kp=sports-training&view=material&activity=job-1');
   await expect(page.getByRole('complementary', { name: '教材处理活动' })).toBeVisible();
   await expect(page.getByRole('button', { name: '关闭处理活动' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -496,7 +502,7 @@ test('reader waits for a cold image before restoring its saved offset', async ({
   await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(580);
 });
 
-test('activity reconnects after the first 200 of 500 events without skipping or duplicating details', async ({ page }) => {
+test('activity reconnects from 200 of 500 without skipping cursors and refreshes one latest diagnostic', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 700 });
   const cursors = [];
   const quoteRequests = [];
@@ -527,10 +533,14 @@ test('activity reconnects after the first 200 of 500 events without skipping or 
 
   await page.goto('/textbooks/book-1?kp=sports-global-game&view=source&activity=job-1');
   const panel = page.getByRole('complementary', { name: '教材处理活动' });
-  await expect(panel.getByText('诊断明细（200）')).toBeVisible();
+  await expect(panel.getByRole('button', { name: '最新诊断' })).toBeVisible();
+  await panel.getByRole('button', { name: '最新诊断' }).click();
+  await expect(panel.getByText('Read 200 执行中', { exact: true })).toHaveCount(1);
   await expect(panel.getByText('正在重新连接活动流')).toBeVisible();
   releaseRemainder();
-  await expect(panel.getByText('诊断明细（500）')).toBeVisible();
+  await expect(panel.getByText('Read 500 执行中', { exact: true })).toHaveCount(1);
+  await expect(panel.getByText('Read 200 执行中', { exact: true })).toHaveCount(0);
+  await expect.poll(() => cursors.slice(0, 4)).toEqual([0, 200, 200, 500]);
   expect(quoteRequests).toHaveLength(0);
   await expect(panel.getByLabel('等待时的名句').locator('blockquote')).toHaveCount(0);
   expect(cursors.slice(0, 3)).toEqual([0, 200, 200]);
@@ -539,20 +549,18 @@ test('activity reconnects after the first 200 of 500 events without skipping or 
   await reader.evaluate((element) => { element.scrollTop = 180; });
   await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   const readingScroll = await reader.evaluate((element) => element.scrollTop);
-  await expect(panel.getByText('Running Read 500', { exact: true })).toHaveCount(0);
-  await panel.getByRole('button', { name: '诊断明细（500）' }).click();
-  await expect(panel.getByText('Running Read 500', { exact: true })).toBeVisible();
-  for (let pageIndex = 0; pageIndex < 6; pageIndex += 1) {
-    await panel.getByRole('button', { name: '更早的诊断' }).click();
-  }
-  await expect(panel.getByText('Running Read 200', { exact: true })).toHaveCount(1);
+  await panel.getByRole('button', { name: '最新诊断' }).click();
+  await expect(panel.getByText('Read 500 执行中', { exact: true })).toHaveCount(0);
+  await panel.getByRole('button', { name: '最新诊断' }).click();
+  await expect(panel.getByText('Read 500 执行中', { exact: true })).toHaveCount(1);
+  await expect(panel.getByRole('button', { name: '更早的诊断' })).toHaveCount(0);
   expect(page.url()).toBe(readingURL);
   expect(await reader.evaluate((element) => element.scrollTop)).toBe(readingScroll);
   await expect(panel.getByText('处理失败', { exact: true })).toHaveCount(0);
 });
 
 for (const width of [1440, 375]) {
-  test(`${width}px completed business history replays titles and keeps diagnostics opt-in`, async ({ page }, testInfo) => {
+  test(`${width}px completed timeline replays the last report and keeps long result titles as plain text`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await mockWorkbench(page);
     const longTitle = 'Place Value: How a Digit\'s Position Sets Its Value <b>原文标题</b> '.repeat(2);
@@ -565,29 +573,32 @@ for (const width of [1440, 375]) {
         activityEvent(2, { message: 'Running Bash diagnostic only' }),
         activityEvent(3, { kind: 'progress', message: '正在整理原文示例', metadata: { stage: 'material_writing', action: 'explaining_source_examples' } }),
         activityEvent(4, { kind: 'item_succeeded', status: 'succeeded', message: '讲义已提交' }),
-        activityEvent(5, { item_id: 'item-2', kind: 'progress', message: '正在澄清概念与术语', metadata: { stage: 'material_writing', action: 'clarifying_concepts' } }),
+        activityEvent(5, { item_id: 'item-2', kind: 'progress', message: '正在澄清概念与术语', metadata: { stage: 'material_writing', action: 'clarifying_concepts' }, created_at: '2026-10-02T06:00:32Z' }),
         activityEvent(6, { item_id: 'item-2', kind: 'item_succeeded', status: 'succeeded', message: '讲义已提交' }),
       ], { status: 'succeeded', high_water_seq: 6 })),
     });
-    await page.goto('/textbooks/book-1?kp=sports-global-game&view=source&activity=job-1');
-    const panel = page.getByRole('complementary', { name: '教材处理活动' });
-    await expect(panel.getByRole('heading', { name: `知识点：${longTitle}` })).toBeVisible();
-    await expect(panel.getByRole('heading', { name: '知识点：冠军的训练方法' })).toBeVisible();
-    await expect(panel.getByText('正在澄清概念与术语')).toHaveCount(2);
+    await page.goto('/textbooks/book-1?kp=sports-global-game&view=source&activity=job-1&panel=processing');
+    const panel = page.getByRole('region', { name: '教材处理时间线' });
+    await expect(panel.getByRole('heading', { name: 'Reading Explorer 3' })).toBeVisible();
+    await expect(panel.getByRole('button', { name: `阅读讲义：${longTitle}` })).toBeVisible();
+    await expect(panel.getByText('正在澄清概念与术语')).toHaveCount(1);
+    await expect(panel.getByText('正在整理原文示例')).toHaveCount(0);
     await expect(panel.locator('b')).toHaveCount(0);
     await expect(panel.getByText('Running Bash diagnostic only')).toHaveCount(0);
-    const diagnostics = panel.getByRole('button', { name: '诊断明细（1）' });
-    await diagnostics.focus();
-    await page.keyboard.press('Enter');
-    await expect(diagnostics).toHaveAttribute('aria-expanded', 'true');
-    await expect(panel.getByText('Running Bash diagnostic only')).toBeVisible();
+    await expect(panel.getByRole('button', { name: '最新诊断' })).toHaveCount(0);
+    await expect(panel.getByText('Token 消耗')).toBeVisible();
+    const enterLearning = panel.getByRole('button', { name: '进入学习空间' });
+    await expect(enterLearning).toBeVisible();
     await page.reload();
-    await expect(panel.getByText('正在整理原文示例')).toBeVisible();
-    await expect(panel.getByText('讲义已提交')).toHaveCount(2);
-    await expect(diagnostics).toHaveAttribute('aria-expanded', 'false');
+    await expect(panel.getByText('正在澄清概念与术语')).toHaveCount(1);
+    await expect(panel.getByText('正在整理原文示例')).toHaveCount(0);
+    await expect(panel.getByRole('button', { name: '最新诊断' })).toHaveCount(0);
     await expect(panel.getByText('Running Bash diagnostic only')).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
-    await page.screenshot({ path: testInfo.outputPath(`business-history-${width}.png`), animations: 'disabled' });
+    await page.screenshot({ path: testInfo.outputPath(`completed-timeline-${width}.png`), animations: 'disabled' });
+    await enterLearning.click();
+    await expect(page).not.toHaveURL(/panel=processing|activity=/);
+    await expect(page.getByTestId('book-reader-scroll')).toBeVisible();
   });
 }
 
@@ -617,14 +628,15 @@ for (const activityStatus of ['available', 'unavailable']) {
       high_water_seq: 1000,
       activity_status: activityStatus,
       succeeded_items: 1,
-      items: job.items.map((item, index) => ({ ...item, status: index === 0 ? 'succeeded' : 'running' })),
+      items: job.items.map((item, index) => ({ ...item, status: index === 0 ? 'succeeded' : 'running', execution_phase: index === 0 ? 'finalization' : 'ptc_execution' })),
     });
 
     await expect(panel.getByText('已完成 1/2 份讲义')).toBeVisible({ timeout: 8000 });
     expect(jobRequests).toBeGreaterThan(previousRequests);
-    await expect(panel.getByText('正在撰写讲义', { exact: true })).toHaveCount(1);
+    await expect(panel.getByText('正在撰写讲义', { exact: true })).toHaveCount(0);
     await expect(panel.getByText('知识点：冠军的训练方法', { exact: true })).toBeVisible();
-    await expect(panel.getByText(activityStatus === 'available' ? '正在生成讲义' : '活动暂不可用，讲义生成仍在继续', { exact: true })).toBeVisible();
+    await expect(panel.getByRole('listitem', { name: 'PTC 执行' })).toContainText('PTC 执行 · 进行中未记录');
+    if (activityStatus === 'unavailable') await expect(panel.getByText('活动暂不可用，任务状态仍会继续更新。')).toBeVisible();
     const activityRequests = (await getCapturedRequests()).filter((request) => request.url.startsWith('/api/v1/education/book-jobs/job-1/events'));
     expect(activityRequests).toHaveLength(1);
     await expect(panel.getByText('正在重新连接活动流')).toHaveCount(0);
@@ -700,10 +712,10 @@ test('a delayed old job response does not overwrite the activity after switching
     },
     'GET /education/book-jobs/job-2': runningJob({ job_id: 'job-2', succeeded_items: 1, items: [
       { ...job.items[0], status: 'succeeded' },
-      { ...job.items[1], item_id: 'item-new', status: 'running' },
+      { ...job.items[1], item_id: 'item-new', status: 'running', execution_phase: 'ptc_execution' },
     ] }),
     'GET /education/book-jobs/job-2/events': (route) => fulfillActivity(route, activityFrame([
-      activityEvent(1, { job_id: 'job-2', item_id: 'item-new', kind: 'progress', message: '正在组织讲义内容', metadata: { stage: 'material_organizing' } }),
+      activityEvent(1, { job_id: 'job-2', item_id: 'item-new', kind: 'progress', message: '正在组织讲义内容', metadata: { stage: 'material_organizing' }, created_at: '2026-10-02T06:00:32Z' }),
     ], { job_id: 'job-2' })),
   });
 
@@ -731,7 +743,7 @@ test('375px long activity and titles keep cancellation, reader, and directory co
   const longMessage = '已完成教材材料校验并保留当前成功讲义'.repeat(30).slice(0, 512);
   const longKnowledgePointTitle = '足球如何成为全球运动：跨地区文化与团队训练方法'.repeat(12);
   await mockRunningWorkbench(page, () => runningJob(), (route) => fulfillActivity(route, activityFrame([
-    activityEvent(1, { kind: 'item_succeeded', status: 'succeeded', message: longMessage }),
+    activityEvent(1, { kind: 'progress', status: 'running', message: longMessage, metadata: { stage: 'material_organizing' } }),
   ])), { title: 'Reading Explorer 3 教材与阅读训练'.repeat(12) });
   await mockAPI(page, {
     'GET /education/textbooks/book-1/structure': {

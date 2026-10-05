@@ -52,7 +52,7 @@ export async function installProcessingMocks(page, {
   const selected = {
     document_id: 'document-1', parse_job_id: 'parse-1', primary_artifact_id: 'artifact-1',
     filename: 'textbook.pdf', media_type: 'application/pdf', parser_id: 'markdown', parser_name: 'Markdown',
-    completed_at: '2026-10-01T00:00:00Z', content_sha256: 'a'.repeat(64), size_bytes: 1000, image_count: 2,
+    completed_at: '2026-10-01T00:00:00Z', content_sha256: 'a'.repeat(64), size_bytes: 1000, image_count: 2, page_count: 24,
   };
   const snapshot = () => getJob();
   await mockAPI(page, {

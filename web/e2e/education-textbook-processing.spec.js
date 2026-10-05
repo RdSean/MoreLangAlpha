@@ -1,7 +1,7 @@
 import { configureSSE, expect, getCapturedRequests, mockAPI, resetMockServer, test } from './fixtures.js';
 import { activityPage, event, installProcessingMocks, json, processingJob } from './helpers/textbookProcessingFixtures.js';
 
-test.use({ screenshot: 'only-on-failure' });
+test.use({ screenshot: 'only-on-failure', locale: 'zh-CN' });
 
 test.beforeEach(async () => { await resetMockServer(); });
 test.afterEach(async ({ page }) => { await page.close(); await resetMockServer(); });
@@ -26,13 +26,17 @@ for (const theme of ['light', 'dark']) {
       const bounds = await layoutBounds(page);
       expect(bounds.page).toBe(bounds.viewport);
       expect(bounds.timeline).toBeGreaterThan(200);
-      const elapsed = timeline.getByLabel('处理计时').locator('dd').first();
+      await page.evaluate(() => document.fonts.ready);
+      const elapsed = timeline.getByTestId('book-processing-elapsed');
       const initial = await elapsed.textContent();
       const box = await elapsed.boundingBox();
       await expect.poll(() => elapsed.textContent()).not.toBe(initial);
       const updated = await elapsed.boundingBox();
       expect(updated.y).toBe(box.y);
       expect(updated.height).toBe(box.height);
+      const screen = await timeline.getByTestId('book-processing-scroll').evaluate((element) => ({ content: element.scrollHeight, available: element.clientHeight }));
+      expect(screen.content).toBeLessThanOrEqual(screen.available + 2);
+      await expect(timeline.getByText('PDF · 24 页', { exact: true })).toBeVisible();
       await expect(timeline.getByRole('button', { name: /诊断明细/ })).toHaveCount(0);
       const back = timeline.getByRole('button', { name: '返回阅读' });
       const hit = await back.boundingBox();
@@ -86,27 +90,25 @@ test('reading, compact and full layouts share one stream and restore reading pos
   expect(streamRequests).toBe(1);
 });
 
-test('activity updates never pull a reader down until follow latest is selected', async ({ page }) => {
+test('activity updates replace the latest report without growing the timeline', async ({ page }) => {
   const snapshot = processingJob({ kind: 'materials' });
-  const events = Array.from({ length: 70 }, (_, index) => event(index + 1, { kind: 'item', message: `服务记录 ${index + 1}` }));
+  const events = Array.from({ length: 70 }, (_, index) => event(index + 1, { kind: 'progress', message: `服务记录 ${index + 1}`, metadata: { origin: 'agent', stage: 'material_reading', scope: 'knowledge_point', kp_id: 'reading' } }));
   snapshot.high_water_seq = 70;
   await installProcessingMocks(page, { getJob: () => snapshot, ready: true, getEvents: () => events });
   await configureSSE({ path: '/api/v1/education/book-jobs/job-1/events', keepOpen: true, delay: 2500,
     events: [
       { id: 70, event: 'snapshot', data: activityPage(events, { highWater: 70 }) },
-      { id: 71, event: 'snapshot', data: activityPage([event(71, { kind: 'item', message: '新的服务记录' })], { highWater: 71 }) },
+      { id: 71, event: 'snapshot', data: activityPage([event(71, { kind: 'progress', message: '新的服务记录', metadata: { origin: 'agent', stage: 'material_reading', scope: 'knowledge_point', kp_id: 'reading' } })], { highWater: 71 }) },
     ] });
   await page.goto('/textbooks/book-1?activity=job-1&panel=processing');
   const scroll = page.getByTestId('book-processing-scroll');
   await expect(scroll).toBeVisible();
-  await expect(page.getByText('服务记录 70', { exact: true })).toBeAttached();
-  await scroll.evaluate((element) => { element.scrollTop = 200; element.dispatchEvent(new Event('scroll')); });
-  const position = await scroll.evaluate((element) => element.scrollTop);
-  await expect(page.getByText('新的服务记录')).toBeAttached();
-  // Scroll anchoring can round a fractional offset by one CSS pixel.
-  expect(Math.abs(await scroll.evaluate((element) => element.scrollTop) - position)).toBeLessThanOrEqual(2);
-  await page.getByRole('button', { name: '跟随最新', exact: true }).click();
-  await expect.poll(() => scroll.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(80);
+  await expect(page.getByText('服务记录 70', { exact: true })).toBeVisible();
+  const height = await scroll.evaluate((element) => element.scrollHeight);
+  await expect(page.getByText('新的服务记录', { exact: true })).toBeVisible();
+  await expect(page.getByText('服务记录 70', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('服务记录 1', { exact: true })).toHaveCount(0);
+  expect(await scroll.evaluate((element) => element.scrollHeight)).toBe(height);
 });
 
 test('source resource activity triggers one quote pool and ticks do not reload it', async ({ page }) => {
@@ -124,9 +126,9 @@ test('source resource activity triggers one quote pool and ticks do not reload i
   const quote = page.getByLabel('等待时的名句');
   await expect(quote.locator('blockquote')).not.toHaveText('');
   const first = await quote.textContent();
-  await expect(page.getByText('最近活动', { exact: true })).toBeVisible();
+  await expect(page.getByText('最近活动', { exact: true })).toBeAttached();
   await expect.poll(async () => (await getCapturedRequests()).filter((request) => request.url.includes('/book-jobs/job-1/events')).length).toBe(1);
-  await expect.poll(() => page.getByLabel('处理计时').locator('dd').first().textContent()).not.toBe('12 秒');
+  await expect.poll(() => page.getByTestId('book-processing-elapsed').textContent()).not.toBe('12 秒');
   expect(await quote.textContent()).toBe(first);
   expect(requests).toHaveLength(2);
 });
@@ -141,7 +143,7 @@ test('a terminal failure retains the timeline and stops the displayed clock', as
       timing_summary: { ...snapshot.items[0].timing_summary, terminal_at: now, total_ms: 20_000 } }] };
   const timeline = page.getByRole('region', { name: '教材处理时间线' });
   await expect(timeline.getByText('验收未通过')).toBeVisible({ timeout: 8000 });
-  const elapsed = timeline.getByLabel('处理计时').locator('dd').first();
+  const elapsed = timeline.getByTestId('book-processing-elapsed');
   const final = await elapsed.textContent();
   await page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
@@ -187,12 +189,11 @@ test('the next queued lesson keeps service milestones waiting after the first su
   await installProcessingMocks(page, { getJob: () => snapshot, ready: true });
   await page.goto('/textbooks/book-1?activity=job-1&panel=processing');
   const timeline = page.getByRole('region', { name: '教材处理时间线' });
-  await expect(timeline.getByText('等待容量的知识点', { exact: true }).first()).toBeVisible();
-  await expect(timeline.getByText('等待讲义执行', { exact: true })).toBeVisible();
+  await expect(timeline.getByText('知识点：等待容量的知识点', { exact: true })).toBeVisible();
+  await expect(timeline.getByRole('listitem', { name: '受理等待', exact: true })).toContainText('等待');
   const milestone = timeline.getByRole('list', { name: '服务里程碑' }).getByRole('listitem', { name: 'PTC 执行', exact: true });
   await expect(milestone).toContainText('等待');
   await expect(milestone).toContainText('未记录');
-  await expect(timeline.getByLabel('处理计时').locator('dd').nth(1)).toHaveText('未记录');
 });
 
 test('cancel and retry switch to a new request round without leaving the timeline', async ({ page }) => {
@@ -232,8 +233,7 @@ test('cancel and retry switch to a new request round without leaving the timelin
   await expect.poll(() => retried).toBe(1);
   await expect(page).toHaveURL(/activity=job-2/);
   await expect(page).toHaveURL(/panel=processing/);
-  await expect(timeline.getByText('本轮总历时', { exact: true })).toBeVisible();
-  await expect(timeline.getByLabel('处理计时').locator('dd').first()).toHaveText(/^[0-3] 秒$/);
+  await expect(timeline.getByTestId('book-processing-elapsed')).toHaveText(/^[0-3] 秒$/);
   await timeline.getByRole('button', { name: '返回阅读' }).click();
   await expect(page).toHaveURL(/kp=reading.*view=source/);
 });
@@ -253,7 +253,7 @@ test('disconnect freezes confirmed timing and reconnect keeps the processing sel
   await expect(timeline).toBeVisible();
   offline = true;
   await expect(timeline.getByText(/正在重新连接活动流/)).toBeVisible();
-  const elapsed = timeline.getByLabel('处理计时').locator('dd').first();
+  const elapsed = timeline.getByTestId('book-processing-elapsed');
   const value = await elapsed.textContent();
   await page.waitForTimeout(1500);
   expect(await elapsed.textContent()).toBe(value);
@@ -311,7 +311,7 @@ test('a missing job provides a reading exit instead of trapping a ready textbook
   await expect(page.getByRole('article', { name: '阅读 原文阅读' })).toBeVisible();
 });
 
-test('expanded attempt history refreshes when recovery changes the attempt without finishing the job', async ({ page }) => {
+test('recovery refreshes the current attempt without exposing statistics history', async ({ page }) => {
   let snapshot = processingJob({ kind: 'materials', title: '恢复中的讲义' });
   await installProcessingMocks(page, { getJob: () => snapshot, ready: true });
   let statisticsRequests = 0;
@@ -331,15 +331,12 @@ test('expanded attempt history refreshes when recovery changes the attempt witho
   });
   await page.goto('/textbooks/book-1?activity=job-1&panel=processing');
   const timeline = page.getByRole('region', { name: '教材处理时间线' });
-  await timeline.getByRole('button', { name: '尝试与批量统计', exact: true }).click();
-  await expect(timeline.getByText(/恢复中的讲义 · 第 1 次尝试 · 处理中/)).toBeVisible();
-  const previous = statisticsRequests;
+  await expect(timeline.getByRole('button', { name: '尝试与批量统计', exact: true })).toHaveCount(0);
+  await expect(timeline.getByText('知识点：恢复中的讲义', { exact: true })).toBeVisible();
+  expect(statisticsRequests).toBe(0);
   snapshot = { ...snapshot, items: [{ ...snapshot.items[0], attempt: 2,
-    timing_summary: { ...snapshot.items[0].timing_summary, attempt: 2 } }] };
-  await expect(timeline.getByText(/第 1 次尝试 · 已中断/)).toBeVisible({ timeout: 8000 });
-  await expect(timeline.getByText(/第 2 次尝试 · 处理中/)).toBeVisible();
-  expect(statisticsRequests).toBeGreaterThan(previous);
-  const after = statisticsRequests;
-  await page.waitForTimeout(1500);
-  expect(statisticsRequests).toBe(after);
+    execution_phase: 'input_staging', timing_summary: { ...snapshot.items[0].timing_summary, attempt: 2,
+      phases: [{ phase: 'input_staging', status: 'available', started_at: snapshot.server_now, ended_at: null, measured_ms: null, segment_count: 1 }] } }] };
+  await expect(timeline.getByRole('listitem', { name: '输入文件准备', exact: true })).toContainText('进行中', { timeout: 8000 });
+  expect(statisticsRequests).toBe(0);
 });
