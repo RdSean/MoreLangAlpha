@@ -72,6 +72,7 @@ function filterNode(node: BookStructureNode, query: string): BookStructureNode |
 function SourceNode({
   node,
   depth,
+  index,
   expanded,
   selectedNodeId,
   onToggle,
@@ -79,6 +80,7 @@ function SourceNode({
 }: {
   node: BookStructureNode;
   depth: number;
+  index: number;
   expanded: ReadonlySet<string>;
   selectedNodeId?: string;
   onToggle: (nodeId: string) => void;
@@ -88,7 +90,7 @@ function SourceNode({
   const isExpanded = expanded.has(node.id);
   return (
     <li>
-      <div className="book-tree-row" style={{ paddingLeft: `${depth * 12}px` }}>
+      <div className={cn('book-tree-row', children.length > 0 && 'book-tree-unit')} style={{ paddingLeft: `${Math.max(0, depth - (children.length ? 0 : 1)) * 12}px` }}>
         {children.length > 0 ? (
           <button
             type="button"
@@ -98,29 +100,32 @@ function SourceNode({
             aria-expanded={isExpanded}
           >
             {isExpanded
-              ? <ChevronDown className="size-4" aria-hidden="true" />
-              : <ChevronRight className="size-4" aria-hidden="true" />}
+              ? <ChevronDown className="size-3" aria-hidden="true" />
+              : <ChevronRight className="size-3" aria-hidden="true" />}
           </button>
-        ) : <span className="w-6 shrink-0" />}
+        ) : null}
         <button
           type="button"
           className={cn(
             'book-tree-item',
+            children.length > 0 && 'book-tree-group',
             selectedNodeId === node.id && 'bg-[var(--color-bg-hover)] font-medium text-foreground',
           )}
           onClick={() => onSelect?.(node.id)}
           aria-label={`打开 ${node.title}`}
         >
+          {children.length === 0 && <span className="book-tree-number" aria-hidden="true">{index + 1}</span>}
           <TreeTitle>{node.title}</TreeTitle>
         </button>
       </div>
       {children.length > 0 && isExpanded && (
         <ul>
-          {children.map((child) => (
+          {children.map((child, childIndex) => (
             <SourceNode
               key={child.id}
               node={child}
               depth={depth + 1}
+              index={childIndex}
               expanded={expanded}
               selectedNodeId={selectedNodeId}
               onToggle={onToggle}
@@ -265,7 +270,7 @@ export function BookNavigator({
                   <button type="button" className="book-tree-toggle" aria-label={`${expanded.has(unitId ?? 'ungrouped') ? '收起' : '展开'} ${title}`} aria-expanded={Boolean(normalizedQuery) || expanded.has(unitId ?? 'ungrouped')} onClick={() => toggleExpanded(unitId ?? 'ungrouped')}>
                     {normalizedQuery || expanded.has(unitId ?? 'ungrouped') ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
                   </button>
-                  <h3 className="min-w-0 flex-1 text-xs font-semibold"><TreeTitle>{`${title}（${count}）`}</TreeTitle></h3>
+                  <h3 className="book-tree-group min-w-0 flex-1"><TreeTitle>{`${title}（${count}）`}</TreeTitle></h3>
                 </div>
                 {(normalizedQuery || expanded.has(unitId ?? 'ungrouped')) && <ul>
                   {entries.map((entry, index) => (
@@ -302,11 +307,12 @@ export function BookNavigator({
         ) : (
           sourceNodes.length > 0 ? (
             <ul>
-              {sourceNodes.map((node) => (
+              {sourceNodes.map((node, index) => (
                 <SourceNode
                   key={node.id}
                   node={node}
                   depth={0}
+                  index={index}
                   expanded={normalizedQuery ? new Set(nodeMap.keys()) : expanded}
                   selectedNodeId={selectedNodeId}
                   onToggle={toggleExpanded}

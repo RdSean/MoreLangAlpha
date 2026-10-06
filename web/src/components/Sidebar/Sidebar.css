@@ -276,7 +276,8 @@ body.sidebar-resizing .sidebar-tracking {
 
 .sidebar-panel-bottom {
   margin-top: auto;
-  padding: 8px 10px 10px;
+  height: var(--sidebar-footer-height);
+  padding: 8px 10px;
   border-top: 1px solid hsl(var(--sidebar-border));
   flex-shrink: 0;
 }
@@ -404,6 +405,7 @@ body.sidebar-resizing .sidebar-tracking {
 
 .sidebar-bottom {
   margin-top: auto;
+  height: var(--sidebar-footer-height);
   width: 100%;
   padding: 12px 14px 16px;
   border-top: 1px solid hsl(var(--sidebar-border));

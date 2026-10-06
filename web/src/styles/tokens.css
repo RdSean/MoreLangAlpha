@@ -36,11 +36,7 @@ html {
   --color-markdown-h4: var(--color-accent-primary);
   --color-markdown-strong: var(--color-accent-primary);
   --color-markdown-quote-border: var(--color-accent-primary);
-  /* Textbook reading and per-user learning state. */
-  --color-book-heading: #B9D8C4;
-  --color-book-quote-border: var(--color-markdown-quote-border);
-  --color-book-quote-bg: rgba(119, 168, 138, 0.06);
-  --color-book-quote-text: #BBBEB6;
+  /* Textbook per-user learning state. */
   --color-book-unread: #D8B04C;
   --color-book-viewed: #8ABA9B;
   --color-book-asked: #3FB950;
@@ -55,6 +51,7 @@ html {
   --font-mono: 'JetBrains Mono', 'Menlo', ui-monospace, SFMono-Regular, monospace;
 
   --sidebar-width: 80px;
+  --sidebar-footer-height: 61px;
   --bottom-tab-height: 78px;
 
   /* ---------- Background roles ----------
@@ -295,10 +292,6 @@ html {
   --color-slash-pill-bg: rgba(208, 125, 51, 0.12);
   --color-slash-pill-border: rgba(208, 125, 51, 0.35);
 
-  --color-book-heading: #1E3A2F;
-  --color-book-quote-border: var(--color-markdown-quote-border);
-  --color-book-quote-bg: rgba(45, 90, 61, 0.03);
-  --color-book-quote-text: #5A5346;
   --color-book-unread: #C8A229;
   --color-book-viewed: #86B295;
   --color-book-asked: #448E43;

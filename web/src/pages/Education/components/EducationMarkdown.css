@@ -16,9 +16,9 @@
 [data-education-markdown] :is(ul,ol) { margin: 0 0 16.8px; padding-left: 23px; }
 [data-education-markdown] li { margin: 0 0 8.4px; padding-left: 0; line-height: 1.8; }
 [data-education-markdown] li > p { margin-bottom: 8.4px; }
-[data-education-markdown] blockquote { border-left: 3px solid var(--color-book-quote-border) !important; background: var(--color-book-quote-bg); color: var(--color-book-quote-text) !important; margin: 0 0 16.8px; padding: 12.6px 16.8px; border-radius: 0 6px 6px 0; font-style: italic; }
+[data-education-markdown] blockquote { border-left: 3px solid var(--color-markdown-quote-border) !important; background: var(--color-bg-hover); color: var(--color-text-primary) !important; margin: 0 0 16.8px; padding: 12.6px 16.8px; border-radius: 0 6px 6px 0; font-style: italic; }
 [data-education-markdown] blockquote p:last-child { margin-bottom: 0; }
-[data-education-markdown] a { color: var(--color-book-heading) !important; text-underline-offset: 3px; }
+[data-education-markdown] a { color: var(--color-accent-primary) !important; text-underline-offset: 3px; }
 [data-education-markdown] table { font-size: inherit; margin: 0; line-height: 1.8; }
 [data-education-markdown] :is(th,td) { padding: 12.6px; border: 1px solid var(--color-border-muted); font: inherit; color: inherit !important; white-space: normal; }
 [data-education-markdown] th { font-weight: 600; }

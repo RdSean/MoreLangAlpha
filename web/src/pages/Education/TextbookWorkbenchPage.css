@@ -1,4 +1,5 @@
 .textbook-workbench {
+  --book-header-height: 56px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
@@ -11,15 +12,17 @@
 
 .textbook-workbench-header {
   display: flex;
-  min-height: 52px;
+  height: var(--book-header-height);
   flex-shrink: 0;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   border-bottom: 1px solid var(--color-border-muted);
   padding: 8px;
 }
+.book-reader-header { display: flex; height: var(--book-header-height); flex-shrink: 0; align-items: center; }
+.book-reader-header > div { width: 100%; min-height: 0; }
+.book-reader-header h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .textbook-mobile-header { display: none; }
 .textbook-workbench:has(> .textbook-workbench-header) { grid-template-rows: auto minmax(0, 1fr); }
 .textbook-workbench-grid { overflow: hidden; height: 100%; }
