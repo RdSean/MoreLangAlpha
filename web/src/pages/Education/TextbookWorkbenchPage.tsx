@@ -109,16 +109,19 @@ export default function TextbookWorkbenchPage() {
           ),
         }
       : sourceRange;
-  const source = useManagedBookSourceSlice(
-    textbookId,
-    sourceRequestRange?.start,
-    sourceRequestRange?.end,
-    Boolean(sourceRequestRange) && requestedView !== 'original',
-  );
   const material = useManagedKnowledgePointMaterial(
     textbookId,
     selectedKnowledgePoint?.knowledge_point_id,
     Boolean(selectedKnowledgePoint),
+  );
+  const learningView = Boolean(selectedKnowledgePoint) && requestedView !== 'original' &&
+    searchParams.get('nav') !== 'text' && searchParams.get('nav') !== 'source';
+  const emptyLearningView = learningView && !material.data?.material_available;
+  const source = useManagedBookSourceSlice(
+    textbookId,
+    sourceRequestRange?.start,
+    sourceRequestRange?.end,
+    Boolean(sourceRequestRange) && requestedView !== 'original' && !emptyLearningView,
   );
 
   const showProcessing =
@@ -666,8 +669,9 @@ export default function TextbookWorkbenchPage() {
                     source={source.data}
                     originalAvailable
                     originalContent={textbookId && readerView === 'original' ? <BookOriginalReader key={`${textbookId}:${selectedKnowledgePoint?.skill_kp_id ?? selectedNode?.id}`} textbookId={textbookId} startLine={sourceRange?.start} jsonPage={jsonPage} restoredPage={restoredPdfPage} onPageChange={(page) => updateSearch((next) => next.set('pdfPage', String(page)), true)} /> : undefined}
-                    loading={source.isLoading || material.isLoading}
-                    generationPending={mutations.createJob.isPending}
+                    loading={(!emptyLearningView && source.isLoading) || material.isLoading}
+                    learningView={learningView}
+                    generationPending={mutations.createJob.isPending || Boolean(currentJob)}
                     readingPositionKey={`textbook:${textbookId}:${selectedKnowledgePoint?.skill_kp_id ?? `node:${selectedNode?.id}`}:${readerView}`}
                     sourceRange={sourceRange}
                     onViewChange={(view) =>
@@ -679,7 +683,7 @@ export default function TextbookWorkbenchPage() {
                     onOpenMaterialLink={openMaterialLink}
                     canManageMaterials={canManageMaterials}
                     onGenerate={
-                      canManageMaterials && selectedKnowledgePoint && !currentJob
+                      canManageMaterials && selectedKnowledgePoint
                         ? (values) =>
                             startGeneration([selectedKnowledgePoint], values)
                         : undefined

@@ -105,15 +105,17 @@ export default function StudentTextbookLearningPage() {
         end: Math.min(data.structure.source.total_lines, sourceRange.end + SOURCE_CONTEXT_LINES),
       }
     : undefined;
+  const material = useStudentKnowledgePointMaterial(
+    assignmentId,
+    selectedKnowledgePoint?.knowledge_point_id,
+  );
+  const learningView = Boolean(selectedKnowledgePoint) && !selectedNode;
+  const emptyLearningView = learningView && !material.data?.material_available;
   const source = useManagedBookSourceSlice(
     data?.textbook_id,
     sourceRequestRange?.start,
     sourceRequestRange?.end,
-    Boolean(sourceRequestRange),
-  );
-  const material = useStudentKnowledgePointMaterial(
-    assignmentId,
-    selectedKnowledgePoint?.knowledge_point_id,
+    Boolean(sourceRequestRange) && !emptyLearningView,
   );
 
   const updateSearch = (update: (next: URLSearchParams) => void) => {
@@ -199,9 +201,10 @@ export default function StudentTextbookLearningPage() {
               textbookId={data.textbook_id}
               assignmentId={assignmentId}
               view={readerView}
+              learningView={learningView}
               material={selectedKnowledgePoint ? material.data : undefined}
               source={source.data}
-              loading={source.isLoading || material.isLoading}
+              loading={(!emptyLearningView && source.isLoading) || material.isLoading}
               readingPositionKey={`student-textbook:${assignmentId}:${selectedKnowledgePoint?.skill_kp_id ?? `node:${selectedNode?.id}`}:${readerView}`}
               sourceRange={sourceRange}
               onViewChange={(view) => updateSearch((next) => next.set('view', view))}

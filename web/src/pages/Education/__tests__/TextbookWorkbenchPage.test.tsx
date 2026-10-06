@@ -182,8 +182,9 @@ vi.mock('../queries', () => ({
     bookId: string,
     startLine: number,
     endLine: number,
+    enabled = true,
   ) => ({
-    data: pageState.sourceSlice(bookId, startLine, endLine),
+    data: enabled ? pageState.sourceSlice(bookId, startLine, endLine) : undefined,
     isLoading: false,
   }),
   useManagedKnowledgePointMaterial: (
@@ -508,11 +509,12 @@ function renderAssignmentDialog() {
 }
 
 describe('TextbookWorkbenchPage', () => {
-  it('renders an ungenerated knowledge point source without quote-like range highlights', () => {
+  it('opens the learning prompt without fetching source Markdown for an ungenerated knowledge point', () => {
     pageState.sourceSlice.mockReturnValue({ ...source, start_line: 1, end_line: 34, markdown: '\n'.repeat(9) + 'Target source paragraph.' });
     const { container } = renderWorkbench('/textbooks/book-1?kp=sports-global-game&view=source&nav=knowledge');
-    expect(screen.getByText('第 10–22 行，共 120 行')).toBeInTheDocument();
-    expect(container.querySelector('[data-source-start-line]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: '开始学习' })).toBeInTheDocument();
+    expect(screen.queryByText('Target source paragraph.')).not.toBeInTheDocument();
+    expect(pageState.sourceSlice).not.toHaveBeenCalled();
     expect(container.querySelector('[data-source-highlight]')).toBeNull();
     expect(container.querySelector('blockquote')).toBeNull();
   });
@@ -525,6 +527,15 @@ describe('TextbookWorkbenchPage', () => {
     renderWorkbench('/textbooks/book-1?kp=sports-training&view=material');
     expect(screen.queryByRole('button', { name: '重新生成讲义' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '生成讲义' })).not.toBeInTheDocument();
+  });
+
+  it('shows a waiting course prompt to students without offering generation', () => {
+    authState.role = 'student';
+    renderWorkbench('/textbooks/book-1?kp=sports-global-game&view=source&nav=knowledge');
+    expect(screen.getByText('等待家长准备课程')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '开始学习' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '选择讲解模式' })).not.toBeInTheDocument();
+    expect(pageState.sourceSlice).not.toHaveBeenCalled();
   });
 
   it('collapses and restores the directory without losing search or reading selection', async () => {
@@ -699,8 +710,7 @@ describe('TextbookWorkbenchPage', () => {
 
   it('enters processing after lesson acceptance and does not erase the current view', async () => {
     renderWorkbench('/textbooks/book-1?kp=sports-global-game&view=source');
-    fireEvent.click(screen.getByRole('button', { name: '生成讲义' }));
-    await userEvent.setup().click(screen.getByRole('button', { name: '开始生成' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: '开始学习' }));
     expect(screen.getByTestId('location')).toHaveTextContent('panel=processing');
     expect(screen.getByTestId('location')).toHaveTextContent('kp=sports-global-game&view=source');
   });
@@ -721,7 +731,7 @@ describe('TextbookWorkbenchPage', () => {
   });
 
   it('loads bounded context around the selected source anchor', async () => {
-    renderWorkbench('/textbooks/book-1?kp=sports-global-game&view=source');
+    renderWorkbench('/textbooks/book-1?kp=sports-global-game&view=source&nav=text');
 
     await waitFor(() => {
       expect(pageState.sourceSlice).toHaveBeenCalledWith('book-1', 1, 34);

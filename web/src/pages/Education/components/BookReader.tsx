@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useScrollMemory } from '@/lib/scrollMemory';
 import type { BookSourceSlice, KnowledgePointMaterial } from '../types';
 import EducationMarkdown from './EducationMarkdown';
+import { BookLearningStart } from './BookLearningStart';
 import {
   BookGenerationForm,
   type BookGenerationValues,
@@ -21,6 +22,7 @@ interface BookReaderProps {
   loading?: boolean;
   generationPending?: boolean;
   canManageMaterials?: boolean;
+  learningView?: boolean;
   readingPositionKey?: string;
   continuous?: boolean;
   sourceRange?: { start: number; end: number };
@@ -38,6 +40,7 @@ export function BookReader({
   loading = false,
   generationPending = false,
   canManageMaterials = false,
+  learningView = false,
   readingPositionKey,
   continuous = false,
   sourceRange,
@@ -51,6 +54,7 @@ export function BookReader({
   const submissionRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasMaterial = Boolean(material?.material_available && material.markdown);
+  const showLearningStart = learningView && !hasMaterial;
   const canGenerate = Boolean(canManageMaterials && material && onGenerate);
   const pending = generationPending || submitting;
   const submitGeneration = async (values: BookGenerationValues) => {
@@ -63,7 +67,7 @@ export function BookReader({
       setConfirmation(null);
       setFormOpen(false);
     } catch {
-      setGenerationError('提交失败，请重试。现有讲义仍然保留。');
+      setGenerationError(hasMaterial ? '提交失败，请重试。现有讲义仍然保留。' : '课程暂时未能开始，请重试。');
     } finally {
       submissionRef.current = false;
       setSubmitting(false);
@@ -81,7 +85,7 @@ export function BookReader({
           <div className="min-w-0">
             <h1 className="education-heading-h1" title={title}>{title}</h1>
           </div>
-          {canGenerate && (
+          {canGenerate && !showLearningStart && (
             <Button
               type="button"
               className="h-8 shrink-0 gap-1.5 px-2.5 text-xs"
@@ -109,7 +113,7 @@ export function BookReader({
           }}
         />
       )}
-      {generationError && !confirmation && <p role="alert" className="px-4 py-2 text-sm text-destructive">{generationError}</p>}
+      {generationError && !confirmation && !showLearningStart && <p role="alert" className="px-4 py-2 text-sm text-destructive">{generationError}</p>}
       <Dialog open={canGenerate && Boolean(confirmation)} onOpenChange={(open) => {
         if (!open && !pending) setConfirmation(null);
       }}>
@@ -131,7 +135,7 @@ export function BookReader({
       <div
         ref={scrollRef}
         data-testid="book-reader-scroll"
-        className={cn('book-reader-scroll min-h-0', !continuous && 'flex-1 overflow-y-auto', view !== 'original' && 'book-reader-prose')}
+        className={cn('book-reader-scroll min-h-0', !continuous && 'flex-1 overflow-y-auto', view !== 'original' && !showLearningStart && 'book-reader-prose')}
       >
         {view === 'original' ? originalContent : loading ? (
           <p className="text-sm text-muted-foreground">正在加载正文…</p>
@@ -140,6 +144,8 @@ export function BookReader({
             content={material?.markdown ?? ''}
             onOpenFile={onOpenMaterialLink}
           />
+        ) : showLearningStart ? (
+          <BookLearningStart onStart={canGenerate ? submitGeneration : undefined} pending={pending} error={generationError} />
         ) : source ? (
           <div>
             <div className="mb-5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
