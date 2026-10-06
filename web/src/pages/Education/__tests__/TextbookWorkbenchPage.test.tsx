@@ -766,11 +766,11 @@ describe('TextbookWorkbenchPage', () => {
     const user = userEvent.setup();
     renderWorkbench('/textbooks/book-1?node=appendix&view=original&nav=source&pdfPage=12');
     expect(await screen.findByTestId('original-file')).toHaveTextContent('PDF start line 81; page 12');
-    expect(screen.getByRole('tab', { name: '原书目录' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: '原始教材' })).toHaveAttribute('aria-selected', 'true');
     await user.click(screen.getByRole('tab', { name: '文字目录' }));
     expect(screen.queryByTestId('original-file')).not.toBeInTheDocument();
     expect(screen.getByTestId('location')).toHaveTextContent('view=source');
-    await user.click(screen.getByRole('tab', { name: '原书目录' }));
+    await user.click(screen.getByRole('tab', { name: '原始教材' }));
     await user.click(screen.getByRole('button', { name: '打开 Sports and Fitness' }));
     expect(screen.getByTestId('original-file')).toHaveTextContent('PDF start line 1; page automatic');
     expect(screen.getByTestId('location')).toHaveTextContent('view=original');

@@ -83,7 +83,7 @@ describe('BookNavigator', () => {
     const tablist = screen.getByRole('tablist');
     const indicator = tablist.querySelector('.book-navigator-indicator');
     expect(indicator?.parentElement).toBe(tablist);
-    for (const name of ['原书目录', '文字目录', '知识点']) {
+    for (const name of ['原始教材', '文字目录', '知识点']) {
       fireEvent.click(screen.getByRole('tab', { name }));
       expect(tablist.querySelector('.book-navigator-indicator')).toBe(indicator);
       expect(tablist.querySelectorAll('.book-navigator-indicator')).toHaveLength(1);
@@ -124,11 +124,11 @@ describe('BookNavigator', () => {
     const original = vi.fn();
     const text = vi.fn();
     render(<BookNavigator structure={structure} onSelectOriginalNode={original} onSelectNode={text} />);
-    fireEvent.click(screen.getByRole('tab', { name: '原书目录' }));
+    fireEvent.click(screen.getByRole('tab', { name: '原始教材' }));
     fireEvent.click(screen.getByRole('button', { name: "打开 The World's Game" }));
     expect(original).toHaveBeenCalledWith('reading-a');
     expect(text).not.toHaveBeenCalled();
-    fireEvent.keyDown(screen.getByRole('tab', { name: '原书目录' }), { key: 'ArrowRight' });
+    fireEvent.keyDown(screen.getByRole('tab', { name: '原始教材' }), { key: 'ArrowRight' });
     const textTab = screen.getByRole('tab', { name: '文字目录' });
     expect(textTab).toHaveFocus();
     expect(textTab).toHaveAttribute('aria-selected', 'true');
@@ -141,7 +141,7 @@ describe('BookNavigator', () => {
     render(<BookNavigator structure={structure} />);
     const knowledge = screen.getByRole('tab', { name: '知识点' });
     fireEvent.keyDown(knowledge, { key: 'ArrowRight' });
-    const source = screen.getByRole('tab', { name: '原书目录' });
+    const source = screen.getByRole('tab', { name: '原始教材' });
     expect(source).toHaveAttribute('aria-selected', 'true');
     expect(source).toHaveFocus();
     expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', source.id);
@@ -188,7 +188,7 @@ describe('BookNavigator', () => {
     const onSelectNode = vi.fn();
     render(<BookNavigator structure={structure} onSelectNode={onSelectNode} />);
 
-    fireEvent.click(screen.getByRole('tab', { name: '原书目录' }));
+    fireEvent.click(screen.getByRole('tab', { name: '原始教材' }));
     fireEvent.click(screen.getByRole('button', { name: "打开 The World's Game" }));
 
     expect(onSelectNode).toHaveBeenCalledWith('reading-a');

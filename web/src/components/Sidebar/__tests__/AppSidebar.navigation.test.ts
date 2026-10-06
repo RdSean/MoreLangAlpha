@@ -48,7 +48,7 @@ describe('library navigation visibility', () => {
       labelKey: 'sidebar.textbooks',
     });
     expect(enUS.sidebar.textbooks).toBe('Textbooks');
-    expect(zhCN.sidebar.textbooks).toBe('教材加工');
+    expect(zhCN.sidebar.textbooks).toBe('教材学习');
     expect(getVisibleNavItems('student').map((item) => item.key)).not.toContain('/textbooks');
   });
 });
