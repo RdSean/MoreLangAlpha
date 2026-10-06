@@ -29,9 +29,16 @@ html {
 
 /* ---------- Semantic color tokens (hex/rgba for inline use) ---------- */
 :root {
+  /* Independent Markdown roles follow the system accent by default. */
+  --color-markdown-h1: var(--color-accent-primary);
+  --color-markdown-h2: var(--color-accent-primary);
+  --color-markdown-h3: var(--color-accent-primary);
+  --color-markdown-h4: var(--color-accent-primary);
+  --color-markdown-strong: var(--color-accent-primary);
+  --color-markdown-quote-border: var(--color-accent-primary);
   /* Textbook reading and per-user learning state. */
   --color-book-heading: #B9D8C4;
-  --color-book-quote-border: #77A88A;
+  --color-book-quote-border: var(--color-markdown-quote-border);
   --color-book-quote-bg: rgba(119, 168, 138, 0.06);
   --color-book-quote-text: #BBBEB6;
   --color-book-unread: #D8B04C;
@@ -289,7 +296,7 @@ html {
   --color-slash-pill-border: rgba(208, 125, 51, 0.35);
 
   --color-book-heading: #1E3A2F;
-  --color-book-quote-border: #2D5A3D;
+  --color-book-quote-border: var(--color-markdown-quote-border);
   --color-book-quote-bg: rgba(45, 90, 61, 0.03);
   --color-book-quote-text: #5A5346;
   --color-book-unread: #C8A229;
