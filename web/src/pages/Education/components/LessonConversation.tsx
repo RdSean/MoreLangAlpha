@@ -145,7 +145,7 @@ export default function LessonConversation({ textbookId, knowledgePointId, assig
               {isListening ? <><Square className="size-3" />松开结束录音</> : <><Mic className="size-4" />按住说话</>}
             </button>
             {message && <p className="mt-2 break-words text-sm" aria-live="polite">{message}</p>}
-          </div> : <textarea aria-label="讲义问题" placeholder="就这份讲义提问…" value={message} disabled={sending}
+          </div> : <textarea aria-label="讲义问题" placeholder="这份讲义输入追问... Enter 发送，Shift+Enter 换行" value={message} disabled={sending}
             onChange={(event) => setMessage(event.target.value)} rows={2}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} />}
           <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="发送问题" title="发送问题" disabled={!message.trim() || sending || isListening || history.isLoading || history.isFetching} onClick={() => void submit()}><Send className="size-4" /></Button>
