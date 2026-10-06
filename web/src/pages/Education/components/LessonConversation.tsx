@@ -1,25 +1,26 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, ChevronLeft, ChevronRight, Keyboard, Mic, Send, Square } from 'lucide-react';
+import { Keyboard, Mic, Send, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Loader } from '@/components/ui/loader';
 import { speechSupported, useVoiceInput } from '@/components/ui/chat-input.useVoiceInput';
 import { useBookQuestions, useBookReadingMutation, useLessonQuestion } from '../queries';
+import { useScrollMemory } from '@/lib/scrollMemory';
 import EducationMarkdown from './EducationMarkdown';
 import './LessonConversation.css';
 
-interface AnswerPage { question: string; answer: string; error?: string }
+interface QuestionTurn { question: string; answer: string; error?: string }
 
-function answerPages(messages: Array<{ role: 'user' | 'assistant'; content: string }>): AnswerPage[] {
-  const pages: AnswerPage[] = [];
+function questionTurns(messages: Array<{ role: 'user' | 'assistant'; content: string }>): QuestionTurn[] {
+  const turns: QuestionTurn[] = [];
   for (const message of messages) {
-    if (message.role === 'user') pages.push({ question: message.content, answer: '' });
-    else if (pages.length) pages[pages.length - 1].answer += message.content;
+    if (message.role === 'user') turns.push({ question: message.content, answer: '' });
+    else if (turns.length) turns[turns.length - 1].answer += message.content;
   }
-  return pages;
+  return turns;
 }
 
-export default function LessonConversation({ textbookId, knowledgePointId, assignmentId, children }: {
-  textbookId: string; knowledgePointId: string; assignmentId?: string; children: ReactNode;
+export default function LessonConversation({ textbookId, knowledgePointId, assignmentId, readingPositionKey, children }: {
+  textbookId: string; knowledgePointId: string; assignmentId?: string; readingPositionKey?: string; children: ReactNode;
 }) {
   const history = useBookQuestions(textbookId, knowledgePointId, assignmentId);
   const questionMutation = useLessonQuestion();
@@ -27,13 +28,17 @@ export default function LessonConversation({ textbookId, knowledgePointId, assig
   const [message, setMessage] = useState('');
   const [voiceMode, setVoiceMode] = useState(false);
   const [sending, setSending] = useState(false);
-  const [pages, setPages] = useState<AnswerPage[]>([]);
-  const [page, setPage] = useState(0);
+  const [turns, setTurns] = useState<QuestionTurn[]>([]);
+  const [historyReady, setHistoryReady] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState(0);
   const hydrated = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const submitGuard = useRef(false);
   const voiceHeld = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const turnRefs = useRef<Array<HTMLElement | null>>([]);
+  const pendingScroll = useRef<number | null>(null);
+  useScrollMemory(scrollRef, readingPositionKey ?? `lesson:${textbookId}:${assignmentId ?? ''}:${knowledgePointId}`, { persist: true, ready: historyReady });
   const { isListening, toggleListening, stopListening } = useVoiceInput({ message, setMessage, isLoading: sending });
   const markRef = useRef(reading.mutate);
   markRef.current = reading.mutate;
@@ -43,11 +48,31 @@ export default function LessonConversation({ textbookId, knowledgePointId, assig
     return () => { controller.current?.abort(); };
   }, [knowledgePointId]);
   useEffect(() => {
-    if (hydrated.current || history.isFetching || !history.data) return;
-    setPages(answerPages(history.data));
+    if (hydrated.current || history.isFetching || (!history.data && !history.isError)) return;
+    setTurns(questionTurns(history.data ?? []));
+    setHistoryReady(true);
     hydrated.current = true;
-  }, [history.data, history.isFetching]);
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, [page]);
+  }, [history.data, history.isFetching, history.isError]);
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const measure = () => setViewportHeight(container.clientHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    const index = pendingScroll.current;
+    const container = scrollRef.current;
+    const target = index === null ? null : turnRefs.current[index];
+    if (!container || !target) return;
+    pendingScroll.current = null;
+    container.scrollTo({
+      top: container.scrollTop + target.getBoundingClientRect().top - container.getBoundingClientRect().top,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+    });
+  }, [turns.length]);
 
   const submit = async () => {
     const question = message.trim();
@@ -57,14 +82,15 @@ export default function LessonConversation({ textbookId, knowledgePointId, assig
     setSending(true);
     setMessage('');
     hydrated.current = true;
-    const index = pages.length;
-    setPages((current) => [...current, { question, answer: '' }]);
-    setPage(index + 1);
+    setHistoryReady(true);
+    const index = turns.length;
+    pendingScroll.current = index;
+    setTurns((current) => [...current, { question, answer: '' }]);
     const abort = new AbortController();
     controller.current = abort;
     let answer = '';
     let streamError = '';
-    const update = (patch: Partial<AnswerPage>) => setPages((current) => current.map((entry, i) => i === index ? { ...entry, ...patch } : entry));
+    const update = (patch: Partial<QuestionTurn>) => setTurns((current) => current.map((entry, i) => i === index ? { ...entry, ...patch } : entry));
     try {
       await questionMutation.mutateAsync({ textbookId, assignmentId, knowledgePointId, question, signal: abort.signal,
         onEvent: (event) => {
@@ -89,30 +115,21 @@ export default function LessonConversation({ textbookId, knowledgePointId, assig
       submitGuard.current = false;
     }
   };
-  const current = pages[page - 1];
   return (
     <div className="lesson-conversation">
-      {page === 0 ? <div className="lesson-original">{children}</div> : <section className="lesson-answer" aria-label="讲义问答">
-        <header className="lesson-answer-header">
-          <Button variant="ghost" size="icon" aria-label="返回讲义" title="返回讲义" onClick={() => setPage(0)}><ArrowLeft className="size-4" /></Button>
-          <h1 className="min-w-0 flex-1 break-words text-base font-semibold">{current?.question}</h1>
-        </header>
-        <div ref={scrollRef} className="lesson-answer-scroll book-reader-prose" key={page}>
-          {current?.answer && <EducationMarkdown content={current.answer} />}
-          {sending && page === pages.length && <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status"><Loader /><span>正在回答…</span></div>}
-          {current?.error && <p role="alert" className="text-sm text-destructive">{current.error}</p>}
-        </div>
-      </section>}
-      <footer className="lesson-composer">
-        {(pages.length > 0 || history.isError) && <div className="lesson-page-controls">
-          <Button variant="ghost" size="sm" onClick={() => setPage(0)} aria-pressed={page === 0}>讲义</Button>
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" className="size-7" aria-label="上一页回答" title="上一页回答" disabled={page <= 0} onClick={() => setPage((value) => value - 1)}><ChevronLeft className="size-3.5" /></Button>
-            <span className="w-16 text-center text-xs tabular-nums text-muted-foreground">{page} / {pages.length}</span>
-            <Button variant="ghost" size="icon" className="size-7" aria-label="下一页回答" title="下一页回答" disabled={page >= pages.length} onClick={() => setPage((value) => value + 1)}><ChevronRight className="size-3.5" /></Button>
+      <div ref={scrollRef} className="lesson-conversation-scroll" role="region" aria-label="讲义与问答">
+        <div className="lesson-original">{children}</div>
+        {turns.map((turn, index) => <section key={index} ref={(node) => { turnRefs.current[index] = node; }} className="lesson-turn" aria-label={`第 ${index + 1} 轮问答`} style={index === turns.length - 1 ? { minHeight: viewportHeight } : undefined}>
+          <div className="lesson-turn-question"><h2>{turn.question}</h2></div>
+          <div className="lesson-turn-answer book-reader-prose">
+            {turn.answer && <EducationMarkdown content={turn.answer} />}
+            {sending && index === turns.length - 1 && <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status"><Loader /><span>正在回答…</span></div>}
+            {turn.error && <p role="alert" className="text-sm text-destructive">{turn.error}</p>}
           </div>
-          {history.isError && <button className="text-xs text-destructive" onClick={() => void history.refetch()}>重试加载记录</button>}
-        </div>}
+        </section>)}
+      </div>
+      <footer className="lesson-composer">
+        {history.isError && <button className="mb-2 text-xs text-destructive" onClick={() => void history.refetch()}>重试加载记录</button>}
         <div className="lesson-composer-input">
           <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label={voiceMode ? '切换为文字输入' : '切换为语音输入'} title={voiceMode ? '文字输入' : speechSupported ? '语音输入' : '当前浏览器不支持语音'} disabled={sending || (!voiceMode && !speechSupported)} onClick={() => { stopListening(); setVoiceMode((value) => !value); }}>
             {voiceMode ? <Keyboard className="size-4" /> : <Mic className="size-4" />}

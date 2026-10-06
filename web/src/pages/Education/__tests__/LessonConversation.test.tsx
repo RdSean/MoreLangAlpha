@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import LessonConversation from '../components/LessonConversation';
 import { BookLessonReader } from '../components/BookLessonReader';
 import type { KnowledgePointMaterial } from '../types';
 
-const state = vi.hoisted(() => ({ ask: vi.fn(), mark: vi.fn(), voice: vi.fn(), stop: vi.fn(), fetching: false }));
+const state = vi.hoisted(() => ({ ask: vi.fn(), mark: vi.fn(), voice: vi.fn(), stop: vi.fn(), scroll: vi.fn(), fetching: false }));
 vi.mock('../queries', () => ({
   useBookQuestions: () => ({ data: [], isLoading: false, isFetching: state.fetching }),
   useLessonQuestion: () => ({ mutateAsync: state.ask, isPending: false }),
@@ -16,9 +16,15 @@ vi.mock('@/components/ui/chat-input.useVoiceInput', () => ({
 }));
 vi.mock('../components/EducationMarkdown', () => ({ default: ({ content }: { content: string }) => <div>{content}</div> }));
 
-describe('lesson conversation pages', () => {
+describe('continuous lesson conversation', () => {
+  beforeAll(() => Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: state.scroll }));
+  afterAll(() => Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo'));
   beforeEach(() => { vi.clearAllMocks(); state.fetching = false; });
-  it('shows an answer on a new page and returns to the lesson', async () => {
+  afterEach(() => vi.restoreAllMocks());
+  it('keeps the lesson and all question rounds in one scroll flow', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return new DOMRect(0, this.classList.contains('lesson-turn') ? 1200 : 20, 800, 600);
+    });
     state.ask.mockImplementation(async ({ onEvent }) => {
       onEvent({ event: 'message_chunk', role: 'assistant', content_type: 'reasoning_signal', content: 'start' });
       onEvent({ event: 'message_chunk', role: 'assistant', content_type: 'reasoning', content: 'Internal reasoning' });
@@ -29,10 +35,18 @@ describe('lesson conversation pages', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送问题' }));
     expect(await screen.findByText('Answer from current lesson')).toBeInTheDocument();
     expect(screen.queryByText(/Internal reasoning/)).not.toBeInTheDocument();
-    expect(screen.queryByText('Original lesson')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '返回讲义' }));
     expect(screen.getByText('Original lesson')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '返回讲义' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '下一页回答' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Why?' }).closest('section')).toHaveClass('lesson-turn');
     await waitFor(() => expect(state.mark).toHaveBeenCalledWith({ knowledgePointId: 'kp', state: 'asked' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'And then?' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送问题' }));
+    await waitFor(() => expect(screen.getAllByText('Answer from current lesson')).toHaveLength(2));
+    expect(screen.getByText('Why?')).toBeInTheDocument();
+    expect(screen.getByText('And then?')).toBeInTheDocument();
+    expect(state.scroll).toHaveBeenLastCalledWith({ top: 1180, behavior: 'smooth' });
+    expect(state.scroll).toHaveBeenCalledTimes(2);
   });
   it('hides the textbox in voice mode and exposes a long recording button', () => {
     render(<LessonConversation textbookId="book" knowledgePointId="kp"><div>Lesson</div></LessonConversation>);
@@ -48,7 +62,7 @@ describe('lesson conversation pages', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'New question' } });
     expect(screen.getByRole('button', { name: '发送问题' })).toBeDisabled();
   });
-  it('clears the previous answer page when changing lessons', async () => {
+  it('clears the previous conversation when changing lessons', async () => {
     state.ask.mockImplementation(async ({ onEvent }) => onEvent({ event: 'message_chunk', role: 'assistant', content_type: 'text', content: 'Previous answer' }));
     const material: KnowledgePointMaterial = {
       textbook_id: 'book', knowledge_point_id: 'kp-1', skill_kp_id: 'one', material_available: true,

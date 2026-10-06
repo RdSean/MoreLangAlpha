@@ -30,7 +30,6 @@ const source: BookSourceSlice = {
 vi.mock('../components/BookOriginalReader', () => ({
   BookOriginalReader: ({ startLine, restoredPage }: { startLine?: number; restoredPage?: number }) => <div data-testid="original-file">PDF start line {startLine}; page {restoredPage ?? 'automatic'}</div>,
 }));
-vi.mock('../components/LessonConversation', () => ({ default: ({ children }: { children: React.ReactNode }) => <div data-testid="lesson-conversation">{children}</div> }));
 
 const emptyMaterial: KnowledgePointMaterial = {
   textbook_id: 'book-1',
@@ -160,6 +159,9 @@ const pageState = vi.hoisted(() => ({
 }));
 
 vi.mock('../queries', () => ({
+  useBookQuestions: () => ({ data: [], isLoading: false, isFetching: false }),
+  useLessonQuestion: () => ({ mutateAsync: vi.fn() }),
+  useBookReadingMutation: () => ({ mutate: vi.fn(), isError: false }),
   useBookReadingState: () => ({ data: {} }),
   useTextbookWorkbench: () => ({
     data: pageState.workbench,
@@ -600,13 +602,13 @@ describe('TextbookWorkbenchPage', () => {
     pageState.activityJob = processingJob();
     pageState.workbench.current_job = pageState.activityJob;
     renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&activity=job-1');
-    const reader = screen.getByTestId('book-reader-scroll');
+    const reader = screen.getByRole('region', { name: '讲义与问答' });
     reader.scrollTop = 184;
     fireEvent.scroll(reader);
     await userEvent.setup().click(screen.getByRole('button', { name: '打开整页时间线' }));
     expect(screen.queryByTestId('book-reader-scroll')).not.toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('button', { name: '返回阅读' }));
-    expect(screen.getByTestId('book-reader-scroll').scrollTop).toBe(184);
+    expect(screen.getByRole('region', { name: '讲义与问答' }).scrollTop).toBe(184);
   });
 
   it('enters processing after lesson acceptance and does not erase the current view', async () => {

@@ -20,6 +20,7 @@ interface BookReaderProps {
   loading?: boolean;
   generationPending?: boolean;
   readingPositionKey?: string;
+  continuous?: boolean;
   sourceHighlightRange?: { start: number; end: number };
   onViewChange: (view: 'material' | 'source' | 'original') => void;
   onGenerate?: (values: BookGenerationValues) => void | Promise<void>;
@@ -35,6 +36,7 @@ export function BookReader({
   loading = false,
   generationPending = false,
   readingPositionKey,
+  continuous = false,
   sourceHighlightRange,
   onGenerate,
   onOpenMaterialLink,
@@ -45,11 +47,11 @@ export function BookReader({
   const canGenerate = Boolean(material && onGenerate);
   useScrollMemory(scrollRef, readingPositionKey ?? `book-reader:${title}:${view}`, {
     persist: true,
-    ready: !loading && (view === 'material' && hasMaterial || Boolean(source)),
+    ready: !continuous && !loading && (view === 'material' && hasMaterial || Boolean(source)),
   });
 
   return (
-    <article className="book-reader flex h-full min-h-0 flex-col bg-background" aria-label={`阅读 ${title}`}>
+    <article className={cn('book-reader flex min-h-0 flex-col bg-background', continuous ? 'book-reader-continuous' : 'h-full')} aria-label={`阅读 ${title}`}>
       <header className="book-reader-header border-b px-4 py-2 sm:px-6">
         <div className="flex min-h-9 items-center justify-between gap-3">
           <div className="min-w-0">
@@ -93,7 +95,7 @@ export function BookReader({
       <div
         ref={scrollRef}
         data-testid="book-reader-scroll"
-        className={cn('book-reader-scroll min-h-0 flex-1 overflow-y-auto', view !== 'original' && 'book-reader-prose')}
+        className={cn('book-reader-scroll min-h-0', !continuous && 'flex-1 overflow-y-auto', view !== 'original' && 'book-reader-prose')}
       >
         {view === 'original' ? originalContent : loading ? (
           <p className="text-sm text-muted-foreground">正在加载正文…</p>
