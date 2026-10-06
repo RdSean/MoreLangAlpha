@@ -10,6 +10,7 @@ import {
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { BookActivityPanel } from './components/BookActivityPanel';
 import { BookNavigator } from './components/BookNavigator';
@@ -59,6 +60,7 @@ function requestId() {
 const SOURCE_CONTEXT_LINES = 12;
 
 export default function TextbookWorkbenchPage() {
+  const canManageMaterials = useAuth().member?.role === 'parent';
   const { t } = useTranslation();
   const { textbookId } = useParams<{ textbookId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -675,8 +677,9 @@ export default function TextbookWorkbenchPage() {
                       })
                     }
                     onOpenMaterialLink={openMaterialLink}
+                    canManageMaterials={canManageMaterials}
                     onGenerate={
-                      selectedKnowledgePoint && !currentJob
+                      canManageMaterials && selectedKnowledgePoint && !currentJob
                         ? (values) =>
                             startGeneration([selectedKnowledgePoint], values)
                         : undefined

@@ -27,6 +27,11 @@ const source: BookSourceSlice = {
   markdown: '# The World’s Game\n\nFootball is played around the world.',
 };
 
+const authState = vi.hoisted(() => ({ role: 'parent' as 'parent' | 'student' }));
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ member: { role: authState.role } }),
+}));
+
 vi.mock('../components/BookOriginalReader', () => ({
   BookOriginalReader: ({ startLine, restoredPage }: { startLine?: number; restoredPage?: number }) => <div data-testid="original-file">PDF start line {startLine}; page {restoredPage ?? 'automatic'}</div>,
 }));
@@ -252,6 +257,7 @@ vi.mock('../queries', () => ({
 }));
 
 beforeEach(() => {
+  authState.role = 'parent';
   void i18n.changeLanguage('zh-CN');
   vi.clearAllMocks();
   scrollMemory.clear();
@@ -299,6 +305,35 @@ describe('BookGenerationForm', () => {
 });
 
 describe('BookReader', () => {
+  it('hides generation unless parent management is explicitly allowed', () => {
+    render(<BookReader title="足球" view="material" material={readyMaterial}
+      onViewChange={vi.fn()} onGenerate={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: '重新生成讲义' })).not.toBeInTheDocument();
+  });
+
+  it('confirms replacement, preserves settings on cancel, and submits only once', async () => {
+    const user = userEvent.setup();
+    let resolveGeneration!: () => void;
+    const onGenerate = vi.fn(() => new Promise<void>((resolve) => { resolveGeneration = resolve; }));
+    render(<BookReader title="足球" view="material" material={readyMaterial}
+      canManageMaterials onViewChange={vi.fn()} onGenerate={onGenerate} />);
+    expect(screen.getByRole('button', { name: '重新生成讲义' })).toHaveTextContent('重新生成讲义');
+    await user.click(screen.getByRole('button', { name: '重新生成讲义' }));
+    await user.type(screen.getByLabelText('补充要求（可选）'), '增加例题');
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+    expect(screen.getByRole('dialog', { name: '确认重新生成讲义？' })).toBeInTheDocument();
+    expect(onGenerate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '保留现有讲义' }));
+    expect(screen.getByLabelText('补充要求（可选）')).toHaveValue('增加例题');
+    expect(screen.getByText('这是一份已经提交的讲义。')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+    await user.dblClick(screen.getByRole('button', { name: '确认重新生成' }));
+    expect(onGenerate).toHaveBeenCalledTimes(1);
+    expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({ requirements: '增加例题', replaceExisting: true }));
+    resolveGeneration();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
   it('shows source first when no lesson exists and submits generation inline', async () => {
     const user = userEvent.setup();
     const onGenerate = vi.fn().mockResolvedValue(undefined);
@@ -307,6 +342,7 @@ describe('BookReader', () => {
         title="足球如何成为全球运动"
         view="source"
         material={emptyMaterial}
+        canManageMaterials
         source={source}
         onViewChange={vi.fn()}
         onGenerate={onGenerate}
@@ -328,6 +364,21 @@ describe('BookReader', () => {
     });
   });
 
+  it('retains the lesson and allows retry after a failed replacement submission', async () => {
+    const user = userEvent.setup();
+    const onGenerate = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined);
+    render(<BookReader title="足球" view="material" material={readyMaterial}
+      canManageMaterials onViewChange={vi.fn()} onGenerate={onGenerate} />);
+    await user.click(screen.getByRole('button', { name: '重新生成讲义' }));
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+    await user.click(screen.getByRole('button', { name: '确认重新生成' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('提交失败');
+    expect(screen.getByText('这是一份已经提交的讲义。')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '确认重新生成' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(onGenerate).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps a successful lesson readable while switching to its source', () => {
     const onViewChange = vi.fn();
     const { rerender } = render(
@@ -335,6 +386,7 @@ describe('BookReader', () => {
         title="足球如何成为全球运动"
         view="material"
         material={readyMaterial}
+        canManageMaterials
         source={source}
         onViewChange={onViewChange}
         onGenerate={vi.fn()}
@@ -349,6 +401,7 @@ describe('BookReader', () => {
         title="足球如何成为全球运动"
         view="source"
         material={readyMaterial}
+        canManageMaterials
         source={source}
         onViewChange={onViewChange}
         onGenerate={vi.fn()}
@@ -455,6 +508,16 @@ function renderAssignmentDialog() {
 }
 
 describe('TextbookWorkbenchPage', () => {
+  it('offers lecture regeneration only to parent members', () => {
+    const { unmount } = renderWorkbench('/textbooks/book-1?kp=sports-training&view=material');
+    expect(screen.getByRole('button', { name: '重新生成讲义' })).toHaveTextContent('重新生成讲义');
+    unmount();
+    authState.role = 'student';
+    renderWorkbench('/textbooks/book-1?kp=sports-training&view=material');
+    expect(screen.queryByRole('button', { name: '重新生成讲义' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '生成讲义' })).not.toBeInTheDocument();
+  });
+
   it('collapses and restores the directory without losing search or reading selection', async () => {
     const user = userEvent.setup();
     renderWorkbench('/textbooks/book-1?kp=sports-training&view=material');
