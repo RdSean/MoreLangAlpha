@@ -4,11 +4,11 @@
 [data-education-markdown] > .font-content { font-family: var(--lesson-face); font-size: 16.8px !important; line-height: 1.8 !important; font-weight: 500; letter-spacing: 0; }
 [data-education-markdown] p { font: inherit; line-height: 1.8; margin: 0 0 16.8px; white-space: normal; color: inherit !important; }
 [data-education-markdown] :is(h1,h2,h3,h4,h5,h6) { font-family: 'Playfair Display', 'LXGW WenKai', 'Noto Serif SC', serif; font-weight: 600 !important; letter-spacing: 0; }
-[data-education-markdown] h1 { color: var(--color-markdown-h1) !important; }
+[data-education-markdown] h1, .education-heading-h1 { font-family: 'Playfair Display', 'LXGW WenKai', 'Noto Serif SC', serif; font-weight: 600 !important; letter-spacing: 0; color: var(--color-markdown-h1) !important; font-size: 28px !important; line-height: 1.4 !important; }
 [data-education-markdown] h2 { color: var(--color-markdown-h2) !important; }
 [data-education-markdown] h3 { color: var(--color-markdown-h3) !important; }
 [data-education-markdown] :is(h4,h5,h6) { color: var(--color-markdown-h4) !important; }
-[data-education-markdown] h1 { font-size: 28px !important; line-height: 1.4 !important; margin: 0 0 24px !important; }
+[data-education-markdown] h1 { margin: 0 0 24px !important; }
 [data-education-markdown] h2 { font-size: 24px !important; line-height: 1.4 !important; margin: 36px 0 18px !important; }
 [data-education-markdown] h3 { font-size: 20px !important; line-height: 1.4 !important; margin: 28px 0 14px !important; }
 [data-education-markdown] h4 { font-size: 18px !important; margin: 24px 0 12px !important; }

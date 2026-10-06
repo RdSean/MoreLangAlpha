@@ -79,12 +79,7 @@ export function BookReader({
       <header className="book-reader-header border-b px-4 py-2 sm:px-6">
         <div className="flex min-h-9 items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="break-words text-base font-semibold text-foreground" title={title}>{title}</h1>
-            {view === 'source' && source && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                第 {sourceHighlightRange?.start ?? source.start_line}–{sourceHighlightRange?.end ?? source.end_line} 行，共 {source.total_lines} 行
-              </p>
-            )}
+            <h1 className="education-heading-h1" title={title}>{title}</h1>
           </div>
           {canGenerate && (
             <Button
@@ -147,9 +142,12 @@ export function BookReader({
           />
         ) : source ? (
           <div>
-            <div className="mb-5 flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="mb-5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <FileText className="size-4" aria-hidden="true" />
               原书内容
+              {view === 'source' && (
+                <span>第 {sourceHighlightRange?.start ?? source.start_line}–{sourceHighlightRange?.end ?? source.end_line} 行，共 {source.total_lines} 行</span>
+              )}
             </div>
             <EducationMarkdown
               content={source.markdown}

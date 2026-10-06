@@ -227,7 +227,7 @@ export function BookNavigator({
   return (
     <nav className="book-navigator" aria-label="教材导航">
       <div className="book-navigator-footer">
-        <div className="book-navigator-tabs" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }} role="tablist" aria-label={t('bookProcessing.navigation')} onKeyDown={(event) => {
+        <div className="book-navigator-tabs" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))`, '--tab-count': tabs.length, '--active-tab': Math.max(0, tabs.indexOf(view)) } as CSSProperties} role="tablist" aria-label={t('bookProcessing.navigation')} onKeyDown={(event) => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
           event.preventDefault();
           const target = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs.at(-1)! : tabs[(tabs.indexOf(view) + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
@@ -237,9 +237,9 @@ export function BookNavigator({
           {tabs.map((tab) => (
             <button key={tab} type="button" role="tab" id={`${tabId}-${tab}`} data-view={tab} aria-controls={`${tabId}-content`} tabIndex={view === tab ? 0 : -1} aria-selected={view === tab} className={cn('book-navigator-tab', view === tab && 'font-medium text-foreground')} onClick={() => setView(tab)}>
               {t(tab === 'knowledge' ? 'bookProcessing.knowledge' : tab === 'source' ? 'bookProcessing.sourceContents' : 'bookProcessing.textContents')}
-              {view === tab && <motion.span className="book-navigator-indicator" layoutId={`${tabId}-indicator`} transition={{ duration: reducedMotion ? 0 : 0.18 }} />}
             </button>
           ))}
+          <span className="book-navigator-indicator" aria-hidden="true" />
         </div>
       </div>
       <div className="book-navigator-tools">

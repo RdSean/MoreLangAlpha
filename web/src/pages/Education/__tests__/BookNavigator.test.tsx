@@ -78,6 +78,19 @@ const structure: BookStructure = {
 };
 
 describe('BookNavigator', () => {
+  it('keeps one indicator anchored in the tablist when switching all three views', () => {
+    render(<BookNavigator structure={structure} onSelectOriginalNode={vi.fn()} />);
+    const tablist = screen.getByRole('tablist');
+    const indicator = tablist.querySelector('.book-navigator-indicator');
+    expect(indicator?.parentElement).toBe(tablist);
+    for (const name of ['原书目录', '文字目录', '知识点']) {
+      fireEvent.click(screen.getByRole('tab', { name }));
+      expect(tablist.querySelector('.book-navigator-indicator')).toBe(indicator);
+      expect(tablist.querySelectorAll('.book-navigator-indicator')).toHaveLength(1);
+      expect(screen.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true');
+    }
+  });
+
   it.each(['source', 'text'] as const)('keeps nested expansion independent from reading selection in %s', (view) => {
     const nested = structuredClone(structure);
     nested.structure.nodes[0].children![0].children = [{
