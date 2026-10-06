@@ -88,35 +88,41 @@ function SourceNode({
 }) {
   const children = node.children ?? [];
   const isExpanded = expanded.has(node.id);
+  const isGroup = depth === 0 && children.length > 0;
+  const toggle = children.length > 0 ? (
+    <button
+      type="button"
+      className="book-tree-toggle"
+      onClick={() => onToggle(node.id)}
+      aria-label={`${isExpanded ? '收起' : '展开'} ${node.title}`}
+      aria-expanded={isExpanded}
+    >
+      {isExpanded
+        ? <ChevronDown className="size-3" aria-hidden="true" />
+        : <ChevronRight className="size-3" aria-hidden="true" />}
+    </button>
+  ) : null;
   return (
     <li>
-      <div className={cn('book-tree-row', children.length > 0 && 'book-tree-unit')} style={{ paddingLeft: `${Math.max(0, depth - (children.length ? 0 : 1)) * 12}px` }}>
-        {children.length > 0 ? (
-          <button
-            type="button"
-            className="book-tree-toggle"
-            onClick={() => onToggle(node.id)}
-            aria-label={`${isExpanded ? '收起' : '展开'} ${node.title}`}
-            aria-expanded={isExpanded}
-          >
-            {isExpanded
-              ? <ChevronDown className="size-3" aria-hidden="true" />
-              : <ChevronRight className="size-3" aria-hidden="true" />}
-          </button>
-        ) : null}
+      <div className={cn('book-tree-row', isGroup && 'book-tree-unit')} style={{ paddingLeft: `${Math.max(0, depth - 1) * 12}px` }}>
+        {isGroup && toggle}
         <button
           type="button"
           className={cn(
             'book-tree-item',
-            children.length > 0 && 'book-tree-group',
+            isGroup && 'book-tree-group',
             selectedNodeId === node.id && 'bg-[var(--color-bg-hover)] font-medium text-foreground',
           )}
           onClick={() => onSelect?.(node.id)}
           aria-label={`打开 ${node.title}`}
         >
-          {children.length === 0 && <span className="book-tree-number" aria-hidden="true">{index + 1}</span>}
+          {!isGroup && <>
+            <span className="book-tree-marker-space" aria-hidden="true" />
+            <span className="book-tree-number" aria-hidden="true">{index + 1}</span>
+          </>}
           <TreeTitle>{node.title}</TreeTitle>
         </button>
+        {!isGroup && toggle}
       </div>
       {children.length > 0 && isExpanded && (
         <ul>

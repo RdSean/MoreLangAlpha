@@ -78,6 +78,24 @@ const structure: BookStructure = {
 };
 
 describe('BookNavigator', () => {
+  it.each(['source', 'text'] as const)('keeps nested expansion independent from reading selection in %s', (view) => {
+    const nested = structuredClone(structure);
+    nested.structure.nodes[0].children![0].children = [{
+      id: 'passage', title: 'Passage', anchor: { start_line: 12, end_line: 20 },
+    }];
+    const original = vi.fn();
+    const text = vi.fn();
+    render(<BookNavigator structure={nested} activeView={view} onSelectOriginalNode={original} onSelectNode={text} />);
+    fireEvent.click(screen.getByRole('button', { name: "展开 The World's Game" }));
+    expect(screen.getByRole('button', { name: '打开 Passage' })).toBeInTheDocument();
+    expect(original).not.toHaveBeenCalled();
+    expect(text).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '打开 Passage' }));
+    expect(view === 'source' ? original : text).toHaveBeenCalledWith('passage');
+    fireEvent.click(screen.getByRole('button', { name: "收起 The World's Game" }));
+    expect(screen.queryByRole('button', { name: '打开 Passage' })).not.toBeInTheDocument();
+  });
+
   it('collapses one knowledge chapter and toggles all chapters', () => {
     render(<BookNavigator structure={structure} />);
     fireEvent.click(screen.getByRole('button', { name: '收起 Sports and Fitness' }));
