@@ -1,4 +1,5 @@
 import Markdown from '@/pages/ChatAgent/components/Markdown';
+import './EducationMarkdown.css';
 
 interface SourceLineRange {
   start: number;

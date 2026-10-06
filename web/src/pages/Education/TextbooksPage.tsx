@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Activity, BookOpenCheck, ChevronRight, Library, Trash2 } from 'lucide-react';
+import { Activity, BookOpenCheck, ChevronRight, Library, MoreHorizontal, Trash2, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useDeleteManagedTextbook, useManagedTextbookLibrary } from './queries';
 import { educationErrorMessage } from './errorMessage';
 import type { BookStructureStatus, ManagedTextbookSummary } from './types';
+import { BookAssignmentDialog } from './components/BookAssignmentDialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 const STRUCTURE_STATUS: Record<BookStructureStatus, string> = {
   queued: '等待结构分析',
@@ -22,6 +24,7 @@ export default function TextbooksPage() {
   const deletion = useDeleteManagedTextbook();
   const [target, setTarget] = useState<ManagedTextbookSummary | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [assignmentTarget, setAssignmentTarget] = useState<string | null>(null);
   const textbooks = library.data ?? [];
   const remove = async () => {
     if (!target || deletion.isPending) return;
@@ -95,6 +98,14 @@ export default function TextbooksPage() {
                     </td>
                     <td className="px-3 py-4 text-right">
                       {member?.role === 'parent' && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={`${textbook.title} 更多`} title="更多"><MoreHorizontal className="size-4" /></Button></DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem disabled={textbook.structure_status !== 'ready'} onSelect={() => setAssignmentTarget(textbook.textbook_id)}><Users className="mr-2 size-4" />给学生使用</DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                      {member?.role === 'parent' && (
                         <TooltipProvider><Tooltip><TooltipTrigger asChild>
                           <span className="inline-flex">
                             <Button
@@ -124,6 +135,7 @@ export default function TextbooksPage() {
           </div>
         )}
       </div>
+      {assignmentTarget && <BookAssignmentDialog textbookId={assignmentTarget} open onOpenChange={(open) => { if (!open) setAssignmentTarget(null); }} />}
       <Dialog open={target !== null} onOpenChange={(open) => { if (!open && !deletion.isPending) setTarget(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>

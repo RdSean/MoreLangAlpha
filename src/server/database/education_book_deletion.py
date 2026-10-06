@@ -154,15 +154,19 @@ async def delete_textbook_for_parent(
             await cur.execute(
                 """
                 SELECT threads.conversation_thread_id, threads.workspace_id,
-                       assignments.student_user_id AS user_id
-                FROM education_learning_spaces AS spaces
-                JOIN education_textbook_assignments AS assignments USING (assignment_id)
-                JOIN conversation_threads AS threads USING (conversation_thread_id)
-                WHERE assignments.textbook_id = %s
+                       workspaces.user_id
+                FROM conversation_threads AS threads
+                JOIN workspaces USING (workspace_id)
+                WHERE threads.platform = 'education' AND (
+                  threads.metadata #>> '{education,textbook_id}' = %s::text
+                  OR EXISTS (SELECT 1 FROM education_learning_spaces AS spaces
+                    JOIN education_textbook_assignments AS assignments USING (assignment_id)
+                    WHERE spaces.conversation_thread_id = threads.conversation_thread_id
+                      AND assignments.textbook_id = %s))
                 ORDER BY threads.conversation_thread_id
                 FOR UPDATE OF threads NOWAIT
             """,
-                (textbook_id,),
+                (textbook_id, textbook_id),
             )
             threads = [dict(row) for row in await cur.fetchall()]
             for thread in threads:

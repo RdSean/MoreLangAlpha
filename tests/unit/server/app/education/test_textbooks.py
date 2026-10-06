@@ -34,6 +34,31 @@ KNOWLEDGE_POINT_ID = UUID("4c3f4d0c-a508-4bff-a89f-a3a584a2fe86")
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["viewed", "asked"])
+async def test_lesson_reading_state_http_contract(client, monkeypatch, state):
+    from src.server.services import education_book_study
+
+    client._transport.app.dependency_overrides[get_current_user_id] = lambda: "member"
+    record = AsyncMock()
+    monkeypatch.setattr(education_book_study, "record_book_reading", record)
+    path = f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/knowledge-points/{KNOWLEDGE_POINT_ID}/reading-state"
+    response = await client.post(path, json={"state": state})
+    assert response.status_code == 204
+    record.assert_awaited_once_with(user_id="member", textbook_id=TEXTBOOK["textbook_id"], knowledge_point_id=str(KNOWLEDGE_POINT_ID), state=state)
+    assert (await client.post(path, json={"state": "invalid"})).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_lesson_chat_space_rejects_inaccessible_lesson(client, monkeypatch):
+    from src.server.services import education_book_study
+
+    client._transport.app.dependency_overrides[get_current_user_id] = lambda: "student"
+    monkeypatch.setattr(education_book_study, "get_book_study_space", AsyncMock(side_effect=TextbookNotFoundError("not found")))
+    response = await client.post(f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/knowledge-points/{KNOWLEDGE_POINT_ID}/chat-space")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_original_stream_closes_download_and_has_private_cache_headers(
     client, monkeypatch
 ):

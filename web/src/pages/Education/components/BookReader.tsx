@@ -1,5 +1,4 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { useTranslation } from 'react-i18next';
 import { FileText, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -33,16 +32,13 @@ export function BookReader({
   material,
   source,
   originalContent,
-  originalAvailable = false,
   loading = false,
   generationPending = false,
   readingPositionKey,
   sourceHighlightRange,
-  onViewChange,
   onGenerate,
   onOpenMaterialLink,
 }: BookReaderProps) {
-  const { t } = useTranslation();
   const [formOpen, setFormOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasMaterial = Boolean(material?.material_available && material.markdown);
@@ -53,11 +49,11 @@ export function BookReader({
   });
 
   return (
-    <article className="flex h-full min-h-0 flex-col bg-background" aria-label={`阅读 ${title}`}>
-      <header className="border-b px-4 py-3 sm:px-6">
-        <div className="flex min-h-11 flex-wrap items-center justify-between gap-3">
+    <article className="book-reader flex h-full min-h-0 flex-col bg-background" aria-label={`阅读 ${title}`}>
+      <header className="book-reader-header border-b px-4 py-2 sm:px-6">
+        <div className="flex min-h-9 items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="break-words text-base font-semibold text-foreground sm:text-lg">{title}</h1>
+            <h1 className="break-words text-base font-semibold text-foreground">{title}</h1>
             {view === 'source' && source && (
               <p className="mt-1 text-xs text-muted-foreground">
                 第 {sourceHighlightRange?.start ?? source.start_line}–{sourceHighlightRange?.end ?? source.end_line} 行，共 {source.total_lines} 行
@@ -68,50 +64,18 @@ export function BookReader({
             <Button
               type="button"
               variant="outline"
-              className="min-h-11 shrink-0"
+              className="size-8 shrink-0 p-0"
               onClick={() => setFormOpen(true)}
               disabled={generationPending}
               aria-label={hasMaterial ? '重新生成讲义' : '生成讲义'}
+              title={hasMaterial ? '重新生成讲义' : '生成讲义'}
             >
               {hasMaterial
-                ? <RefreshCw className="mr-2 size-4" aria-hidden="true" />
-                : <Sparkles className="mr-2 size-4" aria-hidden="true" />}
-              {hasMaterial ? '重新生成' : '生成讲义'}
+                ? <RefreshCw className="size-4" aria-hidden="true" />
+                : <Sparkles className="size-4" aria-hidden="true" />}
             </Button>
           )}
         </div>
-        {material && (
-          <div className={cn('mt-3 inline-grid rounded-md bg-muted p-1', originalAvailable ? 'grid-cols-3' : 'grid-cols-2')} role="tablist" aria-label="阅读视图">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === 'material'}
-              disabled={!hasMaterial}
-              className={cn(
-                'min-h-10 rounded px-3 text-sm disabled:cursor-not-allowed disabled:opacity-45',
-                view === 'material' && 'bg-background font-medium shadow-sm',
-              )}
-              onClick={() => onViewChange('material')}
-            >
-              讲义
-            </button>
-            {originalAvailable && <button type="button" role="tab" aria-selected={view === 'original'} className={cn('min-h-10 rounded px-3 text-sm', view === 'original' && 'bg-background font-medium shadow-sm')} onClick={() => onViewChange('original')}>
-              {t('bookProcessing.originalFile')}
-            </button>}
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === 'source'}
-              className={cn(
-                'min-h-10 rounded px-3 text-sm',
-                view === 'source' && 'bg-background font-medium shadow-sm',
-              )}
-              onClick={() => onViewChange('source')}
-            >
-              原文
-            </button>
-          </div>
-        )}
       </header>
 
       {formOpen && onGenerate && (
@@ -129,7 +93,7 @@ export function BookReader({
       <div
         ref={scrollRef}
         data-testid="book-reader-scroll"
-        className={cn('min-h-0 flex-1 overflow-y-auto', view !== 'original' && 'px-4 py-6 sm:px-6 lg:px-10')}
+        className={cn('book-reader-scroll min-h-0 flex-1 overflow-y-auto', view !== 'original' && 'book-reader-prose')}
       >
         {view === 'original' ? originalContent : loading ? (
           <p className="text-sm text-muted-foreground">正在加载正文…</p>

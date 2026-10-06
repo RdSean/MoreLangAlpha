@@ -2,6 +2,8 @@
 
 from contextlib import aclosing
 from uuid import UUID
+from typing import Literal
+from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import Response, StreamingResponse
@@ -97,6 +99,47 @@ def _textbook_http_error(exc: TextbookError) -> HTTPException:
     if isinstance(exc, TextbookTransitionError):
         return HTTPException(status_code=409, detail=str(exc))
     return HTTPException(status_code=400, detail=str(exc))
+
+
+class BookReadingRequest(BaseModel):
+    state: Literal["viewed", "asked"] = "viewed"
+
+
+@router.get("/textbooks/{textbook_id}/reading-state", response_model=list[dict])
+async def get_reading_state(textbook_id: UUID, user_id: CurrentUserId):
+    from src.server.services.education_book_study import get_book_reading_states
+    try:
+        return await get_book_reading_states(user_id=user_id, textbook_id=str(textbook_id))
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.post("/textbooks/{textbook_id}/knowledge-points/{knowledge_point_id}/reading-state", status_code=204)
+async def record_reading_state(textbook_id: UUID, knowledge_point_id: UUID, request: BookReadingRequest, user_id: CurrentUserId):
+    from src.server.services.education_book_study import record_book_reading
+    try:
+        await record_book_reading(user_id=user_id, textbook_id=str(textbook_id), knowledge_point_id=str(knowledge_point_id), state=request.state)
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+    return Response(status_code=204)
+
+
+@router.post("/textbooks/{textbook_id}/knowledge-points/{knowledge_point_id}/chat-space", response_model=dict)
+async def get_parent_lesson_space(textbook_id: UUID, knowledge_point_id: UUID, user_id: CurrentUserId):
+    from src.server.services.education_book_study import get_book_study_space
+    try:
+        return await get_book_study_space(user_id=user_id, textbook_id=str(textbook_id), knowledge_point_id=str(knowledge_point_id))
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
+@router.get("/textbooks/{textbook_id}/knowledge-points/{knowledge_point_id}/questions", response_model=list[dict])
+async def get_parent_lesson_history(textbook_id: UUID, knowledge_point_id: UUID, user_id: CurrentUserId, assignment_id: UUID | None = None):
+    from src.server.services.education_book_study import get_book_study_history
+    try:
+        return await get_book_study_history(user_id=user_id, textbook_id=str(textbook_id), knowledge_point_id=str(knowledge_point_id), assignment_id=str(assignment_id) if assignment_id else None)
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
 
 
 def _managed_book_job_not_found() -> HTTPException:

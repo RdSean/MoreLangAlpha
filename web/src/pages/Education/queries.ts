@@ -666,6 +666,35 @@ export function useLearningChatSpace(assignmentId: string | undefined) {
   });
 }
 
+export function useBookReadingState(textbookId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.education.bookReadingState(textbookId ?? ''),
+    queryFn: () => educationApi.getBookReadingState(textbookId!),
+    enabled: Boolean(textbookId),
+    select: (rows) => Object.fromEntries(rows.map((row) => [row.knowledge_point_id, row.state])),
+  });
+}
+
+export function useBookReadingMutation(textbookId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ knowledgePointId, state }: { knowledgePointId: string; state: 'viewed' | 'asked' }) => educationApi.recordBookReading(textbookId, knowledgePointId, state),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.education.bookReadingState(textbookId) }),
+  });
+}
+
+export function useBookQuestions(textbookId: string, knowledgePointId: string, assignmentId?: string) {
+  return useQuery({
+    queryKey: queryKeys.education.bookQuestions(textbookId, knowledgePointId, assignmentId),
+    queryFn: () => educationApi.getBookQuestions(textbookId, knowledgePointId, assignmentId),
+    staleTime: 0,
+  });
+}
+
+export function useLessonQuestion() {
+  return useMutation({ mutationFn: educationApi.askBookLesson });
+}
+
 export function useParentLearningTranscript(assignmentId: string | undefined, enabled: boolean) {
   return useQuery({
     queryKey: [...queryKeys.education.assignment(assignmentId ?? ''), 'chat-transcript'],

@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TextbooksPage from '../TextbooksPage';
+vi.mock('../components/BookAssignmentDialog', () => ({ BookAssignmentDialog: ({ textbookId }: { textbookId: string }) => <div role="dialog" aria-label="给学生使用">{textbookId}</div> }));
 
 const state = vi.hoisted(() => ({
   textbooks: [] as Array<Record<string, unknown>>,
@@ -32,6 +33,13 @@ beforeEach(() => {
 });
 
 describe('TextbooksPage', () => {
+  it('assigns students from the textbook more menu', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><TextbooksPage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: '英语第二册 更多' }));
+    await user.click(screen.getByRole('menuitem', { name: '给学生使用' }));
+    expect(screen.getByRole('dialog', { name: '给学生使用' })).toHaveTextContent('textbook-1');
+  });
   it('requires confirmation and preserves the library source', async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><TextbooksPage /></MemoryRouter>);

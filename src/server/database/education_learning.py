@@ -273,9 +273,8 @@ async def get_student_learning_space_for_thread(
                   AND workspaces.user_id = %s
                   AND threads.platform = 'education'
                   AND threads.msg_type = 'flash'
-                  AND COALESCE(
-                      threads.metadata #>> '{education,assignment_id}', ''
-                  ) <> ''
+                  AND (COALESCE(threads.metadata #>> '{education,assignment_id}', '') <> ''
+                    OR COALESCE(threads.metadata #>> '{education,textbook_id}', '') <> '')
                 """,
                 (conversation_thread_id, student_user_id),
             )

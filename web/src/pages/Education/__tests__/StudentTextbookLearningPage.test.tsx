@@ -7,11 +7,12 @@ vi.mock('../components/EducationMarkdown', () => ({
   default: ({ content }: { content: string }) => <div data-testid="student-markdown">{content}</div>,
 }));
 
-vi.mock('../components/StudentLessonFollowUp', () => ({
-  default: () => <div>追问组件</div>,
+vi.mock('../components/LessonConversation', () => ({
+  default: ({ children }: { children: React.ReactNode }) => <div>{children}<div>追问组件</div></div>,
 }));
 
 vi.mock('../queries', () => ({
+  useBookReadingState: () => ({ data: {} }),
   useStudentTextbookStructure: () => ({
     data: {
       assignment_id: 'assignment-1',

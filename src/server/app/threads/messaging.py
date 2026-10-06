@@ -496,7 +496,20 @@ async def _handle_send_message(
         # A learning reference can only ever drive the student's private Flash
         # workspace. Resolve the current successful material on the server so a
         # browser cannot inject arbitrary material or cross-household content.
-        if request.education_assignment_id or request.education_knowledge_point_id:
+        if request.education_textbook_id:
+            if agent_mode != "flash" or not workspace or workspace.get("status") != "flash" or request.education_assignment_id:
+                raise HTTPException(status_code=403, detail="Lesson context requires a private Flash workspace")
+            from src.server.services.education_book_study import attach_book_study_context
+            from src.server.services.education_textbooks import TextbookError
+
+            try:
+                request = request.model_copy(update={"additional_context": await attach_book_study_context(
+                    user_id=user_id, textbook_id=request.education_textbook_id,
+                    knowledge_point_id=request.education_knowledge_point_id or "", thread_id=thread_id,
+                )})
+            except TextbookError as exc:
+                raise HTTPException(status_code=404, detail="Learning lesson is unavailable") from exc
+        elif request.education_assignment_id or request.education_knowledge_point_id:
             if (
                 agent_mode != "flash"
                 or not workspace

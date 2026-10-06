@@ -78,6 +78,17 @@ const structure: BookStructure = {
 };
 
 describe('BookNavigator', () => {
+  it('collapses one knowledge chapter and toggles all chapters', () => {
+    render(<BookNavigator structure={structure} />);
+    fireEvent.click(screen.getByRole('button', { name: '收起 Sports and Fitness' }));
+    expect(screen.queryByText('冠军的训练方法')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '展开 Sports and Fitness' }));
+    expect(screen.getByText('冠军的训练方法')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '收起全部章节' }));
+    expect(screen.queryByText('全书术语索引')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '展开全部章节' }));
+    expect(screen.getByText('全书术语索引')).toBeInTheDocument();
+  });
   it('separates original PDF and text directory selection and cycles three tabs', () => {
     const original = vi.fn();
     const text = vi.fn();

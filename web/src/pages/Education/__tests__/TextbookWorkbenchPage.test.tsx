@@ -2,10 +2,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
 import { scrollMemory } from '@/lib/scrollMemory';
 import i18n from '@/i18n';
 import { BookGenerationForm } from '../components/BookGenerationForm';
 import { BookReader } from '../components/BookReader';
+import { BookAssignmentDialog } from '../components/BookAssignmentDialog';
 import TextbookWorkbenchPage from '../TextbookWorkbenchPage';
 import { processingJob } from './bookProcessingFixtures';
 import type {
@@ -28,6 +30,7 @@ const source: BookSourceSlice = {
 vi.mock('../components/BookOriginalReader', () => ({
   BookOriginalReader: ({ startLine, restoredPage }: { startLine?: number; restoredPage?: number }) => <div data-testid="original-file">PDF start line {startLine}; page {restoredPage ?? 'automatic'}</div>,
 }));
+vi.mock('../components/LessonConversation', () => ({ default: ({ children }: { children: React.ReactNode }) => <div data-testid="lesson-conversation">{children}</div> }));
 
 const emptyMaterial: KnowledgePointMaterial = {
   textbook_id: 'book-1',
@@ -157,6 +160,7 @@ const pageState = vi.hoisted(() => ({
 }));
 
 vi.mock('../queries', () => ({
+  useBookReadingState: () => ({ data: {} }),
   useTextbookWorkbench: () => ({
     data: pageState.workbench,
     isLoading: false,
@@ -336,8 +340,7 @@ describe('BookReader', () => {
     );
 
     expect(screen.getByText('这是一份已经提交的讲义。')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '原文' }));
-    expect(onViewChange).toHaveBeenCalledWith('source');
+    expect(screen.queryByRole('tablist', { name: '阅读视图' })).not.toBeInTheDocument();
 
     rerender(
       <BookReader
@@ -441,6 +444,14 @@ function renderWorkbench(initialEntry = '/textbooks/book-1') {
   );
 }
 
+function renderAssignmentDialog() {
+  function DialogHarness() {
+    const [open, setOpen] = useState(true);
+    return <BookAssignmentDialog textbookId="book-1" open={open} onOpenChange={setOpen} />;
+  }
+  render(<DialogHarness />);
+}
+
 describe('TextbookWorkbenchPage', () => {
   it('hides a cached compact activity after access is lost', () => {
     pageState.activityJob = processingJob();
@@ -486,7 +497,7 @@ describe('TextbookWorkbenchPage', () => {
     );
 
     expect(screen.getByText('这是一份已经提交的讲义。')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '讲义' })).toHaveAttribute(
+    expect(screen.getByRole('tab', { name: '知识点' })).toHaveAttribute(
       'aria-selected',
       'true',
     );
@@ -744,10 +755,7 @@ describe('TextbookWorkbenchPage', () => {
   });
 
   it('opens student access with current assignments preselected and excludes parents', async () => {
-    const user = userEvent.setup();
-    renderWorkbench();
-
-    await user.click(screen.getByRole('button', { name: '给学生使用' }));
+    renderAssignmentDialog();
 
     expect(screen.getByRole('dialog', { name: '给学生使用' })).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: '小雨' })).toBeChecked();
@@ -757,9 +765,7 @@ describe('TextbookWorkbenchPage', () => {
 
   it('saves only added and removed student assignments', async () => {
     const user = userEvent.setup();
-    renderWorkbench();
-
-    await user.click(screen.getByRole('button', { name: '给学生使用' }));
+    renderAssignmentDialog();
     await user.click(screen.getByRole('checkbox', { name: '小雨' }));
     await user.click(screen.getByRole('checkbox', { name: '小川' }));
     await user.click(screen.getByRole('button', { name: '保存' }));
@@ -772,17 +778,13 @@ describe('TextbookWorkbenchPage', () => {
       textbookId: 'book-1',
       studentUserIds: ['student-1'],
     });
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '给学生使用' })).not.toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '给学生使用' })).not.toBeInTheDocument());
   });
 
   it('keeps the assignment dialog open while saving', async () => {
     const user = userEvent.setup();
     pageState.assignStudents.mockReturnValue(new Promise(() => undefined));
-    renderWorkbench();
-
-    await user.click(screen.getByRole('button', { name: '给学生使用' }));
+    renderAssignmentDialog();
     await user.click(screen.getByRole('checkbox', { name: '小川' }));
     await user.click(screen.getByRole('button', { name: '保存' }));
 
@@ -795,9 +797,7 @@ describe('TextbookWorkbenchPage', () => {
     pageState.assignStudents
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValueOnce([]);
-    renderWorkbench();
-
-    await user.click(screen.getByRole('button', { name: '给学生使用' }));
+    renderAssignmentDialog();
     await user.click(screen.getByRole('checkbox', { name: '小川' }));
     await user.click(screen.getByRole('button', { name: '保存' }));
 
@@ -806,8 +806,6 @@ describe('TextbookWorkbenchPage', () => {
     await user.click(screen.getByRole('button', { name: '重试' }));
 
     expect(pageState.assignStudents).toHaveBeenCalledTimes(2);
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '给学生使用' })).not.toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
 });

@@ -5,16 +5,14 @@ import {
   Menu,
   RotateCcw,
   StopCircle,
-  Users,
 } from 'lucide-react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { BookActivityPanel } from './components/BookActivityPanel';
-import { BookAssignmentDialog } from './components/BookAssignmentDialog';
 import { BookNavigator } from './components/BookNavigator';
-import { BookReader } from './components/BookReader';
+import { BookLessonReader as BookReader } from './components/BookLessonReader';
 import { BookOriginalReader } from './components/BookOriginalReader';
 import { firstJsonPage } from './components/bookOriginalLocation';
 import { BookProcessingView } from './components/BookProcessingView';
@@ -34,6 +32,7 @@ import {
   useManagedBookStructure,
   useManagedKnowledgePointMaterial,
   useTextbookWorkbench,
+  useBookReadingState,
 } from './queries';
 import type { BookStructureNode, KnowledgePointProjection } from './types';
 import './TextbookWorkbenchPage.css';
@@ -63,11 +62,11 @@ export default function TextbookWorkbenchPage() {
   const { textbookId } = useParams<{ textbookId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [navigatorOpen, setNavigatorOpen] = useState(false);
-  const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
   const [batchFormOpen, setBatchFormOpen] = useState(false);
   const [batchSelection, setBatchSelection] = useState<Set<string>>(new Set());
   const workbench = useTextbookWorkbench(textbookId);
+  const readingState = useBookReadingState(textbookId);
   const structure = useManagedBookStructure(
     textbookId,
     workbench.data?.structure_status === 'ready',
@@ -436,16 +435,12 @@ export default function TextbookWorkbenchPage() {
                 ? '教材来源准备已取消'
                 : '正在分析教材结构';
 
-  return (
-    <main
-      className={cn('textbook-workbench', showProcessing && 'is-processing')}
-      data-testid="textbook-workbench"
-    >
+  const bookHeader = (
       <header className="textbook-workbench-header">
         <div className="flex min-w-0 items-center gap-2">
           <Link
             to="/textbooks"
-            className="inline-flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-[var(--color-bg-hover)]"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-[var(--color-bg-hover)]"
             aria-label="返回教材列表"
           >
             <ArrowLeft className="size-4" aria-hidden="true" />
@@ -460,7 +455,7 @@ export default function TextbookWorkbenchPage() {
           </button>
           <div className="min-w-0">
             <p
-              className="line-clamp-2 break-words text-sm font-semibold text-foreground sm:text-base"
+              className="truncate text-xs font-semibold text-foreground"
               title={workbench.data.title}
             >
               {workbench.data.title}
@@ -493,26 +488,16 @@ export default function TextbookWorkbenchPage() {
               <span>重试未完成项</span>
             </Button>
           )}
-          {workbench.data.structure_status === 'ready' && !(processingActive && currentJob?.kind === 'structure') && <Button
-            variant="outline"
-            className="min-h-11 px-3"
-            aria-label="给学生使用"
-            onClick={() => setAssignmentOpen(true)}
-          >
-            <Users className="size-4 sm:mr-2" aria-hidden="true" />
-            <span className="hidden sm:inline">给学生使用</span>
-          </Button>}
         </div>
       </header>
-
-      {textbookId && (
-        <BookAssignmentDialog
-          textbookId={textbookId}
-          open={assignmentOpen}
-          onOpenChange={setAssignmentOpen}
-        />
-      )}
-
+  );
+  return (
+    <main className={cn('textbook-workbench', showProcessing && 'is-processing')} data-testid="textbook-workbench">
+      <div className="textbook-mobile-header">
+        <Button size="icon" variant="ghost" aria-label="打开教材目录" onClick={() => setNavigatorOpen(true)}><Menu className="size-4" /></Button>
+        <span className="min-w-0 truncate text-xs font-medium">{workbench.data.title}</span>
+      </div>
+      {!structure.data && bookHeader}
       <div
         className={cn(
           'textbook-workbench-grid',
@@ -527,8 +512,11 @@ export default function TextbookWorkbenchPage() {
           <div
             className={cn('textbook-workbench-nav', navigatorOpen && 'is-open')}
           >
+            {bookHeader}
+            <div className="min-h-0 flex-1">
             <BookNavigator
               structure={structure.data}
+              learningStates={readingState.data}
               selectedKnowledgePointSkillId={
                 selectedKnowledgePoint?.skill_kp_id
               }
@@ -560,6 +548,7 @@ export default function TextbookWorkbenchPage() {
               selectedKnowledgePointIds={batchSelection}
               onBatchSelectionChange={setBatchSelection}
             />
+            </div>
             {navigatorOpen && (
               <button
                 type="button"
@@ -663,6 +652,7 @@ export default function TextbookWorkbenchPage() {
                   <BookReader
                     key={`${selectedKnowledgePoint?.skill_kp_id ?? selectedNode?.id}`}
                     title={selectionTitle}
+                    textbookId={textbookId}
                     view={readerView}
                     material={
                       selectedKnowledgePoint ? material.data : undefined

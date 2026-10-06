@@ -557,6 +557,32 @@ export async function getLearningChatSpace(assignmentId: string): Promise<Learni
   return data;
 }
 
+export async function getBookReadingState(textbookId: string): Promise<Array<{ knowledge_point_id: string; state: 'viewed' | 'asked' }>> {
+  const { data } = await api.get(`/api/v1/education/textbooks/${textbookId}/reading-state`);
+  return data;
+}
+
+export async function recordBookReading(textbookId: string, knowledgePointId: string, state: 'viewed' | 'asked') {
+  await api.post(`/api/v1/education/textbooks/${textbookId}/knowledge-points/${knowledgePointId}/reading-state`, { state });
+}
+
+export async function getBookQuestions(textbookId: string, knowledgePointId: string, assignmentId?: string): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
+  const { data } = await api.get(`/api/v1/education/textbooks/${textbookId}/knowledge-points/${knowledgePointId}/questions`, { params: assignmentId ? { assignment_id: assignmentId } : undefined });
+  return data;
+}
+
+export async function askBookLesson({ textbookId, assignmentId, knowledgePointId, question, onEvent, signal }: {
+  textbookId: string; assignmentId?: string; knowledgePointId: string; question: string;
+  onEvent: (event: Record<string, unknown>) => void; signal: AbortSignal;
+}) {
+  const { sendChatMessageStream } = await import('@/pages/ChatAgent/utils/api/messages');
+  const space = assignmentId ? await getLearningChatSpace(assignmentId) : (await api.post<LearningChatSpace>(`/api/v1/education/textbooks/${textbookId}/knowledge-points/${knowledgePointId}/chat-space`)).data;
+  return sendChatMessageStream(question, space.workspace_id, space.conversation_thread_id, [], false,
+    onEvent, null, 'flash', 'zh-CN', Intl.DateTimeFormat().resolvedOptions().timeZone,
+    null, null, null, null, null, null, null, signal, crypto.randomUUID(),
+    assignmentId ? { assignmentId, knowledgePointId } : { textbookId, knowledgePointId });
+}
+
 export async function getParentLearningTranscript(assignmentId: string): Promise<ParentLearningTranscript> {
   const { data } = await api.get<ParentLearningTranscript>(`/api/v1/education/learning/${assignmentId}/chat-transcript`);
   return data;

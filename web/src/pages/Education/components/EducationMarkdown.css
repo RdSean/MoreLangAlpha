@@ -1,0 +1,26 @@
+@import url('https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=Playfair+Display:wght@600;700&family=LXGW+WenKai&display=swap');
+
+[data-education-markdown] { --lesson-face: 'Lora', 'LXGW WenKai', 'Noto Serif SC', serif; color: var(--color-text-primary); overflow-wrap: anywhere; }
+[data-education-markdown] > .font-content { font-family: var(--lesson-face); font-size: 16.8px !important; line-height: 1.8 !important; font-weight: 500; letter-spacing: 0; }
+[data-education-markdown] p { font: inherit; line-height: 1.8; margin: 0 0 16.8px; white-space: normal; color: inherit !important; }
+[data-education-markdown] :is(h1,h2,h3,h4,h5,h6) { font-family: 'Playfair Display', 'LXGW WenKai', 'Noto Serif SC', serif; color: var(--color-book-heading) !important; font-weight: 600 !important; letter-spacing: 0; }
+[data-education-markdown] h1 { font-size: 28px !important; line-height: 1.4 !important; margin: 0 0 24px !important; }
+[data-education-markdown] h2 { font-size: 24px !important; line-height: 1.4 !important; margin: 36px 0 18px !important; }
+[data-education-markdown] h3 { font-size: 20px !important; line-height: 1.4 !important; margin: 28px 0 14px !important; }
+[data-education-markdown] h4 { font-size: 18px !important; margin: 24px 0 12px !important; }
+[data-education-markdown] strong { font-weight: 700; color: var(--color-book-heading); }
+[data-education-markdown] :is(ul,ol) { margin: 0 0 16.8px; padding-left: 23px; }
+[data-education-markdown] li { margin: 0 0 8.4px; padding-left: 0; line-height: 1.8; }
+[data-education-markdown] li > p { margin-bottom: 8.4px; }
+[data-education-markdown] blockquote { border-left: 3px solid var(--color-book-quote-border) !important; background: var(--color-book-quote-bg); color: var(--color-book-quote-text) !important; margin: 0 0 16.8px; padding: 12.6px 16.8px; border-radius: 0 6px 6px 0; font-style: italic; }
+[data-education-markdown] blockquote p:last-child { margin-bottom: 0; }
+[data-education-markdown] a { color: var(--color-book-heading) !important; text-underline-offset: 3px; }
+[data-education-markdown] table { font-size: inherit; margin: 0; line-height: 1.8; }
+[data-education-markdown] :is(th,td) { padding: 12.6px; border: 1px solid var(--color-border-muted); font: inherit; color: inherit !important; white-space: normal; }
+[data-education-markdown] th { font-weight: 600; }
+[data-education-markdown] div:has(> table) { margin: 0 0 16.8px; border: 0 !important; border-radius: 0; }
+[data-education-markdown] :not(pre) > code { font-family: var(--font-mono); font-size: .85em !important; background: var(--color-bg-code) !important; padding: 2px 5px; border-radius: 3px; }
+[data-education-markdown] pre { font-family: var(--font-mono); font-size: 14px; line-height: 1.65; overflow-x: auto; }
+[data-education-markdown] img { max-width: 100%; height: auto; margin: 20px auto; }
+[data-education-markdown] hr { margin: 28px 0; }
+[data-education-markdown='compact'] > .font-content { font-size: 14px !important; }

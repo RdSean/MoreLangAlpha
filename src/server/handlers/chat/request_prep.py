@@ -261,6 +261,8 @@ def serialize_context_metadata(
 
     Mutates *query_metadata* in-place.
     """
+    if request.education_knowledge_point_id:
+        query_metadata["education_knowledge_point_id"] = request.education_knowledge_point_id
     if request.additional_context:
         serialized_ctx = []
         for ctx in request.additional_context:
