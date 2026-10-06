@@ -3,6 +3,7 @@ import { isAxiosError } from 'axios';
 import {
   ArrowLeft,
   Menu,
+  PanelLeftOpen,
   RotateCcw,
   StopCircle,
 } from 'lucide-react';
@@ -62,6 +63,7 @@ export default function TextbookWorkbenchPage() {
   const { textbookId } = useParams<{ textbookId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [navigatorOpen, setNavigatorOpen] = useState(false);
+  const [navigatorCollapsed, setNavigatorCollapsed] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
   const [batchFormOpen, setBatchFormOpen] = useState(false);
   const [batchSelection, setBatchSelection] = useState<Set<string>>(new Set());
@@ -492,7 +494,7 @@ export default function TextbookWorkbenchPage() {
       </header>
   );
   return (
-    <main className={cn('textbook-workbench', showProcessing && 'is-processing')} data-testid="textbook-workbench">
+    <main className={cn('textbook-workbench', showProcessing && 'is-processing', navigatorCollapsed && 'is-nav-collapsed')} data-testid="textbook-workbench">
       <div className="textbook-mobile-header">
         <Button size="icon" variant="ghost" aria-label="打开教材目录" onClick={() => setNavigatorOpen(true)}><Menu className="size-4" /></Button>
         <span className="min-w-0 truncate text-xs font-medium">{workbench.data.title}</span>
@@ -505,9 +507,10 @@ export default function TextbookWorkbenchPage() {
             visibleActivityJob &&
             !activityAccessLost &&
             'has-activity',
-          !structure.data && 'without-nav',
+          (!structure.data || navigatorCollapsed) && 'without-nav',
         )}
       >
+        {structure.data && navigatorCollapsed && <button type="button" className="textbook-nav-restore" title="展开教材目录" aria-label="展开教材目录" onClick={() => setNavigatorCollapsed(false)}><PanelLeftOpen className="size-4" aria-hidden="true" /></button>}
         {structure.data && (
           <div
             className={cn('textbook-workbench-nav', navigatorOpen && 'is-open')}
@@ -525,6 +528,7 @@ export default function TextbookWorkbenchPage() {
               onSelectNode={selectNode}
               onSelectOriginalNode={(nodeId) => selectNode(nodeId, 'original')}
               activeView={navigatorView}
+              onCollapse={() => { setNavigatorCollapsed(true); setNavigatorOpen(false); }}
               onNavigationChange={(view) => {
                 if (view === 'knowledge') {
                   const target = selectedKnowledgePoint ?? structure.data?.knowledge_points[0];

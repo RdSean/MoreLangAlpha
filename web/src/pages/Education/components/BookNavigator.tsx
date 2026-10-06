@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  PanelLeftClose,
   ChevronsDownUp,
   ChevronsUpDown,
   Search,
@@ -27,6 +28,7 @@ interface BookNavigatorProps {
   onSelectOriginalNode?: (nodeId: string) => void;
   activeView?: 'knowledge' | 'source' | 'text';
   onNavigationChange?: (view: 'knowledge' | 'source' | 'text') => void;
+  onCollapse?: () => void;
   batchMode?: boolean;
   onBatchModeChange?: (enabled: boolean) => void;
   batchDisabled?: boolean;
@@ -153,6 +155,7 @@ export function BookNavigator({
   onSelectOriginalNode,
   activeView,
   onNavigationChange,
+  onCollapse,
   batchMode = false,
   onBatchModeChange,
   batchDisabled = false,
@@ -254,6 +257,7 @@ export function BookNavigator({
         <button type="button" className="book-tree-toggle" title={allExpanded ? '收起全部章节' : '展开全部章节'} aria-label={allExpanded ? '收起全部章节' : '展开全部章节'} onClick={() => setExpanded(allExpanded ? new Set() : new Set(expandableIds))}>
           {allExpanded ? <ChevronsDownUp className="size-4" /> : <ChevronsUpDown className="size-4" />}
         </button>
+        {onCollapse && <button type="button" className="book-tree-toggle" title="收起教材目录" aria-label="收起教材目录" onClick={onCollapse}><PanelLeftClose className="size-4" aria-hidden="true" /></button>}
       </div>
 
       <motion.div key={view} id={`${tabId}-content`} role="tabpanel" aria-labelledby={`${tabId}-${view}`} initial={{ opacity: reducedMotion ? 1 : 0 }} animate={{ opacity: 1 }} transition={{ duration: reducedMotion ? 0 : 0.16 }} className="book-navigator-scroll">

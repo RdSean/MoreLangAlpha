@@ -455,6 +455,20 @@ function renderAssignmentDialog() {
 }
 
 describe('TextbookWorkbenchPage', () => {
+  it('collapses and restores the directory without losing search or reading selection', async () => {
+    const user = userEvent.setup();
+    renderWorkbench('/textbooks/book-1?kp=sports-training&view=material');
+    const search = screen.getByRole('searchbox', { name: '搜索教材内容' });
+    await user.type(search, '冠军');
+    await user.click(screen.getByRole('button', { name: '收起教材目录' }));
+    expect(screen.getByTestId('textbook-workbench')).toHaveClass('is-nav-collapsed');
+    expect(screen.getByText('已有冠军训练讲义')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '展开教材目录' }));
+    expect(screen.getByTestId('textbook-workbench')).not.toHaveClass('is-nav-collapsed');
+    expect(search).toHaveValue('冠军');
+    expect(screen.getByTestId('location')).toHaveTextContent('?kp=sports-training&view=material');
+  });
+
   it('hides a cached compact activity after access is lost', () => {
     pageState.activityJob = processingJob();
     pageState.workbench.current_job = pageState.activityJob;

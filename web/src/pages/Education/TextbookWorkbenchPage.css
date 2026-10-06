@@ -25,7 +25,14 @@
 .book-reader-header h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .textbook-mobile-header { display: none; }
 .textbook-workbench:has(> .textbook-workbench-header) { grid-template-rows: auto minmax(0, 1fr); }
-.textbook-workbench-grid { overflow: hidden; height: 100%; }
+.textbook-workbench-grid { position: relative; overflow: hidden; height: 100%; }
+.textbook-nav-restore { display: none; }
+@media (min-width: 768px) {
+  .textbook-workbench.is-nav-collapsed .textbook-workbench-nav { display: none; }
+  .textbook-nav-restore { position: absolute; z-index: 30; top: 10px; left: 8px; display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 1px solid var(--color-border-muted); border-radius: 4px; background: var(--color-bg-page); color: var(--color-text-secondary); }
+  .textbook-nav-restore:hover { background: var(--color-bg-hover); }
+  .textbook-workbench.is-nav-collapsed .book-reader-header { padding-left: 48px; }
+}
 .book-reader-scroll { overscroll-behavior: contain; scrollbar-gutter: stable; }
 .book-reader-prose { padding: 24px max(24px, calc((100% - 800px) / 2)); }
 
