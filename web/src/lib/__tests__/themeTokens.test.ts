@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
 import {
   clearThemeTokenCache,
   createThemeResolver,
   readTokens,
   resolveTokenMap,
+  useThemeTokens,
 } from '../themeTokens';
 
 /**
@@ -33,6 +35,18 @@ afterEach(() => {
 });
 
 describe('readTokens', () => {
+  it('refreshes mounted canvas consumers when theme tokens change', () => {
+    let palette = { accent: '#123456' };
+    const resolver = () => palette;
+    const { result } = renderHook(() => useThemeTokens(resolver, 'dark'));
+    expect(result.current.accent).toBe('#123456');
+    act(() => {
+      palette = { accent: '#654321' };
+      clearThemeTokenCache();
+      window.dispatchEvent(new Event('theme-tokens-changed'));
+    });
+    expect(result.current.accent).toBe('#654321');
+  });
   it('returns nothing when the DOM resolves no value (jsdom)', () => {
     expect(readTokens(['--color-loss'], 'dark')).toEqual({});
   });

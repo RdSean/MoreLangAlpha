@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useLayoutEffect, useMemo } from 'react';
+import { applyAccentHue, getAccentHue } from '@/lib/accentColor';
 
 type ThemePreference = 'light' | 'dark' | 'auto';
 export type ResolvedTheme = 'light' | 'dark';
@@ -25,6 +26,14 @@ function getInitialPreference(): ThemePreference {
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [preference, setPreference] = useState<ThemePreference>(getInitialPreference);
   const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(getSystemTheme);
+  useLayoutEffect(() => { applyAccentHue(getAccentHue()); }, []);
+  useEffect(() => {
+    const sync = (event: StorageEvent) => {
+      if (event.key === 'accentHue' || event.key === null) applyAccentHue(getAccentHue());
+    };
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
 
   // Listen to OS theme changes
   useEffect(() => {

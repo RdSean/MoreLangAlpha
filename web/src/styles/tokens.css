@@ -107,29 +107,26 @@ html {
   --color-text-muted: #B9BDC2;
   /* Ink, not white — the dark accent is a light ember, so white on it lands
      under 3:1. Anything painted on --color-accent-primary must use this. */
-  --color-text-on-accent: #241505;
+  --color-text-on-accent: hsl(var(--primary-foreground));
   --color-icon-muted: #8A8F96;
 
   --Labels-Secondary: rgba(255, 255, 255, 0.5);
   --Labels-Tertiary: rgba(255, 255, 255, 0.45);
   --Labels-Quaternary: rgba(255, 255, 255, 0.4);
 
-  /* Burnished amber — annotation language, never a CTA fill. The solid face
-     is derived from --primary (see the role table); the alpha variants below
-     stay literal because rgba() needs channels, not an hsl() twin. Flat: the
-     old three-stop gradient is retired; the token stays a gradient type
-     because call sites use it as background-image. */
+  /* Accent roles share the primary channels, including custom hue changes.
+     The flat gradient remains a background-image for existing consumers. */
   --color-accent-primary: hsl(var(--primary));
-  --color-accent-soft: rgba(233, 149, 74, 0.14);
-  --color-accent-disabled: rgba(233, 149, 74, 0.5);
+  --color-accent-soft: hsl(var(--primary) / 0.14);
+  --color-accent-disabled: hsl(var(--primary) / 0.5);
   /* Open/selected edges + glows. High alpha on purpose: at ~0.5 the amber
      blends toward muddy brown over charcoal instead of reading as accent. */
-  --color-accent-overlay: rgba(233, 149, 74, 0.75);
-  --color-accent-gradient: linear-gradient(90deg, #E9954A 0%, #E9954A 100%);
+  --color-accent-overlay: hsl(var(--primary) / 0.75);
+  --color-accent-gradient: linear-gradient(90deg, var(--color-accent-primary), var(--color-accent-primary));
 
-  --color-slash-icon: rgb(233, 149, 74);
-  --color-slash-pill-bg: rgba(233, 149, 74, 0.1);
-  --color-slash-pill-border: rgba(233, 149, 74, 0.28);
+  --color-slash-icon: var(--color-accent-primary);
+  --color-slash-pill-bg: hsl(var(--primary) / 0.1);
+  --color-slash-pill-border: hsl(var(--primary) / 0.28);
 
   --color-profit: #3FB950;
   --color-profit-soft: rgba(63, 185, 80, 0.16);
@@ -147,7 +144,7 @@ html {
   --color-info-soft: rgba(110, 158, 247, 0.12);
   --color-success: #3FB950;
   --color-success-soft: rgba(63, 185, 80, 0.12);
-  --color-accent-light: #F2B67C;
+  --color-accent-light: color-mix(in srgb, var(--color-accent-primary) 75%, white);
   --color-btn-primary-bg: #ECECEA;
   --color-btn-primary-text: #1A1B1D;
   /* Stop-button hover: the paper send face warmed toward red — hover intent
@@ -198,14 +195,14 @@ html {
   --card-foreground: 60 4% 90%;
   --popover: 220 5% 12.4%;
   --popover-foreground: 60 4% 90%;
-  --primary: 28 78% 60%;
-  --primary-foreground: 28 60% 8%;
+  --primary: var(--theme-accent-hue, 28) 78% var(--theme-accent-lightness-dark, 60%);
+  --primary-foreground: var(--theme-accent-hue, 28) 60% 8%;
   --secondary: 225 5% 17%;
   --secondary-foreground: 60 4% 90%;
   --muted: 218 6% 63%;
   --muted-foreground: 60 4% 90% / 0.62;
-  --accent: 28 78% 60%;
-  --accent-foreground: 28 60% 8%;
+  --accent: var(--primary);
+  --accent-foreground: var(--primary-foreground);
   --destructive: 3 93% 63%;
   --destructive-foreground: 0 0% 98%;
   --border: 0 0% 100% / 0.08;
@@ -223,7 +220,7 @@ html {
   --color-up-soft: 128 49% 49% / 0.16;
   --color-down: 3 93% 63%;
   --color-down-soft: 3 93% 63% / 0.16;
-  --accent-fin: 28 78% 60%;
+  --accent-fin: var(--primary);
   --sidebar-bg: 0 0% 12.5%;
   --sidebar-border: 0 0% 100% / 0.08;
   --sidebar-hover: 0 0% 100% / 0.06;
@@ -232,7 +229,7 @@ html {
      signal) and -indicator paints the edge bar. Split because the accent alone is
      under the 3:1 floor for a graphical indicator on the light rail. */
   --sidebar-icon-selected: 0 0% 100%;
-  --sidebar-indicator: 28 78% 60%;
+  --sidebar-indicator: var(--primary);
 }
 
 /* ---------- Light theme overrides ---------- */
@@ -271,7 +268,7 @@ html {
   --color-text-quaternary: #B4B3AF;
   --color-text-muted: #8C8B87;
   /* Ink, matching dark — white on the amber is under 3:1 in either theme. */
-  --color-text-on-accent: #241505;
+  --color-text-on-accent: hsl(var(--primary-foreground));
   --color-icon-muted: #8C8B87;
 
   --Labels-Secondary: rgba(31, 31, 30, 0.5);
@@ -281,16 +278,16 @@ html {
   /* Amber, one step darker than dark-theme so it reads on white (the solid
      face follows the light --primary below). Annotation only — rules,
      underlines, markers — never a button fill. */
-  --color-accent-soft: rgba(208, 125, 51, 0.10);
-  --color-accent-disabled: rgba(208, 125, 51, 0.5);
+  --color-accent-soft: hsl(var(--primary) / 0.10);
+  --color-accent-disabled: hsl(var(--primary) / 0.5);
   /* Matches the dark-theme note: high alpha so the edge stays amber, not a
      chalky wash over paper. */
-  --color-accent-overlay: rgba(208, 125, 51, 0.65);
-  --color-accent-gradient: linear-gradient(90deg, #F8F2EA 0%, #F8F2EA 100%);
+  --color-accent-overlay: hsl(var(--primary) / 0.65);
+  --color-accent-gradient: linear-gradient(90deg, color-mix(in srgb, var(--color-accent-primary) 10%, white), color-mix(in srgb, var(--color-accent-primary) 10%, white));
 
-  --color-slash-icon: rgb(208, 125, 51);
-  --color-slash-pill-bg: rgba(208, 125, 51, 0.12);
-  --color-slash-pill-border: rgba(208, 125, 51, 0.35);
+  --color-slash-icon: var(--color-accent-primary);
+  --color-slash-pill-bg: hsl(var(--primary) / 0.12);
+  --color-slash-pill-border: hsl(var(--primary) / 0.35);
 
   --color-book-unread: #C8A229;
   --color-book-viewed: #86B295;
@@ -311,7 +308,7 @@ html {
   --color-info-soft: rgba(68, 119, 212, 0.08);
   --color-success: #1A7F37;
   --color-success-soft: rgba(26, 127, 55, 0.08);
-  --color-accent-light: #E09A57;
+  --color-accent-light: color-mix(in srgb, var(--color-accent-primary) 80%, white);
   /* Confirm/approve buttons in chat — deliberately ink, not the accent, so
      approving a plan never reads as the same affordance as a brand action. */
   --color-btn-primary-bg: #1F1D1A;
@@ -361,14 +358,14 @@ html {
   --card-foreground: 60 2% 12%;
   --popover: 0 0% 100%;
   --popover-foreground: 60 2% 12%;
-  --primary: 28 63% 51%;
-  --primary-foreground: 28 60% 8%;
+  --primary: var(--theme-accent-hue, 28) 63% var(--theme-accent-lightness-light, 51%);
+  --primary-foreground: var(--theme-accent-hue, 28) 60% 8%;
   --secondary: 60 3% 94%;
   --secondary-foreground: 60 2% 20%;
   --muted: 48 2% 54%;
   --muted-foreground: 60 2% 12% / 0.55;
-  --accent: 28 63% 51%;
-  --accent-foreground: 28 60% 8%;
+  --accent: var(--primary);
+  --accent-foreground: var(--primary-foreground);
   --destructive: 356 72% 47%;
   --destructive-foreground: 0 0% 100%;
   --border: 60 2% 12% / 0.09;
@@ -388,13 +385,13 @@ html {
   --color-up-soft: 137 66% 30% / 0.08;
   --color-down: 356 72% 47%;
   --color-down-soft: 356 72% 47% / 0.08;
-  --accent-fin: 28 63% 51%;
+  --accent-fin: var(--primary);
   --sidebar-bg: 60 9% 96.5%;
   --sidebar-border: 60 2% 12% / 0.07;
   --sidebar-hover: 60 2% 12% / 0.04;
   --sidebar-icon: 60 2% 12% / 0.50;
   --sidebar-icon-selected: 60 2% 12%;
-  --sidebar-indicator: 28 63% 51%;
+  --sidebar-indicator: var(--primary);
 }
 
 @layer base {

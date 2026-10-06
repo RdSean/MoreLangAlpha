@@ -3,12 +3,13 @@ import { ToggleSwitch } from '@/components/ui/switch';
 import { useFeatures, useSetFeatureOverride } from '@/hooks/useFeatures';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '@/components/ui/use-toast';
+import { ThemeColorSettings } from '../components/ThemeColorSettings';
 
 /** Experiments tab: user-overridable feature flags, data-driven from the
  * feature-flag API. */
 export function ExperimentsTab() {
   const { toast } = useToast();
-  const { data: featuresData, isLoading: isFeaturesLoading } = useFeatures();
+  const { data: featuresData } = useFeatures();
   const setFeatureOverrideMutation = useSetFeatureOverride();
   const { t } = useTranslation();
 
@@ -26,6 +27,7 @@ export function ExperimentsTab() {
 
   return (
       <div className="space-y-5 max-w-2xl">
+        <ThemeColorSettings />
         <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-tertiary)' }}>
           {t('settings.experimentsIntro', 'Early-access features still in development. Turn one on to enable it for your account — you can switch it off at any time.')}
         </p>
@@ -34,13 +36,7 @@ export function ExperimentsTab() {
         {(() => {
           const overridable = (featuresData ?? []).filter((f) => f.gate === 'opt_in' || f.gate === 'opt_out');
           if (overridable.length === 0) {
-            // Wait out the features query before committing to the empty
-            // state, so it never flashes before the real list lands.
-            return isFeaturesLoading ? null : (
-              <p className="text-sm" style={{ color: 'var(--color-text-tertiary)', opacity: 0.7 }}>
-                {t('settings.experimentsEmpty', 'No experiments are available right now.')}
-              </p>
-            );
+            return null;
           }
           return (
             <div className="space-y-3">

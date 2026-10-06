@@ -13,7 +13,7 @@ import type { ResolvedTheme } from '@/contexts/ThemeContext';
  * "paint the other theme's colors".
  */
 
-/** Resolved values per theme — tokens never change within a theme at runtime. */
+/** Resolved values per theme, invalidated when the accent changes. */
 const tokenCache = new Map<ResolvedTheme, Map<string, string>>();
 const resolverResets = new Set<() => void>();
 
@@ -142,10 +142,15 @@ export function useThemeTokens<K extends string>(
   useEffect(() => {
     if (resolve(theme) !== tokens) bump((n) => n + 1);
   }, [resolve, theme, tokens]);
+  useEffect(() => {
+    const update = () => bump((n) => n + 1);
+    window.addEventListener('theme-tokens-changed', update);
+    return () => window.removeEventListener('theme-tokens-changed', update);
+  }, []);
   return tokens;
 }
 
-/** Test seam — resolved values are cached for the process lifetime otherwise. */
+/** Invalidate both token values and stable canvas resolver objects. */
 export function clearThemeTokenCache(): void {
   tokenCache.clear();
   resolverResets.forEach((reset) => reset());

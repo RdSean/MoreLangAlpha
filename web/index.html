@@ -15,6 +15,17 @@
         var t = (stored === 'light' || stored === 'dark') ? stored
           : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
         d.setAttribute('data-theme', t);
+        var hue = localStorage.getItem('accentHue');
+        if (hue !== null && hue.trim() !== '' && Number.isInteger(Number(hue)) && Number(hue) >= 0 && Number(hue) <= 359) {
+          d.style.setProperty('--theme-accent-hue', String(Number(hue)));
+          ['light', 'dark'].forEach(function(mode) {
+            var key = mode === 'light' ? 'accentLightnessLight' : 'accentLightnessDark';
+            var lightness = Number(localStorage.getItem(key));
+            if (Number.isInteger(lightness) && lightness > 0 && lightness < 100) {
+              d.style.setProperty('--theme-accent-lightness-' + mode, lightness + '%');
+            }
+          });
+        }
         // Same pre-paint reason as the theme: the root font-size multiplier
         // (tokens.css `html { font-size: calc(100% * var(--app-font-scale)) }`)
         // must land before first layout, or every rem-sized box reflows once.
