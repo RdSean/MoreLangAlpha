@@ -3,6 +3,16 @@ import { describe, expect, it } from 'vitest';
 import EducationMarkdown from '../components/EducationMarkdown';
 
 describe('EducationMarkdown', () => {
+  it('keeps actual Markdown quotes and source paragraphs distinct without a target highlight', () => {
+    const { container } = render(<EducationMarkdown
+      content={'### BEFORE YOU READ\n\nOrdinary exercise text.\n\n> An actual quotation.'}
+      sourceLineOffset={283} />);
+    expect(container.querySelectorAll('blockquote')).toHaveLength(1);
+    expect(container.querySelector('blockquote')).toHaveTextContent('An actual quotation.');
+    expect(container.querySelector('[data-source-highlight]')).toBeNull();
+    expect(screen.getByText('Ordinary exercise text.')).toHaveAttribute('data-source-start-line', '286');
+  });
+
   it('renders saved numeric fraction markup without changing source-line anchors', () => {
     const { container } = render(
       <EducationMarkdown content={'# Fractions\n\n$1/2 = 2/4$'} sourceLineOffset={9} />,

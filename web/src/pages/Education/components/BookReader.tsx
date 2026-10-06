@@ -152,10 +152,7 @@ export function BookReader({
             <EducationMarkdown
               content={source.markdown}
               sourceLineOffset={source.start_line - 1}
-              highlightSourceRange={sourceHighlightRange ?? {
-                start: source.start_line,
-                end: source.end_line,
-              }}
+              highlightSourceRange={sourceHighlightRange}
             />
           </div>
         ) : (

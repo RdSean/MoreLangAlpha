@@ -745,10 +745,12 @@ describe('TextbookWorkbenchPage', () => {
   });
 
   it('opens a source node without exposing generation controls', async () => {
-    renderWorkbench('/textbooks/book-1?node=appendix&view=source');
+    const { container } = renderWorkbench('/textbooks/book-1?node=appendix&view=source');
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Vocabulary Index' })).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: '生成讲义' })).not.toBeInTheDocument();
+    expect(pageState.sourceSlice).toHaveBeenCalledWith('book-1', 81, 120);
+    expect(container.querySelector('[data-source-highlight]')).toBeNull();
   });
 
   it('opens original and text directory independently and preserves the original view on refresh', async () => {

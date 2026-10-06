@@ -100,7 +100,7 @@ export default function TextbookWorkbenchPage() {
         }
       : undefined;
   const sourceRequestRange =
-    sourceRange && structure.data
+    selectedKnowledgePoint && sourceRange && structure.data
       ? {
           start: Math.max(1, sourceRange.start - SOURCE_CONTEXT_LINES),
           end: Math.min(
@@ -108,7 +108,7 @@ export default function TextbookWorkbenchPage() {
             sourceRange.end + SOURCE_CONTEXT_LINES,
           ),
         }
-      : undefined;
+      : sourceRange;
   const source = useManagedBookSourceSlice(
     textbookId,
     sourceRequestRange?.start,
@@ -669,7 +669,7 @@ export default function TextbookWorkbenchPage() {
                     loading={source.isLoading || material.isLoading}
                     generationPending={mutations.createJob.isPending}
                     readingPositionKey={`textbook:${textbookId}:${selectedKnowledgePoint?.skill_kp_id ?? `node:${selectedNode?.id}`}:${readerView}`}
-                    sourceHighlightRange={sourceRange}
+                    sourceHighlightRange={selectedKnowledgePoint ? sourceRange : undefined}
                     onViewChange={(view) =>
                       updateSearch((next) => {
                         next.set('view', view);
