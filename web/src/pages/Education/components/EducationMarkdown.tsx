@@ -1,11 +1,6 @@
 import Markdown from '@/pages/ChatAgent/components/Markdown';
 import './EducationMarkdown.css';
 
-interface SourceLineRange {
-  start: number;
-  end: number;
-}
-
 interface PositionedNode {
   type?: string;
   tagName?: string;
@@ -42,10 +37,8 @@ function hiddenFrontMatterLines(content: string): number {
 
 function sourceLinePlugin({
   lineOffset,
-  highlight,
 }: {
   lineOffset: number;
-  highlight?: SourceLineRange;
 }) {
   return (tree: PositionedNode) => {
     const visit = (node: PositionedNode, parentTag?: string) => {
@@ -60,9 +53,6 @@ function sourceLinePlugin({
         node.properties ??= {};
         node.properties['data-source-start-line'] = String(absoluteStart);
         node.properties['data-source-end-line'] = String(absoluteEnd);
-        if (highlight && absoluteStart <= highlight.end && absoluteEnd >= highlight.start) {
-          node.properties['data-source-highlight'] = 'true';
-        }
       }
       for (const child of node.children ?? []) visit(child, node.tagName);
     };
@@ -76,14 +66,12 @@ export default function EducationMarkdown({
   className = '',
   onOpenFile,
   sourceLineOffset,
-  highlightSourceRange,
 }: {
   content: string;
   variant?: 'lesson' | 'summary' | 'compact';
   className?: string;
   onOpenFile?: (path: string) => void;
   sourceLineOffset?: number;
-  highlightSourceRange?: SourceLineRange;
 }) {
   const lineOffset = sourceLineOffset === undefined
     ? undefined
@@ -97,7 +85,7 @@ export default function EducationMarkdown({
         onOpenFile={onOpenFile}
         rehypePlugins={lineOffset === undefined
           ? []
-          : [[sourceLinePlugin, { lineOffset, highlight: highlightSourceRange }]]}
+          : [[sourceLinePlugin, { lineOffset }]]}
       />
     </div>
   );

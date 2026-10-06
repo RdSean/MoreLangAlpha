@@ -669,7 +669,7 @@ export default function TextbookWorkbenchPage() {
                     loading={source.isLoading || material.isLoading}
                     generationPending={mutations.createJob.isPending}
                     readingPositionKey={`textbook:${textbookId}:${selectedKnowledgePoint?.skill_kp_id ?? `node:${selectedNode?.id}`}:${readerView}`}
-                    sourceHighlightRange={selectedKnowledgePoint ? sourceRange : undefined}
+                    sourceRange={sourceRange}
                     onViewChange={(view) =>
                       updateSearch((next) => {
                         next.set('view', view);

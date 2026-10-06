@@ -203,7 +203,7 @@ export default function StudentTextbookLearningPage() {
               source={source.data}
               loading={source.isLoading || material.isLoading}
               readingPositionKey={`student-textbook:${assignmentId}:${selectedKnowledgePoint?.skill_kp_id ?? `node:${selectedNode?.id}`}:${readerView}`}
-              sourceHighlightRange={sourceRange}
+              sourceRange={sourceRange}
               onViewChange={(view) => updateSearch((next) => next.set('view', view))}
             />
           </div>

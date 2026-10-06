@@ -23,12 +23,11 @@ describe('EducationMarkdown', () => {
     expect(container.querySelector('[data-source-start-line="12"]')).not.toBeNull();
   });
 
-  it('maps rendered blocks to absolute source lines and highlights the target range', () => {
+  it('maps rendered blocks to absolute source lines without decorative range highlights', () => {
     render(
       <EducationMarkdown
         content={'# Opening\n\nFirst paragraph.\n\nSecond paragraph.'}
         sourceLineOffset={9}
-        highlightSourceRange={{ start: 12, end: 12 }}
       />,
     );
 
@@ -37,7 +36,7 @@ describe('EducationMarkdown', () => {
       '10',
     );
     expect(screen.getByText('First paragraph.')).toHaveAttribute('data-source-start-line', '12');
-    expect(screen.getByText('First paragraph.')).toHaveAttribute('data-source-highlight', 'true');
+    expect(screen.getByText('First paragraph.')).not.toHaveAttribute('data-source-highlight');
     expect(screen.getByText('Second paragraph.')).not.toHaveAttribute('data-source-highlight');
   });
 });

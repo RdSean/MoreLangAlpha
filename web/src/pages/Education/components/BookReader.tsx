@@ -23,7 +23,7 @@ interface BookReaderProps {
   canManageMaterials?: boolean;
   readingPositionKey?: string;
   continuous?: boolean;
-  sourceHighlightRange?: { start: number; end: number };
+  sourceRange?: { start: number; end: number };
   onViewChange: (view: 'material' | 'source' | 'original') => void;
   onGenerate?: (values: BookGenerationValues) => void | Promise<void>;
   onOpenMaterialLink?: (path: string) => void;
@@ -40,7 +40,7 @@ export function BookReader({
   canManageMaterials = false,
   readingPositionKey,
   continuous = false,
-  sourceHighlightRange,
+  sourceRange,
   onGenerate,
   onOpenMaterialLink,
 }: BookReaderProps) {
@@ -146,13 +146,12 @@ export function BookReader({
               <FileText className="size-4" aria-hidden="true" />
               原书内容
               {view === 'source' && (
-                <span>第 {sourceHighlightRange?.start ?? source.start_line}–{sourceHighlightRange?.end ?? source.end_line} 行，共 {source.total_lines} 行</span>
+                <span>第 {sourceRange?.start ?? source.start_line}–{sourceRange?.end ?? source.end_line} 行，共 {source.total_lines} 行</span>
               )}
             </div>
             <EducationMarkdown
               content={source.markdown}
               sourceLineOffset={source.start_line - 1}
-              highlightSourceRange={sourceHighlightRange}
             />
           </div>
         ) : (

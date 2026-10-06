@@ -508,6 +508,15 @@ function renderAssignmentDialog() {
 }
 
 describe('TextbookWorkbenchPage', () => {
+  it('renders an ungenerated knowledge point source without quote-like range highlights', () => {
+    pageState.sourceSlice.mockReturnValue({ ...source, start_line: 1, end_line: 34, markdown: '\n'.repeat(9) + 'Target source paragraph.' });
+    const { container } = renderWorkbench('/textbooks/book-1?kp=sports-global-game&view=source&nav=knowledge');
+    expect(screen.getByText('第 10–22 行，共 120 行')).toBeInTheDocument();
+    expect(container.querySelector('[data-source-start-line]')).not.toBeNull();
+    expect(container.querySelector('[data-source-highlight]')).toBeNull();
+    expect(container.querySelector('blockquote')).toBeNull();
+  });
+
   it('offers lecture regeneration only to parent members', () => {
     const { unmount } = renderWorkbench('/textbooks/book-1?kp=sports-training&view=material');
     expect(screen.getByRole('button', { name: '重新生成讲义' })).toHaveTextContent('重新生成讲义');
