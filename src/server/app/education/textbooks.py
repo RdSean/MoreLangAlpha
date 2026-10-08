@@ -146,6 +146,19 @@ def _managed_book_job_not_found() -> HTTPException:
     return HTTPException(status_code=404, detail="Book job not found")
 
 
+@router.get("/textbooks/{textbook_id}/knowledge-points/{knowledge_point_id}/conversation/replay", response_model=list[dict])
+async def get_lesson_conversation_replay(textbook_id: UUID, knowledge_point_id: UUID,
+                                        user_id: CurrentUserId, assignment_id: UUID | None = None):
+    from src.server.services.education_book_study import get_book_conversation_replay
+    try:
+        return await get_book_conversation_replay(
+            user_id=user_id, textbook_id=str(textbook_id), knowledge_point_id=str(knowledge_point_id),
+            assignment_id=str(assignment_id) if assignment_id else None,
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+
+
 @router.get("/book-jobs/{job_id}", response_model=BookJobResponse)
 async def get_managed_book_job(job_id: UUID, user_id: CurrentUserId):
     job = await get_book_job_for_parent(

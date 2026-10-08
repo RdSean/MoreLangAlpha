@@ -77,3 +77,61 @@ async def get_book_study_history(*, user_id: str, textbook_id: str, knowledge_po
     items = [item for item in items if item.get("event") != "message_chunk"
              or (item.get("data") or {}).get("content_type", "text") == "text"]
     return _messages_from_replay_items(items)
+
+
+async def get_book_conversation_replay(*, user_id: str, textbook_id: str,
+                                      knowledge_point_id: str, assignment_id: str | None = None):
+    """Authorized structured replay; preserve the canonical event/card identities."""
+    from src.server.database.conversation import get_replay_thread_data
+    from src.server.services.education_learning_transcript import _get_replay_items
+
+    if assignment_id:
+        from src.server.database.education_learning import get_student_learning_space
+        from src.server.services.education_textbooks import get_student_structure
+        structure = await get_student_structure(student_user_id=user_id, assignment_id=assignment_id)
+        if str(structure["textbook_id"]) != textbook_id:
+            raise TextbookNotFoundError("Learning assignment not found")
+        point = next((p for p in structure["knowledge_points"]
+                      if str(p["knowledge_point_id"]) == knowledge_point_id), None)
+        if not point:
+            raise TextbookNotFoundError("Learning lesson not found")
+        space = await get_student_learning_space(student_user_id=user_id, assignment_id=assignment_id)
+    else:
+        point, _ = await _lesson(user_id=user_id, textbook_id=textbook_id, knowledge_point_id=knowledge_point_id)
+        space = await get_study_space(user_id=user_id, textbook_id=textbook_id, knowledge_point_id=knowledge_point_id)
+    if not space:
+        return []
+    thread_id = str(space["conversation_thread_id"])
+    owner, thread, queries, responses, usages, provenance = await get_replay_thread_data(thread_id)
+    if owner != user_id or not thread:
+        raise TextbookNotFoundError("Learning conversation not found")
+    items = await _get_replay_items(thread_id, thread, queries, responses, usages, provenance)
+    if not assignment_id:
+        # Parent spaces are already bound to a single knowledge point.
+        return items
+    turns = set()
+    for query in queries:
+        metadata = query.get("metadata") or {}
+        kp = metadata.get("education_knowledge_point_id")
+        legacy = not kp and any(
+            isinstance(c, dict) and c.get("content", "").startswith(f"# {point['title']}\n")
+            for c in metadata.get("additional_context", [])
+        )
+        if kp == knowledge_point_id or legacy:
+            turns.add(query["turn_index"])
+    # Canonical replay is ordered by causal turn; trailing unindexed tip
+    # interrupts belong to that final turn, not to whichever lesson is open.
+    run_turns = {str(r["conversation_response_id"]): r.get("turn_index")
+                 for r in responses if r.get("conversation_response_id")}
+    selected = []
+    active_turn = None
+    for item in items:
+        data = item.get("data") or {}
+        turn = data.get("turn_index")
+        if turn is None and data.get("run_id"):
+            turn = run_turns.get(str(data["run_id"]))
+        if turn is not None:
+            active_turn = turn
+        if (turn if turn is not None else active_turn) in turns:
+            selected.append(item)
+    return selected
