@@ -79,11 +79,10 @@ async def get_book_study_history(*, user_id: str, textbook_id: str, knowledge_po
     return _messages_from_replay_items(items)
 
 
-async def get_book_conversation_replay(*, user_id: str, textbook_id: str,
-                                      knowledge_point_id: str, assignment_id: str | None = None):
-    """Authorized structured replay; preserve the canonical event/card identities."""
+async def _book_conversation_source(*, user_id: str, textbook_id: str,
+                                    knowledge_point_id: str, assignment_id: str | None = None):
+    """Resolve current lesson authorization and the durable owner-bound thread."""
     from src.server.database.conversation import get_replay_thread_data
-    from src.server.services.education_learning_transcript import _get_replay_items
 
     if assignment_id:
         from src.server.database.education_learning import get_student_learning_space
@@ -100,11 +99,24 @@ async def get_book_conversation_replay(*, user_id: str, textbook_id: str,
         point, _ = await _lesson(user_id=user_id, textbook_id=textbook_id, knowledge_point_id=knowledge_point_id)
         space = await get_study_space(user_id=user_id, textbook_id=textbook_id, knowledge_point_id=knowledge_point_id)
     if not space:
-        return []
+        return None
     thread_id = str(space["conversation_thread_id"])
     owner, thread, queries, responses, usages, provenance = await get_replay_thread_data(thread_id)
     if owner != user_id or not thread:
         raise TextbookNotFoundError("Learning conversation not found")
+    return point, thread_id, thread, queries, responses, usages, provenance
+
+
+async def get_book_conversation_replay(*, user_id: str, textbook_id: str,
+                                      knowledge_point_id: str, assignment_id: str | None = None):
+    """Authorized structured replay; preserve the canonical event/card identities."""
+    from src.server.services.education_learning_transcript import _get_replay_items
+
+    source = await _book_conversation_source(user_id=user_id, textbook_id=textbook_id,
+        knowledge_point_id=knowledge_point_id, assignment_id=assignment_id)
+    if source is None:
+        return []
+    point, thread_id, thread, queries, responses, usages, provenance = source
     items = await _get_replay_items(thread_id, thread, queries, responses, usages, provenance)
     if not assignment_id:
         # Parent spaces are already bound to a single knowledge point.
@@ -135,3 +147,55 @@ async def get_book_conversation_replay(*, user_id: str, textbook_id: str,
         if (turn if turn is not None else active_turn) in turns:
             selected.append(item)
     return selected
+
+
+async def get_book_conversation_status(*, user_id: str, textbook_id: str,
+                                      knowledge_point_id: str, assignment_id: str | None = None):
+    from src.server.services.thread_status import read_thread_runtime_status
+
+    source = await _book_conversation_source(user_id=user_id, textbook_id=textbook_id,
+        knowledge_point_id=knowledge_point_id, assignment_id=assignment_id)
+    if source is None:
+        return {"status": "completed", "can_reconnect": False, "lesson_active": False}
+    _, thread_id, thread, queries, _, _, _ = source
+    status = await read_thread_runtime_status(thread_id, msg_type=thread.get("msg_type"))
+    latest = next((q for q in reversed(queries) if q.get("turn_index") == status.get("latest_turn_index")), {})
+    matches = not assignment_id or (latest.get("metadata") or {}).get("education_knowledge_point_id") == knowledge_point_id
+    if not matches:
+        return {**status, "can_reconnect": False, "status": "completed", "active_tasks": [],
+                "pending_report_back": False, "report_back_run_id": None, "lesson_active": False,
+                "lesson_blocked": bool(status.get("can_reconnect") or status.get("status") == "interrupted")}
+    return {**status, "lesson_active": True}
+
+
+async def restore_book_continuation_context(*, request, thread_id: str):
+    """Recover education references from durable data after the owner gate.
+
+    This does not grant access: messaging still resolves current material and
+    validates the mapped thread through the ordinary education authorization.
+    """
+    from src.server.database.conversation import get_queries_for_thread, get_thread_by_id
+
+    thread = await get_thread_by_id(thread_id)
+    education = ((thread or {}).get("metadata") or {}).get("education") or {}
+    if not education:
+        return request
+    fields = {}
+    if education.get("textbook_id"):
+        fields = {"education_textbook_id": education["textbook_id"],
+                  "education_knowledge_point_id": education.get("knowledge_point_id")}
+    elif education.get("assignment_id"):
+        if not request.hitl_response and not request.retry_of_run_id:
+            return request
+        queries, _ = await get_queries_for_thread(thread_id)
+        latest = max(queries, key=lambda q: (q.get("turn_index", -1), str(q.get("created_at") or "")), default={})
+        kp = (latest.get("metadata") or {}).get("education_knowledge_point_id")
+        if not kp:
+            raise TextbookNotFoundError("Original learning context is unavailable")
+        fields = {"education_assignment_id": education["assignment_id"],
+                  "education_knowledge_point_id": kp}
+    for name in ("education_textbook_id", "education_assignment_id", "education_knowledge_point_id"):
+        supplied = getattr(request, name, None)
+        if supplied and supplied != fields.get(name):
+            raise TextbookNotFoundError("Learning continuation context changed")
+    return request.model_copy(update={**fields, "agent_mode": "flash"})

@@ -106,3 +106,67 @@ async def test_conversation_replay_preserves_unindexed_cards_and_isolates_lesson
     assert result[1]["data"]["interrupt_id"] == "stable-card"
     with pytest.raises(TextbookNotFoundError):
         await study.get_book_conversation_replay(user_id="stranger", textbook_id="book", knowledge_point_id="kp", assignment_id="assignment")
+
+
+@pytest.mark.asyncio
+async def test_continuation_restores_original_lesson_not_current_selection(monkeypatch):
+    from src.server.database import conversation
+    from src.server.models.chat import ChatRequest
+
+    monkeypatch.setattr(conversation, "get_thread_by_id", AsyncMock(return_value={
+        "metadata": {"education": {"textbook_id": "book", "knowledge_point_id": "kp"}}
+    }))
+    monkeypatch.setattr(conversation, "get_queries_for_thread", AsyncMock(return_value=([
+        {"turn_index": 1, "metadata": {"education_knowledge_point_id": "kp"}}
+    ], 1)))
+    request = ChatRequest(workspace_id="ws", messages=[], hitl_response={"card": {"decisions": [{"type": "approve"}]}})
+    result = await study.restore_book_continuation_context(request=request, thread_id="thread")
+    assert result.education_textbook_id == "book"
+    assert result.education_knowledge_point_id == "kp"
+    fresh = await study.restore_book_continuation_context(request=ChatRequest(workspace_id="ws", messages=[{"role": "user", "content": "Next question"}]), thread_id="thread")
+    assert fresh.education_textbook_id == "book"
+    assert fresh.education_knowledge_point_id == "kp"
+    with pytest.raises(TextbookNotFoundError):
+        await study.restore_book_continuation_context(request=request.model_copy(update={"education_knowledge_point_id": "other"}), thread_id="thread")
+
+
+@pytest.mark.asyncio
+async def test_student_status_never_attaches_another_lesson_run(monkeypatch):
+    from src.server.database import conversation, education_learning
+    from src.server.services import education_textbooks, thread_status
+    monkeypatch.setattr(education_textbooks, "get_student_structure", AsyncMock(return_value={
+        "textbook_id": "book", "knowledge_points": [{"knowledge_point_id": "kp", "title": "Lesson"}]
+    }))
+    monkeypatch.setattr(education_learning, "get_student_learning_space", AsyncMock(return_value={"conversation_thread_id": "thread"}))
+    queries = [{"turn_index": 2, "metadata": {"education_knowledge_point_id": "other"}}]
+    monkeypatch.setattr(conversation, "get_replay_thread_data", AsyncMock(return_value=("student", {"msg_type": "flash"}, queries, [], [], [])))
+    monkeypatch.setattr(thread_status, "read_thread_runtime_status", AsyncMock(return_value={
+        "status": "interrupted", "can_reconnect": True, "run_id": "other-run", "latest_turn_index": 2,
+        "active_tasks": ["other-task"], "pending_report_back": True,
+    }))
+    result = await study.get_book_conversation_status(user_id="student", textbook_id="book", knowledge_point_id="kp", assignment_id="assignment")
+    assert result["can_reconnect"] is False
+    assert result["active_tasks"] == []
+    assert result["pending_report_back"] is False
+    assert result["lesson_active"] is False
+
+
+@pytest.mark.asyncio
+async def test_student_retry_restores_and_validates_original_assignment(monkeypatch):
+    from src.server.database import conversation
+    from src.server.models.chat import ChatRequest
+
+    monkeypatch.setattr(conversation, "get_thread_by_id", AsyncMock(return_value={
+        "metadata": {"education": {"assignment_id": "assignment"}}
+    }))
+    monkeypatch.setattr(conversation, "get_queries_for_thread", AsyncMock(return_value=([
+        {"turn_index": 2, "metadata": {"education_knowledge_point_id": "original"}},
+        {"turn_index": 1, "metadata": {"education_knowledge_point_id": "previous"}},
+    ], 2)))
+    retry = ChatRequest(workspace_id="ws", messages=[], retry_of_run_id="run")
+    restored = await study.restore_book_continuation_context(request=retry, thread_id="thread")
+    assert restored.education_assignment_id == "assignment"
+    assert restored.education_knowledge_point_id == "original"
+    assert restored.agent_mode == "flash"
+    with pytest.raises(TextbookNotFoundError):
+        await study.restore_book_continuation_context(request=retry.model_copy(update={"education_knowledge_point_id": "previous"}), thread_id="thread")

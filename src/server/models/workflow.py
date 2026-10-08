@@ -445,6 +445,9 @@ class ThreadTurnsResponse(BaseModel):
 
 class RetryRequest(BaseModel):
     """Request body for the retry endpoint."""
+    education_textbook_id: Optional[str] = Field(None, max_length=64)
+    education_assignment_id: Optional[str] = Field(None, max_length=64)
+    education_knowledge_point_id: Optional[str] = Field(None, max_length=64)
     workspace_id: str = Field(..., description="Workspace ID (required for graph building)")
     checkpoint_id: Optional[str] = Field(
         None,

@@ -352,6 +352,16 @@ async def _handle_send_message(
         if owner_id is not None and owner_id != user_id:
             raise HTTPException(status_code=403, detail="Forbidden")
 
+        if owner_id == user_id and (request.hitl_response or retry_of_run_id or agent_mode == "flash"):
+            from src.server.services.education_book_study import restore_book_continuation_context
+            from src.server.services.education_textbooks import TextbookError
+
+            try:
+                request = await restore_book_continuation_context(request=request, thread_id=thread_id)
+                agent_mode = request.agent_mode or agent_mode
+            except TextbookError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+
         # Resolve workspace_id from thread if not provided
         if not workspace_id and thread_id:
             thread_record = await get_thread_by_id(thread_id)
@@ -1429,6 +1439,9 @@ async def retry_thread(
         workspace_id=workspace_id,
         messages=[],
         checkpoint_id=retry_checkpoint_id,
+        education_textbook_id=(body.education_textbook_id if body else None),
+        education_assignment_id=(body.education_assignment_id if body else None),
+        education_knowledge_point_id=(body.education_knowledge_point_id if body else None),
         request_key=(body.request_key if body else None),
         llm_model=(body.llm_model if body else None),
         reasoning_effort=(body.reasoning_effort if body else None),

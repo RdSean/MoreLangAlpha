@@ -263,6 +263,10 @@ def serialize_context_metadata(
     """
     if request.education_knowledge_point_id:
         query_metadata["education_knowledge_point_id"] = request.education_knowledge_point_id
+    if request.education_textbook_id:
+        query_metadata["education_textbook_id"] = request.education_textbook_id
+    if request.education_assignment_id:
+        query_metadata["education_assignment_id"] = request.education_assignment_id
     if request.additional_context:
         serialized_ctx = []
         for ctx in request.additional_context:
