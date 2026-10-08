@@ -1,0 +1,7 @@
+.code-block-body { min-width: 0; overscroll-behavior: contain; }
+.code-block-body pre { min-width: max-content; }
+@media print {
+  .code-block-body { max-height: none !important; overflow: visible !important; }
+  .code-block-body pre { min-width: 0; white-space: pre-wrap !important; }
+  .code-block-controls { display: none !important; }
+}

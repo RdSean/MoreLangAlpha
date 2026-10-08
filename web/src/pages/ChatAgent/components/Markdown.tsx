@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useId } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkCjkFriendly from 'remark-cjk-friendly';
@@ -8,7 +8,9 @@ import rehypeKatex from 'rehype-katex';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import 'katex/dist/katex.min.css';
 import SyntaxHighlighter, { oneDark, oneLight } from './SyntaxHighlighter';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, ChevronsDown, ChevronsUp } from 'lucide-react';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import './CodeBlock.css';
 import { useTheme } from '@/contexts/ThemeContext';
 import WorkspaceImage from './WorkspaceImage';
 import { isFilePath, isImagePath, normalizeFilePath, parseWsPath } from './FileCard';
@@ -63,6 +65,21 @@ function CodeBlock({ language, code, compact = false, codeTheme }: CodeBlockProp
   const { theme } = useTheme();
   const effectiveTheme = codeTheme ?? theme;
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyId = useId();
+  const isMobile = useIsMobile();
+  const bound = isMobile ? 240 : 320;
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const measure = () => setOverflows(body.scrollHeight > bound);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [code, bound, effectiveTheme, codeTheme]);
 
   const handleCopy = (): void => {
     navigator.clipboard.writeText(code);
@@ -110,19 +127,23 @@ function CodeBlock({ language, code, compact = false, codeTheme }: CodeBlockProp
     <div style={{ margin: compact ? '4px 0' : '6px 0' }}>
       <div className="rounded-lg overflow-hidden"
         style={{ backgroundColor: bgColor, border: `1px solid ${borderColor}` }}>
-        {!compact && (
-          <div className="flex items-center justify-between px-3 py-1.5"
+          <div className="code-block-controls flex items-center justify-between gap-3 px-3 py-1.5"
             style={{ borderBottom: `1px solid ${borderColor}` }}>
             <span className="text-xs font-mono" style={{ color: labelColor }}>
               {language || 'text'}
             </span>
+            {overflows && <button type="button" aria-expanded={expanded} aria-controls={bodyId}
+              onClick={() => setExpanded((value) => !value)} className="ml-auto flex items-center gap-1 text-xs" style={{ color: labelColor }}>
+              {expanded ? <ChevronsUp className="h-3 w-3" /> : <ChevronsDown className="h-3 w-3" />}
+              {expanded ? '收起代码' : '展开代码'}
+            </button>}
             <button onClick={handleCopy}
               className="flex items-center gap-1 text-xs hover:opacity-100 transition-opacity"
               style={{ color: labelColor, background: 'none', border: 'none', cursor: 'pointer' }}>
               {copied ? <><Check className="h-3 w-3" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
             </button>
           </div>
-        )}
+        <div id={bodyId} ref={bodyRef} className="code-block-body" style={{ maxHeight: expanded ? undefined : bound, overflow: 'auto' }}>
         <SyntaxHighlighter
           language={language || 'text'}
           style={effectiveTheme === 'light' ? oneLight : oneDark}
@@ -134,10 +155,10 @@ function CodeBlock({ language, code, compact = false, codeTheme }: CodeBlockProp
             lineHeight: '1.5',
           }}
           codeTagProps={{ style: { backgroundColor: 'transparent' } }}
-          wrapLongLines
         >
           {code}
         </SyntaxHighlighter>
+        </div>
       </div>
     </div>
   );
