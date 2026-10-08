@@ -35,6 +35,9 @@ vi.mock('@/contexts/AuthContext', () => ({
 vi.mock('../components/BookOriginalReader', () => ({
   BookOriginalReader: ({ startLine, restoredPage }: { startLine?: number; restoredPage?: number }) => <div data-testid="original-file">PDF start line {startLine}; page {restoredPage ?? 'automatic'}</div>,
 }));
+vi.mock('../hooks/useLessonConversationSession', () => ({
+  useLessonConversationSession: () => ({ messages: [], isLoadingHistory: false, isLoading: false }),
+}));
 
 const emptyMaterial: KnowledgePointMaterial = {
   textbook_id: 'book-1',
@@ -165,6 +168,7 @@ const pageState = vi.hoisted(() => ({
 
 vi.mock('../queries', () => ({
   useBookQuestions: () => ({ data: [], isLoading: false, isFetching: false }),
+  useLessonChatSpace: () => ({ data: { workspace_id: 'ws', conversation_thread_id: 'thread' }, isFetching: false }),
   useLessonQuestion: () => ({ mutateAsync: vi.fn() }),
   useBookReadingMutation: () => ({ mutate: vi.fn(), isError: false }),
   useBookReadingState: () => ({ data: {} }),

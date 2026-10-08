@@ -4,7 +4,7 @@
 .lesson-turn { position: relative; margin-top: 48px; padding-top: 48px; }
 .lesson-turn::before { content: ''; position: absolute; top: 0; left: 24px; right: 24px; border-top: 1px solid var(--color-border-muted); }
 .lesson-turn-question { display: flex; justify-content: flex-end; padding: 0 max(24px, calc((100% - 800px) / 2)); }
-.lesson-turn-question h2 { max-width: 85%; margin: 0; text-align: right; font-size: 20px; line-height: 1.6; font-weight: 500; overflow-wrap: anywhere; }
+.lesson-turn-question > div { width: 100%; min-width: 0; overflow-wrap: anywhere; }
 .lesson-turn-answer { min-width: 0; padding-top: 16px; }
 .lesson-composer { flex-shrink: 0; padding: 10px max(18px, calc((100% - 800px) / 2)); border-top: 1px solid var(--color-border-muted); background: var(--color-bg-page); }
 .lesson-composer-input { display: flex; align-items: center; gap: 8px; }
@@ -16,5 +16,4 @@
   .lesson-turn { margin-top: 32px; padding-top: 32px; }
   .lesson-turn::before { left: 18px; right: 18px; }
   .lesson-turn-question { padding: 0 18px; }
-  .lesson-turn-question h2 { font-size: 18px; }
 }

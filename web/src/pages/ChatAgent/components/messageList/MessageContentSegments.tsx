@@ -44,6 +44,7 @@ import {
 // --- MessageContentSegments ---
 
 interface MessageContentSegmentsProps {
+  renderText?: (content: string) => React.ReactNode;
   segments: ContentSegmentRecord[];
   reasoningProcesses: Record<string, Record<string, unknown>>;
   toolCallProcesses: Record<string, ToolCallProcessRecord>;
@@ -72,6 +73,7 @@ interface MessageContentSegmentsProps {
 }
 
 interface TextBlockProps {
+  renderText?: (content: string) => React.ReactNode;
   block: TextRenderBlock;
   isFirst: boolean;
   isStreaming: boolean;
@@ -81,7 +83,7 @@ interface TextBlockProps {
   onOpenFile?: (path: string, workspaceId?: string) => void;
 }
 
-function TextBlock({ block, isFirst, isStreaming, hasError, structuredError, isSubagentView, onOpenFile }: TextBlockProps): React.ReactElement | null {
+function TextBlock({ block, isFirst, isStreaming, hasError, structuredError, isSubagentView, onOpenFile, renderText }: TextBlockProps): React.ReactElement | null {
   const raw = block.segment.content ?? '';
   // A schema-constrained subagent answers with one JSON object, which the
   // transcript would otherwise show as a raw dump. Mid-stream text is excluded
@@ -95,7 +97,7 @@ function TextBlock({ block, isFirst, isStreaming, hasError, structuredError, isS
     [isSubagentView, isStreaming, hasError, raw]
   );
   const textContent = isSubagentView && !structured ? normalizeSubagentText(raw) : raw;
-  const textEl = structured ? (
+  const textEl = renderText && !hasError ? <>{renderText(textContent)}</> : structured ? (
     <StructuredResultBlock result={structured} onOpenFile={onOpenFile} />
   ) : (
     <TextMessageContent
@@ -113,7 +115,7 @@ function TextBlock({ block, isFirst, isStreaming, hasError, structuredError, isS
   return isFirst && textContent ? <div className="-mt-1">{textEl}</div> : textEl;
 }
 
-export const MessageContentSegments = memo(function MessageContentSegments({ segments, reasoningProcesses, toolCallProcesses, todoListProcesses: _todoListProcesses, subagentTasks, planApprovals = EMPTY_OBJ, userQuestions = EMPTY_OBJ, workspaceProposals = EMPTY_OBJ, questionProposals = EMPTY_OBJ, pendingToolCallChunks = EMPTY_OBJ, isStreaming, hasError, structuredError, isAssistant = false, compactToolCalls = false, isSubagentView = false, readOnly = false, allowFiles = false, ptcAgentProposals = EMPTY_OBJ, secretaryActionProposals = EMPTY_OBJ, htmlWidgetProcesses = EMPTY_OBJ, textOnly = false, flashContext }: MessageContentSegmentsProps): React.ReactElement {
+export const MessageContentSegments = memo(function MessageContentSegments({ segments, reasoningProcesses, toolCallProcesses, todoListProcesses: _todoListProcesses, subagentTasks, planApprovals = EMPTY_OBJ, userQuestions = EMPTY_OBJ, workspaceProposals = EMPTY_OBJ, questionProposals = EMPTY_OBJ, pendingToolCallChunks = EMPTY_OBJ, isStreaming, hasError, structuredError, isAssistant = false, compactToolCalls = false, isSubagentView = false, readOnly = false, allowFiles = false, ptcAgentProposals = EMPTY_OBJ, secretaryActionProposals = EMPTY_OBJ, htmlWidgetProcesses = EMPTY_OBJ, textOnly = false, flashContext, renderText }: MessageContentSegmentsProps): React.ReactElement {
   const {
     onOpenSubagentTask, onOpenFile, onOpenDir, onToolCallDetailClick,
     onApprovePlan, onRejectPlan, onPlanDetailClick,
@@ -271,6 +273,7 @@ export const MessageContentSegments = memo(function MessageContentSegments({ seg
             return (
               <TextBlock
                 key={block.key}
+                renderText={renderText}
                 block={block as TextRenderBlock}
                 isFirst={blockIdx === 0}
                 isStreaming={!!(isStreaming && blockIdx === lastTextBlockIdx && !hasAnyTrulyInProgress)}
