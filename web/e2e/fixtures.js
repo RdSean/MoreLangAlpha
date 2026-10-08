@@ -32,7 +32,7 @@ export async function resetMockServer() {
  * We intercept via page.route() for instant JSON responses on REST endpoints,
  * while SSE endpoints pass through to the mock server for real chunked streaming.
  */
-export async function mockAPI(page, overrides = {}) {
+export async function mockAPI(page, overrides = {}, apiOrigin = MOCK_SERVER) {
   const routes = { ...defaultResponses, ...overrides };
 
   for (const [key, response] of Object.entries(routes)) {
@@ -45,7 +45,7 @@ export async function mockAPI(page, overrides = {}) {
     );
 
     await page.route(
-      (url) => url.origin === MOCK_SERVER && pathRegex.test(url.pathname.replace('/api/v1', '')),
+      (url) => url.origin === apiOrigin && pathRegex.test(url.pathname.replace('/api/v1', '')),
       async (route) => {
         const reqMethod = route.request().method();
         if (method !== '*' && reqMethod !== method) {

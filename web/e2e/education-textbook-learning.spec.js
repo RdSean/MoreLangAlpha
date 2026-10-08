@@ -92,16 +92,14 @@ test('student opens the current knowledge-point lesson', async ({ page }) => {
       workspace_id: 'workspace-1',
       conversation_thread_id: 'thread-1',
     },
+    'GET /education/textbooks/textbook-1/knowledge-points/kp-1/conversation/replay': [],
+    'GET /education/textbooks/textbook-1/knowledge-points/kp-1/conversation/status': { status: 'completed', can_reconnect: false, lesson_active: true },
   });
 
   await page.goto('/education/learn/assignment-1?kp=world-game&view=material');
 
   await expect(page.getByRole('heading', { name: '世界运动' }).first()).toBeVisible();
   await expect(page.getByText('足球是一项简单的运动。')).toBeVisible();
-  if ((page.viewportSize()?.width ?? 0) < 1024) {
-    await page.getByRole('button', { name: '打开学习笔记' }).click();
-    await expect(page.getByRole('heading', { name: '学习笔记' })).toBeVisible();
-  } else {
-    await expect(page.getByRole('region', { name: '学习笔记' })).toBeVisible();
-  }
+  await page.getByRole('button', { name: '打开学习笔记' }).click();
+  await expect(page.getByRole('heading', { name: '学习笔记' })).toBeVisible();
 });

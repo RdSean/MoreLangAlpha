@@ -221,6 +221,9 @@ async function mockWorkbench(page) {
     'GET /education/textbooks/book-1/structure': structure,
     'GET /education/textbooks/book-1/source': sourceSlice,
     'GET /education/textbooks/book-1/knowledge-points/*/material': material,
+    'POST /education/textbooks/book-1/knowledge-points/*/chat-space': { workspace_id: 'lesson-workspace', conversation_thread_id: 'lesson-thread' },
+    'GET /education/textbooks/book-1/knowledge-points/*/conversation/replay': [],
+    'GET /education/textbooks/book-1/knowledge-points/*/conversation/status': { status: 'completed', can_reconnect: false, lesson_active: true },
     'GET /education/book-jobs/job-1': job,
     'GET /education/book-jobs/job-1/events': (route) => fulfillActivity(route,
       activityFrame([], { status: 'succeeded', high_water_seq: 0 })),
@@ -371,21 +374,22 @@ test('desktop workbench keeps reading, batch controls, links, and activity in on
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockWorkbench(page);
 
-  await page.goto('/textbooks/book-1?kp=sports-global-game&view=source');
+  await page.goto('/textbooks/book-1?kp=sports-global-game&view=source&nav=text');
 
   await expect(page.getByRole('heading', { name: '足球如何成为全球运动' })).toBeVisible();
   await expect(page.getByText('第 10–22 行，共 120 行')).toBeVisible();
-  const highlighted = page.locator('[data-source-highlight="true"]');
-  await expect(highlighted.first()).toBeVisible();
-  expect(await highlighted.count()).toBeGreaterThan(0);
+  const sourceAnchors = page.locator('[data-source-start-line]');
+  await expect(sourceAnchors.first()).toBeVisible();
+  expect(await sourceAnchors.count()).toBeGreaterThan(0);
   await expectNoHorizontalOverflow(page);
 
+  await page.getByRole('tab', { name: '知识点', exact: true }).click();
   await page.getByText('冠军的训练方法', { exact: true }).click();
   await expect(page).toHaveURL(/kp=sports-training.*view=material/);
   await expect(page.getByText('训练需要稳定反馈。')).toBeVisible();
-  await page.getByRole('tab', { name: '原文' }).click();
+  await page.goto('/textbooks/book-1?kp=sports-training&view=source&nav=text');
   await expect(page).toHaveURL(/kp=sports-training.*view=source/);
-  await page.getByRole('tab', { name: '讲义' }).click();
+  await page.goto('/textbooks/book-1?kp=sports-training&view=material');
   await page.getByRole('link', { name: '回到全球运动' }).click();
   await expect(page).toHaveURL(/kp=sports-global-game.*view=source/);
 
@@ -409,18 +413,18 @@ test('375px workbench keeps the directory drawer and actions reachable without o
 
   await page.goto('/textbooks/book-1?kp=sports-global-game&view=source');
 
-  await expect(page.getByRole('button', { name: '打开教材目录' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '打开教材目录' }).first()).toBeInViewport();
   await expect(page.getByRole('button', { name: '活动', exact: true })).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
 
-  await page.getByRole('button', { name: '打开教材目录' }).click();
+  await page.getByRole('button', { name: '打开教材目录' }).first().click();
   const navigator = page.getByRole('navigation', { name: '教材导航' });
   await expect(navigator).toBeVisible();
   await navigator.getByText('冠军的训练方法', { exact: true }).click();
   await expect(page).toHaveURL(/kp=sports-training.*view=material/);
   await expect(page.getByText('训练需要稳定反馈。')).toBeVisible();
 
-  await page.getByRole('button', { name: '打开教材目录' }).click();
+  await page.getByRole('button', { name: '打开教材目录' }).first().click();
   await navigator.getByRole('button', { name: '批量选择' }).click();
   await navigator.getByRole('checkbox', { name: '选择 Sports and Fitness 全部知识点' }).check();
   await page.getByRole('button', { name: '生成所选讲义' }).click();
@@ -454,11 +458,12 @@ test('reader restores independent positions after reload and delayed body loadin
     },
   });
   await page.goto('/textbooks/book-1?kp=sports-training&view=source');
-  const reader = page.getByTestId('book-reader-scroll');
-  await expect(page.getByText('原书内容', { exact: true })).toBeVisible();
+  const reader = page.locator('.lesson-conversation-scroll, .book-reader:not(.book-reader-continuous) .book-reader-scroll');
+  await expect(page.getByText('原书内容')).toBeVisible();
   await reader.evaluate((element) => { element.scrollTop = 580; });
   await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(580);
-  await page.getByRole('tab', { name: '讲义', exact: true }).click();
+  await page.goto('/textbooks/book-1?kp=sports-training&view=material');
+  await expect(page.locator('.lesson-conversation-scroll')).toBeVisible();
   await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(0);
   await reader.evaluate((element) => { element.scrollTop = 240; });
   await expect.poll(() => reader.evaluate((element) => element.scrollTop)).toBe(240);
@@ -466,10 +471,10 @@ test('reader restores independent positions after reload and delayed body loadin
   // Match the restore hook's four-pixel tolerance for font/Markdown layout changes.
   await expect.poll(async () => Math.abs(await reader.evaluate((element) => element.scrollTop) - 240)).toBeLessThanOrEqual(4);
   delaySource = true;
-  await page.getByRole('tab', { name: '原文', exact: true }).click();
+  await page.goto('/textbooks/book-1?kp=sports-training&view=source&nav=text');
   await expect.poll(async () => Math.abs(await reader.evaluate((element) => element.scrollTop) - 580)).toBeLessThanOrEqual(4);
   await page.reload();
-  await expect(page.getByText('原书内容', { exact: true })).toBeVisible();
+  await expect(page.getByText('原书内容')).toBeVisible();
   await expect.poll(async () => Math.abs(await reader.evaluate((element) => element.scrollTop) - 580)).toBeLessThanOrEqual(4);
 });
 
@@ -490,7 +495,7 @@ test('reader waits for a cold image before restoring its saved offset', async ({
       markdown: '# Image lesson\n\n![Original figure](/slow-reader-image.svg)\n\nEnd of lesson.',
     }),
   });
-  await page.goto('/textbooks/book-1?kp=sports-global-game&view=source');
+  await page.goto('/textbooks/book-1?kp=sports-global-game&view=source&nav=text');
   const reader = page.getByTestId('book-reader-scroll');
   const image = reader.getByRole('img', { name: 'Original figure' });
   await expect.poll(() => image.evaluate((element) => element.complete && element.naturalHeight > 0)).toBe(true);
@@ -531,7 +536,7 @@ test('activity reconnects from 200 of 500 without skipping cursors and refreshes
     }),
   });
 
-  await page.goto('/textbooks/book-1?kp=sports-global-game&view=source&activity=job-1');
+  await page.goto('/textbooks/book-1?kp=sports-global-game&view=source&activity=job-1&nav=text');
   const panel = page.getByRole('complementary', { name: '教材处理活动' });
   await expect(panel.getByRole('button', { name: '最新诊断' })).toBeVisible();
   await panel.getByRole('button', { name: '最新诊断' }).click();
@@ -675,8 +680,7 @@ test('closing activity still discovers committed material through job snapshots'
   completed = true;
   await expect(page.getByRole('button', { name: '取消本次生成' })).toHaveCount(0, { timeout: 12_000 });
   await expect(page.getByText('结构已就绪 · 讲义 2/2')).toBeVisible();
-  await expect(page.getByRole('tab', { name: '讲义', exact: true })).toBeEnabled();
-  await page.getByRole('tab', { name: '讲义', exact: true }).click();
+  await page.getByRole('navigation', { name: '教材导航' }).getByText('足球如何成为全球运动', { exact: true }).click();
   await expect(page.getByRole('heading', { name: '新提交的讲义' })).toBeVisible();
   await expect(page.getByRole('complementary', { name: '教材处理活动' })).toHaveCount(0);
 });
@@ -773,9 +777,9 @@ test('375px long activity and titles keep cancellation, reader, and directory co
   });
   await page.screenshot({ path: testInfo.outputPath('activity-long-mobile.png'), animations: 'disabled' });
   await page.getByRole('button', { name: '取消本次生成' }).click({ trial: true });
-  await expect(page.getByRole('button', { name: '打开教材目录' })).toBeInViewport();
+  await expect(page.getByRole('button', { name: '打开教材目录' }).first()).toBeInViewport();
   await expect(page.getByRole('button', { name: '取消本次生成' })).toBeInViewport();
-  await page.getByRole('button', { name: '打开教材目录' }).click();
+  await page.getByRole('button', { name: '打开教材目录' }).first().click();
   const navigator = page.getByRole('navigation', { name: '教材导航' });
   await expect(navigator).toBeVisible();
   await expect(navigator.getByText('冠军的训练方法', { exact: true })).toBeInViewport();
