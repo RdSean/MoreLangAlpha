@@ -115,6 +115,7 @@ export function handleHistoryUserMessage({
       const currentUserMessageId = `history-user-${pairIndex}`;
       const userMessage: MessageRecord = {
         id: currentUserMessageId,
+        turnIndex: pairIndex,
         role: 'user',
         content: event.content,
         contentType: 'text',
@@ -169,6 +170,7 @@ export function handleHistoryUserMessage({
 
     const assistantMessage: MessageRecord = {
       id: currentAssistantMessageId,
+      turnIndex: pairIndex,
       role: 'assistant',
       content: '',
       contentType: 'text',

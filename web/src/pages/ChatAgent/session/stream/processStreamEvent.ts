@@ -517,17 +517,18 @@ export const createStreamEventProcessor = (rt: StreamRuntime, deps: StreamRouter
           // widgets) is task-internal until the detail view renders them.
           const taskArtifactType = event.artifact_type as string;
           if (taskArtifactType === 'file_operation' && rt.onFileArtifact) {
-            rt.onFileArtifact(event);
+            rt.onFileArtifact(event, assistantMessageId);
           } else if (taskArtifactType === 'preview_url' && rt.onPreviewUrl) {
             const payload = (event.payload || {}) as Record<string, unknown>;
             rt.onPreviewUrl({
+              artifactId: event.artifact_id as string | undefined,
               url: '',  // resolved by ChatView via authenticated endpoint
               port: payload.port as number,
               title: payload.title as string | undefined,
               command: payload.command as string | undefined,
               path: payload.path as string | undefined,
               loading: true,
-            });
+            }, assistantMessageId);
           }
         } else if (eventType === 'workflow_lifecycle') {
           handleWorkflowLifecycle({
@@ -727,17 +728,18 @@ export const createStreamEventProcessor = (rt: StreamRuntime, deps: StreamRouter
           eventId: event._eventId as number,
         });
       } else if (artifactType === 'file_operation' && rt.onFileArtifact) {
-        rt.onFileArtifact(event);
+        rt.onFileArtifact(event, assistantMessageId);
       } else if (artifactType === 'preview_url' && rt.onPreviewUrl) {
         const payload = (event.payload || {}) as Record<string, unknown>;
         rt.onPreviewUrl({
+          artifactId: event.artifact_id as string | undefined,
           url: '',  // resolved by ChatView via authenticated endpoint
           port: payload.port as number,
           title: payload.title as string | undefined,
           command: payload.command as string | undefined,
           path: payload.path as string | undefined,
           loading: true,
-        });
+        }, assistantMessageId);
       } else if (artifactType === 'task') {
         const payload = (event.payload || {}) as Record<string, unknown>;
         const { task_id, action: rawAction, description, prompt, type } = payload;

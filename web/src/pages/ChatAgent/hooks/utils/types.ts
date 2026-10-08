@@ -47,6 +47,8 @@ export interface HtmlWidgetData {
 export interface PreviewData {
   url: string;
   port: number;
+  /** Stable artifact identity retained by hosts that render preview references. */
+  artifactId?: string;
   title?: string;
   command?: string;
   /** URL path suffix (e.g. "/timeline.html") appended to the resolved signed URL. */

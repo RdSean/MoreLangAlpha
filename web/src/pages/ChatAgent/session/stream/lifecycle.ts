@@ -32,6 +32,7 @@ export interface ReconnectOptions {
 }
 
 export interface RecoveryDeps {
+  readWorkflowStatus?: typeof getWorkflowStatus;
   /** Live-router factory with runtime, router deps, and task routing pre-bound
    * by the composition root. */
   createProcessor: (
@@ -560,7 +561,7 @@ export const attemptReconnectAfterDisconnect = async (
 
     try {
       const snapshotAtMs = Date.now();
-      const status = await getWorkflowStatus(tid);
+      const status = await (deps.readWorkflowStatus ?? getWorkflowStatus)(tid);
       if (!status.can_reconnect) {
         console.log('[Reconnect] Workflow no longer reconnectable, cleaning up');
         break;

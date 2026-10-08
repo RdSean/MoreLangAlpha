@@ -36,6 +36,7 @@ import { projectHistoryInterrupt } from '../interrupts/fromHistoryEvent';
 import type { HistoryRuntime } from '../runtime';
 
 export interface ReplayHistoryDeps {
+  replayHistory?: (threadId: string, onEvent: (event: Record<string, unknown>) => void) => Promise<void>;
   /** Fold a model-fallback replay event into the fallback banner state. */
   applyFallbackSuggestion: (event: Record<string, unknown>) => void;
   /** Best-effort fetch of the thread's feedback state (useChatFeedback). */
@@ -118,7 +119,7 @@ export async function loadConversationHistory(
     // Track which agentIds had steering_accepted actions (for inline card "Updated" label)
     const steeredAgentIds = new Set<string>();
     try {
-      await replayThreadHistory(threadIdToUse, (_rawEvent) => {
+      await (deps.replayHistory ?? replayThreadHistory)(threadIdToUse, (_rawEvent) => {
       // Cast to SSEEvent for type-safe field access within this callback
       const event = _rawEvent as SSEEvent;
       const eventType = event.event;

@@ -695,6 +695,15 @@ export function useLessonQuestion() {
   return useMutation({ mutationFn: educationApi.askBookLesson });
 }
 
+export function useLessonChatSpace(textbookId: string, knowledgePointId: string, assignmentId?: string) {
+  return useQuery({
+    queryKey: queryKeys.education.lessonChatSpace(textbookId, knowledgePointId, assignmentId),
+    queryFn: () => educationApi.getLessonChatSpace(textbookId, knowledgePointId, assignmentId),
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
 export function useParentLearningTranscript(assignmentId: string | undefined, enabled: boolean) {
   return useQuery({
     queryKey: [...queryKeys.education.assignment(assignmentId ?? ''), 'chat-transcript'],

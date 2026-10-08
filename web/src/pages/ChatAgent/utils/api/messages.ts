@@ -91,8 +91,12 @@ export async function sendRetryStream(
   onRunIdResolved: ((runId: string, threadId: string | null) => void) | null = null,
   signal: AbortSignal | null = null,
   requestKey: string | null = null,
+  educationContext: { assignmentId?: string; textbookId?: string; knowledgePointId?: string } | null = null,
 ) {
   const body: Record<string, unknown> = { workspace_id: workspaceId };
+  if (educationContext?.assignmentId) body.education_assignment_id = educationContext.assignmentId;
+  if (educationContext?.textbookId) body.education_textbook_id = educationContext.textbookId;
+  if (educationContext?.knowledgePointId) body.education_knowledge_point_id = educationContext.knowledgePointId;
   if (llmModel) body.llm_model = llmModel;
   if (reasoningEffort) body.reasoning_effort = reasoningEffort;
   if (fastMode) body.fast_mode = true;
@@ -572,6 +576,7 @@ export async function sendHitlResponse(
   onRunIdResolved: ((runId: string, threadId: string | null) => void) | null = null,
   signal: AbortSignal | null = null,
   requestKey: string | null = null,
+  educationContext: { assignmentId?: string; textbookId?: string; knowledgePointId?: string } | null = null,
 ) {
   const body: Record<string, unknown> = {
     workspace_id: workspaceId,
@@ -584,5 +589,8 @@ export async function sendHitlResponse(
   if (modelOptions?.reasoningEffort) body.reasoning_effort = modelOptions.reasoningEffort;
   if (modelOptions?.fastMode) body.fast_mode = true;
   if (requestKey) body.request_key = requestKey;
+  if (educationContext?.assignmentId) body.education_assignment_id = educationContext.assignmentId;
+  if (educationContext?.textbookId) body.education_textbook_id = educationContext.textbookId;
+  if (educationContext?.knowledgePointId) body.education_knowledge_point_id = educationContext.knowledgePointId;
   return await postSSEStream(`/api/v1/threads/${threadId}/messages`, body, { onEvent, onRunIdResolved, signal });
 }

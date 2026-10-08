@@ -126,8 +126,8 @@ export interface StreamRuntime {
   t: Translate;
   updateSubagentCard: UpdateSubagentCard | null;
   onWorkspaceCreated: ((info: { workspaceId: string; question: string }) => void) | null;
-  onFileArtifact: ((event: SSEEvent) => void) | null;
-  onPreviewUrl: ((data: PreviewData) => void) | null;
+  onFileArtifact: ((event: SSEEvent, assistantMessageId?: string) => void) | null;
+  onPreviewUrl: ((data: PreviewData, assistantMessageId?: string) => void) | null;
   // stable (setters)
   setMessages: SetMessages;
   setIsLoading: React.Dispatch<React.SetStateAction<boolean>>;

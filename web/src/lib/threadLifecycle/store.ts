@@ -516,6 +516,10 @@ export function useThreadRunStatus(threadId: string): PublicRunStatus {
   );
 }
 
+export function useThreadFeedRunId(threadId: string): string | null {
+  return useSyncExternalStore(subscribe, () => state.threads.get(threadId)?.feed?.runId ?? null);
+}
+
 /** Status ordinals for the packed snapshot below; append-only (the packed
  *  value never leaves a render pass, so the order carries no wire meaning). */
 const PACKED_STATUSES: readonly PublicRunStatus[] = [

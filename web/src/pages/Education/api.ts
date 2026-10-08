@@ -583,7 +583,26 @@ export async function askBookLesson({ textbookId, assignmentId, knowledgePointId
     assignmentId ? { assignmentId, knowledgePointId } : { textbookId, knowledgePointId });
 }
 
+export async function getLessonChatSpace(textbookId: string, knowledgePointId: string, assignmentId?: string): Promise<LearningChatSpace> {
+  if (assignmentId) return getLearningChatSpace(assignmentId);
+  return (await api.post<LearningChatSpace>(`/api/v1/education/textbooks/${textbookId}/knowledge-points/${knowledgePointId}/chat-space`)).data;
+}
+
+export async function replayLessonConversation(textbookId: string, knowledgePointId: string, assignmentId: string | undefined, onEvent: (event: Record<string, unknown>) => void): Promise<void> {
+  const { data } = await api.get<Array<{ event: string; data: Record<string, unknown> }>>(
+    `/api/v1/education/textbooks/${textbookId}/knowledge-points/${knowledgePointId}/conversation/replay`,
+    { params: assignmentId ? { assignment_id: assignmentId } : undefined },
+  );
+  for (const item of data) onEvent({ ...item.data, event: item.event });
+}
+
 export async function getParentLearningTranscript(assignmentId: string): Promise<ParentLearningTranscript> {
   const { data } = await api.get<ParentLearningTranscript>(`/api/v1/education/learning/${assignmentId}/chat-transcript`);
+  return data;
+}
+
+export async function getLessonConversationStatus(textbookId: string, knowledgePointId: string, assignmentId?: string): Promise<import('@/pages/ChatAgent/utils/api').WorkflowStatusResponse & { lesson_active: boolean; lesson_blocked?: boolean }> {
+  const { data } = await api.get(`/api/v1/education/textbooks/${textbookId}/knowledge-points/${knowledgePointId}/conversation/status`,
+    { params: assignmentId ? { assignment_id: assignmentId } : undefined });
   return data;
 }

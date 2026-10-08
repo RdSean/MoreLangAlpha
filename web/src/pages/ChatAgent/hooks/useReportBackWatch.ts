@@ -99,6 +99,7 @@ interface ReconnectToStreamOptions {
 }
 
 export interface UseReportBackWatchParams {
+  readWorkflowStatus?: typeof getWorkflowStatus;
   /** The visible thread id (prop). */
   threadId: string;
   /** The workspace id (prop). */
@@ -620,7 +621,7 @@ export function useReportBackWatch(params: UseReportBackWatchParams): ReportBack
     if (!workspaceId || !threadId || threadId === '__default__') return;
     // Only after this instance's initial load settled; never mid-stream or -load.
     if (historyLoadedKeyRef.current === null || isStreamingRef.current || historyLoadingRef.current) return;
-    const status = (await getWorkflowStatus(threadId).catch(() => null)) as WorkflowStatusResponse | null;
+    const status = (await (params.readWorkflowStatus ?? getWorkflowStatus)(threadId).catch(() => null)) as WorkflowStatusResponse | null;
     if (!status) return;
     // Re-check after the await, mirroring the pre-await guard — including
     // historyLoadingRef, so a load that starts DURING the /status fetch can't

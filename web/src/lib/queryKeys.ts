@@ -181,6 +181,7 @@ export const queryKeys = {
     bookJob: (id: string) => [...queryKeys.education.all, 'book-jobs', id],
     bookReadingState: (id: string) => [...queryKeys.education.textbook(id), 'reading-state'],
     bookQuestions: (id: string, kp: string, assignmentId?: string) => [...queryKeys.education.textbook(id), 'questions', kp, assignmentId ?? 'parent'],
+    lessonChatSpace: (id: string, kp: string, assignmentId?: string) => [...queryKeys.education.textbook(id), 'chat-space', kp, assignmentId ?? 'parent'],
     bookActivity: (id: string) => [...queryKeys.education.bookJob(id), 'activity'],
     bookStatistics: (id: string) => [...queryKeys.education.bookJob(id), 'statistics'],
     learning: () => [...queryKeys.education.all, 'learning'],

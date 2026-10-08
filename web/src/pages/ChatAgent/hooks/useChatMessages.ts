@@ -12,6 +12,7 @@ import { queryKeys } from '@/lib/queryKeys';
 import { useUser } from '@/hooks/useUser';
 import { sendChatMessageStream, sendRetryStream, getWorkflowStatus, sendHitlResponse, fetchThreadTurns, cancelWorkflow } from '../utils/api';
 import { useLocalRunPublisher } from '@/lib/threadLifecycle/useLocalRunPublisher';
+import { useThreadFeedRunId, useThreadRunStatus } from '@/lib/threadLifecycle/store';
 import { peekThreadMux } from '../session/stream/threadStreamMux';
 import type { WorkflowStatusResponse } from '../utils/api';
 import type { CancelOutcome } from '../utils/cancelOutcome';
@@ -71,15 +72,21 @@ export function useChatMessages(
   updateTodoListCard: ((todoData: Record<string, unknown>, isNew?: boolean) => void) | null = null,
   updateSubagentCard: ((agentId: string, data: Record<string, unknown>) => void) | null = null,
   finalizePendingTodos: (() => void) | null = null,
-  onFileArtifact: ((event: SSEEvent) => void) | null = null,
-  onPreviewUrl: ((data: PreviewData) => void) | null = null,
+  onFileArtifact: ((event: SSEEvent, assistantMessageId?: string) => void) | null = null,
+  onPreviewUrl: ((data: PreviewData, assistantMessageId?: string) => void) | null = null,
   agentMode: string = 'ptc',
   clearSubagentCards: (() => void) | null = null,
   onWorkspaceCreated: ((info: { workspaceId: string; question: string }) => void) | null = null,
   platform: string | null = null,
+  session?: {
+    educationContext: { assignmentId?: string; textbookId?: string; knowledgePointId?: string };
+    replayHistory: (threadId: string, onEvent: (event: Record<string, unknown>) => void) => Promise<void>;
+    readWorkflowStatus?: typeof getWorkflowStatus;
+  },
 ) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const readWorkflowStatus = session?.readWorkflowStatus ?? getWorkflowStatus;
 
   // User locale/timezone — prefer saved preference, fall back to browser detection
   const { user } = useUser();
@@ -160,6 +167,7 @@ export function useChatMessages(
   const [returnedSteering, setReturnedSteering] = useState<string | null>(null);
   // HITL (Human-in-the-Loop) plan mode interrupt state
   const [pendingInterrupt, setPendingInterrupt] = useState<PendingInterrupt | null>(null);
+  const hitlSubmissionRef = useRef(false);
   // When user clicks Reject on a plan, this stores the interruptId so the next message
   // sent via handleSendMessage is routed as rejection feedback via hitl_response.
   const [pendingRejection, setPendingRejection] = useState<PendingRejection | null>(null);
@@ -328,6 +336,17 @@ export function useChatMessages(
   // stale-run reactivation of a cached view). Declared before the watch so
   // `requestHistoryReload` below can close over the setter directly.
   const [reloadTrigger, setReloadTrigger] = useState(0);
+  const observedRunId = useThreadFeedRunId(threadId);
+  const observedRunStatus = useThreadRunStatus(threadId);
+  const checkedRemoteRun = useRef<string | null>(null);
+  useEffect(() => {
+    if (!observedRunId || observedRunId === currentRunIdRef.current || isLoading || isLoadingHistory) return;
+    const key = `${threadId}:${observedRunId}:${observedRunStatus}`;
+    if (checkedRemoteRun.current === key) return;
+    checkedRemoteRun.current = key;
+    setPendingInterrupt(null);
+    setReloadTrigger((value) => value + 1);
+  }, [threadId, observedRunId, observedRunStatus, isLoading, isLoadingHistory]);
   // A finished stream means the server persisted this turn (pair persistence
   // runs at terminal), so every rendered bubble is now reproducible from
   // /messages/replay. Mark them isHistory so a later corrective reload
@@ -350,6 +369,7 @@ export function useChatMessages(
     recentlySentTrackerRef.current.clear();
   }, []);
   const reportBackWatch = useReportBackWatch({
+    readWorkflowStatus,
     threadId,
     workspaceId,
     threadIdRef,
@@ -651,6 +671,7 @@ export function useChatMessages(
    * the runtime and the cross-lane callbacks. */
   const loadConversationHistory = (): Promise<boolean> =>
     replayConversationHistory(runtime, {
+      replayHistory: session?.replayHistory,
       applyFallbackSuggestion,
       loadFeedback,
       projectSubagentHistory: (byTaskId) => projectSubagentHistory(runtime, byTaskId),
@@ -751,7 +772,7 @@ export function useChatMessages(
       // (active_tasks above all) reflects the world at this instant, and the
       // mux attach may lag it by the whole history load.
       const snapshotAtMs = Date.now();
-      const status: WorkflowStatusResponse = await getWorkflowStatus(threadId).catch((statusErr: unknown) => {
+      const status: WorkflowStatusResponse = await readWorkflowStatus(threadId).catch((statusErr: unknown) => {
         console.log('[Reconnect] Could not check workflow status:', (statusErr as Error).message);
         return { can_reconnect: false, status: 'error' } as WorkflowStatusResponse;
       });
@@ -1361,6 +1382,7 @@ export function useChatMessages(
         },
         steeringAbort.signal,
         requestKey,
+        ...(session ? [session.educationContext] : []),
       );
       if (mainStreamAbortRef.current === steeringAbort) {
         mainStreamAbortRef.current = null;
@@ -1658,6 +1680,7 @@ export function useChatMessages(
         },
         abortController.signal,
         requestKey,
+        ...(session ? [session.educationContext] : []),
       );
 
       // The user hit stop: stopWorkflow already finalized the message and ran
@@ -1822,6 +1845,10 @@ export function useChatMessages(
    * Follows the same pattern as handleSendMessage but sends messages: [] with hitl_response.
    */
   const resumeWithHitlResponse = useCallback(async (hitlResponse: Record<string, { decisions: Array<{ type: string; message?: string }> }>, planMode: boolean = false) => {
+    // Card state updates are asynchronous; guard repeated handlers in the
+    // same render before the disabled/processed state reaches the buttons.
+    if (hitlSubmissionRef.current) return;
+    hitlSubmissionRef.current = true;
     setPendingInterrupt(null);
     pendingInterruptIdsRef.current.clear();
     collectedHitlResponsesRef.current = {};
@@ -1885,6 +1912,7 @@ export function useChatMessages(
         },
         abortController.signal,
         requestKey,
+        ...(session ? [session.educationContext] : []),
       );
 
       // User hit stop: stopWorkflow already finalized + tore down. Exception: a
@@ -1939,6 +1967,7 @@ export function useChatMessages(
         }))
       );
     } finally {
+      hitlSubmissionRef.current = false;
       if (mainStreamAbortRef.current === abortController) {
         mainStreamAbortRef.current = null;
       }
@@ -2332,6 +2361,7 @@ export function useChatMessages(
             latchRunId,
             abortController.signal,
             requestKey,
+            ...(session ? [session.educationContext] : []),
           )
         : await sendChatMessageStream(
             message || '',
@@ -2353,6 +2383,7 @@ export function useChatMessages(
             latchRunId,
             abortController.signal,
             requestKey,
+            ...(session ? [session.educationContext] : []),
           );
 
       // User hit stop: stopWorkflow already finalized + tore down. Exception: a
@@ -2560,6 +2591,7 @@ export function useChatMessages(
   /** Composition-level callbacks for the recovery/ownership lifecycle; direct
    * references, so this literal must stay below every referent. */
   const recoveryDeps: RecoveryDeps = {
+    readWorkflowStatus,
     createProcessor: (assistantMessageId, refs, wasInterruptedRef) =>
       createStreamEventProcessor(runtime, streamRouterDeps, assistantMessageId, refs, getTaskIdFromEvent, wasInterruptedRef),
     buildStreamRefs,
@@ -2618,6 +2650,7 @@ export function useChatMessages(
     handleEditMessage,
     handleRegenerate,
     handleRetry,
+    reloadHistory: () => setReloadTrigger((value) => value + 1),
     handleThumbUp,
     handleThumbDown,
     feedbackByTurn,

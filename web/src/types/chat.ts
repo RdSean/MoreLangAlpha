@@ -335,6 +335,7 @@ export interface SecretaryActionProposalState {
 
 export interface UserMessage {
   id: string;
+  turnIndex?: number;
   role: 'user';
   content: string;
   contentType: 'text';
@@ -361,6 +362,7 @@ export interface UserMessage {
 
 export interface AssistantMessage {
   id: string;
+  turnIndex?: number;
   role: 'assistant';
   content: string;
   contentType: 'text';
