@@ -1,7 +1,12 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import Markdown from '../Markdown';
+import SyntaxHighlighter from '../SyntaxHighlighter';
 import { ThemeProvider } from '@/contexts/ThemeContext';
+
+beforeAll(async () => {
+  await (SyntaxHighlighter as unknown as { preload: () => Promise<void> }).preload();
+});
 
 describe('Markdown math and currency', () => {
   it.each(['chat', 'panel', 'compact'] as const)(

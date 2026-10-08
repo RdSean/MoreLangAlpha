@@ -1,8 +1,12 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CodeBlock } from '../Markdown';
+import SyntaxHighlighter from '../SyntaxHighlighter';
 
 vi.mock('@/contexts/ThemeContext', () => ({ useTheme: () => ({ theme: 'dark' }) }));
+beforeAll(async () => {
+  await (SyntaxHighlighter as unknown as { preload: () => Promise<void> }).preload();
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe('shared code block', () => {
