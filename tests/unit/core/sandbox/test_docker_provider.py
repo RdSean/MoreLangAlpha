@@ -936,6 +936,16 @@ class TestDockerProviderTransientErrors:
     def test_case_insensitive(self, provider):
         assert provider.is_transient_error(Exception("Connection Refused"))
 
+    def test_wrapped_container_state_error_is_transient(self, provider):
+        assert provider.is_transient_error(
+            SandboxTransientError(
+                "[409] Container c4fdfa9c2698 is not running"
+            )
+        )
+
+    def test_unrelated_409_is_not_transient(self, provider):
+        assert not provider.is_transient_error(Exception("HTTP 409 conflict"))
+
 
 # ---------------------------------------------------------------------------
 # DockerProvider — lazy client creation

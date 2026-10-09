@@ -2,6 +2,11 @@
 
 ## 2026-10-08
 
+### Docker 沙盒停止容器自动恢复
+
+- Docker runtime 已包装的容器状态错误（包括 `409 Container is not running`）现在进入现有安全重连流程，重连会检查并启动原容器后再重试操作。
+- 仅识别 `SandboxTransientError`，普通无关的 HTTP 409 不会被当作沙盒传输错误；新增分类回归测试。
+
 ### DeepSeek 图片尺寸适配
 
 - DeepSeek Anthropic 兼容请求中的历史图片在发送前按比例缩放，确保单边不超过官方 `8192` 像素限制；原始 checkpoint 与 workspace 文件保持不变。

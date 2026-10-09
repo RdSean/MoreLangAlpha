@@ -1010,6 +1010,13 @@ class DockerProvider(SandboxProvider):
                 self._client = None
 
     def is_transient_error(self, exc: Exception) -> bool:
+        # DockerRuntime.exec wraps container-state failures (including the
+        # Docker 409 "container is not running" response) so the sandbox
+        # reconnect path can start the existing container before retrying.
+        # Keep this scoped to our typed error; an unrelated HTTP 409 must not
+        # be interpreted as a Docker transport failure.
+        if isinstance(exc, SandboxTransientError):
+            return True
         msg = str(exc).lower()
         transient_markers = (
             "connection refused",
