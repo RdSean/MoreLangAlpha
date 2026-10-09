@@ -33,6 +33,7 @@ export default function BottomTabBar() {
               aria-current={active ? 'page' : undefined}
             >
               <Icon className="bottom-tab-item-icon" />
+              <span className="bottom-tab-item-label">{t(item.labelKey)}</span>
             </button>
           );
         })}

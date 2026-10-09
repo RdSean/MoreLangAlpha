@@ -53,6 +53,12 @@ html {
   --sidebar-width: 80px;
   --sidebar-footer-height: 61px;
   --bottom-tab-height: 78px;
+  --font-label: var(--font-mono);
+  --radius-control: 0.5rem;
+  --radius-panel: 0.5rem;
+  --warning-stripe: none;
+  --identity-stripe: none;
+  --surface-scratch-opacity: 0;
 
   /* ---------- Background roles ----------
      Which fill belongs on which surface. Reach for the role, not a lookalike

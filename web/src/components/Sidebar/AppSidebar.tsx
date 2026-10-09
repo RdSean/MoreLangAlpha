@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { LayoutGrid, PanelLeftClose, PanelLeftOpen, SquarePen } from 'lucide-react';
-import logoLight from '../../assets/img/logo.svg';
 import logoDark from '../../assets/img/logo-dark.svg';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getVisibleNavItems } from '../nav/navItems';
@@ -223,6 +222,7 @@ function AppSidebar({ collapsed, onToggleCollapse, width, onWidthChange }: AppSi
         >
           <img src={logo} alt="" style={{ width: '28px', height: '28px', objectFit: 'contain' }} />
           <span className="sidebar-wordmark title-font">LangAlpha</span>
+          <span className="sidebar-mission-label" aria-hidden="true">MISSION / 01</span>
         </button>
         <button
           className="sidebar-collapse-btn"

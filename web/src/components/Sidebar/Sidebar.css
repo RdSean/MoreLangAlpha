@@ -18,6 +18,10 @@
   transition: width 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+[data-theme='nasa'] .sidebar {
+  border-right-width: 2px;
+}
+
 /* Mode-switch choreography: the aside persists (width transitions) while each
    mode's content remounts via a keyed fragment (AppSidebar), so this mount
    animation fades the incoming layout in just behind the width change instead
@@ -105,6 +109,18 @@ body.sidebar-resizing .sidebar-tracking {
   gap: 8px;
   padding: 14px 10px 10px 16px;
   flex-shrink: 0;
+  position: relative;
+}
+
+.sidebar-panel-header::after {
+  content: '';
+  position: absolute;
+  right: 10px;
+  bottom: 0;
+  left: 16px;
+  height: 3px;
+  background: var(--identity-stripe);
+  opacity: var(--surface-scratch-opacity);
 }
 
 .sidebar-brand {
@@ -126,6 +142,21 @@ body.sidebar-resizing .sidebar-tracking {
   font-weight: 600;
   color: var(--color-text-primary);
   white-space: nowrap;
+}
+
+.sidebar-mission-label {
+  display: none;
+  margin-left: auto;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-label);
+  font-size: 0.5625rem;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+[data-theme='nasa'] .sidebar-mission-label {
+  display: inline;
 }
 
 .sidebar-collapse-btn,
@@ -170,7 +201,7 @@ body.sidebar-resizing .sidebar-tracking {
   width: 100%;
   padding: 7px 9px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: hsl(var(--sidebar-icon));
   font-size: 0.8438rem;
@@ -198,7 +229,7 @@ body.sidebar-resizing .sidebar-tracking {
   transform: translateY(-50%);
   width: 3px;
   height: 18px;
-  border-radius: 0 3px 3px 0;
+  border-radius: 0;
   background: hsl(var(--sidebar-indicator));
 }
 
@@ -300,6 +331,43 @@ body.sidebar-resizing .sidebar-tracking {
 }
 
 .sidebar-account-row-avatar {
+  position: relative;
+  overflow: hidden;
+  border: 2px solid var(--color-border-default);
+  border-radius: 50%;
+  background: var(--color-bg-card);
+}
+
+.sidebar-account-row-avatar::after,
+.sidebar-account-trigger::after {
+  content: '';
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  left: 1px;
+  height: 3px;
+  border-radius: 0 0 999px 999px;
+  background: var(--identity-stripe);
+  opacity: var(--surface-scratch-opacity);
+}
+
+.sidebar-account-trigger {
+  position: relative;
+  overflow: hidden;
+  border-radius: 50%;
+}
+
+[data-theme='nasa'] .sidebar-account-row-avatar,
+[data-theme='nasa'] .sidebar-account-trigger {
+  border-color: var(--color-text-primary);
+}
+
+[data-theme='nasa'] .sidebar-account-row-avatar::after,
+[data-theme='nasa'] .sidebar-account-trigger::after {
+  opacity: 1;
+}
+
+.sidebar-account-row-avatar {
   width: 32px;
   height: 32px;
   border-radius: 999px;
@@ -329,7 +397,7 @@ body.sidebar-resizing .sidebar-tracking {
   letter-spacing: 0.04em;
   line-height: 1;
   padding: 3px 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   background: var(--color-accent-soft);
   color: var(--color-accent-light);
   flex-shrink: 0;
