@@ -1,11 +1,12 @@
 """Parent textbook management and student deterministic-learning routes."""
 
 from contextlib import aclosing
+import asyncio
 from uuid import UUID
 from typing import Literal
 from pydantic import BaseModel
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 from starlette.background import BackgroundTask
 
@@ -22,6 +23,7 @@ from src.server.app.education.book_models import (
     CreateBookResponse,
     BookJobResponse,
     BookJobStatisticsResponse,
+    BookLessonPdfRequest,
     KnowledgePointMaterialResponse,
     StudentBookAssignmentResponse,
     StudentBookStructureResponse,
@@ -140,6 +142,30 @@ async def get_parent_lesson_history(textbook_id: UUID, knowledge_point_id: UUID,
         return await get_book_study_history(user_id=user_id, textbook_id=str(textbook_id), knowledge_point_id=str(knowledge_point_id), assignment_id=str(assignment_id) if assignment_id else None)
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
+
+
+@router.post("/textbooks/{textbook_id}/knowledge-points/{knowledge_point_id}/export-pdf", response_class=Response)
+async def export_book_lesson_pdf(textbook_id: UUID, knowledge_point_id: UUID, request: BookLessonPdfRequest, user_id: CurrentUserId):
+    from src.server.services.education_lesson_export import export_lesson_pdf
+    from src.server.services.pdf_render import PdfRenderError, PdfRenderTimeout, PdfRenderUnavailable
+
+    try:
+        pdf = await asyncio.wait_for(export_lesson_pdf(user_id=user_id, textbook_id=str(textbook_id), knowledge_point_id=str(knowledge_point_id), request=request), timeout=60)
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PdfRenderUnavailable as exc:
+        raise HTTPException(status_code=503, detail="PDF 导出服务暂不可用，请稍后重试。") from exc
+    except (PdfRenderTimeout, asyncio.TimeoutError) as exc:
+        raise HTTPException(status_code=504, detail="PDF 导出超时，请稍后重试。") from exc
+    except PdfRenderError as exc:
+        raise HTTPException(status_code=502, detail="PDF 内容未能完整生成，请稍后重试。") from exc
+    return Response(content=pdf.content, media_type="application/pdf", headers={
+        "Content-Disposition": content_disposition(pdf.filename, disposition="attachment"),
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+    })
 
 
 def _managed_book_job_not_found() -> HTTPException:
@@ -382,6 +408,58 @@ async def get_managed_asset(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+@router.get("/textbooks/{textbook_id}/cover", response_class=Response)
+async def get_textbook_cover(textbook_id: UUID, user_id: CurrentUserId):
+    from src.server.services.education_textbook_cover import open_textbook_cover
+    from src.server.services.education_textbook_cover import TextbookCoverStorageError
+
+    try:
+        cover = await open_textbook_cover(user_id=user_id, textbook_id=str(textbook_id))
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+    except TextbookCoverStorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return Response(
+        content=cover["content"], media_type=cover["media_type"],
+        headers={"Cache-Control": "private, max-age=3600", "ETag": f'"{cover["sha256"]}"', "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.post("/textbooks/{textbook_id}/cover", response_model=dict)
+async def upload_textbook_cover(
+    textbook_id: UUID, user_id: CurrentUserId, file: UploadFile = File(...)
+):
+    from src.server.services.education_textbook_cover import (
+        CoverUpload, TextbookCoverStorageError, TextbookCoverValidationError,
+        replace_textbook_cover,
+    )
+    try:
+        content = await file.read(10 * 1024 * 1024 + 1)
+        return await replace_textbook_cover(
+            parent_user_id=user_id, textbook_id=str(textbook_id),
+            upload=CoverUpload(
+                filename=file.filename or "cover", content_type=file.content_type or "", content=content
+            ),
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
+    except TextbookCoverValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TextbookCoverStorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.delete("/textbooks/{textbook_id}/cover", response_model=dict)
+async def delete_textbook_cover(textbook_id: UUID, user_id: CurrentUserId):
+    from src.server.services.education_textbook_cover import remove_textbook_cover
+    try:
+        return await remove_textbook_cover(
+            parent_user_id=user_id, textbook_id=str(textbook_id)
+        )
+    except TextbookError as exc:
+        raise _textbook_http_error(exc) from exc
 
 
 @router.post(

@@ -20,7 +20,7 @@ function questionTurns(messages: Array<{ role: 'user' | 'assistant'; content: st
 }
 
 export default function LessonConversation({ textbookId, knowledgePointId, assignmentId, readingPositionKey, children }: {
-  textbookId: string; knowledgePointId: string; assignmentId?: string; readingPositionKey?: string; children: ReactNode;
+  textbookId: string; knowledgePointId: string; assignmentId?: string; readingPositionKey?: string; children: ReactNode | ((state: { questionsBusy: boolean }) => ReactNode);
 }) {
   const history = useBookQuestions(textbookId, knowledgePointId, assignmentId);
   const questionMutation = useLessonQuestion();
@@ -118,7 +118,7 @@ export default function LessonConversation({ textbookId, knowledgePointId, assig
   return (
     <div className="lesson-conversation">
       <div ref={scrollRef} className="lesson-conversation-scroll" role="region" aria-label="讲义与问答">
-        <div className="lesson-original">{children}</div>
+        <div className="lesson-original">{typeof children === 'function' ? children({ questionsBusy: sending || history.isFetching || history.isLoading || history.isError }) : children}</div>
         {turns.map((turn, index) => <section key={index} ref={(node) => { turnRefs.current[index] = node; }} className="lesson-turn" aria-label={`第 ${index + 1} 轮问答`} style={index === turns.length - 1 ? { minHeight: viewportHeight } : undefined}>
           <div className="lesson-turn-question"><h2>{turn.question}</h2></div>
           <div className="lesson-turn-answer book-reader-prose">

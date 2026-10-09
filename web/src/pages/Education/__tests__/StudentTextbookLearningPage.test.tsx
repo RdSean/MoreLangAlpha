@@ -8,7 +8,9 @@ vi.mock('../components/EducationMarkdown', () => ({
 }));
 
 vi.mock('../components/LessonConversation', () => ({
-  default: ({ children }: { children: React.ReactNode }) => <div>{children}<div>追问组件</div></div>,
+  default: ({ children }: { children: React.ReactNode | ((state: { questionsBusy: boolean }) => React.ReactNode) }) => (
+    <div>{typeof children === 'function' ? children({ questionsBusy: false }) : children}<div>追问组件</div></div>
+  ),
 }));
 
 vi.mock('../queries', () => ({

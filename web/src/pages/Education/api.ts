@@ -219,6 +219,21 @@ export async function deleteManagedTextbook(textbookId: string): Promise<void> {
   await api.delete(`/api/v1/education/textbooks/${encodeURIComponent(textbookId)}`);
 }
 
+export async function uploadTextbookCover(textbookId: string, file: File): Promise<Pick<ManagedTextbookSummary, 'cover_available' | 'cover_updated_at'>> {
+  const body = new FormData();
+  body.append('file', file);
+  const { data } = await api.post<Pick<ManagedTextbookSummary, 'cover_available' | 'cover_updated_at'>>(
+    `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/cover`,
+    body,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  );
+  return data;
+}
+
+export async function deleteTextbookCover(textbookId: string): Promise<void> {
+  await api.delete(`/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/cover`);
+}
+
 export async function listManagedBookSources(): Promise<BookSourceCandidate[]> {
   const { data } = await api.get<{ items: BookSourceCandidate[] }>(
     '/api/v1/education/textbook-sources',
@@ -566,9 +581,45 @@ export async function recordBookReading(textbookId: string, knowledgePointId: st
   await api.post(`/api/v1/education/textbooks/${textbookId}/knowledge-points/${knowledgePointId}/reading-state`, { state });
 }
 
-export async function getBookQuestions(textbookId: string, knowledgePointId: string, assignmentId?: string): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
-  const { data } = await api.get(`/api/v1/education/textbooks/${textbookId}/knowledge-points/${knowledgePointId}/questions`, { params: assignmentId ? { assignment_id: assignmentId } : undefined });
+export async function getBookQuestions(textbookId: string, knowledgePointId: string, assignmentId?: string, signal?: AbortSignal): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
+  const { data } = await api.get(`/api/v1/education/textbooks/${textbookId}/knowledge-points/${knowledgePointId}/questions`, { params: assignmentId ? { assignment_id: assignmentId } : undefined, signal });
   return data;
+}
+
+export async function downloadBookLessonPdf({ textbookId, knowledgePointId, assignmentId, markdown, includeQuestions, signal }: {
+  textbookId: string; knowledgePointId: string; assignmentId?: string; markdown: string; includeQuestions: boolean; signal: AbortSignal;
+}): Promise<void> {
+  try {
+    const { renderLessonSections, lessonFontCss } = await import('./lessonPdf');
+    const messages = includeQuestions ? await getBookQuestions(textbookId, knowledgePointId, assignmentId, signal) : [];
+    const sections = renderLessonSections(markdown, messages);
+    const fontCss = sections.some((section) => section.html.includes('class="katex')) ? await lessonFontCss(signal) : '';
+    const response = await api.post<Blob>(`/api/v1/education/textbooks/${textbookId}/knowledge-points/${knowledgePointId}/export-pdf`, {
+      include_questions: includeQuestions, assignment_id: assignmentId, sections, font_css: fontCss,
+    }, { responseType: 'blob', signal, timeout: 65_000 });
+    if (signal.aborted) return;
+    if (response.data.type !== 'application/pdf') throw new Error('PDF 导出响应无效，请重试。');
+    const disposition = String(response.headers['content-disposition'] ?? '');
+    const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+    let filename = '讲义.pdf';
+    if (encodedName) {
+      try { filename = decodeURIComponent(encodedName); } catch { /* retain safe fallback */ }
+    }
+    const url = URL.createObjectURL(response.data);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    try { link.click(); } finally { link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); }
+  } catch (error) {
+    const response = error && typeof error === 'object' && 'response' in error ? error.response : null;
+    if (response && typeof response === 'object' && 'data' in response && response.data instanceof Blob) {
+      let message: unknown;
+      try { message = JSON.parse(await response.data.text()).detail; } catch { /* use bounded fallback */ }
+      throw new Error(typeof message === 'string' ? message : 'PDF 导出失败，请稍后重试。');
+    }
+    throw error;
+  }
 }
 
 export async function askBookLesson({ textbookId, assignmentId, knowledgePointId, question, onEvent, signal }: {
