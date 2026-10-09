@@ -85,6 +85,7 @@ export function BookReader({
       <header className={cn('book-reader-header border-b px-4 py-2 sm:px-6', headerActions && 'has-actions')}>
         <div className="flex min-h-9 flex-wrap items-center justify-between gap-3">
           <div className={cn('min-w-0', headerActions && 'basis-full sm:basis-0 sm:flex-1')}>
+            <span className="mission-label">{view === 'material' ? 'LESSON MATERIAL' : view === 'original' ? 'ORIGINAL SOURCE' : 'SOURCE EXCERPT'}</span>
             <h1 className="education-heading-h1" title={title}>{title}</h1>
           </div>
           <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">

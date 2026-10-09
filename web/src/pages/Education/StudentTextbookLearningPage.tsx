@@ -150,6 +150,8 @@ export default function StudentTextbookLearningPage() {
   }
 
   const title = selectedKnowledgePoint?.title ?? selectedNode?.title ?? data.textbook_title;
+  const missionNumber = selectedKnowledgePoint?.position ?? (selectedNode ? 0 : 1);
+  const missionCode = `MISSION ${String(missionNumber).padStart(2, '0')}`;
   const notebook = (
     <PersonalNotebook
       assignmentId={assignmentId}
@@ -169,29 +171,36 @@ export default function StudentTextbookLearningPage() {
   );
 
   return (
-    <main className="h-full min-h-0 overflow-hidden bg-canvas" data-testid="student-textbook-learning">
+    <main className="student-learning-shell h-full min-h-0 overflow-hidden bg-canvas" data-testid="student-textbook-learning">
       <div className="grid h-full min-h-0 w-full lg:grid-cols-[280px_minmax(0,1fr)]">
         <aside className="hidden min-h-0 border-r lg:flex lg:flex-col" style={{ borderColor: 'var(--color-border-muted)' }}>
-          <div className="flex h-[52px] shrink-0 items-center gap-2 border-b px-3" style={{ borderColor: 'var(--color-border-muted)' }}>
+          <div className="student-learning-rail-header flex h-[52px] shrink-0 items-center gap-2 border-b px-3" style={{ borderColor: 'var(--color-border-muted)' }}>
             <Link to="/education" aria-label="返回我的学习" className="inline-flex size-8 shrink-0 items-center justify-center text-muted-foreground"><ChevronLeft className="size-4" /></Link>
-            <h2 className="min-w-0 truncate text-xs font-semibold" title={data.textbook_title}>{data.textbook_title}</h2>
+            <div className="min-w-0">
+              <span className="mission-label">TEXTBOOK / {data.textbook_id.slice(0, 6).toUpperCase()}</span>
+              <h2 className="min-w-0 truncate text-xs font-semibold" title={data.textbook_title}>{data.textbook_title}</h2>
+            </div>
           </div>
           <div className="min-h-0 flex-1">{navigator}</div>
         </aside>
 
         <section className="flex min-h-0 min-w-0 flex-col">
-          <div className="flex h-10 shrink-0 items-center justify-end gap-3 border-b px-3" style={{ borderColor: 'var(--color-border-muted)' }}>
-            <Link to="/education" className="mr-auto inline-flex items-center gap-2 text-xs text-muted-foreground lg:hidden"><ChevronLeft className="size-4" />我的学习</Link>
+          <div className="student-learning-toolbar flex h-10 shrink-0 items-center justify-end gap-3 border-b px-3" style={{ borderColor: 'var(--color-border-muted)' }}>
+            <Link to="/education" className="mr-auto inline-flex min-h-11 items-center gap-2 text-xs text-muted-foreground lg:hidden"><ChevronLeft className="size-4" />我的学习</Link>
+            <div className="student-learning-mission" aria-label={`${missionCode} ${title}`}>
+              <span className="mission-badge" aria-hidden="true">{missionNumber || '—'}</span>
+              <span className="mission-label">{missionCode} / {readerView === 'material' ? 'LESSON' : 'SOURCE'}</span>
+            </div>
             <div className="flex gap-1">
               <Dialog open={navigatorOpen} onOpenChange={setNavigatorOpen}>
-                <DialogTrigger asChild><Button size="icon" variant="ghost" className="lg:hidden" aria-label="打开教材目录"><ListTree className="size-4" /></Button></DialogTrigger>
+                <DialogTrigger asChild><Button size="icon" variant="ghost" className="min-h-11 min-w-11 lg:hidden" aria-label="打开教材目录"><ListTree className="size-4" /></Button></DialogTrigger>
                 <DialogContent className="h-[80vh] overflow-hidden p-0"><DialogHeader className="sr-only"><DialogTitle>教材目录</DialogTitle></DialogHeader>{navigator}</DialogContent>
               </Dialog>
               <Dialog>
-                <DialogTrigger asChild><Button size="icon" variant="ghost" aria-label="打开学习笔记"><NotebookPen className="size-4" /></Button></DialogTrigger>
+                <DialogTrigger asChild><Button size="icon" variant="ghost" className="min-h-11 min-w-11" aria-label="打开学习笔记"><NotebookPen className="size-4" /></Button></DialogTrigger>
                 <DialogContent><DialogHeader><DialogTitle>学习笔记</DialogTitle></DialogHeader>{notebook}</DialogContent>
               </Dialog>
-              {selectedKnowledgePoint && <Button variant="ghost" size="sm" disabled={learningAssets.progress.isPending} onClick={() => void learningAssets.progress.mutateAsync({ assignmentId, knowledgePointId: selectedKnowledgePoint.knowledge_point_id, status: 'read' })}>标记已学</Button>}
+              {selectedKnowledgePoint && <Button variant="ghost" size="sm" className="min-h-11" disabled={learningAssets.progress.isPending} onClick={() => void learningAssets.progress.mutateAsync({ assignmentId, knowledgePointId: selectedKnowledgePoint.knowledge_point_id, status: 'read' })}>标记已学</Button>}
             </div>
           </div>
           <div className="min-h-0 flex-1">

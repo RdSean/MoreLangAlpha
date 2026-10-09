@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=Playfair+Display:wght@600;700&family=LXGW+WenKai&display=swap');
 
 [data-education-markdown] { --lesson-face: 'Lora', 'LXGW WenKai', 'Noto Serif SC', serif; color: var(--color-text-primary); overflow-wrap: anywhere; }
+[data-theme='nasa'] [data-education-markdown] { --lesson-face: var(--font-content); }
 [data-education-markdown] > .font-content { font-family: var(--lesson-face); font-size: 16.8px !important; line-height: 1.8 !important; font-weight: 500; letter-spacing: 0; }
 [data-education-markdown] p { font: inherit; line-height: 1.8; margin: 0 0 16.8px; white-space: normal; color: inherit !important; }
 [data-education-markdown] :is(h1,h2,h3,h4,h5,h6) { font-family: 'Playfair Display', 'LXGW WenKai', 'Noto Serif SC', serif; font-weight: 600 !important; letter-spacing: 0; }

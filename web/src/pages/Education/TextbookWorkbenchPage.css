@@ -24,6 +24,32 @@
 .book-reader-header.has-actions { height: auto; min-height: var(--book-header-height); }
 .book-reader-header > div { width: 100%; min-height: 0; }
 .book-reader-header h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mission-label {
+  display: none;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-label);
+  font-size: 0.5625rem;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+.mission-badge {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--color-border-default);
+  border-radius: 50%;
+  color: var(--color-text-primary);
+  font-family: var(--font-label);
+  font-size: 0.625rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.student-learning-mission { display: none; align-items: center; gap: 7px; margin-right: auto; min-width: 0; }
+.student-learning-toolbar .student-learning-mission + div { margin-left: auto; }
 .textbook-mobile-header { display: none; }
 .textbook-workbench:has(> .textbook-workbench-header) { grid-template-rows: auto minmax(0, 1fr); }
 .textbook-workbench-grid { position: relative; overflow: hidden; height: 100%; }
@@ -36,6 +62,52 @@
 }
 .book-reader-scroll { overscroll-behavior: contain; scrollbar-gutter: stable; }
 .book-reader-prose { padding: 24px max(24px, calc((100% - 800px) / 2)); }
+
+[data-theme='nasa'] .student-learning-shell {
+  --student-panel-gap: 12px;
+  background: var(--color-bg-page);
+}
+[data-theme='nasa'] .student-learning-shell::before {
+  content: '';
+  position: fixed;
+  z-index: 0;
+  top: 0;
+  right: 0;
+  width: 180px;
+  height: 3px;
+  background: var(--identity-stripe);
+  opacity: 0.9;
+  pointer-events: none;
+}
+[data-theme='nasa'] .student-learning-shell > div,
+[data-theme='nasa'] .student-learning-shell section,
+[data-theme='nasa'] .student-learning-shell aside { position: relative; z-index: 1; }
+[data-theme='nasa'] .student-learning-rail-header,
+[data-theme='nasa'] .student-learning-toolbar {
+  background: var(--color-bg-card);
+  border-color: var(--color-border-muted) !important;
+}
+[data-theme='nasa'] .student-learning-toolbar { min-height: 52px; height: auto; padding-block: 6px; }
+[data-theme='nasa'] .student-learning-mission { display: flex; }
+[data-theme='nasa'] .mission-label { display: block; }
+[data-theme='nasa'] .book-reader-header {
+  background: var(--color-bg-card);
+  border-color: var(--color-border-muted);
+  padding-block: 10px;
+}
+[data-theme='nasa'] .book-reader-header h1 { font-family: var(--font-ui); font-size: 1.35rem !important; letter-spacing: -0.01em; }
+[data-theme='nasa'] .book-reader-prose { background: var(--color-bg-card); }
+[data-theme='nasa'] .book-reader-scroll { border-left: 1px solid var(--color-border-muted); border-right: 1px solid var(--color-border-muted); }
+[data-theme='nasa'] .book-reader-scroll::before {
+  content: 'THIS SIDE UP';
+  display: block;
+  width: fit-content;
+  margin: 0 auto 8px;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-label);
+  font-size: 0.5625rem;
+  letter-spacing: 0.16em;
+}
 
 .textbook-workbench-grid {
   display: grid;
@@ -406,6 +478,11 @@
   .textbook-workbench { grid-template-rows: auto minmax(0, 1fr); }
   .textbook-mobile-header { display: flex; height: 44px; align-items: center; gap: 8px; padding: 0 8px; border-bottom: 1px solid var(--color-border-muted); }
   .book-reader-prose { padding: 20px 18px; }
+
+  [data-theme='nasa'] .student-learning-toolbar { padding-inline: 8px; }
+  [data-theme='nasa'] .student-learning-mission { min-width: 0; }
+  [data-theme='nasa'] .student-learning-mission .mission-label { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  [data-theme='nasa'] .book-reader-scroll::before { margin-top: 10px; }
 
   .textbook-workbench-grid,
   .textbook-workbench-grid.has-activity {

@@ -2,6 +2,12 @@
 
 ## 2026-10-10
 
+### 教材学习会话 NASA Mission 主题
+
+- 教材学习页、目录、原文阅读器和连续问答会话适配 NASA Mission 浅色主题：加入任务徽章、教材/来源编号、四色身份条、`THIS SIDE UP` 与 `MISSION LOG` 标签。
+- 阅读、目录和输入区域改为暖纸张与白色细线面板，移动端工具栏和操作按钮保持 44px 触控尺寸，并保留 Quiet Workspace 切换与原有学习交互。
+- 教材相关 29 项前端测试与类型检查通过。
+
 ### 浅色主题偏好迁移
 
 - 主题选择改为 Quiet Workspace 与 NASA Mission 两套浅色主题，旧的 `light`、`dark`、`auto` 偏好统一迁移到 Quiet Workspace。
