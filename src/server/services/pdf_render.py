@@ -461,3 +461,65 @@ async def render_workspace_pdf(
                     await context.close()
                 except Exception:
                     pass
+
+
+async def render_static_pdf(html: str) -> bytes:
+    """Render a self-contained document without scripts, network or credentials."""
+    try:
+        from playwright.async_api import Error as PlaywrightError
+        from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+    except ImportError as exc:
+        raise PdfRenderUnavailable("playwright is not installed") from exc
+
+    async def render() -> bytes:
+        async with _RENDER_SEMAPHORE:
+            browser = await _get_browser()
+            context = None
+            try:
+                context = await browser.new_context(
+                    viewport={"width": 794, "height": 1123},
+                    java_script_enabled=False,
+                    offline=True,
+                    service_workers="block",
+                    color_scheme="light",
+                )
+                page = await context.new_page()
+
+                async def deny_request(route):
+                    await route.abort()
+
+                async def deny_socket(route):
+                    await route.close()
+
+                await page.route("**/*", deny_request)
+                await page.route_web_socket("**/*", deny_socket)
+                await page.emulate_media(media="print")
+                await page.set_content(html, wait_until="load", timeout=_GOTO_TIMEOUT_MS)
+                complete = await page.evaluate("""async () => {
+                  await document.fonts.ready;
+                  return Array.from(document.images).every(img => img.complete && img.naturalWidth > 0)
+                    && Array.from(document.fonts).every(font => font.status !== 'error');
+                }""")
+                if not complete:
+                    raise PdfRenderError("PDF images or fonts did not load")
+                return await page.pdf(
+                    format="A4", margin={"top": "15mm", "bottom": "15mm", "left": "15mm", "right": "15mm"},
+                    print_background=True, prefer_css_page_size=True,
+                    display_header_footer=True, header_template="<span></span>",
+                    footer_template='<div style="font-size:9px;color:#666;width:100%;text-align:center"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+                )
+            finally:
+                if context is not None:
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
+
+    try:
+        return await asyncio.wait_for(render(), timeout=_RENDER_TIMEOUT_MS / 1000)
+    except (asyncio.TimeoutError, PlaywrightTimeoutError) as exc:
+        raise PdfRenderTimeout("PDF rendering timed out") from exc
+    except PdfRenderError:
+        raise
+    except PlaywrightError as exc:
+        raise PdfRenderError("PDF rendering failed") from exc

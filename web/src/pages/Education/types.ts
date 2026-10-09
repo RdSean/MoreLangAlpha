@@ -329,6 +329,8 @@ export interface ManagedTextbookSummary {
   current_job: BookJobSummary | null;
   updated_at: string;
   source_status?: BookSourceStatus;
+  cover_available?: boolean;
+  cover_updated_at?: string | null;
 }
 
 export interface TextbookWorkbench extends ManagedTextbookSummary {

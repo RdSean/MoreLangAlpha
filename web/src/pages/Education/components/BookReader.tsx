@@ -14,6 +14,7 @@ import {
 
 interface BookReaderProps {
   title: string;
+  headerActions?: ReactNode;
   view: 'material' | 'source' | 'original';
   originalContent?: ReactNode;
   originalAvailable?: boolean;
@@ -33,6 +34,7 @@ interface BookReaderProps {
 
 export function BookReader({
   title,
+  headerActions,
   view,
   material,
   source,
@@ -80,24 +82,27 @@ export function BookReader({
 
   return (
     <article className={cn('book-reader flex min-h-0 flex-col bg-background', continuous ? 'book-reader-continuous' : 'h-full')} aria-label={`阅读 ${title}`}>
-      <header className="book-reader-header border-b px-4 py-2 sm:px-6">
-        <div className="flex min-h-9 items-center justify-between gap-3">
-          <div className="min-w-0">
+      <header className={cn('book-reader-header border-b px-4 py-2 sm:px-6', headerActions && 'has-actions')}>
+        <div className="flex min-h-9 flex-wrap items-center justify-between gap-3">
+          <div className={cn('min-w-0', headerActions && 'basis-full sm:basis-0 sm:flex-1')}>
             <h1 className="education-heading-h1" title={title}>{title}</h1>
           </div>
-          {canGenerate && !showLearningStart && (
-            <Button
-              type="button"
-              className="h-8 shrink-0 gap-1.5 px-2.5 text-xs"
-              onClick={() => setFormOpen(true)}
-              disabled={pending}
-              aria-label={hasMaterial ? '重新生成讲义' : '生成讲义'}
-              title={hasMaterial ? '重新生成讲义' : '生成讲义'}
-            >
-              <Sparkles className="size-4" aria-hidden="true" />
-              {hasMaterial ? '重新生成讲义' : '生成讲义'}
-            </Button>
-          )}
+          <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
+            {headerActions}
+            {canGenerate && !showLearningStart && (
+              <Button
+                type="button"
+                className="h-8 shrink-0 gap-1.5 px-2.5 text-xs"
+                onClick={() => setFormOpen(true)}
+                disabled={pending}
+                aria-label={hasMaterial ? '重新生成讲义' : '生成讲义'}
+                title={hasMaterial ? '重新生成讲义' : '生成讲义'}
+              >
+                <Sparkles className="size-4" aria-hidden="true" />
+                {hasMaterial ? '重新生成讲义' : '生成讲义'}
+              </Button>
+            )}
+          </div>
         </div>
       </header>
 

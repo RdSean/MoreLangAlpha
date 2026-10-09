@@ -19,6 +19,7 @@ from src.server.services.education_textbooks import (
     TextbookTransitionError,
 )
 from src.server.utils.api import get_current_user_id
+from src.server.services.pdf_render import PdfRenderError, PdfRenderTimeout, PdfRenderUnavailable
 
 
 TEXTBOOK = {
@@ -31,6 +32,55 @@ TEXTBOOK = {
 
 MANAGED_JOB_ID = UUID("9998bb1a-687a-4d45-815d-5b1dd6ed2f17")
 KNOWLEDGE_POINT_ID = UUID("4c3f4d0c-a508-4bff-a89f-a3a584a2fe86")
+
+
+@pytest.mark.asyncio
+async def test_lesson_pdf_download_contract(client, monkeypatch):
+    from types import SimpleNamespace
+    from src.server.services import education_lesson_export
+
+    client._transport.app.dependency_overrides[get_current_user_id] = lambda: "student"
+    export = AsyncMock(return_value=SimpleNamespace(content=b"%PDF-lesson", filename="讲义.pdf"))
+    monkeypatch.setattr(education_lesson_export, "export_lesson_pdf", export)
+    response = await client.post(f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/knowledge-points/{KNOWLEDGE_POINT_ID}/export-pdf", json={"sections": [{"role": "material", "markdown": "Lesson", "html": "<p>Lesson</p>"}]})
+    assert response.status_code == 200
+    assert response.content == b"%PDF-lesson"
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["content-disposition"].startswith("attachment;")
+    assert export.call_args.kwargs["user_id"] == "student"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error,code", [
+    (TextbookNotFoundError("missing"), 404),
+    (TextbookPermissionError("forbidden"), 403),
+    (TextbookTransitionError("changed"), 409),
+    (ValueError("invalid"), 400),
+    (PdfRenderUnavailable("private diagnostic"), 503),
+    (PdfRenderTimeout("private diagnostic"), 504),
+    (PdfRenderError("private diagnostic"), 502),
+])
+async def test_lesson_pdf_rejects_inaccessible_or_stale_content(client, monkeypatch, error, code):
+    from src.server.services import education_lesson_export
+
+    client._transport.app.dependency_overrides[get_current_user_id] = lambda: "member"
+    monkeypatch.setattr(education_lesson_export, "export_lesson_pdf", AsyncMock(side_effect=error))
+    response = await client.post(f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/knowledge-points/{KNOWLEDGE_POINT_ID}/export-pdf", json={"sections": [{"role": "material", "markdown": "Lesson", "html": "<p>Lesson</p>"}]})
+    assert response.status_code == code
+    assert "private diagnostic" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_lesson_pdf_rejects_process_payload_before_rendering(client, monkeypatch):
+    from src.server.services import education_lesson_export
+
+    client._transport.app.dependency_overrides[get_current_user_id] = lambda: "student"
+    export = AsyncMock()
+    monkeypatch.setattr(education_lesson_export, "export_lesson_pdf", export)
+    response = await client.post(f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/knowledge-points/{KNOWLEDGE_POINT_ID}/export-pdf", json={"sections": [{"role": "tool", "markdown": "private", "html": "private"}]})
+    assert response.status_code == 422
+    export.assert_not_awaited()
 
 
 @pytest.mark.asyncio

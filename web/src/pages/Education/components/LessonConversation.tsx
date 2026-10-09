@@ -26,6 +26,7 @@ const FilePanel = lazy(() => import('@/pages/ChatAgent/components/FilePanel'));
 const PreviewViewer = lazy(() => import('@/pages/ChatAgent/components/viewers/PreviewViewer'));
 const renderLessonText = (content: string) => <EducationMarkdown content={content} />;
 interface QuestionTurn { question?: ChatMessage; answers: AssistantMessage[] }
+type LessonContent = ReactNode | ((state: { questionsBusy: boolean }) => ReactNode);
 
 function questionTurns(messages: ChatMessage[]): QuestionTurn[] {
   const turns: QuestionTurn[] = [];
@@ -40,11 +41,11 @@ function questionTurns(messages: ChatMessage[]): QuestionTurn[] {
 }
 
 export default function LessonConversation({ textbookId, knowledgePointId, assignmentId, readingPositionKey, children }: {
-  textbookId: string; knowledgePointId: string; assignmentId?: string; readingPositionKey?: string; children: ReactNode;
+  textbookId: string; knowledgePointId: string; assignmentId?: string; readingPositionKey?: string; children: LessonContent;
 }) {
   const space = useLessonChatSpace(textbookId, knowledgePointId, assignmentId);
   if (!space.data || space.isFetching) return <div className="lesson-conversation">
-    <div className="lesson-conversation-scroll"><div className="lesson-original">{children}</div></div>
+    <div className="lesson-conversation-scroll"><div className="lesson-original">{typeof children === 'function' ? children({ questionsBusy: true }) : children}</div></div>
     <footer className="lesson-composer"><textarea aria-label="讲义问题" disabled /><Button aria-label="发送问题" disabled><Send className="size-4" /></Button><Loader />{space.isError && <button onClick={() => void space.refetch()}>重试加载会话</button>}</footer>
   </div>;
   return <LessonSession key={`${textbookId}:${assignmentId ?? ''}:${knowledgePointId}:${space.data.conversation_thread_id}`}
@@ -52,7 +53,7 @@ export default function LessonConversation({ textbookId, knowledgePointId, assig
 }
 
 function LessonSession({ textbookId, knowledgePointId, assignmentId, readingPositionKey, children, space }: {
-  textbookId: string; knowledgePointId: string; assignmentId?: string; readingPositionKey?: string; children: ReactNode; space: LearningChatSpace;
+  textbookId: string; knowledgePointId: string; assignmentId?: string; readingPositionKey?: string; children: LessonContent; space: LearningChatSpace;
 }) {
   const session = useLessonConversationSession(space, textbookId, knowledgePointId, assignmentId);
   const isMobile = useIsMobile();
@@ -171,7 +172,7 @@ function LessonSession({ textbookId, knowledgePointId, assignmentId, readingPosi
   return (
     <WorkspaceProvider workspaceId={assignmentId ? null : space.workspace_id} downloadFile={null}><MessageActionsProvider actions={actions}><div className="lesson-conversation">
       <div ref={scrollRef} className="lesson-conversation-scroll" role="region" aria-label="讲义与问答">
-        <div className="lesson-original">{children}</div>
+        <div className="lesson-original">{typeof children === 'function' ? children({ questionsBusy: sending || session.isLoadingHistory || session.isReconnecting || Boolean(session.messageError) }) : children}</div>
         {turns.map((turn, index) => <section key={index} ref={(node) => { turnRefs.current[index] = node; }} className="lesson-turn" aria-label={`第 ${index + 1} 轮问答`} style={index === turns.length - 1 ? { minHeight: viewportHeight } : undefined}>
           {turn.question && <div className="lesson-turn-question"><MessageBubble message={turn.question as unknown as Record<string, unknown>} turnIndex={index} isTurnTail={false} readOnly isMobile={isMobile} /></div>}
           <div className="lesson-turn-answer book-reader-prose">

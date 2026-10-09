@@ -314,3 +314,65 @@ async def test_new_page_playwright_error_maps_to_taxonomy(_isolated_browser_glob
             workspace_serve_prefix=_PREFIX,
         )
     context.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_static_pdf_is_offline_a4_light_without_user_credentials(monkeypatch):
+    page = MagicMock()
+    page.route = AsyncMock()
+    page.route_web_socket = AsyncMock()
+    page.emulate_media = AsyncMock()
+    page.set_content = AsyncMock()
+    page.evaluate = AsyncMock(return_value=True)
+    page.pdf = AsyncMock(return_value=b"%PDF-static")
+    context = MagicMock(new_page=AsyncMock(return_value=page), close=AsyncMock())
+    browser = MagicMock(new_context=AsyncMock(return_value=context))
+    monkeypatch.setattr(pdf_render, "_get_browser", AsyncMock(return_value=browser))
+    assert hasattr(pdf_render, "render_static_pdf"), "static PDF renderer is missing"
+    assert await pdf_render.render_static_pdf("<p>正文</p>") == b"%PDF-static"
+    options = browser.new_context.call_args.kwargs
+    assert options["java_script_enabled"] is False
+    assert options["offline"] is True
+    assert options["service_workers"] == "block"
+    assert options["color_scheme"] == "light"
+    assert options["viewport"] == {"width": 794, "height": 1123}
+    assert "storage_state" not in options
+    route = MagicMock(abort=AsyncMock(), continue_=AsyncMock())
+    await page.route.call_args.args[1](route)
+    route.abort.assert_awaited_once()
+    route.continue_.assert_not_awaited()
+    assert page.pdf.call_args.kwargs["format"] == "A4"
+    context.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_static_pdf_missing_images_fails_and_closes_context(monkeypatch):
+    page = MagicMock(route=AsyncMock(), route_web_socket=AsyncMock(), emulate_media=AsyncMock(), set_content=AsyncMock(), evaluate=AsyncMock(return_value=False), pdf=AsyncMock())
+    context = MagicMock(new_page=AsyncMock(return_value=page), close=AsyncMock())
+    browser = MagicMock(new_context=AsyncMock(return_value=context))
+    monkeypatch.setattr(pdf_render, "_get_browser", AsyncMock(return_value=browser))
+    assert hasattr(pdf_render, "render_static_pdf"), "static PDF renderer is missing"
+    with pytest.raises(PdfRenderError):
+        await pdf_render.render_static_pdf("<img src='broken' />")
+    page.pdf.assert_not_awaited()
+    context.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_static_pdf_cleanup_error_does_not_mask_missing_images(monkeypatch):
+    page = MagicMock(route=AsyncMock(), route_web_socket=AsyncMock(), emulate_media=AsyncMock(), set_content=AsyncMock(), evaluate=AsyncMock(return_value=False))
+    context = MagicMock(new_page=AsyncMock(return_value=page), close=AsyncMock(side_effect=RuntimeError("browser already closed")))
+    browser = MagicMock(new_context=AsyncMock(return_value=context))
+    monkeypatch.setattr(pdf_render, "_get_browser", AsyncMock(return_value=browser))
+    with pytest.raises(PdfRenderError, match="images or fonts"):
+        await pdf_render.render_static_pdf("<img src='broken' />")
+    context.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_static_pdf_missing_playwright_is_reported_as_unavailable(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "playwright.async_api", None)
+    with pytest.raises(pdf_render.PdfRenderUnavailable):
+        await pdf_render.render_static_pdf("<p>Lesson</p>")

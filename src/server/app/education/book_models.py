@@ -47,6 +47,29 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class BookLessonPdfSection(_StrictModel):
+    role: Literal["material", "user", "assistant"]
+    markdown: str = Field(min_length=1, max_length=1_000_000)
+    html: str = Field(min_length=1, max_length=4_000_000)
+
+
+class BookLessonPdfRequest(_StrictModel):
+    include_questions: bool = False
+    assignment_id: UUID | None = None
+    sections: list[BookLessonPdfSection] = Field(min_length=1, max_length=1024)
+    font_css: str = Field(default="", max_length=2_000_000)
+
+    @model_validator(mode="after")
+    def _bounded_document(self) -> BookLessonPdfRequest:
+        size = len(self.font_css.encode("utf-8")) + sum(
+            len(section.markdown.encode("utf-8")) + len(section.html.encode("utf-8"))
+            for section in self.sections
+        )
+        if size > 8_000_000:
+            raise ValueError("PDF document is too large")
+        return self
+
+
 class CreateBookRequest(_StrictModel):
     parse_job_id: str = Field(min_length=1, max_length=128)
     primary_artifact_id: str = Field(min_length=1, max_length=128)
@@ -162,6 +185,8 @@ class TextbookSummaryResponse(_StrictModel):
     current_job: BookJobSummaryResponse | None = None
     updated_at: datetime
     source_status: BookSourceStatus = "ready"
+    cover_available: bool = False
+    cover_updated_at: datetime | None = None
 
 
 class TextbookWorkbenchResponse(TextbookSummaryResponse):

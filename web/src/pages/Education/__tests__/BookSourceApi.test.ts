@@ -15,6 +15,8 @@ import {
   listManagedBookAssignments,
   listManagedBookSources,
   revokeManagedBookStudents,
+  uploadTextbookCover,
+  deleteTextbookCover,
 } from '../api';
 
 describe('managed textbook source API', () => {
@@ -59,5 +61,21 @@ describe('managed textbook source API', () => {
     expect(api.get).toHaveBeenCalledWith(url);
     expect(api.post).toHaveBeenCalledWith(url, input);
     expect(api.delete).toHaveBeenCalledWith(url, { data: input });
+  });
+
+  it('uploads and removes a textbook cover through the authenticated API', async () => {
+    const file = new File(['png'], 'cover.png', { type: 'image/png' });
+    vi.mocked(api.post).mockResolvedValue({ data: { cover_available: true, cover_updated_at: 'now' } });
+    vi.mocked(api.delete).mockResolvedValue({});
+
+    await expect(uploadTextbookCover('book-1', file)).resolves.toEqual({ cover_available: true, cover_updated_at: 'now' });
+    await expect(deleteTextbookCover('book-1')).resolves.toBeUndefined();
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/education/textbooks/book-1/cover',
+      expect.any(FormData),
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    expect(api.delete).toHaveBeenCalledWith('/api/v1/education/textbooks/book-1/cover');
   });
 });

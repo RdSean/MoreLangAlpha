@@ -138,6 +138,28 @@ export function useDeleteManagedTextbook() {
   });
 }
 
+export function useUploadTextbookCover() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ textbookId, file }: { textbookId: string; file: File }) => educationApi.uploadTextbookCover(textbookId, file),
+    onSuccess: async (_, { textbookId }) => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.education.textbooks() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.education.textbookWorkbench(textbookId) });
+    },
+  });
+}
+
+export function useDeleteTextbookCover() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: educationApi.deleteTextbookCover,
+    onSuccess: async (_, textbookId) => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.education.textbooks() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.education.textbookWorkbench(textbookId) });
+    },
+  });
+}
+
 export function useManagedBookSourceCandidates(enabled = true) {
   return useQuery({
     queryKey: queryKeys.education.bookSources(),

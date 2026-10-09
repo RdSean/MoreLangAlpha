@@ -310,6 +310,14 @@ describe('BookGenerationForm', () => {
 });
 
 describe('BookReader', () => {
+  it('allows the action header to grow without changing plain source headers', () => {
+    const { rerender } = render(<BookReader title="位值" view="material" material={readyMaterial}
+      headerActions={<button>导出 PDF</button>} onViewChange={vi.fn()} />);
+    expect(screen.getByRole('heading', { name: '位值' }).closest('header')).toHaveClass('has-actions');
+    rerender(<BookReader title="原文" view="source" source={source} onViewChange={vi.fn()} />);
+    expect(screen.getByRole('heading', { name: '原文' }).closest('header')).not.toHaveClass('has-actions');
+  });
+
   it('hides generation unless parent management is explicitly allowed', () => {
     render(<BookReader title="足球" view="material" material={readyMaterial}
       onViewChange={vi.fn()} onGenerate={vi.fn()} />);

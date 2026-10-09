@@ -113,6 +113,8 @@ def _managed_summary(row: Mapping[str, Any]) -> dict[str, Any]:
         "current_job": row.get("current_job"),
         "updated_at": row["updated_at"],
         "source_status": row.get("source_status", "ready"),
+        "cover_available": bool(row.get("cover_storage_key")),
+        "cover_updated_at": row.get("cover_updated_at"),
     }
 
 

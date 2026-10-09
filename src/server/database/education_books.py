@@ -987,6 +987,9 @@ async def _managed_textbook_rows(
                textbooks.selected_source->'page_count' AS page_count,
                textbooks.source_frozen_at AS frozen_at,
                textbooks.source_status, textbooks.selected_source,
+               textbooks.cover_storage_key, textbooks.cover_filename,
+               textbooks.cover_content_type, textbooks.cover_size_bytes,
+               textbooks.cover_sha256, textbooks.cover_updated_at,
                COALESCE(source_counts.image_count, 0)::int AS image_count,
                COALESCE(assignments.assigned_student_count, 0)::int
                    AS assigned_student_count
@@ -1062,6 +1065,66 @@ async def get_managed_textbook_for_parent(
         textbook_id=UUID(str(textbook_id)),
     )
     return rows[0] if rows else None
+
+
+async def get_managed_textbook_cover_for_user(
+    *, user_id: str, textbook_id: str | UUID
+) -> dict[str, Any] | None:
+    """Return cover metadata only within the parent/assigned-student ACL."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT textbooks.textbook_id, textbooks.household_id,
+                       textbooks.cover_storage_key, textbooks.cover_filename,
+                       textbooks.cover_content_type, textbooks.cover_size_bytes,
+                       textbooks.cover_sha256, textbooks.cover_updated_at
+                FROM education_textbooks AS textbooks
+                WHERE textbooks.textbook_id = %s
+                  AND (
+                    EXISTS (
+                      SELECT 1 FROM education_memberships AS memberships
+                      WHERE memberships.household_id = textbooks.household_id
+                        AND memberships.user_id = %s AND memberships.role = 'parent'
+                    )
+                    OR EXISTS (
+                      SELECT 1 FROM education_textbook_assignments AS assignments
+                      WHERE assignments.textbook_id = textbooks.textbook_id
+                        AND assignments.student_user_id = %s
+                    )
+                  )
+                """,
+                (textbook_id, user_id, user_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def update_managed_textbook_cover(
+    *, textbook_id: str | UUID, storage_key: str | None,
+    filename: str | None, content_type: str | None, size_bytes: int | None,
+    sha256: str | None,
+) -> dict[str, Any] | None:
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                UPDATE education_textbooks
+                SET cover_storage_key = %s, cover_filename = %s,
+                    cover_content_type = %s, cover_size_bytes = %s,
+                    cover_sha256 = %s,
+                    cover_updated_at = CASE WHEN %s IS NULL THEN NULL ELSE NOW() END,
+                    updated_at = NOW()
+                WHERE textbook_id = %s
+                RETURNING textbook_id, household_id, cover_storage_key,
+                          cover_filename, cover_content_type, cover_size_bytes,
+                          cover_sha256, cover_updated_at
+                """,
+                (storage_key, filename, content_type, size_bytes, sha256,
+                 storage_key, textbook_id),
+            )
+            row = await cur.fetchone()
+    return dict(row) if row else None
 
 
 async def get_managed_structure_for_user(

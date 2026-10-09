@@ -21,6 +21,7 @@
   padding: 8px;
 }
 .book-reader-header { display: flex; height: var(--book-header-height); flex-shrink: 0; align-items: center; }
+.book-reader-header.has-actions { height: auto; min-height: var(--book-header-height); }
 .book-reader-header > div { width: 100%; min-height: 0; }
 .book-reader-header h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .textbook-mobile-header { display: none; }
