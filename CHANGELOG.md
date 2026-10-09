@@ -2,6 +2,12 @@
 
 ## 2026-10-08
 
+### DeepSeek 工具图片消息适配
+
+- 对 DeepSeek Anthropic 兼容端点，在模型调用前将 `tool_result` 中的图片移到独立 `user` 消息，避免图片内容块触发 400；Claude/Anthropic 及其他 provider 保持原消息形状。
+- DeepSeek Responses API 不经过该适配路径，继续使用其官方支持的 `function_call_output` 图片格式。
+- 新增 provider 路由回归，验证 DeepSeek 适配、Claude 原样透传及 checkpoint 消息不被修改；相关 74 项多模态测试和 Ruff 通过。
+
 ### 教材会话浏览器验收
 
 - 新增确认历史、拒绝/失败重试、教材与 Flash 双页面同步、HTML、文件/预览按需恢复及代码块尺寸/复制/打印的浏览器用例；更新教材学习与工作台 fixtures 对齐结构化会话。

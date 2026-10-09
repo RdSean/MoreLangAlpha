@@ -15,11 +15,58 @@ still inherits history full of blocks it may not be able to read.
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
+from langchain_core.messages import HumanMessage, ToolMessage
 
 from ptc_agent.agent.middleware._message_utils import order_tool_results_first
 from ptc_agent.agent.middleware._utils import append_to_system_message
 from src.llms.attachment_payload import FILE_BLOCK_TYPES, IMAGE_BLOCK_TYPES, block_type
 from src.llms.llm import get_input_modalities, get_max_pdf_pages
+
+
+def move_deepseek_tool_images_to_user(messages: list) -> list:
+    """Move images out of Anthropic ``tool_result`` blocks for DeepSeek.
+
+    DeepSeek's Anthropic-compatible endpoint accepts image blocks in user
+    messages, but rejects an image nested in a ``tool_result`` block. Claude's
+    native Messages API supports that shape, so this is deliberately a
+    DeepSeek-only request adaptation and must run after the target client is
+    known. The checkpoint messages are never mutated.
+    """
+    result: list = []
+    changed = False
+    pending_images: list[dict] = []
+
+    def flush_images() -> None:
+        nonlocal pending_images, changed
+        if pending_images:
+            result.append(HumanMessage(content=pending_images))
+            pending_images = []
+            changed = True
+
+    for message in messages:
+        if not isinstance(message, ToolMessage) or not isinstance(message.content, list):
+            flush_images()
+            result.append(message)
+            continue
+
+        text_blocks: list = []
+        image_blocks: list[dict] = []
+        for block in message.content:
+            kind = block_type(block)
+            if kind in IMAGE_BLOCK_TYPES:
+                image_blocks.append(block)
+            else:
+                text_blocks.append(block)
+        if not image_blocks:
+            flush_images()
+            result.append(message)
+            continue
+
+        flush_images()
+        result.append(message.model_copy(update={"content": text_blocks or ""}))
+        pending_images.extend(image_blocks)
+    flush_images()
+    return result if changed else messages
 
 
 def _placeholder_for(
@@ -202,6 +249,10 @@ class MultimodalStripMiddleware(AgentMiddleware):
         overrides: dict[str, Any] = {}
 
         stamped, modalities = self._resolve_target(request)
+        metadata = getattr(request.model, "metadata", None)
+        provider_route = metadata.get("provider_route") if isinstance(metadata, dict) else None
+        if isinstance(provider_route, str) and provider_route == "deepseek":
+            messages = move_deepseek_tool_images_to_user(messages)
         has_image = "image" in modalities
         has_pdf = "pdf" in modalities
         # Looked up even for a fully multimodal target: a model that accepts PDFs

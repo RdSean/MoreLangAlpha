@@ -14,9 +14,31 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from ptc_agent.agent.middleware._message_utils import order_tool_results_first
 from ptc_agent.agent.middleware.file_operations.multimodal_strip import (
     MultimodalStripMiddleware,
+    move_deepseek_tool_images_to_user,
     strip_unsupported_content_blocks,
 )
 from src.llms.llm import LLM, get_input_modalities
+def test_deepseek_moves_tool_result_images_to_a_user_message():
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}}
+    messages = [ToolMessage(content=[{"type": "text", "text": "loaded"}, image], tool_call_id="call-1")]
+
+    adapted = move_deepseek_tool_images_to_user(messages)
+
+    assert len(adapted) == 2
+    assert isinstance(adapted[0], ToolMessage)
+    assert adapted[0].content == [{"type": "text", "text": "loaded"}]
+    assert isinstance(adapted[1], HumanMessage)
+    assert adapted[1].content == [image]
+    assert messages[0].content == [{"type": "text", "text": "loaded"}, image]
+
+
+def test_deepseek_image_adapter_leaves_non_tool_and_plain_tool_messages_unchanged():
+    messages = [
+        HumanMessage(content="question"),
+        ToolMessage(content="loaded", tool_call_id="call-1"),
+    ]
+
+    assert move_deepseek_tool_images_to_user(messages) is messages
 
 
 def _system_text(request) -> str:
@@ -221,9 +243,11 @@ class TestStripUnsupportedContentBlocks:
         assert result is msgs
 
 
-def _request(manifest_model):
+def _request(manifest_model, provider_route=None):
     """A model-call request carrying only what _resolve_target reads."""
     metadata = {"manifest_model": manifest_model} if manifest_model else {}
+    if provider_route:
+        metadata["provider_route"] = provider_route
     return types.SimpleNamespace(model=types.SimpleNamespace(metadata=metadata))
 
 
@@ -274,8 +298,11 @@ class _ModelCallRequest:
     """Minimal stand-in for the model-call request: a stamped client, a history,
     and the ``override`` the middleware must go through to replace messages."""
 
-    def __init__(self, manifest_model, messages, system_message=None):
-        self.model = types.SimpleNamespace(metadata={"manifest_model": manifest_model})
+    def __init__(self, manifest_model, messages, system_message=None, provider_route=None):
+        metadata = {"manifest_model": manifest_model}
+        if provider_route:
+            metadata["provider_route"] = provider_route
+        self.model = types.SimpleNamespace(metadata=metadata)
         self.messages = messages
         self.system_message = system_message
 
@@ -311,6 +338,28 @@ class TestAwrapModelCall:
         request = _ModelCallRequest("claude-sonnet-4-6", self._image_history())
         assert await MultimodalStripMiddleware().awrap_model_call(request, handler) == "ok"
         assert seen["request"] is request, "vision target must not be cloned or stripped"
+
+    @pytest.mark.asyncio
+    async def test_deepseek_moves_tool_image_but_claude_does_not(self):
+        image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}}
+        history = [ToolMessage(content=[{"type": "text", "text": "loaded"}, image], tool_call_id="call-1")]
+        seen = {}
+
+        async def handler(request):
+            seen["request"] = request
+            return "ok"
+
+        deepseek = _ModelCallRequest("deepseek-flash", history, provider_route="deepseek")
+        await MultimodalStripMiddleware().awrap_model_call(deepseek, handler)
+        forwarded = seen["request"].messages
+        assert isinstance(forwarded[0], ToolMessage)
+        assert forwarded[0].content == [{"type": "text", "text": "loaded"}]
+        assert isinstance(forwarded[1], HumanMessage)
+        assert forwarded[1].content == [image]
+
+        claude = _ModelCallRequest("claude-sonnet-4-6", history, provider_route="anthropic")
+        await MultimodalStripMiddleware().awrap_model_call(claude, handler)
+        assert seen["request"] is claude
 
     @pytest.mark.asyncio
     async def test_a_text_only_target_is_handed_stripped_messages(self):
