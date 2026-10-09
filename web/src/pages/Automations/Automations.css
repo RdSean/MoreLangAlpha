@@ -29,6 +29,14 @@
   overflow: hidden;
 }
 
+[data-theme='nasa'] .automations-card {
+  border-radius: var(--radius-panel);
+  border-color: var(--color-border-default);
+  background-color: var(--color-bg-card);
+  background-image: none;
+  box-shadow: var(--shadow-card);
+}
+
 .automations-card ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

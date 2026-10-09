@@ -363,7 +363,7 @@ export const MessageBubble = memo(function MessageBubble({ message, turnIndex, i
           {(message.isStreaming as boolean) && !Object.keys((message.pendingToolCallChunks as Record<string, unknown>) || {}).length && (() => {
             const contentSegments = message.contentSegments as ContentSegmentRecord[] | undefined;
             const hasContent = contentSegments?.some(s => s.content?.trim()) || (message.content as string)?.trim();
-            return <LissajousLoading className={`${hasContent ? "mt-2" : "mt-0"} ${isMobile ? 'w-5 h-5' : 'w-6 h-6'} text-neutral-500 dark:text-neutral-400`} />;
+            return <LissajousLoading className={`${hasContent ? "mt-2" : "mt-0"} ${isMobile ? 'w-5 h-5' : 'w-6 h-6'} text-neutral-500`} />;
           })()}
         </div>
 

@@ -117,7 +117,7 @@ export function ProviderManager({
                 <button
                   type="button"
                   onClick={() => handleDeleteChip(cp.provider)}
-                  className="inline-flex items-center justify-center rounded-full p-0.5 transition-colors hover:bg-black/5 dark:hover:bg-white/10"
+                  className="inline-flex items-center justify-center rounded-full p-0.5 transition-colors hover:bg-black/5"
                   style={{ color: "var(--color-text-tertiary)" }}
                   aria-label={`Remove ${cp.display_name}`}
                   onMouseEnter={(e) => {

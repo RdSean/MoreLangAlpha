@@ -48,6 +48,13 @@
   border: 1px solid var(--color-border-muted);
   border-radius: 1.5rem;
 }
+[data-theme='nasa'] .dashboard-glass-card {
+  border-radius: var(--radius-panel);
+  border-color: var(--color-border-default);
+  background: var(--color-bg-card);
+  backdrop-filter: none;
+  box-shadow: var(--shadow-card);
+}
 .dashboard-glass-card:hover {
   border-color: var(--color-border-default);
 }
@@ -105,10 +112,21 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   transition: all 0.3s;
 }
+[data-theme='nasa'] .dashboard-floating-chat {
+  border-radius: var(--radius-panel);
+  border-color: var(--color-border-default);
+  background: var(--color-bg-card);
+  backdrop-filter: none;
+  box-shadow: var(--shadow-card);
+}
 /* Focus earns a low-alpha accent edge — no glow, resting stays neutral. */
 .dashboard-floating-chat:focus-within {
   border-color: var(--color-accent-overlay);
   border-radius: 1rem;
+}
+[data-theme='nasa'] .dashboard-floating-chat:focus-within {
+  border-color: var(--color-text-primary);
+  border-radius: var(--radius-panel);
 }
 
 @media (max-width: 767px) {

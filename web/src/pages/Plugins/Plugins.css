@@ -10,6 +10,8 @@
   background-color: var(--color-bg-canvas);
 }
 
+[data-theme='nasa'] .plugins-page { background: var(--color-bg-page); }
+
 .plugins-scroll {
   flex: 1;
   min-height: 0;

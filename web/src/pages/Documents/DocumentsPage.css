@@ -6,6 +6,9 @@
   background: var(--color-bg-canvas);
 }
 
+[data-theme='nasa'] .documents-page { background: var(--color-bg-page); }
+[data-theme='nasa'] .documents-title { font-family: var(--font-ui); }
+
 .documents-main {
   min-width: 0;
   flex: 1 1 auto;

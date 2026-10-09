@@ -1,0 +1,42 @@
+.login-kicker {
+  display: block;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-label);
+  font-size: 0.5625rem;
+  letter-spacing: 0.14em;
+}
+
+[data-theme='nasa'] .login-page {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-bg-page);
+}
+
+[data-theme='nasa'] .login-page::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 4px;
+  background: var(--identity-stripe);
+  content: '';
+}
+
+[data-theme='nasa'] .login-panel {
+  position: relative;
+  border-radius: var(--radius-panel);
+  border-color: var(--color-border-default);
+  background: var(--color-bg-card);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme='nasa'] .login-panel::after {
+  position: absolute;
+  right: 20px;
+  bottom: 16px;
+  color: var(--color-text-quaternary);
+  content: 'THIS SIDE UP';
+  font-family: var(--font-label);
+  font-size: 0.5625rem;
+  letter-spacing: 0.14em;
+}

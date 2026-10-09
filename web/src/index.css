@@ -10,6 +10,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* NASA Mission keeps activity labels legible and printed-flat. The animated
+   shimmer remains available to Quiet Workspace, while NASA uses a quiet ink
+   label in keeping with the paper interface. */
+[data-theme='nasa'] .text-shimmer {
+  background-image: none !important;
+  color: var(--color-text-secondary) !important;
+  -webkit-text-fill-color: currentColor;
+}
+
 /* Morph loading animation keyframes (compact — 3-5px travel for inline use) */
 @keyframes morph-0 {
   0%, 100% { transform: translate(0, 0) scale(1); border-radius: 0%; }

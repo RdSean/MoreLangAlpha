@@ -8,6 +8,10 @@
   position: relative;
 }
 
+[data-theme='nasa'] .chat-agent-container {
+  background: var(--color-bg-page);
+}
+
 @media (max-width: 767px) {
   .chat-agent-container { height: 100%; }
 }

@@ -3,6 +3,7 @@ import { ArrowLeft, LogIn, UsersRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
+import './LoginPage.css';
 
 type View = 'login' | 'register';
 
@@ -70,11 +71,11 @@ function LoginPage() {
   };
 
   return (
-    <main className="min-h-dvh bg-page px-4 py-8 text-foreground sm:px-6 lg:px-8">
+    <main className="login-page min-h-dvh bg-page px-4 py-8 text-foreground sm:px-6 lg:px-8">
       <section className="mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-md items-center">
-        <div className="w-full rounded-lg border border-border bg-card p-6 shadow-[var(--shadow-card)] sm:p-8">
+        <div className="login-panel w-full rounded-lg border border-border bg-card p-6 shadow-[var(--shadow-card)] sm:p-8">
           <div className="mb-8">
-            <p className="font-mono text-xs text-muted-foreground">LANGALPHA</p>
+            <p className="login-kicker">LANGALPHA / MISSION CONTROL</p>
             <h1 className="title-font mt-3 text-2xl font-semibold">{view === 'login' ? '登录工作区' : '创建家庭账户'}</h1>
           </div>
 
