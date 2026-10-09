@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useMemo, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy, FileSearch, Info, Pencil, RefreshCw, RotateCcw, StopCircle, ThumbsDown, ThumbsUp, User } from 'lucide-react';
 import ThumbDownModal from '../ThumbDownModal';
-import logoLight from '../../../../assets/img/logo.svg';
 import logoDark from '../../../../assets/img/logo-dark.svg';
 import { useTheme } from '../../../../contexts/ThemeContext';
 import LissajousLoading from '@/components/ui/lissajous-loading';

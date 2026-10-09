@@ -15,7 +15,7 @@ vi.mock('@/hooks/useUser', () => ({
 }));
 
 vi.mock('@/contexts/ThemeContext', () => ({
-  useTheme: () => ({ theme: 'dark' }),
+  useTheme: () => ({ theme: 'quiet' }),
 }));
 
 const writeText = vi.fn().mockResolvedValue(undefined);

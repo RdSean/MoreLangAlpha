@@ -32,9 +32,18 @@ test('legacy textbook structure routes explain the one-workbench reset', async (
   await expect(page.getByRole('link', { name: '返回教材列表' })).toHaveAttribute('href', '/textbooks');
 });
 
-test('student opens the current knowledge-point lesson', async ({ page }) => {
+for (const theme of ['quiet', 'nasa']) {
+for (const width of [375, 768, 1024, 1440]) {
+test(`student ${theme} ${width}px opens lesson and notebook`, async ({ page }, testInfo) => {
+  await page.setViewportSize({ width, height: 900 });
+  await page.addInitScript((value) => localStorage.setItem('theme', value), theme);
   await mockAPI(page, {
     'GET /auth/me': student,
+    'GET /users/me': { ...student, onboarding_completed: true, has_api_key: true },
+    'GET /education/learning/assignment-1/reading-state': [],
+    'POST /education/learning/assignment-1/knowledge-points/kp-1/reading-state': {},
+    'GET /education/textbooks/textbook-1/reading-state': [],
+    'POST /education/textbooks/textbook-1/knowledge-points/kp-1/reading-state': {},
     'GET /education/learning/assignment-1/structure': {
       assignment_id: 'assignment-1',
       textbook_id: 'textbook-1',
@@ -100,6 +109,21 @@ test('student opens the current knowledge-point lesson', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: '世界运动' }).first()).toBeVisible();
   await expect(page.getByText('足球是一项简单的运动。')).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+  const actions = page.locator('.student-learning-toolbar');
+  const bounds = await actions.evaluate((element) => {
+    const parent = element.getBoundingClientRect();
+    return [...element.querySelectorAll('a, button')].filter((child) => child.getBoundingClientRect().width > 0).map((child) => {
+      const rect = child.getBoundingClientRect();
+      return { fits: rect.left >= parent.left && rect.right <= parent.right + 1 && rect.top >= parent.top && rect.bottom <= parent.bottom + 1, height: rect.height };
+    });
+  });
+  expect(bounds.every((item) => item.fits && item.height >= 44)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath(`student-${theme}-${width}.png`) });
   await page.getByRole('button', { name: '打开学习笔记' }).click();
   await expect(page.getByRole('heading', { name: '学习笔记' })).toBeVisible();
 });
+
+}
+}

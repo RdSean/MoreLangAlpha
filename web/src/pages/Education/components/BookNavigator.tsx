@@ -117,6 +117,7 @@ function SourceNode({
           )}
           onClick={() => onSelect?.(node.id)}
           aria-label={`打开 ${node.title}`}
+          aria-current={selectedNodeId === node.id ? 'page' : undefined}
         >
           {!isGroup && <>
             <span className="book-tree-marker-space" aria-hidden="true" />
@@ -302,6 +303,7 @@ export function BookNavigator({
                         )}
                         onClick={() => onSelectKnowledgePoint?.(entry.skill_kp_id)}
                         aria-label={`${entry.title}${entry.material_available ? '，已生成讲义' : ''}`}
+                        aria-current={selectedKnowledgePointSkillId === entry.skill_kp_id ? 'page' : undefined}
                       >
                         <span className="book-learning-stick" data-state={entry.material_available ? learningStates[entry.knowledge_point_id] ?? 'unread' : 'unavailable'} title={entry.material_available ? learningStates[entry.knowledge_point_id] === 'asked' ? '已阅读并提问' : learningStates[entry.knowledge_point_id] === 'viewed' ? '已阅读讲义' : '讲义已就绪，尚未阅读' : '尚未生成讲义'} />
                         <span className="book-tree-number" aria-hidden="true">{index + 1}</span>

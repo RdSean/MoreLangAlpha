@@ -18,8 +18,8 @@ describe('accent preferences', () => {
     expect(document.documentElement.style.getPropertyValue('--theme-accent-lightness-light')).toBe('');
   });
 
-  it('darkens bright hues on white and brightens dark hues on charcoal', () => {
-    expect(accentLightness(60, 'light')).toBeLessThan(35);
-    expect(accentLightness(240, 'dark')).toBeGreaterThan(60);
+  it('darkens bright hues for readable annotations on white', () => {
+    expect(accentLightness(60)).toBeLessThan(35);
+    expect(accentLightness(240)).toBeLessThanOrEqual(51);
   });
 });

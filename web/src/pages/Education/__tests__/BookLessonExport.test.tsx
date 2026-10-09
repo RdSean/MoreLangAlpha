@@ -18,7 +18,7 @@ vi.mock('@/pages/ChatAgent/utils/api', async () => {
   const { apiMockModule } = await import('@/pages/ChatAgent/hooks/__tests__/chatHookHarness');
   return apiMockModule({ sendChatMessageStream: (...args: unknown[]) => state.ask({ onEvent: args[5] }) });
 });
-vi.mock('@/contexts/ThemeContext', () => ({ useTheme: () => ({ theme: 'light' }) }));
+vi.mock('@/contexts/ThemeContext', () => ({ useTheme: () => ({ theme: 'quiet' }) }));
 vi.mock('../components/EducationMarkdown', () => ({ default: ({ content }: { content: string }) => <p>{content}</p> }));
 vi.mock('@/components/ui/chat-input.useVoiceInput', () => ({ speechSupported: false, useVoiceInput: () => ({ isListening: false, stopListening: vi.fn() }) }));
 

@@ -24,7 +24,7 @@ vi.mock('@/components/ui/chat-input.useVoiceInput', () => ({
   useVoiceInput: () => ({ isListening: false, toggleListening: state.voice, stopListening: state.stop }),
 }));
 vi.mock('../components/EducationMarkdown', () => ({ default: ({ content }: { content: string }) => <div>{content}</div> }));
-vi.mock('@/contexts/ThemeContext', () => ({ useTheme: () => ({ theme: 'light' }) }));
+vi.mock('@/contexts/ThemeContext', () => ({ useTheme: () => ({ theme: 'quiet' }) }));
 
 describe('continuous lesson conversation', () => {
   beforeAll(() => Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: state.scroll }));

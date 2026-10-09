@@ -185,13 +185,13 @@ export default function StudentTextbookLearningPage() {
         </aside>
 
         <section className="flex min-h-0 min-w-0 flex-col">
-          <div className="student-learning-toolbar flex h-10 shrink-0 items-center justify-end gap-3 border-b px-3" style={{ borderColor: 'var(--color-border-muted)' }}>
-            <Link to="/education" className="mr-auto inline-flex min-h-11 items-center gap-2 text-xs text-muted-foreground lg:hidden"><ChevronLeft className="size-4" />我的学习</Link>
+          <div className="student-learning-toolbar flex min-h-11 shrink-0 items-center justify-end gap-3 border-b px-3" style={{ borderColor: 'var(--color-border-muted)' }}>
+            <Link to="/education" className="mr-auto inline-flex min-h-11 shrink-0 whitespace-nowrap items-center gap-2 text-xs text-muted-foreground lg:hidden"><ChevronLeft className="size-4" />我的学习</Link>
             <div className="student-learning-mission" aria-label={`${missionCode} ${title}`}>
               <span className="mission-badge" aria-hidden="true">{missionNumber || '—'}</span>
               <span className="mission-label">{missionCode} / {readerView === 'material' ? 'LESSON' : 'SOURCE'}</span>
             </div>
-            <div className="flex gap-1">
+            <div className="student-learning-actions flex shrink-0 gap-1">
               <Dialog open={navigatorOpen} onOpenChange={setNavigatorOpen}>
                 <DialogTrigger asChild><Button size="icon" variant="ghost" className="min-h-11 min-w-11 lg:hidden" aria-label="打开教材目录"><ListTree className="size-4" /></Button></DialogTrigger>
                 <DialogContent className="h-[80vh] overflow-hidden p-0"><DialogHeader className="sr-only"><DialogTitle>教材目录</DialogTitle></DialogHeader>{navigator}</DialogContent>
@@ -200,7 +200,7 @@ export default function StudentTextbookLearningPage() {
                 <DialogTrigger asChild><Button size="icon" variant="ghost" className="min-h-11 min-w-11" aria-label="打开学习笔记"><NotebookPen className="size-4" /></Button></DialogTrigger>
                 <DialogContent><DialogHeader><DialogTitle>学习笔记</DialogTitle></DialogHeader>{notebook}</DialogContent>
               </Dialog>
-              {selectedKnowledgePoint && <Button variant="ghost" size="sm" className="min-h-11" disabled={learningAssets.progress.isPending} onClick={() => void learningAssets.progress.mutateAsync({ assignmentId, knowledgePointId: selectedKnowledgePoint.knowledge_point_id, status: 'read' })}>标记已学</Button>}
+              {selectedKnowledgePoint && <Button variant="ghost" size="sm" className="min-h-11 whitespace-nowrap" disabled={learningAssets.progress.isPending} onClick={() => void learningAssets.progress.mutateAsync({ assignmentId, knowledgePointId: selectedKnowledgePoint.knowledge_point_id, status: 'read' })}>标记已学</Button>}
             </div>
           </div>
           <div className="min-h-0 flex-1">

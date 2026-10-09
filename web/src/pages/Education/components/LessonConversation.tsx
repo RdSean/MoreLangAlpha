@@ -211,7 +211,7 @@ function LessonSession({ textbookId, knowledgePointId, assignmentId, readingPosi
           <button disabled={blocked} onClick={() => void session.handleRetry()}>重试回答</button>
         </div>}
         <div className="lesson-composer-input">
-          <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label={voiceMode ? '切换为文字输入' : '切换为语音输入'} title={voiceMode ? '文字输入' : speechSupported ? '语音输入' : '当前浏览器不支持语音'} disabled={sending || (!voiceMode && !speechSupported)} onClick={() => { stopListening(); setVoiceMode((value) => !value); }}>
+          <Button variant="ghost" size="icon" className="size-11 shrink-0" aria-label={voiceMode ? '切换为文字输入' : '切换为语音输入'} title={voiceMode ? '文字输入' : speechSupported ? '语音输入' : '当前浏览器不支持语音'} disabled={sending || (!voiceMode && !speechSupported)} onClick={() => { stopListening(); setVoiceMode((value) => !value); }}>
             {voiceMode ? <Keyboard className="size-4" /> : <Mic className="size-4" />}
           </Button>
           {voiceMode ? <div className="min-w-0 flex-1">
@@ -228,7 +228,7 @@ function LessonSession({ textbookId, knowledgePointId, assignmentId, readingPosi
           </div> : <textarea aria-label="讲义问题" placeholder="这份讲义输入追问... Enter 发送，Shift+Enter 换行" value={message} disabled={blocked}
             onChange={(event) => setMessage(event.target.value)} rows={2}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} />}
-          <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="发送问题" title="发送问题" disabled={!message.trim() || blocked || isListening} onClick={() => void submit()}><Send className="size-4" /></Button>
+          <Button variant="ghost" size="icon" className="size-11 shrink-0" aria-label="发送问题" title="发送问题" disabled={!message.trim() || blocked || isListening} onClick={() => void submit()}><Send className="size-4" /></Button>
         </div>
         {reading.isError && <p className="mt-1 text-xs text-destructive" role="status">学习状态保存失败</p>}
       </footer>

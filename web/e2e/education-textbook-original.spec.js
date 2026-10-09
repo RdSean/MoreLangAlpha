@@ -56,7 +56,15 @@ async function expectPdf(page, number) {
   })).toBeGreaterThan(40);
 }
 
-for (const theme of ['light', 'dark']) {
+async function selectDirectoryTab(page, name) {
+  const openDirectory = page.locator('.textbook-mobile-header').getByRole('button', { name: '打开教材目录', exact: true });
+  if (await openDirectory.isVisible()) await openDirectory.click();
+  await page.getByRole('tab', { name, exact: true }).click();
+  const closeDirectory = page.getByRole('button', { name: '关闭教材目录', exact: true });
+  if (await closeDirectory.isVisible()) await closeDirectory.click();
+}
+
+for (const theme of ['quiet', 'nasa']) {
   for (const width of [375, 1440]) {
     test(`${theme} ${width}px original starts at marker page and restores navigation`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 900 });
@@ -73,9 +81,9 @@ for (const theme of ['light', 'dark']) {
       await expect(page).toHaveURL(/pdfPage=13/);
       await page.reload();
       await expectPdf(page, 13);
-      await page.getByRole('tab', { name: '原文', exact: true }).click();
+      await selectDirectoryTab(page, '文字目录');
       await expect(page.getByText('Paragraph 1:', { exact: false })).toBeVisible();
-      await page.getByRole('tab', { name: '原文件', exact: true }).click();
+      await selectDirectoryTab(page, '原始教材');
       await expectPdf(page, 13);
       expect(requests.downloads()).toBe(2); // one load per page lifetime, not per selection/tab
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
@@ -96,7 +104,7 @@ test('no location opens original at page one; JSON alone opens its start page', 
 test('directory tabs select PDF and Markdown separately and an out-of-range page stays readable', async ({ page }) => {
   await installOriginal(page, { jsonPage: 300 });
   await page.goto('/textbooks/book-1?kp=reading&view=material');
-  await page.getByRole('tab', { name: '原书目录', exact: true }).click();
+  await page.getByRole('tab', { name: '原始教材', exact: true }).click();
   await page.getByRole('button', { name: '打开 章节一' }).click();
   await expectPdf(page, 1);
   await expect(page).toHaveURL(/view=original/);
@@ -110,6 +118,6 @@ test('original unavailable has a retry and text reading remains available', asyn
   await page.goto('/textbooks/book-1?kp=reading&view=original');
   await expect(page.getByRole('alert')).toHaveText('原文件暂不可读，请重试或切换文字目录。');
   await expect(page.getByRole('button', { name: '重试', exact: true })).toBeVisible();
-  await page.getByRole('tab', { name: '原文', exact: true }).click();
+  await selectDirectoryTab(page, '文字目录');
   await expect(page.getByText('Paragraph 1:', { exact: false })).toBeVisible();
 });

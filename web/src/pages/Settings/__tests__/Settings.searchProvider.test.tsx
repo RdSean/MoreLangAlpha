@@ -102,7 +102,7 @@ vi.mock('@/hooks/useUpdatePreferences', () => ({
 
 // Theme — Settings reads preference + setTheme.
 vi.mock('@/contexts/ThemeContext', () => ({
-  useTheme: () => ({ theme: 'dark', preference: 'dark', setTheme: vi.fn() }),
+  useTheme: () => ({ theme: 'quiet', preference: 'quiet', setTheme: vi.fn() }),
 }));
 
 // Models hook — supply the minimal shape Settings + the (stubbed) tier config read.

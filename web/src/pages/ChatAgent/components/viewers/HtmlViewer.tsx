@@ -1,7 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useTheme } from '@/contexts/ThemeContext';
-import SyntaxHighlighter, { oneDark, oneLight } from '../SyntaxHighlighter';
+import SyntaxHighlighter, { oneLight } from '../SyntaxHighlighter';
 import { useHtmlSandbox } from './html/useHtmlSandbox';
 import { useHtmlActions } from './html/useHtmlActions';
 import { useDirectLinkGuard } from './html/useDirectLinkGuard';
@@ -69,8 +68,6 @@ export default function HtmlViewer({
     !servedUrlOverride,
   );
 
-  const isLight = true;
-
   return (
     <div className="html-viewer">
       <div className="html-viewer-toolbar">
@@ -111,7 +108,7 @@ export default function HtmlViewer({
         <div className="html-viewer-source">
           <SyntaxHighlighter
             language="markup"
-            style={isLight ? oneLight : oneDark}
+            style={oneLight}
             customStyle={{ margin: 0, padding: 0, backgroundColor: 'transparent', fontSize: '0.75rem', lineHeight: '1.6' }}
             codeTagProps={{ style: { backgroundColor: 'transparent' } }}
             wrapLongLines

@@ -23,10 +23,16 @@ const material = {
   markdown: '## 位值\n\n先看一看这个算式：$12 \\times 3 = 36$。\n\n|数量|结果|\n|---|---|\n|12|36|',
   generated_at: '2026-10-09T00:00:00Z', depth: 'lesson', requirements: null, content_sha256: 'a'.repeat(64),
 };
+const thread = 'b0000010-0000-4000-8000-000000000010';
+const workspace = 'a0000010-0000-4000-8000-000000000010';
+const chatSpace = { workspace_id: workspace, conversation_thread_id: thread };
+const conversationStatus = { status: 'completed', can_reconnect: false, lesson_active: true, pending_report_back: false };
 
 async function prepare(page, role, exports, failFirst = false) {
+  const user = { user_id: `${role}-1`, email: `${role}@example.test`, name: role, role, household_id: 'household-1', onboarding_completed: true, has_api_key: true };
   await mockAPI(page, {
-    'GET /auth/me': { user_id: `${role}-1`, email: `${role}@example.test`, name: role, role, household_id: 'household-1' },
+    'GET /auth/me': user,
+    'GET /users/me': user,
     'GET /education/textbooks/book-1': {
       textbook_id: 'book-1', title: '数学教材', structure_status: 'ready',
       materials: { total: 1, ready: 1 }, current_job: null, recent_job: null,
@@ -39,6 +45,15 @@ async function prepare(page, role, exports, failFirst = false) {
     'GET /education/textbooks/book-1/knowledge-points/kp-1/material': material,
     'GET /education/learning/assignment-1/knowledge-points/kp-1': material,
     'GET /education/learning/assignment-1/items': [],
+    'GET /education/learning/assignment-1/reading-state': [],
+    'POST /education/learning/assignment-1/knowledge-points/kp-1/reading-state': {},
+    'GET /education/learning/assignment-1/chat-space': chatSpace,
+    'POST /education/textbooks/book-1/knowledge-points/kp-1/chat-space': chatSpace,
+    'GET /education/textbooks/book-1/knowledge-points/kp-1/conversation/replay': [],
+    'GET /education/textbooks/book-1/knowledge-points/kp-1/conversation/status': conversationStatus,
+    [`GET /threads/${thread}/status`]: { thread_id: thread, ...conversationStatus },
+    [`GET /threads/${thread}/feedback`]: [],
+    [`GET /threads/${thread}/turns`]: { turns: [] },
     'GET /education/textbooks/book-1/reading-state': {},
     'POST /education/textbooks/book-1/knowledge-points/kp-1/reading-state': {},
     'GET /education/textbooks/book-1/knowledge-points/kp-1/questions': [
@@ -53,22 +68,27 @@ async function prepare(page, role, exports, failFirst = false) {
         return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ detail: 'PDF 内容未能完整生成，请稍后重试。' }) });
       }
       // This checks the browser download contract, not actual PDF rendering.
-      return route.fulfill({ status: 200, contentType: 'application/pdf', headers: { 'Content-Disposition': "attachment; filename*=UTF-8''%E4%BD%8D%E5%80%BC.pdf" }, body: '%PDF-test-download' });
+      return route.fulfill({ status: 200, contentType: 'application/pdf', headers: {
+        'Content-Disposition': "attachment; filename*=UTF-8''%E4%BD%8D%E5%80%BC.pdf",
+        // The test API is cross-origin; expose the download header to axios.
+        'Access-Control-Expose-Headers': 'Content-Disposition',
+      }, body: '%PDF-test-download' });
     },
   });
   await page.goto(role === 'parent'
     ? '/textbooks/book-1?kp=place-value&view=material'
-    : '/education/learn/assignment-1?kp=place-value&view=material');
+    : '/education/learn/assignment-1?kp=place-value&view=material', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('button', { name: '导出讲义 PDF', exact: true })).toBeVisible();
 }
 
 test.beforeEach(async () => { await resetMockServer(); });
 
+for (const theme of ['quiet', 'nasa']) {
 for (const role of ['parent', 'student']) {
   for (const mobile of [false, true]) {
-    test(`${role} exports public lesson and own Q&A (${mobile ? 'mobile dark' : 'desktop light'})`, async ({ page }) => {
+    test(`${role} exports public lesson and own Q&A (${theme} ${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
       await page.setViewportSize(mobile ? { width: 375, height: 812 } : { width: 1440, height: 900 });
-      await page.emulateMedia({ colorScheme: mobile ? 'dark' : 'light' });
+      await page.addInitScript((value) => localStorage.setItem('theme', value), theme);
       const exports = [];
       await prepare(page, role, exports);
       let download = page.waitForEvent('download');
@@ -95,6 +115,7 @@ for (const role of ['parent', 'student']) {
       expect(buttonBox.y + buttonBox.height).toBeLessThanOrEqual(headerBox.y + headerBox.height);
     });
   }
+}
 }
 
 test('failed export remains on the lesson and can be retried', async ({ page }) => {

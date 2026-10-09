@@ -11,7 +11,7 @@ async function layoutBounds(page) {
     timeline: document.querySelector('[aria-label="教材处理时间线"]')?.getBoundingClientRect().width ?? 0 }));
 }
 
-for (const theme of ['light', 'dark']) {
+for (const theme of ['quiet', 'nasa']) {
   for (const width of [375, 768, 1440]) {
     test(`${theme} ${width}px processing stays readable with long titles and stable timing`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });

@@ -1,14 +1,11 @@
-.login-kicker {
-  display: block;
-  color: var(--color-text-tertiary);
-  font-family: var(--font-label);
-  font-size: 0.5625rem;
-  letter-spacing: 0.14em;
-}
+.login-mission-label { display: none; }
+[data-theme='nasa'] .login-mission-label { display: inline; }
+[data-theme='nasa'] .login-kicker { font-family: var(--font-label); letter-spacing: 0.14em; }
 
 [data-theme='nasa'] .login-page {
   position: relative;
-  overflow: hidden;
+  height: 100dvh;
+  overflow-y: auto;
   background: var(--color-bg-page);
 }
 

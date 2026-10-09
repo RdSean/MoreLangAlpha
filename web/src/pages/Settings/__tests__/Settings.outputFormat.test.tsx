@@ -38,7 +38,7 @@ vi.mock('@/hooks/useUpdatePreferences', () => ({
 }));
 
 vi.mock('@/contexts/ThemeContext', () => ({
-  useTheme: () => ({ theme: 'dark', preference: 'dark', setTheme: vi.fn() }),
+  useTheme: () => ({ theme: 'quiet', preference: 'quiet', setTheme: vi.fn() }),
 }));
 
 vi.mock('@/hooks/useAllModels', () => ({

@@ -6,7 +6,7 @@ test.use({ locale: 'zh-CN' });
 test.beforeEach(async () => { await resetMockServer(); });
 test.afterEach(async ({ page }) => { await page.close(); await resetMockServer(); });
 
-for (const theme of ['light', 'dark']) {
+for (const theme of ['quiet', 'nasa']) {
   for (const width of [375, 1440]) {
     test(`${theme} ${width}px completed batch has one screen summary and manual learning entry`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });

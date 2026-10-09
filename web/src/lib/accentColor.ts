@@ -4,9 +4,9 @@ import { clearThemeTokenCache } from './themeTokens';
 export const DEFAULT_ACCENT_HUE = 28;
 const hueSchema = z.number().int().min(0).max(359);
 
-export function accentLightness(hue: number, theme: 'light' | 'dark'): number {
-  const saturation = theme === 'light' ? 0.63 : 0.78;
-  let lightness = theme === 'light' ? 51 : 60;
+export function accentLightness(hue: number): number {
+  const saturation = 0.63;
+  let lightness = 51;
   // HSL channels are converted to relative luminance to keep text at 4.5:1.
   const luminance = (value: number) => {
     const light = value / 100;
@@ -18,12 +18,11 @@ export function accentLightness(hue: number, theme: 'light' | 'dark'): number {
     });
     return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
   };
-  const darkGround = ((25 / 255 + 0.055) / 1.055) ** 2.4;
   while (lightness > 1 && lightness < 99) {
     const level = luminance(lightness);
-    const contrast = theme === 'light' ? 1.05 / (level + 0.05) : (level + 0.05) / (darkGround + 0.05);
+    const contrast = 1.05 / (level + 0.05);
     if (contrast >= 4.5) break;
-    lightness += theme === 'light' ? -1 : 1;
+    lightness -= 1;
   }
   return lightness;
 }
@@ -47,8 +46,7 @@ export function applyAccentHue(hue: number | null): void {
     root.removeProperty('--theme-accent-lightness-dark');
   } else {
     root.setProperty('--theme-accent-hue', String(hue));
-    root.setProperty('--theme-accent-lightness-light', `${accentLightness(hue, 'light')}%`);
-    root.setProperty('--theme-accent-lightness-dark', `${accentLightness(hue, 'dark')}%`);
+    root.setProperty('--theme-accent-lightness-light', `${accentLightness(hue)}%`);
   }
   clearThemeTokenCache();
   window.dispatchEvent(new Event('theme-tokens-changed'));
@@ -62,8 +60,7 @@ export function setAccentHue(hue: number | null): void {
     localStorage.removeItem('accentLightnessDark');
     localStorage.removeItem('accentHue');
   } else {
-    localStorage.setItem('accentLightnessLight', String(accentLightness(hue, 'light')));
-    localStorage.setItem('accentLightnessDark', String(accentLightness(hue, 'dark')));
+    localStorage.setItem('accentLightnessLight', String(accentLightness(hue)));
     localStorage.setItem('accentHue', String(hue));
   }
   applyAccentHue(hue);

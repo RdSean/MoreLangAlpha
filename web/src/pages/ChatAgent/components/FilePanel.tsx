@@ -12,7 +12,7 @@ import { Loader } from '@/components/ui/loader';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { SandboxSettingsContent } from './SandboxSettingsPanel';
 import { useIsMobile } from '@/hooks/useIsMobile';
-import SyntaxHighlighter, { oneDark, oneLight } from './SyntaxHighlighter';
+import SyntaxHighlighter, { oneLight } from './SyntaxHighlighter';
 import { useTranslation } from 'react-i18next';
 import { readWorkspaceFile, readWorkspaceFileFull, writeWorkspaceFile, downloadWorkspaceFile, downloadWorkspaceFileAsArrayBuffer, triggerFileDownload } from '../utils/api';
 import { stripLineNumbers } from './toolDisplayConfig';
@@ -896,7 +896,7 @@ function FilePanel({
                 ) : (
                   <SyntaxHighlighter
                     language={EXT_TO_LANG[getFileExtension(selectedFile)] || 'text'}
-                    style={typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'light' ? oneLight : oneDark}
+                    style={oneLight}
                     customStyle={{ margin: 0, padding: 0, backgroundColor: 'transparent', fontSize: '0.75rem', lineHeight: '1.6' }}
                     codeTagProps={{ style: { backgroundColor: 'transparent' } }}
                     showLineNumbers

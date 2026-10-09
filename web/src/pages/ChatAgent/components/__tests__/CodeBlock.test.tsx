@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CodeBlock } from '../Markdown';
 import SyntaxHighlighter from '../SyntaxHighlighter';
 
-vi.mock('@/contexts/ThemeContext', () => ({ useTheme: () => ({ theme: 'dark' }) }));
+vi.mock('@/contexts/ThemeContext', () => ({ useTheme: () => ({ theme: 'quiet' }) }));
 beforeAll(async () => {
   await (SyntaxHighlighter as unknown as { preload: () => Promise<void> }).preload();
 });

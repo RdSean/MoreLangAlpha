@@ -15,13 +15,6 @@ function getLanguageFromFileName(fileName: string | undefined): string {
   return EXT_TO_MONACO_LANG[ext] || 'plaintext';
 }
 
-function getTheme(): string {
-  if (typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'light') {
-    return 'vs';
-  }
-  return 'vs-dark';
-}
-
 const EDITOR_OPTIONS: editor.IStandaloneEditorConstructionOptions = {
   minimap: { enabled: false },
   lineNumbers: 'on',
@@ -59,7 +52,7 @@ interface CodeEditorProps {
 
 export default function CodeEditor({ value, onChange, fileName, readOnly = false, height = '100%', diffMode = false, originalValue, editorRef, onUndoRedoChange, onTextSelect }: CodeEditorProps) {
   const language = getLanguageFromFileName(fileName);
-  const theme = getTheme();
+  const theme = 'vs';
   const showDiff = diffMode && originalValue != null;
 
   // Track DiffEditor listener disposables to prevent "TextModel got disposed" race

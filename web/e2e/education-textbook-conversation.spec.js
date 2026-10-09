@@ -95,8 +95,8 @@ test('renders synthetic pending history on the existing LAN development server w
   // never send a test mutation to the developer's live backend.
   await page.route('**/api/v1/**', (route) => route.fulfill({ status: 403, json: { detail: 'Unmocked live backend request blocked' } }));
   await setup(page, { replay: [userEvent, textEvent, widgetEvent, interruptEvent], status: { ...baseStatus, status: 'interrupted', run_id: 'paused-run' } }, undefined, devOrigin);
-  for (const width of [390, 1440]) {
-    for (const theme of ['light', 'dark']) {
+  for (const width of [375, 768, 1024, 1440]) {
+    for (const theme of ['quiet', 'nasa']) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(`${devOrigin}/textbooks/${book}?kp=lesson&view=material`);
       await expect(page.getByText('这是原始讲义。')).toBeVisible();
@@ -191,7 +191,7 @@ test('bounds long code in desktop/mobile themes, preserves full copy, and prints
   await setup(page, { markdown: `# 学习讲义\n\n这是原始讲义。\n\n\`\`\`js\n${code}\n\`\`\`` });
   await page.addInitScript(() => { navigator.clipboard.writeText = async (text) => { window.copiedLessonCode = text; }; });
   for (const width of [375, 390, 768, 1440]) {
-    for (const theme of ['light', 'dark']) {
+    for (const theme of ['quiet', 'nasa']) {
       await page.setViewportSize({ width, height: 900 });
       await openLesson(page);
       await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);

@@ -23,7 +23,7 @@ export function ThemeColorSettings() {
   }, []);
 
   return (
-    <section className="space-y-4 border-b pb-5" style={{ borderColor: 'var(--color-border-muted)' }} aria-labelledby={`${id}-title`}>
+    <section className="theme-color-settings space-y-4 border-b pb-5" style={{ borderColor: 'var(--color-border-muted)' }} aria-labelledby={`${id}-title`}>
       <div className="flex items-center justify-between gap-3">
         <h3 id={`${id}-title`} className="text-sm font-medium">{t('settings.themeColor')}</h3>
         <button type="button" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40" disabled={hue === null} onClick={() => setAccentHue(null)}>
@@ -33,7 +33,7 @@ export function ThemeColorSettings() {
       <div className="flex flex-wrap gap-3">
         {presets.map(({ key, hue: presetHue }) => (
           <button key={key} type="button" className="flex size-9 shrink-0 items-center justify-center rounded-full border-2 outline-none focus-visible:ring-2 focus-visible:ring-ring" style={{ borderColor: resolvedHue === presetHue ? 'var(--color-text-primary)' : 'transparent' }} aria-label={t(`settings.themeColorPresets.${key}`)} title={t(`settings.themeColorPresets.${key}`)} aria-pressed={resolvedHue === presetHue} onClick={() => setAccentHue(presetHue)}>
-            <span className="size-6 rounded-full" style={{ backgroundColor: `hsl(${presetHue} 63% ${accentLightness(presetHue, 'light')}%)` }} />
+            <span className="size-6 rounded-full" style={{ backgroundColor: `hsl(${presetHue} 63% ${accentLightness(presetHue)}%)` }} />
           </button>
         ))}
       </div>

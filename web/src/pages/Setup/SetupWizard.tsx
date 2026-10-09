@@ -9,7 +9,6 @@ import { useUser } from '@/hooks/useUser';
 import { skipSetup } from '@/hooks/useSetupGate';
 
 import { isPlatformMode } from '@/config/hostMode';
-import logoLight from '@/assets/img/logo.svg';
 import logoDark from '@/assets/img/logo-dark.svg';
 import React from 'react';
 

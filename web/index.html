@@ -14,13 +14,10 @@
         var hue = localStorage.getItem('accentHue');
         if (hue !== null && hue.trim() !== '' && Number.isInteger(Number(hue)) && Number(hue) >= 0 && Number(hue) <= 359) {
           d.style.setProperty('--theme-accent-hue', String(Number(hue)));
-          ['light', 'dark'].forEach(function(mode) {
-            var key = mode === 'light' ? 'accentLightnessLight' : 'accentLightnessDark';
-            var lightness = Number(localStorage.getItem(key));
-            if (Number.isInteger(lightness) && lightness > 0 && lightness < 100) {
-              d.style.setProperty('--theme-accent-lightness-' + mode, lightness + '%');
-            }
-          });
+          var lightness = Number(localStorage.getItem('accentLightnessLight'));
+          if (Number.isInteger(lightness) && lightness > 0 && lightness < 100) {
+            d.style.setProperty('--theme-accent-lightness-light', lightness + '%');
+          }
         }
         // Same pre-paint reason as the theme: the root font-size multiplier
         // (tokens.css `html { font-size: calc(100% * var(--app-font-scale)) }`)
@@ -33,10 +30,7 @@
     </script>
     <style>
       @view-transition { navigation: auto; }
-      /* color-scheme drives the browser's pre-paint clear color: without it a
-         reload flashes the UA's white canvas before the dark page paints.
-         Both values mirror --color-bg-page (tokens.css) — a near-miss here is
-         a visible flash of the wrong ground on every reload. */
+      /* Match the selected light surface before the app bundle paints. */
       html { background: #ECE5D6; color-scheme: light; }
       html[data-theme="quiet"] { background: #FFFFFF; color-scheme: light; }
       html[data-theme="nasa"] { background: #ECE5D6; color-scheme: light; }
@@ -52,7 +46,6 @@
   <body>
     <script>
       (function(){
-        var t = document.documentElement.getAttribute('data-theme');
         var favicon = document.querySelector('link[rel="icon"]');
         if (favicon) favicon.href = '/logo-favicon.svg';
       })();

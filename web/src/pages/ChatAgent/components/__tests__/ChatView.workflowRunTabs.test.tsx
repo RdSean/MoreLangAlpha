@@ -59,7 +59,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('@/hooks/useUser', () => ({ useUser: () => ({ user: null }) }));
 vi.mock('@/contexts/ThemeContext', () => ({
-  useTheme: () => ({ theme: 'light', setTheme: () => {} }),
+  useTheme: () => ({ theme: 'quiet', setTheme: () => {} }),
 }));
 
 vi.mock('../Markdown', () => ({

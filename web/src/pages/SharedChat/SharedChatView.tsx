@@ -12,7 +12,6 @@ import {
 import FilePanel from '../ChatAgent/components/FilePanel';
 import { WorkspaceProvider } from '../ChatAgent/contexts/WorkspaceContext';
 import { useTheme } from '../../contexts/ThemeContext';
-import logoLight from '../../assets/img/logo.svg';
 import logoDark from '../../assets/img/logo-dark.svg';
 import {
   handleHistoryUserMessage,

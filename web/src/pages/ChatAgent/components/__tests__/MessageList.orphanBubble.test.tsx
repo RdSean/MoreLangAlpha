@@ -53,7 +53,7 @@ vi.mock('../Markdown', () => ({
 vi.mock('@/hooks/useUser', () => ({ useUser: () => ({ user: null }) }));
 
 vi.mock('@/contexts/ThemeContext', () => ({
-  useTheme: () => ({ theme: 'light', setTheme: () => {} }),
+  useTheme: () => ({ theme: 'quiet', setTheme: () => {} }),
 }));
 
 type Msg = Record<string, unknown>;

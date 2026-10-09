@@ -330,7 +330,7 @@ body.sidebar-resizing .sidebar-tracking {
   background: hsl(var(--sidebar-hover));
 }
 
-.sidebar-account-row-avatar {
+[data-theme='nasa'] .sidebar-account-row-avatar {
   position: relative;
   overflow: hidden;
   border: 2px solid var(--color-border-default);

@@ -4,7 +4,7 @@ import StepperList, { StepperTrack, type AgentPlanItem } from '../stepper-track'
 
 // Mock ThemeContext
 vi.mock('@/contexts/ThemeContext', () => ({
-  useTheme: () => ({ theme: 'dark' as const, preference: 'dark' as const, setTheme: () => {}, toggleTheme: () => {} }),
+  useTheme: () => ({ theme: 'quiet' as const, preference: 'quiet' as const, setTheme: () => {}, toggleTheme: () => {} }),
 }));
 
 const makeItems = (statuses: AgentPlanItem['status'][]): AgentPlanItem[] =>

@@ -63,7 +63,7 @@ interface CodeBlockProps {
 // --- CodeBlock component ---
 function CodeBlock({ language, code, compact = false, codeTheme }: CodeBlockProps): React.ReactElement {
   const { theme } = useTheme();
-  const effectiveTheme = codeTheme ?? theme;
+  const effectiveTheme = codeTheme ?? 'light';
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
@@ -79,7 +79,7 @@ function CodeBlock({ language, code, compact = false, codeTheme }: CodeBlockProp
     const observer = new ResizeObserver(measure);
     observer.observe(body);
     return () => observer.disconnect();
-  }, [code, bound, effectiveTheme, codeTheme]);
+  }, [code, bound, theme, codeTheme]);
 
   const handleCopy = (): void => {
     navigator.clipboard.writeText(code);

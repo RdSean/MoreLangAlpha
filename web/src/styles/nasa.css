@@ -1,0 +1,55 @@
+/* Mission hardware details live on chrome and panel edges, never on prose. */
+[data-theme='nasa'] .ui-control { border-radius: var(--radius-control); }
+[data-theme='nasa'] :is(input.ui-control, textarea.ui-control) { background: var(--color-bg-input); border-color: var(--color-border-input); }
+[data-theme='nasa'] :is([role='dialog'], [role='menu'], .panel, .fin-card, .fin-card-inner) { border-radius: var(--radius-panel); backdrop-filter: none; }
+[data-theme='nasa'] .sidebar-panel-header::after { opacity: 1; }
+[data-theme='nasa'] :is(.sidebar-account-initials, .sidebar-account-icon) { color: var(--color-text-primary); }
+[data-theme='nasa'] .sidebar-account-row-avatar { background: var(--color-bg-card); }
+[data-theme='nasa'] .sidebar-panel-header::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 10px;
+  left: 16px;
+  height: 5px;
+  background: repeating-linear-gradient(174deg, transparent 0 25px, var(--color-text-primary) 26px 27px, transparent 28px 61px);
+  opacity: var(--surface-scratch-opacity);
+  pointer-events: none;
+}
+[data-theme='nasa'] .login-panel::before {
+  content: '';
+  position: absolute;
+  inset: 7px;
+  background:
+    radial-gradient(circle, var(--color-border-default) 0 1px, transparent 2px) left top / 5px 5px no-repeat,
+    radial-gradient(circle, var(--color-border-default) 0 1px, transparent 2px) right top / 5px 5px no-repeat,
+    radial-gradient(circle, var(--color-border-default) 0 1px, transparent 2px) left bottom / 5px 5px no-repeat,
+    radial-gradient(circle, var(--color-border-default) 0 1px, transparent 2px) right bottom / 5px 5px no-repeat;
+  pointer-events: none;
+}
+[data-theme='nasa'] .book-processing-status:not([data-status='succeeded'])::before,
+[data-theme='nasa'] .lesson-composer :is([role='alert'], [role='status'])::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  height: 8px;
+  margin-right: 6px;
+  background: var(--warning-stripe);
+}
+[data-theme='nasa'] .chat-input-container { border-radius: var(--radius-panel); }
+[data-theme='nasa'] .chat-input-container.recording { box-shadow: none; }
+[data-theme='nasa'] .mic-button.recording { animation: none; color: var(--color-accent-primary); }
+[data-theme='nasa'] .recording-overlay { background: none; }
+[data-theme='nasa'] :is(.mention-autocomplete, .workspace-dropdown-up) { box-shadow: var(--shadow-card); }
+[data-theme='nasa'] .widget-deck-card-thumb.has-image { background: var(--color-bg-input); }
+[data-theme='nasa'] .book-service-glyph.is-completed {
+  background: var(--color-success-soft);
+  color: var(--color-identity-1-fg);
+}
+@media (max-width: 767px) {
+  .ui-control { min-height: 44px; }
+  button.ui-control { min-width: 44px; }
+}
+
+/* The custom accent preference belongs to Quiet; NASA always uses action red. */
+[data-theme='nasa'] .theme-color-settings { display: none; }

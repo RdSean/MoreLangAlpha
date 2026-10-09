@@ -75,7 +75,7 @@ function LoginPage() {
       <section className="mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-md items-center">
         <div className="login-panel w-full rounded-lg border border-border bg-card p-6 shadow-[var(--shadow-card)] sm:p-8">
           <div className="mb-8">
-            <p className="login-kicker">LANGALPHA / MISSION CONTROL</p>
+            <p className="login-kicker font-mono text-xs text-muted-foreground">LANGALPHA<span className="login-mission-label"> / MISSION CONTROL</span></p>
             <h1 className="title-font mt-3 text-2xl font-semibold">{view === 'login' ? '登录工作区' : '创建家庭账户'}</h1>
           </div>
 
