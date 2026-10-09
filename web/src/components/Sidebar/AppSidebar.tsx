@@ -55,11 +55,11 @@ export function getNewChatNavigation(
 function AppSidebar({ collapsed, onToggleCollapse, width, onWidthChange }: AppSidebarProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { theme } = useTheme();
+  useTheme();
   const { member } = useAuth();
   const visibleNavItems = getVisibleNavItems(member?.role);
   const isActive = useNavActive();
-  const logo = theme === 'light' ? logoDark : logoLight;
+  const logo = logoDark;
 
   const widthRef = useRef(width);
   widthRef.current = width;

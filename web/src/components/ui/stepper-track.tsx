@@ -26,14 +26,6 @@ interface ThemePalette {
   indicator: string;
 }
 
-const darkPalette: ThemePalette = {
-  completed: { node: "#7BAE8E", conn: "rgba(123,174,142,0.6)", status: "#7BAE8E" },
-  in_progress: { node: "var(--color-accent-primary)", conn: "hsl(var(--primary) / 0.6)", status: "var(--color-accent-primary)", glow: "hsl(var(--primary) / 0.25)", size: 9 },
-  stale: { node: "#B8A07A", conn: "rgba(184,160,122,0.5)", status: "#B8A07A" },
-  pending: { node: "transparent", border: "var(--color-border-muted)", conn: "var(--color-border-muted)", status: "var(--color-text-quaternary)" },
-  indicator: "var(--color-accent-primary)",
-};
-
 const lightPalette: ThemePalette = {
   completed: { node: "#4E8A64", conn: "rgba(78,138,100,0.5)", status: "#4E8A64" },
   in_progress: { node: "var(--color-accent-primary)", conn: "hsl(var(--primary) / 0.55)", status: "var(--color-accent-primary)", glow: "hsl(var(--primary) / 0.18)", size: 9 },
@@ -43,8 +35,8 @@ const lightPalette: ThemePalette = {
 };
 
 function usePalette(): ThemePalette {
-  const { theme } = useTheme();
-  return theme === "light" ? lightPalette : darkPalette;
+  useTheme();
+  return lightPalette;
 }
 
 function getColors(status: string, palette: ThemePalette): StatusColors {

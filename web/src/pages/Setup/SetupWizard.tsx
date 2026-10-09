@@ -135,8 +135,8 @@ function slideVariants(direction: number) {
 
 export default function SetupWizard() {
   const { t } = useTranslation();
-  const { theme } = useTheme();
-  const logo = theme === 'light' ? logoDark : logoLight;
+  useTheme();
+  const logo = logoDark;
   const location = useLocation();
   const navigate = useNavigate();
   const { hasAny: hasProvider } = useConfiguredProviders();

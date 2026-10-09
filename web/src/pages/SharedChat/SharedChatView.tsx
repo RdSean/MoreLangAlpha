@@ -61,8 +61,8 @@ function updateMessage(messages: MessageRecord[], messageId: string, updater: (m
  */
 export default function SharedChatView() {
   const { shareToken } = useParams<{ shareToken: string }>();
-  const { theme } = useTheme();
-  const logo = theme === 'dark' ? logoDark : logoLight;
+  useTheme();
+  const logo = logoDark;
 
   const [metadata, setMetadata] = useState<SharedThreadMetadata | null>(null);
   const [messages, setMessages] = useState<MessageRecord[]>([]);

@@ -58,8 +58,8 @@ export const MessageBubble = memo(function MessageBubble({ message, turnIndex, i
   const { onOpenFile, onOpenSources, onEditMessage, onRegenerate, onRetry, onThumbUp, onThumbDown, onReportWithAgent } = useMessageActions();
   const { t } = useTranslation();
   const { user } = useUser();
-  const { theme } = useTheme();
-  const logo = theme === 'light' ? logoDark : logoLight;
+  useTheme();
+  const logo = logoDark;
   const avatarUrl = user?.avatar_url as string | undefined;
   const isUser = (message.role as string) === 'user';
   const isAssistant = (message.role as string) === 'assistant';

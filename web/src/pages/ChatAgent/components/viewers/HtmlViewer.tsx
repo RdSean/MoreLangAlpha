@@ -37,7 +37,6 @@ export default function HtmlViewer({
   onCopyShareLink,
 }: HtmlViewerProps) {
   const { t } = useTranslation();
-  const { theme } = useTheme();
   const [mode, setMode] = useState<'preview' | 'source'>('preview');
   const [fullscreen, setFullscreen] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -70,7 +69,7 @@ export default function HtmlViewer({
     !servedUrlOverride,
   );
 
-  const isLight = theme === 'light';
+  const isLight = true;
 
   return (
     <div className="html-viewer">

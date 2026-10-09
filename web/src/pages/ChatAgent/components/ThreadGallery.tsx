@@ -69,8 +69,8 @@ function ThreadGallery({ workspaceId, onBack, onThreadSelect }: ThreadGalleryPro
   const isMobile = useIsMobile();
   const location = useLocation();
   const queryClient = useQueryClient();
-  const { theme } = useTheme();
-  const iconComputer = theme === 'light' ? iconComputerDark : iconComputerLight;
+  useTheme();
+  const iconComputer = iconComputerDark;
 
   // Workspace detail via React Query (useWorkspace)
   const { data: wsData, error: wsError } = useWorkspace(workspaceId);

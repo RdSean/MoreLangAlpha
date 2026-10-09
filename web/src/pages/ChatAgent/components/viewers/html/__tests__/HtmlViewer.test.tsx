@@ -4,7 +4,7 @@ import '@testing-library/jest-dom';
 import type { ReactElement } from 'react';
 
 import HtmlViewer from '../../HtmlViewer';
-import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { ThemeProvider } from '@/contexts/ThemeContext';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -42,22 +42,9 @@ function getPreviewIframe(): HTMLIFrameElement {
   return frame as HTMLIFrameElement;
 }
 
-// HtmlViewer consumes ThemeContext; render under a provider with a control that
-// flips the resolved theme so reactivity can be driven the way the app does.
-function ThemeToggle() {
-  const { setTheme } = useTheme();
-  return (
-    <>
-      <button onClick={() => setTheme('light')}>set-light</button>
-      <button onClick={() => setTheme('dark')}>set-dark</button>
-    </>
-  );
-}
-
 function renderViewer(ui: ReactElement) {
   return render(
     <ThemeProvider>
-      <ThemeToggle />
       {ui}
     </ThemeProvider>,
   );
@@ -93,20 +80,10 @@ describe('HtmlViewer', () => {
     expect(highlighter).toHaveTextContent('<h1>Report</h1>');
   });
 
-  it('re-themes the Source highlighter when the app theme toggles', () => {
+  it('uses the light Source highlighter palette', () => {
     renderViewer(<HtmlViewer {...defaultProps} />);
-    fireEvent.click(screen.getByText('set-dark'));
     fireEvent.click(screen.getByText('filePanel.htmlSource'));
-    expect(screen.getByTestId('syntax-highlighter')).toHaveAttribute('data-palette', 'dark');
-
-    // Switching the app theme must re-theme the highlighter live, with no
-    // tab/file remount — the palette is driven by the ThemeContext value, so a
-    // context change re-renders the Source tab in place.
-    fireEvent.click(screen.getByText('set-light'));
     expect(screen.getByTestId('syntax-highlighter')).toHaveAttribute('data-palette', 'light');
-
-    fireEvent.click(screen.getByText('set-dark'));
-    expect(screen.getByTestId('syntax-highlighter')).toHaveAttribute('data-palette', 'dark');
   });
 
   it('renders only view actions in the toolbar (fullscreen, open-in-new-tab)', () => {

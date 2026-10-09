@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { User, LogOut, Sun, Moon, Monitor } from 'lucide-react';
+import { User, LogOut, Sun, Orbit } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { ToggleSwitch } from '@/components/ui/switch';
@@ -300,46 +300,38 @@ export function UserInfoTab() {
       </div>
 
       {/* Theme Toggle */}
-      <div className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: 'var(--color-bg-card)', border: '1px solid var(--color-border-muted)' }}>
+      <div className="flex flex-col gap-3 p-3" style={{ backgroundColor: 'var(--color-bg-card)', border: '1px solid var(--color-border-muted)' }}>
         <div className="space-y-0.5">
           <label className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{t('settings.theme')}</label>
         </div>
-        <div className="inline-flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border-muted)' }}>
+        <div className="grid gap-2 sm:grid-cols-2">
           <button
             type="button"
-            onClick={() => setThemePref('dark')}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors"
+            onClick={() => setThemePref('quiet')}
+            className="flex min-h-11 items-center gap-2 border px-3 py-2 text-left text-sm font-medium transition-colors"
             style={{
-              backgroundColor: preference === 'dark' ? 'var(--color-accent-soft)' : 'transparent',
-              color: preference === 'dark' ? 'var(--color-accent-primary)' : 'var(--color-text-tertiary)',
+              backgroundColor: preference === 'quiet' ? 'var(--color-accent-soft)' : 'transparent',
+              color: preference === 'quiet' ? 'var(--color-accent-primary)' : 'var(--color-text-tertiary)',
+              borderColor: preference === 'quiet' ? 'var(--color-accent-primary)' : 'var(--color-border-muted)',
             }}
-          >
-            <Moon className="h-3.5 w-3.5" />
-            {t('settings.dark')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setThemePref('light')}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors"
-            style={{
-              backgroundColor: preference === 'light' ? 'var(--color-accent-soft)' : 'transparent',
-              color: preference === 'light' ? 'var(--color-accent-primary)' : 'var(--color-text-tertiary)',
-            }}
+            aria-pressed={preference === 'quiet'}
           >
             <Sun className="h-3.5 w-3.5" />
-            {t('settings.light')}
+            <span><span className="block">{t('settings.quietWorkspace')}</span><span className="text-xs font-normal opacity-70">{t('settings.quietWorkspaceDescription')}</span></span>
           </button>
           <button
             type="button"
-            onClick={() => setThemePref('auto')}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors"
+            onClick={() => setThemePref('nasa')}
+            className="flex min-h-11 items-center gap-2 border px-3 py-2 text-left text-sm font-medium transition-colors"
             style={{
-              backgroundColor: preference === 'auto' ? 'var(--color-accent-soft)' : 'transparent',
-              color: preference === 'auto' ? 'var(--color-accent-primary)' : 'var(--color-text-tertiary)',
+              backgroundColor: preference === 'nasa' ? 'var(--color-accent-soft)' : 'transparent',
+              color: preference === 'nasa' ? 'var(--color-accent-primary)' : 'var(--color-text-tertiary)',
+              borderColor: preference === 'nasa' ? 'var(--color-accent-primary)' : 'var(--color-border-muted)',
             }}
+            aria-pressed={preference === 'nasa'}
           >
-            <Monitor className="h-3.5 w-3.5" />
-            {t('settings.auto', 'Auto')}
+            <Orbit className="h-3.5 w-3.5" />
+            <span><span className="block">{t('settings.nasaMission')}</span><span className="text-xs font-normal opacity-70">{t('settings.nasaMissionDescription')}</span></span>
           </button>
         </div>
       </div>

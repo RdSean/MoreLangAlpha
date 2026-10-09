@@ -16,17 +16,17 @@ import {
  */
 
 const SOURCES = {
-  dark: { bg: '--color-bg-tool-card', up: '#0FEDBE', down: '--color-loss' },
-  light: { bg: '--color-bg-tool-card', up: '--color-profit', down: '--color-loss' },
+  quiet: { bg: '--color-bg-tool-card', up: '#1A7F37', down: '--color-loss' },
+  nasa: { bg: '--color-bg-tool-card', up: '--color-profit', down: '--color-loss' },
 };
 const FALLBACKS = {
-  dark: { bg: '#232426', up: '#0FEDBE', down: '#F85149' },
-  light: { bg: '#F5F4F1', up: '#1A7F37', down: '#CF222E' },
+  quiet: { bg: '#F5F4F1', up: '#1A7F37', down: '#CF222E' },
+  nasa: { bg: '#FFFFFF', up: '#1A7F37', down: '#D63A2C' },
 };
 
 beforeEach(() => {
   clearThemeTokenCache();
-  document.documentElement.setAttribute('data-theme', 'dark');
+  document.documentElement.setAttribute('data-theme', 'quiet');
 });
 
 afterEach(() => {
@@ -38,7 +38,7 @@ describe('readTokens', () => {
   it('refreshes mounted canvas consumers when theme tokens change', () => {
     let palette = { accent: '#123456' };
     const resolver = () => palette;
-    const { result } = renderHook(() => useThemeTokens(resolver, 'dark'));
+    const { result } = renderHook(() => useThemeTokens(resolver, 'quiet'));
     expect(result.current.accent).toBe('#123456');
     act(() => {
       palette = { accent: '#654321' };
@@ -48,49 +48,49 @@ describe('readTokens', () => {
     expect(result.current.accent).toBe('#654321');
   });
   it('returns nothing when the DOM resolves no value (jsdom)', () => {
-    expect(readTokens(['--color-loss'], 'dark')).toEqual({});
+    expect(readTokens(['--color-loss'], 'quiet')).toEqual({});
   });
 
   it('refuses to read while the stamped theme is the other one', () => {
-    document.documentElement.setAttribute('data-theme', 'dark');
-    expect(readTokens(['--color-loss'], 'light')).toEqual({});
+    document.documentElement.setAttribute('data-theme', 'quiet');
+    expect(readTokens(['--color-loss'], 'nasa')).toEqual({});
   });
 });
 
 describe('resolveTokenMap', () => {
   it('falls back to the literal for every token-backed slot', () => {
-    expect(resolveTokenMap(SOURCES.dark, FALLBACKS.dark, 'dark')).toEqual({
-      bg: '#232426',
-      up: '#0FEDBE',
-      down: '#F85149',
+    expect(resolveTokenMap(SOURCES.quiet, FALLBACKS.quiet, 'quiet')).toEqual({
+      bg: '#F5F4F1',
+      up: '#1A7F37',
+      down: '#CF222E',
     });
   });
 
   it('passes one-off literals through instead of looking them up', () => {
     const resolved = resolveTokenMap(
-      SOURCES.dark,
-      { ...FALLBACKS.dark, up: 'SHOULD-NOT-BE-USED' },
-      'dark',
+      SOURCES.quiet,
+      { ...FALLBACKS.quiet, up: 'SHOULD-NOT-BE-USED' },
+      'quiet',
     );
     // `up` is a literal source, so the fallback entry is irrelevant to it.
-    expect(resolved.up).toBe('#0FEDBE');
+    expect(resolved.up).toBe('#1A7F37');
   });
 
   it('keeps each theme on its own literals', () => {
-    document.documentElement.setAttribute('data-theme', 'light');
-    expect(resolveTokenMap(SOURCES.light, FALLBACKS.light, 'light')).toEqual(FALLBACKS.light);
+    document.documentElement.setAttribute('data-theme', 'nasa');
+    expect(resolveTokenMap(SOURCES.nasa, FALLBACKS.nasa, 'nasa')).toEqual(FALLBACKS.nasa);
   });
 });
 
 describe('createThemeResolver', () => {
   it('hands back a stable identity per theme so chart effects do not churn', () => {
     const resolve = createThemeResolver(SOURCES, FALLBACKS);
-    expect(resolve('dark')).toBe(resolve('dark'));
+    expect(resolve('quiet')).toBe(resolve('quiet'));
   });
 
   it('returns the requested theme, not the stamped one', () => {
     const resolve = createThemeResolver(SOURCES, FALLBACKS);
-    expect(resolve('light')).toEqual(FALLBACKS.light);
-    expect(resolve('dark')).toEqual(FALLBACKS.dark);
+    expect(resolve('quiet')).toEqual(FALLBACKS.quiet);
+    expect(resolve('nasa')).toEqual(FALLBACKS.nasa);
   });
 });
