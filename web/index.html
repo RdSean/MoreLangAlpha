@@ -7,13 +7,9 @@
     <script>
       (function(){
         var d = document.documentElement;
-        // Resolve before stamping: the stored preference may be 'auto', which
-        // is a preference and not a theme — stamping it verbatim matches
-        // neither theme selector, so a light-OS user paints dark until
-        // ThemeProvider's effect corrects it.
+        // Resolve the stored light theme before the app bundle paints.
         var stored = localStorage.getItem('theme');
-        var t = (stored === 'light' || stored === 'dark') ? stored
-          : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        var t = stored === 'nasa' ? 'nasa' : 'quiet';
         d.setAttribute('data-theme', t);
         var hue = localStorage.getItem('accentHue');
         if (hue !== null && hue.trim() !== '' && Number.isInteger(Number(hue)) && Number(hue) >= 0 && Number(hue) <= 359) {
@@ -41,8 +37,9 @@
          reload flashes the UA's white canvas before the dark page paints.
          Both values mirror --color-bg-page (tokens.css) — a near-miss here is
          a visible flash of the wrong ground on every reload. */
-      html { background: #191919; color-scheme: dark; }
-      html[data-theme="light"] { background: #FFFFFF; color-scheme: light; }
+      html { background: #ECE5D6; color-scheme: light; }
+      html[data-theme="quiet"] { background: #FFFFFF; color-scheme: light; }
+      html[data-theme="nasa"] { background: #ECE5D6; color-scheme: light; }
     </style>
     <link rel="icon" type="image/svg+xml" href="/logo-favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -57,7 +54,7 @@
       (function(){
         var t = document.documentElement.getAttribute('data-theme');
         var favicon = document.querySelector('link[rel="icon"]');
-        if (favicon) favicon.href = t === 'light' ? '/logo-favicon.svg' : '/logo-favicon-dark.svg';
+        if (favicon) favicon.href = '/logo-favicon.svg';
       })();
     </script>
     <div id="root"></div>

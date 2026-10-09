@@ -232,13 +232,13 @@ html {
   --sidebar-indicator: var(--primary);
 }
 
-/* ---------- Light theme overrides ---------- */
+/* ---------- Quiet Workspace theme ---------- */
 /* Notion-paper: pure-white page, white cards separated by neutral hairline
    borders (not tonal fills), warm-neutral grays for text. The amber darkens a
    step from the dark theme (#E9954A → #D07D33) so it holds on white — see
    --login-ember in Login/LoginPage.css, which owns the auth surface and must
    stay in step. */
-[data-theme="light"] {
+[data-theme="quiet"] {
   /* bg-page / bg-card / bg-input / bg-popover are derived from the HSL block
      below (see the role table in :root) — they need no override here. */
   /* Warm paper ground so white cards read as raised surfaces instead of
@@ -392,6 +392,137 @@ html {
   --sidebar-icon: 60 2% 12% / 0.50;
   --sidebar-icon-selected: 60 2% 12%;
   --sidebar-indicator: var(--primary);
+}
+
+/* ---------- NASA Mission theme ---------- */
+[data-theme="nasa"] {
+  --color-bg-page: #ECE5D6;
+  --color-bg-canvas: #ECE5D6;
+  --color-bg-card: #FFFFFF;
+  --color-bg-tool-card: #F7F3EA;
+  --color-bg-elevated: #FFFFFF;
+  --color-bg-input: #FFFEFA;
+  --color-bg-popover: #FFFFFF;
+  --color-bg-tag: #ECE5D6;
+  --color-bg-code: #F2EEE4;
+  --color-bg-surface: #F7F3EA;
+  --color-bg-hover: rgba(23, 23, 23, 0.06);
+  --color-bg-subtle: rgba(23, 23, 23, 0.03);
+  --color-bg-chart-placeholder: #FFFFFF;
+  --color-bg-overlay: rgba(23, 23, 23, 0.24);
+  --color-bg-overlay-strong: rgba(23, 23, 23, 0.48);
+  --color-border-muted: rgba(23, 23, 23, 0.22);
+  --color-border-default: #36332E;
+  --color-border-elevated: #5F5A50;
+  --color-border-subtle: rgba(23, 23, 23, 0.12);
+  --color-border-input: #8A8478;
+  --color-text-primary: #171717;
+  --color-text-secondary: #5F5B53;
+  --color-text-tertiary: #777168;
+  --color-text-quaternary: #9A9388;
+  --color-text-muted: #5F5B53;
+  --color-text-on-accent: #FFFFFF;
+  --color-icon-muted: #5F5B53;
+  --color-accent-primary: #D63A2C;
+  --color-accent-soft: rgba(214, 58, 44, 0.12);
+  --color-accent-disabled: rgba(214, 58, 44, 0.48);
+  --color-accent-overlay: rgba(214, 58, 44, 0.82);
+  --color-accent-gradient: none;
+  --color-slash-icon: #D63A2C;
+  --color-slash-pill-bg: rgba(214, 58, 44, 0.08);
+  --color-slash-pill-border: rgba(214, 58, 44, 0.35);
+  --color-book-unread: #A07A22;
+  --color-book-viewed: #4C5A68;
+  --color-book-asked: #7A7F4E;
+  --color-profit: #4C5A68;
+  --color-profit-soft: rgba(76, 90, 104, 0.12);
+  --color-profit-border: rgba(76, 90, 104, 0.3);
+  --color-profit-border-hover: rgba(76, 90, 104, 0.45);
+  --color-profit-muted: rgba(76, 90, 104, 0.7);
+  --color-loss: #D63A2C;
+  --color-loss-soft: rgba(214, 58, 44, 0.1);
+  --color-loss-muted: rgba(214, 58, 44, 0.7);
+  --color-border-loss: rgba(214, 58, 44, 0.45);
+  --color-warning: #A8432F;
+  --color-warning-soft: rgba(168, 67, 47, 0.12);
+  --color-info: #4C5A68;
+  --color-info-soft: rgba(76, 90, 104, 0.12);
+  --color-success: #7A7F4E;
+  --color-success-soft: rgba(122, 127, 78, 0.14);
+  --color-accent-light: #D63A2C;
+  --color-btn-primary-bg: #D63A2C;
+  --color-btn-primary-text: #FFFFFF;
+  --color-btn-stop-hover-bg: #A8432F;
+  --color-btn-stop-hover-fg: #FFFFFF;
+  --color-btn-danger: #D63A2C;
+  --color-btn-danger-pressed: #A8432F;
+  --color-icon-danger: #D63A2C;
+  --color-danger-hover-bg: rgba(214, 58, 44, 0.12);
+  --color-status-modified: #A8432F;
+  --color-status-modified-border: rgba(168, 67, 47, 0.55);
+  --color-status-modified-glow: rgba(168, 67, 47, 0.16);
+  --color-dot-grid: rgba(23, 23, 23, 0.08);
+  --color-identity-0-bg: rgba(76, 90, 104, 0.14);
+  --color-identity-0-fg: #4C5A68;
+  --color-identity-1-bg: rgba(122, 127, 78, 0.14);
+  --color-identity-1-fg: #62683B;
+  --color-identity-2-bg: rgba(210, 168, 94, 0.2);
+  --color-identity-2-fg: #80652B;
+  --color-identity-3-bg: rgba(168, 67, 47, 0.14);
+  --color-identity-3-fg: #A8432F;
+  --color-identity-4-bg: rgba(76, 90, 104, 0.14);
+  --color-identity-4-fg: #4C5A68;
+  --color-identity-5-bg: rgba(122, 127, 78, 0.14);
+  --color-identity-5-fg: #62683B;
+  --color-identity-6-bg: rgba(210, 168, 94, 0.2);
+  --color-identity-6-fg: #80652B;
+  --color-identity-7-bg: rgba(168, 67, 47, 0.14);
+  --color-identity-7-fg: #A8432F;
+  --color-bg-card-hover: #FAF7F0;
+  --color-bg-card-gradient: #FFFFFF;
+  --color-bg-card-border: #36332E;
+  --background: 40 32% 88%;
+  --foreground: 0 0% 9%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 9%;
+  --primary: 4 68% 50%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 40 22% 93%;
+  --secondary-foreground: 0 0% 9%;
+  --muted: 39 10% 43%;
+  --muted-foreground: 39 10% 36%;
+  --accent: var(--primary);
+  --accent-foreground: var(--primary-foreground);
+  --destructive: 4 68% 50%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 9% / 0.22;
+  --input: 40 100% 99%;
+  --ring: 0 0% 9% / 0.5;
+  --radius: 0.25rem;
+  --shadow-card: 0 1px 0 rgba(23, 23, 23, 0.16), 0 3px 10px rgba(23, 23, 23, 0.06);
+  --bg-main: 40 32% 88%;
+  --bg-panel: 0 0% 100% / 0.92;
+  --border-light: 0 0% 9% / 0.18;
+  --border-card: 0 0% 9% / 0.22;
+  --color-up: 197 17% 35%;
+  --color-up-soft: 197 17% 35% / 0.12;
+  --color-down: 4 68% 50%;
+  --color-down-soft: 4 68% 50% / 0.1;
+  --accent-fin: var(--primary);
+  --sidebar-bg: 40 32% 88%;
+  --sidebar-border: 0 0% 9% / 0.22;
+  --sidebar-hover: 0 0% 9% / 0.06;
+  --sidebar-icon: 0 0% 9% / 0.62;
+  --sidebar-icon-selected: 0 0% 9%;
+  --sidebar-indicator: 4 68% 50%;
+  --font-label: var(--font-mono);
+  --radius-control: 0.25rem;
+  --radius-panel: 0.25rem;
+  --warning-stripe: repeating-linear-gradient(135deg, #171717 0 5px, #FFFFFF 5px 10px);
+  --identity-stripe: linear-gradient(90deg, #4C5A68 0 25%, #7A7F4E 25% 50%, #D2A85E 50% 75%, #A8432F 75% 100%);
+  --surface-scratch-opacity: 0.035;
 }
 
 @layer base {

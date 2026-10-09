@@ -30,7 +30,8 @@
   animation: pl-appear 0.3s ease-out 0.15s backwards;
 }
 
-[data-theme='light'] .page-loading {
+[data-theme='quiet'] .page-loading,
+[data-theme='nasa'] .page-loading {
   /* --pl-ember follows the accent token's own theme flip. */
   --pl-glow: color-mix(in srgb, var(--color-accent-primary) 18%, transparent);
   --pl-wall-opacity: 0.2;

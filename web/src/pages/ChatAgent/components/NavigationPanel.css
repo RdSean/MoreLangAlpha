@@ -181,6 +181,7 @@
 .subagent-avatar-glyph {
   filter: brightness(0) saturate(100%) invert(100%);
 }
-[data-theme='light'] .subagent-avatar-glyph {
+[data-theme='quiet'] .subagent-avatar-glyph,
+[data-theme='nasa'] .subagent-avatar-glyph {
   filter: brightness(0) saturate(100%);
 }

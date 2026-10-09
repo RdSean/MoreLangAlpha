@@ -49,6 +49,8 @@ describe('color token references', () => {
     expect(declared.size).toBeGreaterThan(50);
     expect(declared.has('--color-bg-page')).toBe(true);
     expect(declared.has('--color-bg-popover')).toBe(true);
+    expect(readFileSync(TOKENS, 'utf8')).toContain('[data-theme="quiet"]');
+    expect(readFileSync(TOKENS, 'utf8')).toContain('[data-theme="nasa"]');
   });
 
   it('has no reference to an undeclared --color-* token', () => {
