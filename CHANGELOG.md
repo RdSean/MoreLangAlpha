@@ -2,6 +2,12 @@
 
 ## 2026-10-08
 
+### DeepSeek 图片尺寸适配
+
+- DeepSeek Anthropic 兼容请求中的历史图片在发送前按比例缩放，确保单边不超过官方 `8192` 像素限制；原始 checkpoint 与 workspace 文件保持不变。
+- 适配仅作用于 DeepSeek 临时请求副本，Responses API、Claude 及其他 provider 不受影响。
+- 新增超长 PNG 缩放与原消息不变回归；多模态相关测试 76 项通过，Ruff 及 diff 检查通过。
+
 ### DeepSeek 工具图片消息适配
 
 - 对 DeepSeek Anthropic 兼容端点，在模型调用前将 `tool_result` 中的图片移到独立 `user` 消息，避免图片内容块触发 400；Claude/Anthropic 及其他 provider 保持原消息形状。

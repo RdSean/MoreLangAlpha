@@ -12,15 +12,71 @@ agent wires both: the Flash assistant has no filesystem tool to intercept, but
 still inherits history full of blocks it may not be able to read.
 """
 
+import base64
+import io
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import HumanMessage, ToolMessage
+from PIL import Image
 
 from ptc_agent.agent.middleware._message_utils import order_tool_results_first
 from ptc_agent.agent.middleware._utils import append_to_system_message
 from src.llms.attachment_payload import FILE_BLOCK_TYPES, IMAGE_BLOCK_TYPES, block_type
 from src.llms.llm import get_input_modalities, get_max_pdf_pages
+
+DEEPSEEK_MAX_IMAGE_SIDE = 8192
+
+
+def _resize_deepseek_image_block(block: dict[str, Any]) -> dict[str, Any]:
+    """Resize an inline image only when it exceeds DeepSeek's side limit."""
+    envelope = block.get("image_url")
+    url = envelope.get("url") if isinstance(envelope, dict) else None
+    if not isinstance(url, str) or not url.startswith("data:") or "," not in url:
+        return block
+    header, encoded = url.split(",", 1)
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+        with Image.open(io.BytesIO(raw)) as source:
+            if max(source.size) <= DEEPSEEK_MAX_IMAGE_SIDE:
+                return block
+            scale = DEEPSEEK_MAX_IMAGE_SIDE / max(source.size)
+            size = (max(1, round(source.width * scale)), max(1, round(source.height * scale)))
+            image = source.resize(size, Image.Resampling.LANCZOS)
+            output = io.BytesIO()
+            image.save(output, format="PNG", optimize=True)
+        return {
+            **block,
+            "image_url": {
+                **envelope,
+                "url": f"data:image/png;base64,{base64.b64encode(output.getvalue()).decode()}"
+            },
+        }
+    except (ValueError, OSError):
+        # Leave malformed data for the provider to report; this adapter must not
+        # turn a useful upstream diagnostic into a local generic error.
+        return block
+
+
+def normalize_deepseek_images(messages: list) -> list:
+    """Resize DeepSeek-bound inline images without changing checkpoint history."""
+    result: list = []
+    changed = False
+    for message in messages:
+        content = getattr(message, "content", None)
+        if not isinstance(content, list):
+            result.append(message)
+            continue
+        new_content = [
+            _resize_deepseek_image_block(block) if isinstance(block, dict) else block
+            for block in content
+        ]
+        if new_content != content:
+            changed = True
+            result.append(message.model_copy(update={"content": new_content}))
+        else:
+            result.append(message)
+    return result if changed else messages
 
 
 def move_deepseek_tool_images_to_user(messages: list) -> list:
@@ -252,7 +308,7 @@ class MultimodalStripMiddleware(AgentMiddleware):
         metadata = getattr(request.model, "metadata", None)
         provider_route = metadata.get("provider_route") if isinstance(metadata, dict) else None
         if isinstance(provider_route, str) and provider_route == "deepseek":
-            messages = move_deepseek_tool_images_to_user(messages)
+            messages = normalize_deepseek_images(move_deepseek_tool_images_to_user(messages))
         has_image = "image" in modalities
         has_pdf = "pdf" in modalities
         # Looked up even for a fully multimodal target: a model that accepts PDFs

@@ -4,17 +4,20 @@ Its counterpart, the Read interception that puts an attachment into history in
 the first place, is covered in ``test_multimodal_read``.
 """
 
+import base64
 import io
 import types
 
 import pypdf
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from PIL import Image
 
 from ptc_agent.agent.middleware._message_utils import order_tool_results_first
 from ptc_agent.agent.middleware.file_operations.multimodal_strip import (
     MultimodalStripMiddleware,
     move_deepseek_tool_images_to_user,
+    normalize_deepseek_images,
     strip_unsupported_content_blocks,
 )
 from src.llms.llm import LLM, get_input_modalities
@@ -39,6 +42,32 @@ def test_deepseek_image_adapter_leaves_non_tool_and_plain_tool_messages_unchange
     ]
 
     assert move_deepseek_tool_images_to_user(messages) is messages
+
+
+def test_deepseek_resizes_oversized_inline_images_without_mutating_history():
+    source = Image.new("RGB", (10, 9000), "red")
+    buf = io.BytesIO()
+    source.save(buf, format="PNG")
+    original = {
+        "type": "image_url",
+        "image_url": {"url": "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()},
+    }
+    messages = [HumanMessage(content=[original])]
+
+    adapted = normalize_deepseek_images(messages)
+
+    assert adapted is not messages
+    resized = adapted[0].content[0]["image_url"]["url"]
+    with Image.open(io.BytesIO(base64.b64decode(resized.split(",", 1)[1]))) as image:
+        assert image.size == (9, 8192)
+    assert messages[0].content == [original]
+
+
+def test_deepseek_keeps_images_within_the_side_limit_unchanged():
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}}
+    messages = [HumanMessage(content=[image])]
+
+    assert normalize_deepseek_images(messages) is messages
 
 
 def _system_text(request) -> str:
