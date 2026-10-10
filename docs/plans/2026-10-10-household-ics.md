@@ -37,3 +37,10 @@
 - Run Ruff and focused backend/frontend regression tests; inspect screenshots.
 - Verify dev server listens on `0.0.0.0:5177` and LAN HTTP responds.
 - Update Chinese `CHANGELOG.md`, stage only feature files, create atomic feature commit; retain unrelated user changes and stay on the feature branch.
+
+## Execution Results
+
+- [x] Parser and recurring event contracts: 13 tests, including DST, floating time, exclusions, moved/cancelled occurrences and malformed rules.
+- [x] Household persistence/API and Alembic 090: real PostgreSQL import/share/update/remove and cross-household isolation; downgrade/reupgrade preserves a seeded homework record. Local development database upgraded through Alembic.
+- [x] Settings and education UI: 49 frontend tests; household/date cache reuse and invalidation, import errors and shared events across child filters.
+- [x] Verification: 72 backend unit tests, 3 PostgreSQL integration tests, 8 browser regressions; 4 new calendar flows also checked in touch-enabled mobile and desktop contexts. Build, lint and LAN 5177 checks passed; screenshots inspected.

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import type { EducationHomeworkDictionaries } from '@/pages/Education/types';
+import FamilyCalendarSettings from '@/pages/Education/FamilyCalendarSettings';
 import type { FamilyChild } from '../api';
 import { useCreateChildAccount, useEducationHomeworkDictionaries, useFamilyChildEducationProfile, useFamilyChildren, useUpdateFamilyChildEducationProfile } from '../queries';
 
@@ -111,5 +112,6 @@ export function FamilyAccountsTab({ onOpenChild }: FamilyAccountsTabProps) {
     {!childrenQuery.isLoading && !childrenQuery.isError && <div className="divide-y" style={{ borderColor: 'var(--color-border-muted)' }}>
       {(childrenQuery.data ?? []).map((child) => <FamilyChildRow key={child.user_id} child={child} grades={dictionariesQuery.data?.grade_levels ?? []} onOpenChild={onOpenChild} />)}
     </div>}
+    <FamilyCalendarSettings />
   </section>;
 }

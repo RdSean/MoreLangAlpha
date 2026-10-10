@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Clock3 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import pokemonball from '@/assets/img/pokemonball.svg';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,8 @@ import { cn } from '@/lib/utils';
 import { createDateFormatter } from '@/lib/format';
 import { calendarMonth, householdToday, parseDate, dateString } from './calendarDates';
 import { useEducationTaskCalendar } from './queries';
+import { useFamilyCalendarEvents } from './calendarQueries';
+import FamilyDayEvents from './FamilyDayEvents';
 import type { EducationCalendarTask, EducationHomeworkDictionaries, EducationMember, EducationTask } from './types';
 
 const coreSubjects = [
@@ -57,6 +59,9 @@ export default function EducationNotebook({ role, dictionaries, members, actions
   }, [dictionaries.timezone]);
   const range = calendarMonth(`${month}-01`);
   const calendar = useEducationTaskCalendar({ start_date: range.start_date, end_date: range.end_date, ...(role === 'parent' && studentId ? { student_id: studentId } : {}) });
+  const sharedCalendar = useFamilyCalendarEvents({ start_date: range.start_date, end_date: range.end_date });
+  const sharedEvents = sharedCalendar.isError ? [] : sharedCalendar.data?.events ?? [];
+  const selectedEvents = sharedEvents.filter(event => event.dates.includes(selectedDate));
   const dateLabel = useMemo(() => createDateFormatter({ timeZone: 'UTC', month: 'long', day: 'numeric', weekday: 'long' }), []);
   const monthLabel = useMemo(() => createDateFormatter({ timeZone: 'UTC', year: 'numeric', month: 'long' }), []);
   const days = new Map(calendar.data?.days.map(day => [day.date, day]) ?? []);
@@ -107,10 +112,12 @@ export default function EducationNotebook({ role, dictionaries, members, actions
           if (!date) return <div key={`empty-${index}`} className="border-t bg-[var(--color-bg-subtle)]" />;
           const day = days.get(date);
           const count = hasData ? day?.task_count ?? 0 : 0;
-          return <button key={date} type="button" aria-label={`${date}${count ? `，${count}项作业，已完成${day?.completed_count ?? 0}项` : ''}`} aria-pressed={date === selectedDate} aria-current={date === today ? 'date' : undefined}
-            onClick={() => setSelectedDate(date)} className={cn('relative flex min-h-[60px] min-w-0 flex-col items-center justify-start gap-1 border-t py-2 transition-colors focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring sm:min-h-[72px]', date === selectedDate ? 'bg-[var(--color-bg-tool-card)]' : 'hover:bg-[var(--color-bg-hover)]')}>
+          const eventCount = sharedEvents.filter(event => event.dates.includes(date)).length;
+          return <button key={date} type="button" aria-label={`${date}${count ? `，${count}项作业，已完成${day?.completed_count ?? 0}项` : ''}${eventCount ? `，${eventCount}项日程` : ''}`} aria-pressed={date === selectedDate} aria-current={date === today ? 'date' : undefined}
+            onClick={() => setSelectedDate(date)} className={cn('relative flex min-h-[82px] min-w-0 flex-col items-center justify-start gap-1 border-t py-2 transition-colors focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring sm:min-h-[94px]', date === selectedDate ? 'bg-[var(--color-bg-tool-card)]' : 'hover:bg-[var(--color-bg-hover)]')}>
             <span className={cn('flex size-7 items-center justify-center rounded-full text-sm tabular-nums', date === selectedDate && 'bg-[var(--color-btn-primary-bg)] text-[var(--color-btn-primary-text)]', date === today && date !== selectedDate && 'font-bold ring-1 ring-border')}>{Number(date.slice(-2))}</span>
             {count > 0 && <HomeworkDots tasks={day?.tasks ?? []} dictionaries={dictionaries} />}
+            <span aria-hidden="true" className="mt-auto flex h-3.5 items-center gap-1 text-[10px] tabular-nums text-muted-foreground">{eventCount > 0 && <><Clock3 className="size-2.5" />{eventCount}</>}</span>
           </button>;
         })}
       </div>
@@ -120,6 +127,9 @@ export default function EducationNotebook({ role, dictionaries, members, actions
         <div><p className="text-xs text-muted-foreground">作业记录 · {selectedDate}</p><h2 className="mt-1 text-lg font-semibold">{dateLabel(parseDate(selectedDate))}</h2></div>
         {hasData && <p className="text-sm tabular-nums text-muted-foreground">已完成 {selected?.completed_count ?? 0} / {selected?.task_count ?? 0}</p>}
       </div>
+      {sharedCalendar.isError ? <div className="border-b px-4 py-4 sm:px-6"><p role="alert" className="text-sm">家庭日程加载失败。</p><Button variant="outline" size="sm" className="mt-2" onClick={() => void sharedCalendar.refetch()}>重试日程</Button></div>
+        : sharedCalendar.isLoading ? <p role="status" className="border-b px-4 py-4 text-sm text-muted-foreground sm:px-6">正在加载家庭日程…</p>
+          : <FamilyDayEvents events={selectedEvents} timezone={sharedCalendar.data?.timezone ?? dictionaries.timezone} />}
       {calendar.isError ? <div className="p-6"><p role="alert" className="text-sm">作业日历加载失败，请重试。</p><Button variant="outline" className="mt-3" onClick={() => void calendar.refetch()}>重试</Button></div>
         : calendar.isLoading || !calendar.data ? <p role="status" className="p-6 text-sm text-muted-foreground">正在加载作业…</p>
           : subjects.map(subject => {

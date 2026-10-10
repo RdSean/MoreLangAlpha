@@ -66,6 +66,7 @@ vi.mock('../api', () => ({
 }));
 
 vi.mock('../completionSound', () => ({ createCompletionSound: () => ({ play: state.sound, close: vi.fn() }) }));
+vi.mock('../calendarQueries', () => ({ useFamilyCalendarEvents: () => ({ data: { events: [] }, isLoading: false, isError: false }) }));
 
 vi.mock('../queries', () => ({
   useEducationTaskDetail: () => ({ data: { parent_materials: [], submissions: [{ submission_id: 'submission-1', task_id: 'task-1', sequence: 1, submission_text: '已经阅读第三章。', assets: [], reviews: [] }] }, isLoading: false }),

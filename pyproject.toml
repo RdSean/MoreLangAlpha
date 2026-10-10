@@ -117,6 +117,9 @@ dependencies = [
     "qrcode>=7.0",
     "wechatbot-sdk>=0.3.0",
     "referencing>=0.30",
+    "icalendar>=6,<7",
+    "recurring-ical-events>=3,<4",
+    "python-dateutil>=2.9,<3",
 ]
 
 [tool.uv.sources]

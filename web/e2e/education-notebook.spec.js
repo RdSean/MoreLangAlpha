@@ -37,6 +37,7 @@ for (const role of ['parent', 'student']) for (const width of [375, 1440]) {
       'GET /auth/members': [parent, student],
       'GET /education/dictionaries': dictionaries,
       'GET /education/learning': [],
+      'GET /education/calendar/events': { household_id: 'household-1', timezone: 'Asia/Tokyo', events: [] },
       'GET /education/tasks/calendar': async route => {
         const url = new URL(route.request().url());
         await route.fulfill({ json: {
