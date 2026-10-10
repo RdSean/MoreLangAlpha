@@ -248,7 +248,7 @@ describe('EducationPage', () => {
   it('defers weekly date validation to the household timezone and shows its server error', async () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
-    state.create.mockRejectedValue({ response: { data: { detail: 'The initial due date must be one of the selected weekly weekdays' } } });
+    state.create.mockRejectedValue({ response: { data: { detail: 'No scheduled homework dates before the deadline' } } });
 
     renderCreateHomeworkPage();
 
@@ -258,10 +258,11 @@ describe('EducationPage', () => {
     fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-09T10:00' } });
     choose('每周指定日期');
     fireEvent.click(screen.getByRole('checkbox', { name: '周一' }));
+    expect(screen.getByLabelText('截止时间')).toHaveValue('2026-08-09T10:00');
     fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
 
     await waitFor(() => expect(state.create).toHaveBeenCalled());
-    expect(await screen.findByRole('alert')).toHaveTextContent('The initial due date must be one of the selected weekly weekdays');
+    expect(await screen.findByRole('alert')).toHaveTextContent('No scheduled homework dates before the deadline');
   });
 
   it('reuses staged parent materials and its creation key when a create response is lost', async () => {

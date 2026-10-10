@@ -166,3 +166,16 @@ async def test_calendar_uses_subject_colours_and_stable_due_time_order(db_conn, 
         task_id=str(later_task_id), student_user_id=foreign_parent_id,
         submission_text="", idempotency_key=None, asset_ids=[],
     ) is None
+
+    # Inclusive rule deadline also bounds real database materialization.
+    async with db_conn.cursor() as cur:
+        await cur.execute(
+            "UPDATE education_task_rules SET recurrence = %s::jsonb WHERE task_rule_id = %s",
+            ('{"frequency":"daily","start_date":"2026-08-01","end_date":"2026-08-03","due_time":"09:00"}', later_rule_id),
+        )
+    assert await education_tasks.materialize_task_rule_through(
+        task_rule_id=str(later_rule_id), from_date=date(2026, 8, 1), through_date=date(2026, 8, 10),
+    ) == 2
+    assert await education_tasks.materialize_task_rule_through(
+        task_rule_id=str(later_rule_id), from_date=date(2026, 8, 4), through_date=date(2026, 8, 10),
+    ) == 0

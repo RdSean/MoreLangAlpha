@@ -214,7 +214,10 @@ def _task_occurrence_dates(
 ) -> list[date]:
     """Generate only the requested bounded occurrence window for one rule."""
     start = date.fromisoformat(recurrence["start_date"])
+    end = date.fromisoformat(recurrence["end_date"]) if recurrence.get("end_date") else None
     window_start = max(start, from_date) if from_date is not None else start
+    if end is not None:
+        through_date = min(through_date, end)
     if window_start > through_date:
         return []
 

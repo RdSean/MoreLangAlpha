@@ -49,17 +49,6 @@ function householdWallClockToIso(value: string, timeZone: string): string {
   return new Date(instant).toISOString();
 }
 
-function moveWallClockToNextWeekday(value: string, weekdays: number[]): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})$/.exec(value);
-  if (!match || weekdays.length === 0) return value;
-  const [year, month, day] = match.slice(1, 4).map(Number);
-  const currentWeekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay() || 7;
-  const offset = Math.min(...weekdays.map((weekday) => (weekday - currentWeekday + 7) % 7));
-  const nextDate = new Date(Date.UTC(year, month - 1, day + offset));
-  const nextDateValue = nextDate.toISOString().slice(0, 10);
-  return `${nextDateValue}T${match[4]}`;
-}
-
 const maxEducationAttachments = 20;
 
 function assertAttachmentLimit(files: File[]) {
@@ -269,9 +258,6 @@ export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending
       const next = current.includes(weekday)
         ? current.filter((item) => item !== weekday)
         : [...current, weekday].sort((left, right) => left - right);
-      if (next.length > 0 && !next.includes(new Date(`${dueAt}:00Z`).getUTCDay() || 7)) {
-        setDueAt((currentDueAt) => moveWallClockToNextWeekday(currentDueAt, next));
-      }
       return next;
     });
   };
@@ -330,6 +316,7 @@ export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending
         {isPractice && <ChoiceGroup label="练习来源" value={practiceSourceCode} options={(dictionaries?.practice_sources ?? []).map((item) => ({ value: item.code, label: item.name }))} onChange={setPracticeSourceCode} />}
         <label className="grid gap-1.5 text-sm font-medium">说明<Textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label>
         <label className="grid gap-1.5 text-sm font-medium"><span>截止时间</span><span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>家庭时区：{householdTimezone}</span><Input aria-label="截止时间" type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} required /></label>
+        <p className="text-xs text-muted-foreground">重复作业从创建当天开始，按所选频率安排至截止日期（含当天）；时间部分为每次作业的截止时刻。</p>
         <ChoiceGroup label="重复方式" value={frequency} options={[{ value: 'once', label: '一次' }, { value: 'daily', label: '每天' }, { value: 'weekdays', label: '工作日' }, { value: 'weekly', label: '每周指定日期' }]} onChange={(value) => updateFrequency(value as CreateEducationTaskInput['frequency'])} />
         {needsWeekdaySelection && <fieldset className="grid gap-2"><legend className="text-sm font-medium">每周日期</legend><div className="flex flex-wrap gap-x-4 gap-y-2">{weeklyDayOptions.map(([weekday, label]) => <label className="flex items-center gap-2 text-sm" key={weekday}><input type="checkbox" checked={weekdays.includes(weekday)} onChange={() => toggleWeekday(weekday)} />{label}</label>)}</div></fieldset>}
         <label className="grid gap-1.5 text-sm font-medium">材料附件<Input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />{files.length > 0 && <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>已选择 {files.length} 份附件</span>}</label>

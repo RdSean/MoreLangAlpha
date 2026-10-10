@@ -1,6 +1,6 @@
 """State-machine contracts for persisted family homework tasks."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -170,7 +170,7 @@ async def test_task_creation_persists_student_grade_and_weekly_recurrence(monkey
         assigned_student_id="student-1",
         title="Practice",
         description="",
-        due_at=datetime(2026, 8, 31, 9, tzinfo=timezone.utc),
+        due_at=datetime.now(timezone.utc) + timedelta(days=10),
         subject_code="math",
         type_code="practice",
         practice_source_code="schoolwork",
@@ -317,10 +317,15 @@ async def test_weekly_task_requires_a_nonempty_unique_iso_weekday_list(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_weekly_task_requires_its_initial_due_date_to_be_selected(monkeypatch):
+async def test_weekly_task_rejects_a_range_without_a_selected_weekday(monkeypatch):
     _stub_create_context(monkeypatch)
 
-    with pytest.raises(EducationTaskError, match="initial due date"):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 30, 8, tzinfo=tz)
+    monkeypatch.setattr(education_tasks, "datetime", FrozenDateTime)
+    with pytest.raises(EducationTaskError, match="No scheduled homework dates"):
         await education_tasks.create_task(
             parent_user_id="parent-1",
             assigned_student_id="student-1",
@@ -508,3 +513,45 @@ async def test_check_in_outside_actor_scope_is_not_found(monkeypatch):
     monkeypatch.setattr(education_tasks, "check_in_task_record", AsyncMock(return_value=None))
     with pytest.raises(education_tasks.EducationTaskNotFoundError):
         await education_tasks.check_in_task(student_user_id="parent-2", task_id="task-1", submission_text="", idempotency_key=None, asset_ids=[])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frequency,weekdays,first_day", [
+    ("daily", None, "2026-10-10"),
+    ("weekdays", None, "2026-10-12"),
+    ("weekly", [7], "2026-10-11"),
+])
+async def test_recurring_task_starts_today_and_ends_on_due_date(monkeypatch, frequency, weekdays, first_day):
+    _stub_create_context(monkeypatch)
+    write = AsyncMock(return_value={"task_id": "task-1"})
+    monkeypatch.setattr(education_tasks, "create_task_rule_and_instance", write)
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 10, 9, tzinfo=tz)
+    monkeypatch.setattr(education_tasks, "datetime", FrozenDateTime)
+
+    await education_tasks.create_task(
+        parent_user_id="parent-1", assigned_student_id="student-1", title="Daily",
+        description="", due_at=datetime(2027, 1, 1, 9, tzinfo=timezone.utc),
+        subject_code="math", type_code="practice", practice_source_code="schoolwork",
+        frequency=frequency, weekdays=weekdays, material_asset_ids=[],
+    )
+
+    recurrence = write.await_args.kwargs["recurrence"]
+    assert recurrence["start_date"] == "2026-10-10"
+    assert recurrence["end_date"] == "2027-01-01"
+    assert write.await_args.kwargs["occurrence_date"].isoformat() == first_day
+    assert write.await_args.kwargs["due_at"].date().isoformat() == first_day
+
+
+@pytest.mark.parametrize("frequency,weekdays,expected", [
+    ("daily", None, [date(2026, 12, 30), date(2026, 12, 31), date(2027, 1, 1)]),
+    ("weekdays", None, [date(2026, 12, 30), date(2026, 12, 31), date(2027, 1, 1)]),
+    ("weekly", ["3"], [date(2026, 12, 30)]),
+])
+def test_recurrence_stops_at_inclusive_cross_year_deadline(frequency, weekdays, expected):
+    from src.server.database.education_tasks import _task_occurrence_dates
+    recurrence = {"frequency": frequency, "start_date": "2026-12-30", "end_date": "2027-01-01", "weekdays": weekdays}
+    assert _task_occurrence_dates(recurrence=recurrence, from_date=None, through_date=date(2027, 1, 8)) == expected
+    assert _task_occurrence_dates(recurrence=recurrence, from_date=date(2027, 1, 2), through_date=date(2027, 1, 8)) == []

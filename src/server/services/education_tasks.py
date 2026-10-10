@@ -133,20 +133,35 @@ async def create_task(
         raise EducationTaskError("The practice source is invalid")
 
     timezone_name = context["timezone"]
-    local_due = due_at.astimezone(ZoneInfo(timezone_name))
-    if (
-        frequency == "weekly"
-        and normalized_weekdays is not None
-        and str(local_due.isoweekday()) not in normalized_weekdays
-    ):
-        raise EducationTaskError("The initial due date must be one of the selected weekly weekdays")
+    household_zone = ZoneInfo(timezone_name)
+    local_due = due_at.astimezone(household_zone)
+    local_today = datetime.now(household_zone).date()
+    if frequency != "once" and local_due.date() < local_today:
+        raise EducationTaskError("Recurring homework deadline must be on or after today")
+    recurrence_start = local_due.date() if frequency == "once" else local_today
     recurrence: dict[str, Any] = {
         "frequency": frequency,
-        "start_date": local_due.date().isoformat(),
+        "start_date": recurrence_start.isoformat(),
         "due_time": local_due.timetz().replace(tzinfo=None).isoformat(timespec="minutes"),
     }
+    if frequency != "once":
+        recurrence["end_date"] = local_due.date().isoformat()
     if normalized_weekdays is not None:
         recurrence["weekdays"] = normalized_weekdays
+    initial_occurrence = local_due.date()
+    if frequency != "once":
+        candidate = recurrence_start
+        if frequency == "weekdays":
+            while candidate.isoweekday() > 5:
+                candidate += timedelta(days=1)
+        elif frequency == "weekly" and normalized_weekdays is not None:
+            selected = {int(day) for day in normalized_weekdays}
+            while candidate.isoweekday() not in selected:
+                candidate += timedelta(days=1)
+        if candidate > local_due.date():
+            raise EducationTaskError("No scheduled homework dates before the deadline")
+        initial_occurrence = candidate
+    initial_due = datetime.combine(initial_occurrence, local_due.timetz().replace(tzinfo=None), tzinfo=household_zone)
     try:
         return await create_task_rule_and_instance(
             parent_user_id=parent_user_id,
@@ -156,8 +171,8 @@ async def create_task(
             description=description.strip(),
             recurrence=recurrence,
             timezone_name=timezone_name,
-            occurrence_date=local_due.date(),
-            due_at=local_due,
+            occurrence_date=initial_occurrence,
+            due_at=initial_due,
             subject_code=subject_code,
             type_code=type_code,
             practice_source_code=practice_source_code,
