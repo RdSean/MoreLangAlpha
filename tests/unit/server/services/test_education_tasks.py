@@ -490,3 +490,21 @@ async def test_completed_task_cannot_be_cancelled(monkeypatch):
 
     with pytest.raises(education_tasks.EducationTaskNotFoundError, match="cannot be cancelled"):
         await education_tasks.cancel_task(parent_user_id="parent-1", task_id="task-1")
+
+
+@pytest.mark.asyncio
+async def test_parent_check_in_preserves_actual_actor(monkeypatch):
+    monkeypatch.setattr(education_tasks, "get_membership_for_user", AsyncMock(return_value={"role": "parent", "household_id": "h-1"}))
+    write = AsyncMock(return_value={"submitted_by_user_id": "parent-1"})
+    monkeypatch.setattr(education_tasks, "check_in_task_record", write)
+    result = await education_tasks.check_in_task(student_user_id="parent-1", task_id="task-1", submission_text="完成", idempotency_key="key", asset_ids=[])
+    assert result["submitted_by_user_id"] == "parent-1"
+    assert write.await_args.kwargs["student_user_id"] == "parent-1"
+
+
+@pytest.mark.asyncio
+async def test_check_in_outside_actor_scope_is_not_found(monkeypatch):
+    monkeypatch.setattr(education_tasks, "get_membership_for_user", AsyncMock(return_value={"role": "parent", "household_id": "other"}))
+    monkeypatch.setattr(education_tasks, "check_in_task_record", AsyncMock(return_value=None))
+    with pytest.raises(education_tasks.EducationTaskNotFoundError):
+        await education_tasks.check_in_task(student_user_id="parent-2", task_id="task-1", submission_text="", idempotency_key=None, asset_ids=[])

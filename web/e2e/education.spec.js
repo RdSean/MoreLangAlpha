@@ -112,8 +112,9 @@ const textbookMaterial = {
   content_sha256: 'b'.repeat(64),
 };
 
-test.beforeEach(async () => {
+test.beforeEach(async ({ page }) => {
   await resetMockServer();
+  await page.clock.setFixedTime(new Date('2026-08-09T06:00:00Z'));
 });
 
 test.describe('Family education roles', () => {
@@ -130,7 +131,7 @@ test.describe('Family education roles', () => {
       }],
     });
 
-    await page.goto('/textbooks');
+    await page.goto('/textbooks', { waitUntil: 'domcontentloaded' });
 
     await expect(page.getByRole('heading', { name: '教材' })).toBeVisible();
     await expect(page.getByText('英语第二册')).toBeVisible();
@@ -156,7 +157,7 @@ test.describe('Family education roles', () => {
 
     for (const width of [390, 1280]) {
       await page.setViewportSize({ width, height: 900 });
-      await page.goto('/textbooks/textbook-1?kp=overview&view=source');
+      await page.goto('/textbooks/textbook-1?kp=overview&view=source', { waitUntil: 'domcontentloaded' });
 
       const panel = page.getByTestId('book-reader-scroll');
       await expect(panel.getByText(unbroken)).toBeVisible();
@@ -173,7 +174,7 @@ test.describe('Family education roles', () => {
     await mockAPI(page, {
       'GET /auth/me': parent,
       'GET /auth/members': [parent, student],
-      'GET /education/tasks': [],
+      'GET /education/tasks/calendar': { days: [], stats: { total_points: 0 } },
       'GET /education/dictionaries': dictionaries,
       'POST /education/tasks': async (route) => {
         created = route.request().postDataJSON();
@@ -185,7 +186,7 @@ test.describe('Family education roles', () => {
       },
     });
 
-    await page.goto('/education');
+    await page.goto('/education', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: '家庭作业' })).toBeVisible();
     await page.getByRole('link', { name: '创建作业' }).click();
     await page.getByRole('button', { name: student.name, exact: true }).click();
@@ -211,7 +212,7 @@ test.describe('Family education roles', () => {
     let submitted;
     await mockAPI(page, {
       'GET /auth/me': student,
-      'GET /education/tasks': [task('completed')],
+      'GET /education/tasks/calendar': { days: [{ date: '2026-08-09', task_count: 1, completed_count: 1, tasks: [task('completed')] }], stats: { total_points: 1 } },
       'GET /education/dictionaries': dictionaries,
       'GET /education/learning': [],
       'POST /education/assets': {
@@ -226,7 +227,7 @@ test.describe('Family education roles', () => {
       },
     });
 
-    await page.goto('/education');
+    await page.goto('/education', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: '我的作业' })).toBeVisible();
     await expect(page.getByRole('button', { name: '创建作业' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '反馈' })).toHaveCount(0);
@@ -259,7 +260,7 @@ test.describe('Family education roles', () => {
     };
     await mockAPI(page, {
       'GET /auth/me': student,
-      'GET /education/tasks': [],
+      'GET /education/tasks/calendar': { days: [], stats: { total_points: 0 } },
       'GET /education/learning': [assignment],
       'GET /education/learning/assignment-1/structure': {
         ...textbookStructure,
@@ -289,7 +290,7 @@ test.describe('Family education roles', () => {
       },
     });
 
-    await page.goto('/education');
+    await page.goto('/education', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: '继续学习' }).click();
 
     await expect(page.getByRole('heading', { name: '英语第二册' })).toBeVisible();
@@ -305,6 +306,7 @@ test.describe('Family education roles', () => {
     await mockAPI(page, {
       'GET /auth/me': parent,
       'GET /auth/members': [parent, student],
+      'GET /education/textbooks': [textbookWorkbench],
       'GET /education/textbooks/textbook-1': textbookWorkbench,
       'GET /education/textbooks/textbook-1/structure': textbookStructure,
       'GET /education/textbooks/textbook-1/source': {
@@ -330,9 +332,9 @@ test.describe('Family education roles', () => {
       },
     });
 
-    await page.goto('/textbooks/textbook-1?kp=overview&view=material');
-    await expect(page.getByText('理解课文的核心内容。')).toBeVisible();
-    await page.getByRole('button', { name: '给学生使用' }).click();
+    await page.goto('/textbooks', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: '英语第二册 更多' }).click();
+    await page.getByRole('menuitem', { name: '给学生使用' }).click();
     await page.getByRole('checkbox', { name: '学生' }).check();
     await page.getByRole('button', { name: '保存' }).click();
 

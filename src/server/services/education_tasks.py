@@ -181,8 +181,14 @@ async def check_in_task(
     *, student_user_id: str, task_id: str, submission_text: str,
     idempotency_key: str | None, asset_ids: list[str],
 ) -> dict[str, Any]:
-    """Record an initial optional submission and permanently complete the task."""
-    await _require_student(student_user_id)
+    """Complete a task as its student or a household parent.
+
+    student_user_id is the authenticated actor (legacy keyword kept for callers).
+    The database checks household/assignee scope atomically with the write.
+    """
+    member = await get_membership_for_user(student_user_id)
+    if not member or member["role"] not in {"student", "parent"}:
+        raise EducationTaskPermissionError("Only a household member can check in homework")
     try:
         submission = await check_in_task_record(
             task_id=task_id,

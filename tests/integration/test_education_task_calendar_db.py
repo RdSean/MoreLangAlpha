@@ -116,4 +116,53 @@ async def test_calendar_uses_subject_colours_and_stable_due_time_order(db_conn, 
         "week_count": 1,
         "overdue_count": 1,
         "completed_count": 1,
+        "total_points": 1,
     }
+
+    sibling_id = f"calendar-sibling-{uuid4()}"
+    foreign_parent_id = f"calendar-foreign-parent-{uuid4()}"
+    foreign_household_id = uuid4()
+    async with db_conn.transaction():
+        async with db_conn.cursor() as cur:
+            await cur.executemany(
+                "INSERT INTO users (user_id, name) VALUES (%s, %s)",
+                [(sibling_id, "Sibling"), (foreign_parent_id, "Foreign parent")],
+            )
+            await cur.execute(
+                "INSERT INTO education_households (household_id, name, model_owner_user_id) VALUES (%s, 'Other', %s)",
+                (foreign_household_id, foreign_parent_id),
+            )
+            await cur.executemany(
+                "INSERT INTO education_memberships (household_id, user_id, role, display_name) VALUES (%s, %s, %s, %s)",
+                [(household_id, sibling_id, "student", "Sibling"), (foreign_household_id, foreign_parent_id, "parent", "Other")],
+            )
+    for unauthorized_actor in (sibling_id, foreign_parent_id):
+        assert await education_tasks.check_in_task(
+            task_id=str(later_task_id), student_user_id=unauthorized_actor,
+            submission_text="", idempotency_key=None, asset_ids=[],
+        ) is None
+
+    # A household parent checks in on behalf of the student, preserving actor.
+    submission = await education_tasks.check_in_task(
+        task_id=str(later_task_id), student_user_id=parent_id,
+        submission_text="Parent checked", idempotency_key=str(later_task_id), asset_ids=[],
+    )
+    assert submission["submitted_by_user_id"] == parent_id
+    again = await education_tasks.check_in_task(
+        task_id=str(later_task_id), student_user_id=parent_id,
+        submission_text="Retry", idempotency_key=str(later_task_id), asset_ids=[],
+    )
+    assert again["submission_id"] == submission["submission_id"]
+    # Even a completed task outside the selected month contributes exactly once.
+    counts = await education_tasks.get_calendar_progress_counts(
+        household_id=str(household_id), assigned_student_id=student_id,
+        today=date(2026, 9, 1), week_start=date(2026, 8, 31), week_end=date(2026, 9, 6),
+        start_date=date(2026, 9, 1), end_date=date(2026, 9, 30),
+        now=datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+    assert counts["completed_count"] == 0
+    assert counts["total_points"] == 2
+    assert await education_tasks.check_in_task(
+        task_id=str(later_task_id), student_user_id=foreign_parent_id,
+        submission_text="", idempotency_key=None, asset_ids=[],
+    ) is None

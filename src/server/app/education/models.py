@@ -219,6 +219,7 @@ class EducationCalendarDayResponse(BaseModel):
 
 
 class EducationCalendarStatsResponse(BaseModel):
+    total_points: int = 0
     today_count: int
     week_count: int
     overdue_count: int

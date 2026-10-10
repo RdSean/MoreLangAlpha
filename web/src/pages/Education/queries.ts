@@ -548,6 +548,15 @@ export function useEducationTaskDetail(taskId: string | undefined) {
   });
 }
 
+export function useEducationAssetDownloadUrl(assetId: string) {
+  return useQuery({
+    queryKey: queryKeys.education.assetDownload(assetId),
+    queryFn: () => educationApi.getEducationAssetDownloadUrl(assetId),
+    staleTime: 60_000,
+    gcTime: 60_000,
+  });
+}
+
 export function useEducationTaskCalendar(params: EducationTaskCalendarRequest | undefined) {
   return useQuery({
     queryKey: queryKeys.education.calendar(params ?? {}),

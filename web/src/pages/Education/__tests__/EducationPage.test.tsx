@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import EducationPage, { CreateHomeworkPage, ParentCreateDialog } from '../EducationPage';
 import type { EducationHomeworkDictionaries } from '../types';
@@ -17,6 +17,8 @@ const state = vi.hoisted(() => ({
   upload: vi.fn(),
   deleteAsset: vi.fn(),
   membersEnabled: vi.fn(),
+  sound: vi.fn(),
+  calendarError: false,
   dictionaries: {
     timezone: 'Asia/Tokyo',
     subjects: [
@@ -63,7 +65,22 @@ vi.mock('../api', () => ({
   deleteEducationAsset: state.deleteAsset,
 }));
 
+vi.mock('../completionSound', () => ({ createCompletionSound: () => ({ play: state.sound, close: vi.fn() }) }));
+
 vi.mock('../queries', () => ({
+  useEducationTaskDetail: () => ({ data: { parent_materials: [], submissions: [{ submission_id: 'submission-1', task_id: 'task-1', sequence: 1, submission_text: '已经阅读第三章。', assets: [], reviews: [] }] }, isLoading: false }),
+  useEducationTaskCalendar: (params: { start_date: string; end_date: string; student_id?: string } | undefined) => ({
+    isLoading: false,
+    isError: state.calendarError,
+    refetch: vi.fn(),
+    data: params && !state.calendarError ? {
+      stats: { total_points: state.tasks.filter(t => t.status === 'completed' && (!params.student_id || t.assigned_student_id === params.student_id)).length },
+      days: Array.from(new Set(state.tasks.map(t => t.occurrence_date as string))).map(date => {
+        const tasks = state.tasks.filter(t => t.occurrence_date === date && t.status !== 'cancelled' && (!params.student_id || t.assigned_student_id === params.student_id));
+        return { date, tasks, task_count: tasks.length, completed_count: tasks.filter(t => t.status === 'completed').length, overdue_count: 0 };
+      }),
+    } : undefined,
+  }),
   useEducationTasks: () => ({ data: state.tasks, isLoading: false }),
   useEducationHomeworkDictionaries: () => ({ data: state.dictionaries, isLoading: !state.dictionaries }),
   useEducationMembers: (enabled: boolean) => {
@@ -92,7 +109,13 @@ const task = (status: 'open' | 'completed' | 'cancelled') => ({
   status,
 });
 
+afterEach(() => vi.useRealTimers());
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-08-09T06:00:00Z'));
+  state.sound.mockReset();
+  state.calendarError = false;
   state.member = null;
   state.members = [];
   state.tasks = [];
@@ -584,4 +607,67 @@ describe('EducationPage', () => {
     resolveRevision?.();
     await waitFor(() => expect(screen.queryByRole('heading', { name: '补充提交' })).not.toBeInTheDocument());
   });
+});
+
+
+describe('calendar homework notebook', () => {
+  it('keeps the three core subjects and hides empty optional subjects', () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    for (const name of ['语文', '数学', '英语']) expect(screen.getByRole('heading', { name })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '科学' })).not.toBeInTheDocument();
+    expect(screen.getAllByText('今日未布置')).toHaveLength(3);
+  });
+
+  it('selects a date and renders only its subject homework', () => {
+    state.member = { user_id: 'student-1', name: '学生', role: 'student' };
+    state.dictionaries!.subjects.push({ code: 'science', name: '科学', color: '', sort_order: 4, homework_types: [] });
+    state.tasks = [{ ...task('open'), subject_code: 'chinese' }, { ...task('open'), task_id: 'task-2', occurrence_date: '2026-08-10', subject_code: 'science', title: '观察植物' }];
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    expect(screen.getByRole('heading', { name: '读书笔记' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /2026-08-10/ }));
+    expect(screen.queryByRole('heading', { name: '读书笔记' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '科学' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '观察植物' })).toBeInTheDocument();
+  });
+
+  it('allows a parent check-in and plays sound only on success', async () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.tasks = [task('open')];
+    state.checkIn.mockRejectedValueOnce(new Error('暂时无法提交'));
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: '完成打卡' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认打卡' }));
+    await screen.findByRole('alert');
+    expect(state.sound).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '确认打卡' }));
+    await waitFor(() => expect(state.sound).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows persisted total points and filters by child', () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.members = [{ user_id: 'student-1', name: '小一', role: 'student' }, { user_id: 'student-2', name: '小二', role: 'student' }];
+    state.tasks = [task('completed'), { ...task('completed'), task_id: 'task-2', assigned_student_id: 'student-2' }];
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    expect(screen.getByLabelText('累计积分')).toHaveTextContent('2');
+    fireEvent.change(screen.getByLabelText('选择孩子'), { target: { value: 'student-1' } });
+    expect(screen.getByLabelText('累计积分')).toHaveTextContent('1');
+    expect(within(screen.getByRole('region', { name: '当天作业本' })).getAllByRole('heading', { name: '读书笔记' })).toHaveLength(1);
+  });
+
+  it('shows a retry error instead of an empty notebook on a failed calendar request', () => {
+    state.calendarError = true;
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    expect(screen.getByRole('alert')).toHaveTextContent('作业日历加载失败');
+    expect(screen.queryByText('今日未布置')).not.toBeInTheDocument();
+  });
+});
+
+
+it('lets parents read the actual submission before writing feedback', () => {
+  state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+  state.tasks = [task('completed')];
+  render(<MemoryRouter><EducationPage /></MemoryRouter>);
+  fireEvent.click(screen.getByRole('button', { name: '反馈' }));
+  expect(screen.getByText('已经阅读第三章。')).toBeInTheDocument();
 });

@@ -159,6 +159,7 @@ export const queryKeys = {
     task: (id: string) => [...queryKeys.education.tasks(), id],
     calendar: (params: object) => [...queryKeys.education.tasks(), 'calendar', params],
     assets: () => [...queryKeys.education.all, 'assets'],
+    assetDownload: (id: string) => [...queryKeys.education.assets(), id, 'download'],
     textbooks: () => [...queryKeys.education.all, 'textbooks'],
     bookSources: () => [...queryKeys.education.all, 'textbook-sources'],
     textbook: (id: string) => [...queryKeys.education.textbooks(), id],

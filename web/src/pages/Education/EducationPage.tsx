@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ClipboardPlus, RotateCcw, Send, XCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { createDateFormatter } from '@/lib/format';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -10,7 +12,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { SubjectIcon } from '@/components/icons/SubjectIcon';
 import { createRequestKeyTracker } from '@/pages/ChatAgent/hooks/utils/requestKey';
 import { deleteEducationAsset, uploadEducationAsset } from './api';
-import { useEducationHomeworkDictionaries, useEducationMembers, useEducationTaskMutations, useEducationTasks, useLearningAssignments } from './queries';
+import { useEducationHomeworkDictionaries, useEducationMembers, useEducationTaskMutations, useLearningAssignments } from './queries';
+import EducationNotebook from './EducationNotebook';
+import HomeworkTaskDetail from './HomeworkTaskDetail';
+import { createCompletionSound } from './completionSound';
 import type { CreateEducationTaskInput, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskStatus } from './types';
 
 const statusLabels: Record<EducationTaskStatus, string> = {
@@ -18,10 +23,6 @@ const statusLabels: Record<EducationTaskStatus, string> = {
   completed: '已完成',
   cancelled: '已取消',
 };
-
-function localDate(value: string, timeZone: string) {
-  return new Intl.DateTimeFormat(undefined, { timeZone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
-}
 
 function householdWallClockToIso(value: string, timeZone: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
@@ -347,7 +348,7 @@ export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending
   </Dialog>;
 }
 
-function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'student' }) {
+function TaskActions({ task, role, onCompleted }: { task: EducationTask; role: 'parent' | 'student'; onCompleted?: () => void }) {
   const mutations = useEducationTaskMutations();
   const [text, setText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
@@ -422,13 +423,18 @@ function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'st
     setText('');
     setFiles([]);
   };
-  const checkIn = () => runAction(async () => {
+  const checkIn = () => {
+    const sound = createCompletionSound();
+    return runAction(async () => {
     await submitWithAttachments('check-in', async (idempotencyKey, assetIds) => {
       await mutations.checkIn.mutateAsync({ taskId: task.task_id, submission_text: text, idempotency_key: idempotencyKey, asset_ids: assetIds });
     });
     resetSubmission();
+    sound.play();
+    onCompleted?.();
     setCheckInOpen(false);
-  });
+    }).finally(() => sound.close());
+  };
   const appendRevision = () => runAction(async () => {
     await submitWithAttachments('revision', async (idempotencyKey, assetIds) => {
       await mutations.appendRevision.mutateAsync({ taskId: task.task_id, submission_text: text, idempotency_key: idempotencyKey, asset_ids: assetIds });
@@ -444,9 +450,9 @@ function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'st
 
   const errorMessage = actionError && <p role="alert" className="text-sm" style={{ color: 'var(--color-loss)' }}>{actionError}</p>;
 
-  if (role === 'student' && task.status === 'open') {
+  if (task.status === 'open') {
     return <Dialog open={checkInOpen} onOpenChange={handleCheckInOpenChange}>
-      <DialogTrigger asChild><Button size="sm"><CheckCircle2 className="mr-2 size-4" aria-hidden="true" />完成打卡</Button></DialogTrigger>
+      <DialogTrigger asChild><Button size="sm" className="min-h-11"><CheckCircle2 className="mr-2 size-4" aria-hidden="true" />完成打卡</Button></DialogTrigger>
       <DialogContent variant="centered" className="max-w-lg" onEscapeKeyDown={preventCloseWhileSubmitting} onPointerDownOutside={preventCloseWhileSubmitting}>
         <DialogHeader><DialogTitle>完成打卡</DialogTitle><DialogDescription>可直接确认完成，也可以补充文字和多份 PDF、图片附件。</DialogDescription></DialogHeader>
         <div className="grid gap-4">
@@ -459,38 +465,85 @@ function TaskActions({ task, role }: { task: EducationTask; role: 'parent' | 'st
     </Dialog>;
   };
   if (role === 'student' && task.status === 'completed') {
-    return <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}><DialogTrigger asChild><Button size="sm" variant="outline"><Send className="mr-2 size-4" aria-hidden="true" />补充提交</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg" onEscapeKeyDown={preventCloseWhileSubmitting} onPointerDownOutside={preventCloseWhileSubmitting}><DialogHeader><DialogTitle>补充提交</DialogTitle><DialogDescription>可追加文字说明或多份 PDF、图片附件。</DialogDescription></DialogHeader><div className="grid gap-4"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="补充说明或修改内容" /><label className="grid gap-1.5 text-sm font-medium">附件<Input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>{errorMessage}<DialogFooter><Button onClick={() => void appendRevision()} disabled={isSubmitting || mutations.appendRevision.isPending || (!text.trim() && files.length === 0)}>{isSubmitting || mutations.appendRevision.isPending ? '正在提交' : '提交补充'}</Button></DialogFooter></div></DialogContent></Dialog>;
+    return <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}><DialogTrigger asChild><Button size="sm" className="min-h-11" variant="outline"><Send className="mr-2 size-4" aria-hidden="true" />补充提交</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg" onEscapeKeyDown={preventCloseWhileSubmitting} onPointerDownOutside={preventCloseWhileSubmitting}><DialogHeader><DialogTitle>补充提交</DialogTitle><DialogDescription>可追加文字说明或多份 PDF、图片附件。</DialogDescription></DialogHeader><div className="grid gap-4"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="补充说明或修改内容" /><label className="grid gap-1.5 text-sm font-medium">附件<Input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>{errorMessage}<DialogFooter><Button onClick={() => void appendRevision()} disabled={isSubmitting || mutations.appendRevision.isPending || (!text.trim() && files.length === 0)}>{isSubmitting || mutations.appendRevision.isPending ? '正在提交' : '提交补充'}</Button></DialogFooter></div></DialogContent></Dialog>;
   }
   if (role === 'parent' && task.status === 'completed') {
-    return <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}><DialogTrigger asChild><Button size="sm" variant="outline"><RotateCcw className="mr-2 size-4" aria-hidden="true" />反馈</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg"><DialogHeader><DialogTitle>作业反馈</DialogTitle><DialogDescription>反馈不会改变学生已完成状态。</DialogDescription></DialogHeader><div className="grid gap-4"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="写下修改建议或完成反馈" />{errorMessage}<DialogFooter><Button variant="outline" onClick={() => void review('revision_requested')} disabled={!text.trim() || mutations.review.isPending}>请求修改</Button><Button onClick={() => void review('feedback')} disabled={!text.trim() || mutations.review.isPending}>保存反馈</Button></DialogFooter></div></DialogContent></Dialog>;
+    return <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}><DialogTrigger asChild><Button size="sm" className="min-h-11" variant="outline"><RotateCcw className="mr-2 size-4" aria-hidden="true" />反馈</Button></DialogTrigger><DialogContent variant="centered" className="max-w-lg"><DialogHeader><DialogTitle>作业反馈</DialogTitle><DialogDescription>反馈不会改变学生已完成状态。</DialogDescription></DialogHeader><div className="grid gap-4">{dialogOpen && <HomeworkTaskDetail taskId={task.task_id} />}<Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="写下修改建议或完成反馈" />{errorMessage}<DialogFooter><Button variant="outline" onClick={() => void review('revision_requested')} disabled={!text.trim() || mutations.review.isPending}>请求修改</Button><Button onClick={() => void review('feedback')} disabled={!text.trim() || mutations.review.isPending}>保存反馈</Button></DialogFooter></div></DialogContent></Dialog>;
   }
   return null;
 }
 
-function TaskRows({ tasks, role, timezone }: { tasks: EducationTask[]; role: 'parent' | 'student'; timezone: string }) {
+function TaskRecordDialog({ task }: { task: EducationTask }) {
+  const [open, setOpen] = useState(false);
+  return <Dialog open={open} onOpenChange={setOpen}>
+    <DialogTrigger asChild><Button size="sm" variant="ghost" className="min-h-11">查看记录</Button></DialogTrigger>
+    <DialogContent variant="centered" className="max-w-lg">
+      <DialogHeader><DialogTitle>{task.title}</DialogTitle><DialogDescription>查看作业材料、打卡提交和家长反馈。</DialogDescription></DialogHeader>
+      {open && <HomeworkTaskDetail taskId={task.task_id} />}
+    </DialogContent>
+  </Dialog>;
+}
+
+function TaskRows({ tasks, role, timezone, onCompleted, members }: {
+  tasks: EducationTask[]; role: 'parent' | 'student'; timezone: string;
+  onCompleted?: () => void; members: EducationMember[];
+}) {
+  useTranslation();
+  const formatDue = useMemo(() => createDateFormatter({ timeZone: timezone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }), [timezone]);
   const mutations = useEducationTaskMutations();
   const [cancelError, setCancelError] = useState<{ taskId: string; message: string } | null>(null);
   const cancelTask = async (taskId: string) => {
     setCancelError(null);
-    try {
-      await mutations.cancel.mutateAsync(taskId);
-    } catch (error) {
-      setCancelError({ taskId, message: readableError(error) });
-    }
+    try { await mutations.cancel.mutateAsync(taskId); }
+    catch (error) { setCancelError({ taskId, message: readableError(error) }); }
   };
-  if (tasks.length === 0) return <p className="py-8 text-sm text-muted-foreground">暂无作业。</p>;
-  return <>{tasks.map((task) => <article key={task.task_id} className="grid gap-3 border-b py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center" style={{ borderColor: 'var(--color-border-muted)' }}><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{task.title}</h2><span className="rounded border px-2 py-0.5 font-mono text-[11px]" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-secondary)' }}>{statusLabels[task.status]}</span></div>{task.description && <p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>{task.description}</p>}{task.latest_feedback_text && <p className="mt-2 border-l-2 pl-3 text-sm" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-secondary)' }}>反馈：{task.latest_feedback_text}</p>}<p className="mt-2 font-mono text-xs" style={{ color: 'var(--color-text-tertiary)' }}>截止 {localDate(task.due_at, timezone)}</p>{cancelError?.taskId === task.task_id && <p role="alert" className="mt-2 text-sm" style={{ color: 'var(--color-loss)' }}>{cancelError.message}</p>}</div><div className="flex flex-wrap items-center gap-2"><TaskActions task={task} role={role} />{role === 'parent' && task.status === 'open' && <TooltipProvider><Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" aria-label="取消作业" disabled={mutations.cancel.isPending} onClick={() => void cancelTask(task.task_id)}><XCircle className="size-4" aria-hidden="true" /></Button></TooltipTrigger><TooltipContent>取消作业</TooltipContent></Tooltip></TooltipProvider>}{task.status === 'completed' && <CheckCircle2 className="size-5" aria-label="已完成" style={{ color: 'var(--color-success)' }} />}</div></article>)}</>;
+  return <>{tasks.map((task, index) => <article key={task.task_id} className="grid gap-3 border-b py-5 last:border-b-0 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+    <div className="min-w-0">
+      <div className="flex items-start gap-2">
+        <span className="pt-0.5 font-mono text-xs text-muted-foreground">{String(index + 1).padStart(2, '0')}</span>
+        <h4 className="min-w-0 break-words text-sm font-semibold">{task.title}</h4>
+        {task.status === 'completed' && <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />}
+        <span className="shrink-0 text-xs text-muted-foreground">{statusLabels[task.status]}</span>
+      </div>
+      {role === 'parent' && <p className="mt-1 text-xs text-muted-foreground">{members.find(member => member.user_id === task.assigned_student_id)?.name ?? '学生'}</p>}
+      {task.description && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-muted-foreground">{task.description}</p>}
+      {task.latest_feedback_text && <p className="mt-2 whitespace-pre-wrap break-words border-l-2 pl-3 text-sm text-muted-foreground">反馈：{task.latest_feedback_text}</p>}
+      <p className="mt-2 text-xs tabular-nums text-muted-foreground">截止 {formatDue(new Date(task.due_at))}</p>
+      {cancelError?.taskId === task.task_id && <p role="alert" className="mt-2 text-sm" style={{ color: 'var(--color-loss)' }}>{cancelError.message}</p>}
+    </div>
+    <div className="flex flex-wrap items-center gap-1">
+      <TaskRecordDialog task={task} />
+      <TaskActions task={task} role={role} onCompleted={onCompleted} />
+      {role === 'parent' && task.status === 'open' && <TooltipProvider><Tooltip><TooltipTrigger asChild>
+        <Button size="icon" variant="ghost" className="min-h-11 min-w-11" aria-label="取消作业" disabled={mutations.cancel.isPending} onClick={() => void cancelTask(task.task_id)}><XCircle className="size-4" aria-hidden="true" /></Button>
+      </TooltipTrigger><TooltipContent>取消作业</TooltipContent></Tooltip></TooltipProvider>}
+    </div>
+  </article>)}</>;
 }
 
 export default function EducationPage() {
   const { member } = useAuth();
-  const tasksQuery = useEducationTasks();
-  const dictionariesQuery = useEducationHomeworkDictionaries();
-  const tasks = useMemo(() => tasksQuery.data ?? [], [tasksQuery.data]);
+  const dictionaries = useEducationHomeworkDictionaries();
   const role = member?.role ?? 'student';
-  const learningAssignments = useLearningAssignments(role === 'student');
-
-  if (role === 'parent') return <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="education-page"><div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8"><header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-end sm:justify-between" style={{ borderColor: 'var(--color-border-muted)' }}><div><p className="font-mono text-xs" style={{ color: 'var(--color-text-tertiary)' }}>FAMILY EDUCATION</p><h1 className="title-font mt-2 text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>家庭作业</h1><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>创建任务、查看学生打卡并给出文字反馈。</p></div><div className="flex flex-wrap gap-2"><Link to="/textbooks"><Button variant="outline">教材加工</Button></Link><Link to="/education/tasks/new"><Button><ClipboardPlus className="mr-2 size-4" aria-hidden="true" />创建作业</Button></Link></div></header><section aria-label="作业列表" className="border-t" style={{ borderColor: 'var(--color-border-muted)' }}>{tasksQuery.isLoading ? <p className="py-8 text-sm text-muted-foreground">正在加载作业…</p> : <TaskRows tasks={tasks} role={role} timezone={dictionariesQuery.data?.timezone ?? 'UTC'} />}</section></div></main>;
-
-  return <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="education-page"><div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8 lg:py-8"><header className="border-b pb-5" style={{ borderColor: 'var(--color-border-muted)' }}><p className="font-mono text-xs" style={{ color: 'var(--color-text-tertiary)' }}>MY LEARNING</p><h1 className="title-font mt-2 text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>我的学习</h1><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>继续阅读已分配教材，并完成知识点学习。</p></header><section aria-label="已分配教材" className="border-t" style={{ borderColor: 'var(--color-border-muted)' }}>{learningAssignments.isLoading ? <p className="py-8 text-sm text-muted-foreground">正在加载学习材料…</p> : (learningAssignments.data ?? []).length === 0 ? <p className="py-8 text-sm text-muted-foreground">暂未分配教材。</p> : (learningAssignments.data ?? []).map((assignment) => <article key={assignment.assignment_id} className="grid gap-3 border-b py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center" style={{ borderColor: 'var(--color-border-muted)' }}><div><h2 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{assignment.textbook_title}</h2><p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>{assignment.completed_knowledge_point_count}/{assignment.knowledge_point_count} 个知识点已学习</p></div><Link to={`/education/learn/${assignment.assignment_id}`}><Button size="sm">继续学习</Button></Link></article>)}</section><section aria-label="作业列表" className="border-t" style={{ borderColor: 'var(--color-border-muted)' }}><h2 className="py-4 text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>我的作业</h2>{tasksQuery.isLoading ? <p className="pb-6 text-sm text-muted-foreground">正在加载作业…</p> : <TaskRows tasks={tasks} role={role} timezone={dictionariesQuery.data?.timezone ?? 'UTC'} />}</section></div></main>;
+  const members = useEducationMembers(role === 'parent');
+  const assignments = useLearningAssignments(role === 'student');
+  const [completionMessage, setCompletionMessage] = useState('');
+  return <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="education-page" style={{ backgroundColor: 'var(--color-bg-canvas)' }}>
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-3 py-5 pb-24 sm:px-6 md:pb-8 lg:px-8 lg:py-8">
+      <p role="status" className="sr-only">{completionMessage}</p>
+      {dictionaries.isError ? <p role="alert">作业设置加载失败，请刷新重试。</p> : !dictionaries.data ? <p role="status" className="p-6 text-sm text-muted-foreground">正在加载作业…</p> : <EducationNotebook
+        key={`${member?.user_id}:${dictionaries.data.timezone}`}
+        role={role} dictionaries={dictionaries.data} members={members.data ?? []}
+        actions={role === 'parent' ? <><Link to="/textbooks"><Button variant="outline">教材加工</Button></Link><Link to="/education/tasks/new"><Button><ClipboardPlus className="mr-2 size-4" aria-hidden="true" />创建作业</Button></Link></> : null}
+        renderTasks={tasks => <TaskRows tasks={tasks} role={role} timezone={dictionaries.data!.timezone} members={members.data ?? []} onCompleted={() => setCompletionMessage('打卡成功，获得 1 积分。')} />}
+      />}
+      {role === 'student' && <section aria-label="已分配教材" className="rounded-xl border bg-card px-4 py-5 sm:px-6">
+        <h2 className="text-base font-semibold">我的教材</h2>
+        {assignments.isLoading ? <p className="py-4 text-sm text-muted-foreground">正在加载学习材料…</p> : assignments.isError ? <p role="alert" className="py-4 text-sm text-muted-foreground">学习材料加载失败，请刷新重试。</p> : !(assignments.data ?? []).length ? <p className="py-4 text-sm text-muted-foreground">暂未分配教材。</p> : assignments.data?.map(assignment => <article key={assignment.assignment_id} className="flex flex-wrap items-center justify-between gap-3 border-b py-4 last:border-0">
+          <div><h3 className="text-sm font-semibold">{assignment.textbook_title}</h3><p className="mt-1 text-sm text-muted-foreground">{assignment.completed_knowledge_point_count}/{assignment.knowledge_point_count} 个知识点已学习</p></div>
+          <Link to={`/education/learn/${assignment.assignment_id}`}><Button size="sm" className="min-h-11">继续学习</Button></Link>
+        </article>)}
+      </section>}
+    </div>
+  </main>;
 }

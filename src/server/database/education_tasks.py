@@ -361,13 +361,16 @@ async def check_in_task(
                     SELECT tasks.task_id, tasks.household_id, tasks.assigned_student_id, tasks.status
                     FROM education_tasks AS tasks
                     JOIN education_memberships AS memberships ON memberships.household_id = tasks.household_id
-                    WHERE tasks.task_id = %s AND memberships.user_id = %s AND memberships.role = 'student'
-                    FOR UPDATE
+                    WHERE tasks.task_id = %s AND memberships.user_id = %s AND (
+                        memberships.role = 'parent'
+                        OR (memberships.role = 'student' AND tasks.assigned_student_id = memberships.user_id)
+                    )
+                    FOR UPDATE OF tasks
                     """,
                     (task_id, student_user_id),
                 )
                 task = await cur.fetchone()
-                if not task or task["assigned_student_id"] != student_user_id:
+                if not task:
                     return None
                 if idempotency_key:
                     await cur.execute(
@@ -612,7 +615,8 @@ async def get_calendar_progress_counts(
                     COUNT(*) FILTER (
                         WHERE tasks.status = 'completed'
                           AND tasks.occurrence_date BETWEEN %s AND %s
-                    ) AS completed_count
+                    ) AS completed_count,
+                    COUNT(*) FILTER (WHERE tasks.status = 'completed') AS total_points
                 FROM education_tasks AS tasks
                 WHERE tasks.household_id = %s
                   AND tasks.status <> 'cancelled'
@@ -629,6 +633,7 @@ async def get_calendar_progress_counts(
         "week_count": int(row["week_count"]),
         "overdue_count": int(row["overdue_count"]),
         "completed_count": int(row["completed_count"]),
+        "total_points": int(row["total_points"]),
     }
 
 

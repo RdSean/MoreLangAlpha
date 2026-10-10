@@ -130,6 +130,7 @@ export interface EducationTaskCalendar {
   end_date: string;
   days: EducationTaskCalendarDay[];
   stats: {
+    total_points?: number;
     today_count: number;
     week_count: number;
     overdue_count: number;
