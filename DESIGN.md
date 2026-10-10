@@ -35,8 +35,11 @@ small uppercase Latin text and tabular numbers. Chinese text is not transformed.
 ## Accent discipline
 
 Quiet amber is annotation only, not a button fill or glow. NASA red identifies
-the decisive action, selected navigation or an urgent status. NASA prose headings,
-bold text, quotes and secondary actions use neutral ink. The experimental accent
+the decisive action, selected navigation or an urgent status. NASA Markdown uses
+the muted mission palette: slate H1, dark olive H2, brick H3 and bold text, dark
+ochre H4, and an ochre quote rule. Olive and ochre use the darker identity ink
+variants for readable small headings. Paragraphs and secondary actions use neutral
+ink. The experimental accent
 picker belongs to Quiet; it is hidden under NASA and its stored preference survives
 switching back.
 

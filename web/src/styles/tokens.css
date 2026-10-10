@@ -222,12 +222,14 @@ html {
 [data-theme="nasa"] {
   --font-ui: 'Helvetica Neue', Helvetica, Arial, 'Noto Sans SC', sans-serif;
   --font-content: 'Helvetica Neue', Helvetica, Arial, 'Noto Sans SC', sans-serif;
-  --color-markdown-h1: var(--color-text-primary);
-  --color-markdown-h2: var(--color-text-primary);
-  --color-markdown-h3: var(--color-text-primary);
-  --color-markdown-h4: var(--color-text-primary);
-  --color-markdown-strong: var(--color-text-primary);
-  --color-markdown-quote-border: var(--color-border-default);
+  /* Reading hierarchy uses the mission stripe palette. Olive and ochre ink
+     use its darker identity variants so compact headings remain legible. */
+  --color-markdown-h1: var(--color-identity-0-fg);
+  --color-markdown-h2: var(--color-identity-1-fg);
+  --color-markdown-h3: var(--color-identity-3-fg);
+  --color-markdown-h4: var(--color-identity-2-fg);
+  --color-markdown-strong: var(--color-identity-3-fg);
+  --color-markdown-quote-border: #D2A85E;
   --Labels-Secondary: #5F5B53;
   --Labels-Tertiary: #68635B;
   --Labels-Quaternary: #777168;
