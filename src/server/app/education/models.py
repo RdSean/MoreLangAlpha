@@ -6,6 +6,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
+from src.server.app.education.reward_models import RewardSummary
 
 
 _ALLOWED_BRIEF_CONTROL_CHARS = frozenset("\t\n\r")
@@ -157,6 +158,8 @@ class EducationSubmissionResponse(BaseModel):
     idempotency_key: UUID | None = None
     submission_kind: Literal["check_in", "revision"] | None = None
     created_at: datetime | None = None
+    reward_status: Literal["ready", "pending"] | None = None
+    reward_summary: RewardSummary | None = None
 
 
 class EducationReviewResponse(BaseModel):

@@ -349,8 +349,10 @@ async def test_check_in_allows_an_empty_initial_submission_and_forwards_idempote
         AsyncMock(return_value={"role": "student", "household_id": "h-1"}),
     )
     persisted = {"submission_id": "submission-1", "task_id": "task-1", "sequence": 1, "submission_text": ""}
-    write = AsyncMock(return_value=persisted)
+    write = AsyncMock(return_value={**persisted, "_reward_student_id": "student-1"})
     monkeypatch.setattr(education_tasks, "check_in_task_record", write)
+    reward = AsyncMock(return_value={"balance": 1})
+    monkeypatch.setattr(education_tasks, "sync_rewards", reward)
 
     result = await education_tasks.check_in_task(
         student_user_id="student-1",
@@ -360,7 +362,8 @@ async def test_check_in_allows_an_empty_initial_submission_and_forwards_idempote
         asset_ids=[],
     )
 
-    assert result == persisted
+    assert result == {**persisted, "reward_status": "ready", "reward_summary": {"balance": 1}}
+    reward.assert_awaited_once_with(user_id="student-1", student_id="student-1")
     assert write.await_args.kwargs["idempotency_key"] == "idempotency-1"
     assert write.await_args.kwargs["submission_text"] == ""
 
@@ -500,11 +503,29 @@ async def test_completed_task_cannot_be_cancelled(monkeypatch):
 @pytest.mark.asyncio
 async def test_parent_check_in_preserves_actual_actor(monkeypatch):
     monkeypatch.setattr(education_tasks, "get_membership_for_user", AsyncMock(return_value={"role": "parent", "household_id": "h-1"}))
-    write = AsyncMock(return_value={"submitted_by_user_id": "parent-1"})
+    write = AsyncMock(return_value={"submitted_by_user_id": "parent-1", "_reward_student_id": "child-1"})
     monkeypatch.setattr(education_tasks, "check_in_task_record", write)
+    reward = AsyncMock(return_value={"balance": 1})
+    monkeypatch.setattr(education_tasks, "sync_rewards", reward)
     result = await education_tasks.check_in_task(student_user_id="parent-1", task_id="task-1", submission_text="完成", idempotency_key="key", asset_ids=[])
     assert result["submitted_by_user_id"] == "parent-1"
     assert write.await_args.kwargs["student_user_id"] == "parent-1"
+    reward.assert_awaited_once_with(user_id="parent-1", student_id="child-1")
+
+
+@pytest.mark.asyncio
+async def test_completion_survives_retryable_reward_failure(monkeypatch):
+    from psycopg import OperationalError
+
+    monkeypatch.setattr(education_tasks,"get_membership_for_user",AsyncMock(return_value={"role":"student"}))
+    monkeypatch.setattr(education_tasks,"check_in_task_record",AsyncMock(return_value={"submission_id":"saved","_reward_student_id":"student"}))
+    monkeypatch.setattr(education_tasks,"sync_rewards",AsyncMock(side_effect=OperationalError("temporarily unavailable")))
+    result=await education_tasks.check_in_task(student_user_id="student",task_id="task",submission_text="",idempotency_key=None,asset_ids=[])
+    assert result["submission_id"]=="saved" and result["reward_status"]=="pending"
+    monkeypatch.setattr(education_tasks,"check_in_task_record",AsyncMock(return_value={"submission_id":"saved","_reward_student_id":"student"}))
+    monkeypatch.setattr(education_tasks,"sync_rewards",AsyncMock(side_effect=TypeError("programming error")))
+    with pytest.raises(TypeError):
+        await education_tasks.check_in_task(student_user_id="student",task_id="task",submission_text="",idempotency_key=None,asset_ids=[])
 
 
 @pytest.mark.asyncio

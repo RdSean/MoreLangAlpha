@@ -54,6 +54,11 @@ async def get_card_image(
     card = await get_pokemon_card(card_id)
     if not card:
         raise PokemonCatalogNotFoundError("卡牌不存在。")
+    return await read_card_image(card, if_none_match=if_none_match)
+
+
+async def read_card_image(card: dict, *, if_none_match: str | None) -> CardImage:
+    """Stream a card already authorized by catalog or collection ownership."""
     expected_key = (
         f"education/pokemon/cards/{card['source_card_id']}/{card['image_sha256']}.png"
     )

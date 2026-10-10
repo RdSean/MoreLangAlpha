@@ -387,7 +387,7 @@ async def check_in_task(
                     )
                     prior = await cur.fetchone()
                     if prior:
-                        return dict(prior)
+                        return {**prior, "_reward_student_id": task["assigned_student_id"]}
                 if task["status"] != "open":
                     raise ValueError(f"Task cannot be checked in from {task['status']}")
                 await cur.execute(
@@ -420,7 +420,7 @@ async def check_in_task(
                     """,
                     (task_id,),
                 )
-    return submission
+    return {**submission, "_reward_student_id": task["assigned_student_id"]}
 
 
 async def append_revision_submission(

@@ -89,7 +89,7 @@ async def test_catalog_batch_rolls_back_and_rejects_non_catalog_objects(
 async def test_catalog_pages_in_numeric_order_and_filters_sets(
     db_conn, patched_get_db_connection
 ):
-    await db_conn.execute("TRUNCATE education_pokemon_cards")
+    await db_conn.execute("TRUNCATE education_pokemon_cards CASCADE")
     await upsert_pokemon_cards(
         [record(f"test-{n}") for n in (10, 1, 2)]
         + [{**record("other-1"), "set_code": "other", "series_name": "Other"}]
@@ -158,4 +158,4 @@ async def test_migration_roundtrip_preserves_existing_family_calendar(
         await (
             await db_conn.execute("SELECT version_num FROM alembic_version")
         ).fetchone()
-    )["version_num"] == "091_pokemon_cards"
+    )["version_num"] == "092_education_card_rewards"

@@ -4,7 +4,12 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from psycopg import OperationalError
+from psycopg.errors import DeadlockDetected, SerializationFailure
+from psycopg_pool import PoolTimeout
+
 from src.server.database.education_members import get_membership_for_user
+from src.server.services.education_rewards import sync as sync_rewards
 from src.server.database.education_tasks import (
     append_revision_submission as append_revision_submission_record,
     cancel_task as cancel_task_record,
@@ -218,7 +223,12 @@ async def check_in_task(
         raise EducationTaskTransitionError(str(exc)) from exc
     if not submission:
         raise EducationTaskNotFoundError("Homework task not found")
-    return submission
+    student_id = submission.pop("_reward_student_id")
+    try:
+        rewards = await sync_rewards(user_id=student_user_id, student_id=student_id)
+    except (OperationalError, PoolTimeout, DeadlockDetected, SerializationFailure):
+        return {**submission, "reward_status": "pending", "reward_summary": None}
+    return {**submission, "reward_status": "ready", "reward_summary": rewards}
 
 
 async def submit_task(

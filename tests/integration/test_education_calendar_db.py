@@ -158,4 +158,4 @@ async def test_migration_downgrade_and_reupgrade_preserves_homework(
             "status": "open",
         }
         await cur.execute("SELECT version_num FROM alembic_version")
-        assert (await cur.fetchone())["version_num"] == "091_pokemon_cards"
+        assert (await cur.fetchone())["version_num"] == "092_education_card_rewards"
