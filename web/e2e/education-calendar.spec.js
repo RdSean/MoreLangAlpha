@@ -31,11 +31,12 @@ async function setup(page, role, state) {
   });
 }
 
-for (const width of [375, 1440]) {
-  test.describe(`${width}px household calendar`, () => {
+for (const theme of ['light', 'nasa']) for (const width of [375, 1440]) {
+  test.describe(`${theme} ${width}px household calendar`, () => {
   test.use({ isMobile: width === 375, hasTouch: width === 375 });
   test(`parent ${width}px imports, updates, shares and removes a household calendar`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 });
+    await page.addInitScript(value => localStorage.setItem('theme', value), theme);
     const state = { imported: false };
     await setup(page, 'parent', state);
     await page.goto('/settings?tab=family', { waitUntil: 'domcontentloaded' });
@@ -50,15 +51,41 @@ for (const width of [375, 1440]) {
     await page.goto('/education', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('button', { name: /2026-10-10.*2项日程/ })).toBeVisible();
     await page.getByLabel('选择孩子').selectOption('student-1');
-    await expect(page.getByText(events[0].title)).toBeVisible();
-    if (width === 375) await page.getByText(events[0].title).tap();
-    else await page.getByText(events[0].title).click();
+    const day = page.getByRole('button', { name: /2026-10-10.*2项日程/ });
+    const preview = day.getByText(events[0].title);
+    await expect(preview).toBeVisible();
+    const truncation = await preview.evaluate(element => ({ overflow: getComputedStyle(element).textOverflow, fits: element.clientWidth <= element.parentElement.clientWidth, clipped: element.scrollWidth > element.clientWidth }));
+    expect(truncation.overflow).toBe('ellipsis');
+    expect(truncation.fits).toBe(true);
+    expect(truncation.clipped).toBe(true);
+    const cellHeight = await day.evaluate(element => element.getBoundingClientRect().height);
+    if (width === 375) expect(cellHeight).toBe(128);
+    else {
+      expect(cellHeight).toBeGreaterThan(100);
+      const emptyHeight = await page.getByRole('button', { name: '2026-10-09' }).evaluate(element => element.getBoundingClientRect().height);
+      expect(cellHeight).toBeCloseTo(emptyHeight, 1);
+      const calendar = await page.getByRole('region', { name: '作业日历', exact: true }).boundingBox();
+      const notebook = await page.getByRole('region', { name: '当天作业本' }).boundingBox();
+      expect(notebook.x).toBeGreaterThan(calendar.x + calendar.width);
+      expect(Math.abs(calendar.y - notebook.y)).toBeLessThan(2);
+    }
+    expect(await day.locator('[title]').first().locator('span').first().evaluate(element => getComputedStyle(element).backgroundColor)).toBe(theme === 'nasa' ? 'rgb(214, 58, 44)' : await day.evaluate(element => {
+      const sample = document.createElement('span');
+      sample.style.backgroundColor = 'var(--color-accent-primary)';
+      element.append(sample);
+      const color = getComputedStyle(sample).backgroundColor;
+      sample.remove();
+      return color;
+    }));
+    const summary = page.locator('summary').filter({ hasText: events[0].title });
+    if (width === 375) await summary.tap();
+    else await summary.click();
     await expect(page.getByText(events[0].location)).toBeVisible();
     expect(await page.getByTestId('education-page').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`shared-calendar-${width}.png`), animations: 'disabled' });
     await page.getByRole('button', { name: /2026-10-11/ }).click();
-    await expect(page.getByText('秋季假期')).toBeVisible();
-    await expect(page.getByText(events[0].title)).toHaveCount(0);
+    await expect(page.getByRole('region', { name: '当天家庭日程' }).getByText('秋季假期')).toBeVisible();
+    await expect(page.locator('summary').filter({ hasText: events[0].title })).toHaveCount(0);
     await page.goto('/settings?tab=family', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: '移除学校课表' }).click();
     await page.getByRole('button', { name: '确认移除' }).click();
@@ -70,6 +97,7 @@ for (const width of [375, 1440]) {
 
   test(`student ${width}px reads shared events and uses keyboard details`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 });
+    await page.addInitScript(value => localStorage.setItem('theme', value), theme);
     await setup(page, 'student', { imported: true });
     await page.goto('/education', { waitUntil: 'domcontentloaded' });
     const summary = page.locator('summary').filter({ hasText: events[0].title });
@@ -83,3 +111,62 @@ for (const width of [375, 1440]) {
   });
   });
 }
+
+for (const theme of ['light', 'nasa']) test.describe(`${theme} tablet gestures and homework drawer`, () => {
+  test.use({ hasTouch: true });
+  test('swipes real touch input and opens the drawer without navigating away', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 820, height: 1180 });
+    await page.addInitScript(value => localStorage.setItem('theme', value), theme);
+    await setup(page, 'parent', { imported: true });
+    await page.goto('/education', { waitUntil: 'domcontentloaded' });
+    const grid = page.getByLabel('选择作业日期');
+    await expect(page.getByRole('button', { name: /2026-10-10/ })).toBeVisible();
+    const box = await grid.boundingBox();
+    const cdp = await page.context().newCDPSession(page);
+    const swipe = async (dx, dy = 0) => {
+      const x = box.x + box.width / 2, y = box.y + 60;
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      for (let step = 1; step <= 5; step++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx * step / 5, y: y + dy * step / 5 }] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    };
+    await swipe(-180);
+    await expect(page.getByRole('button', { name: '2026-11-01' })).toHaveAttribute('aria-pressed', 'true');
+    await swipe(180);
+    await expect(page.getByRole('button', { name: '2026-10-01' })).toHaveAttribute('aria-pressed', 'true');
+    await swipe(10, 100);
+    await expect(page.getByRole('button', { name: '2026-10-01' })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: '2026-10-23' }).dblclick();
+    const drawer = page.getByRole('dialog');
+    await expect(drawer.getByLabel('截止时间')).toHaveValue('2026-10-23T20:00');
+    expect(await drawer.evaluate(element => Math.round(element.getBoundingClientRect().right))).toBe(820);
+    await page.screenshot({ path: testInfo.outputPath('homework-drawer.png'), animations: 'disabled' });
+    await page.keyboard.press('Escape');
+    await expect(drawer).toHaveCount(0);
+    await page.getByRole('button', { name: '创建作业', exact: true }).click();
+    await expect(drawer.getByLabel('截止时间')).toHaveValue('2026-10-23T20:00');
+    await expect(page).toHaveURL(/\/education$/);
+    await cdp.detach();
+  });
+
+  test('scrolls long homework independently and keeps a six-week calendar bounded', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript(value => localStorage.setItem('theme', value), theme);
+    await setup(page, 'parent', { imported: true });
+    const tasks = Array.from({ length: 24 }, (_, i) => ({ task_id: `long-${i}`, assigned_student_id: 'student-1', title: `数学练习 ${i + 1}`, description: '家庭作业内容。'.repeat(30), subject_code: 'math', status: 'open', due_at: '2026-11-01T11:00:00Z', occurrence_date: '2026-11-01' }));
+    await mockAPI(page, { 'GET /education/tasks/calendar': { days: [{ date: '2026-11-01', tasks, task_count: 24, completed_count: 0 }], stats: { total_points: 4 } } });
+    await page.goto('/education', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: '下个月' }).click();
+    const calendar = page.getByRole('region', { name: '作业日历', exact: true });
+    const before = await calendar.boundingBox();
+    const pane = page.getByLabel('作业与教材', { exact: true });
+    await expect(pane.getByText('数学练习 1', { exact: true })).toBeVisible();
+    expect(await pane.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+    await pane.hover();
+    await page.mouse.wheel(0, 900);
+    await expect.poll(() => pane.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    expect(await calendar.boundingBox()).toEqual(before);
+    expect(before.y + before.height).toBeLessThanOrEqual(800);
+    expect(await page.getByTestId('education-page').evaluate(element => element.scrollWidth <= element.clientWidth && element.scrollTop === 0)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('six-week-calendar.png'), animations: 'disabled' });
+  });
+});

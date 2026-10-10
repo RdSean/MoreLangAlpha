@@ -184,12 +184,15 @@ export function CreateHomeworkPage() {
   return <ParentCreateDialog page students={students} dictionaries={dictionariesQuery.data} onSubmit={create} isPending={mutations.create.isPending} />;
 }
 
-export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending, page = false }: {
+export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending, page = false, open: controlledOpen, onOpenChange, initialDate }: {
   students: EducationMember[];
   dictionaries: EducationHomeworkDictionaries | undefined;
   onSubmit: (input: ParentCreateInput) => Promise<void>;
   isPending: boolean;
   page?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  initialDate?: string;
 }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -214,6 +217,12 @@ export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending
   const isPractice = typeCode === 'practice';
   const needsWeekdaySelection = frequency === 'weekly';
   const householdTimezone = dictionaries?.timezone ?? 'UTC';
+  const dialogOpen = controlledOpen ?? open;
+  const changeOpen = (nextOpen: boolean) => { setOpen(nextOpen); onOpenChange?.(nextOpen); };
+
+  useEffect(() => {
+    if (controlledOpen && initialDate) setDueAt(`${initialDate}T20:00`);
+  }, [controlledOpen, initialDate]);
 
   useEffect(() => {
     if (!dictionaries || students.length === 0) return;
@@ -246,7 +255,7 @@ export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen && (isSubmitting || isPending)) return;
     if (!nextOpen) void discardStagedAttempt();
-    setOpen(nextOpen);
+    changeOpen(nextOpen);
   };
 
   const updateFrequency = (nextFrequency: CreateEducationTaskInput['frequency']) => {
@@ -295,7 +304,10 @@ export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending
       stagedAttempt.current = null;
       requestKeyTracker.current.clear();
       if (page) navigate('/education');
-      else setOpen(false);
+      else {
+        changeOpen(false);
+        setDescription(''); setFiles([]); setWeekdays([]); setFrequency('once'); setDueAt('');
+      }
     } catch (error) {
       if (attempt && isDefinitiveRequestError(error)) {
         await discardStagedAttempt();
@@ -326,9 +338,9 @@ export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending
 
   if (page) return <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="create-homework-page"><div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10"><nav aria-label="面包屑" className="mb-8 flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}><Link to="/education" className="hover:underline">家庭作业</Link><span aria-hidden="true">/</span><span style={{ color: 'var(--color-text-primary)' }}>创建作业</span></nav><header className="mb-8 border-b pb-5" style={{ borderColor: 'var(--color-border-default)' }}><h1 className="title-font flex items-center gap-2 text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}><ClipboardPlus className="size-5" aria-hidden="true" />创建作业</h1><p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>分配给家庭中的学生，并设定完成时间。</p></header><section className="border bg-background p-5 sm:p-7" style={{ borderColor: 'var(--color-border-default)' }}>{form}</section></div></main>;
 
-  return <Dialog open={open} onOpenChange={handleOpenChange}>
-    <DialogTrigger asChild><Button><ClipboardPlus className="mr-2 size-4" aria-hidden="true" />创建作业</Button></DialogTrigger>
-    <DialogContent variant="centered" className="max-w-lg" onEscapeKeyDown={(event) => { if (isSubmitting || isPending) event.preventDefault(); }} onPointerDownOutside={(event) => { if (isSubmitting || isPending) event.preventDefault(); }}>
+  return <Dialog open={dialogOpen} onOpenChange={handleOpenChange}>
+    {controlledOpen === undefined && <DialogTrigger asChild><Button><ClipboardPlus className="mr-2 size-4" aria-hidden="true" />创建作业</Button></DialogTrigger>}
+    <DialogContent variant="centered" className={controlledOpen === undefined ? 'max-w-lg' : 'left-auto right-0 top-0 h-dvh max-h-dvh max-w-xl translate-x-0 translate-y-0 content-start rounded-none border-y-0 border-r-0 data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100'} dismissible={!isSubmitting && !isPending} onEscapeKeyDown={(event) => { if (isSubmitting || isPending) event.preventDefault(); }} onPointerDownOutside={(event) => { if (isSubmitting || isPending) event.preventDefault(); }}>
       <DialogHeader><DialogTitle>创建作业</DialogTitle><DialogDescription>分配给家庭中的学生，并设定完成时间。</DialogDescription></DialogHeader>
       {form}
     </DialogContent>
@@ -484,7 +496,7 @@ function TaskRows({ tasks, role, timezone, onCompleted, members }: {
     try { await mutations.cancel.mutateAsync(taskId); }
     catch (error) { setCancelError({ taskId, message: readableError(error) }); }
   };
-  return <>{tasks.map((task, index) => <article key={task.task_id} className="grid gap-3 border-b py-5 last:border-b-0 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+  return <>{tasks.map((task, index) => <article key={task.task_id} className="grid gap-3 border-b py-5 last:border-b-0">
     <div className="min-w-0">
       <div className="flex items-start gap-2">
         <span className="pt-0.5 font-mono text-xs text-muted-foreground">{String(index + 1).padStart(2, '0')}</span>
@@ -514,23 +526,31 @@ export default function EducationPage() {
   const role = member?.role ?? 'student';
   const members = useEducationMembers(role === 'parent');
   const assignments = useLearningAssignments(role === 'student');
+  const mutations = useEducationTaskMutations();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createDate, setCreateDate] = useState('');
   const [completionMessage, setCompletionMessage] = useState('');
-  return <main className="h-full min-h-0 overflow-y-auto bg-canvas" data-testid="education-page" style={{ backgroundColor: 'var(--color-bg-canvas)' }}>
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-3 py-5 pb-24 sm:px-6 md:pb-8 lg:px-8 lg:py-8">
+  const create = async (input: ParentCreateInput) => {
+    await mutations.create.mutateAsync({ idempotency_key: input.idempotencyKey, assigned_student_id: input.assignedStudentId, title: input.title, description: input.description, due_at: householdWallClockToIso(input.dueAt, dictionaries.data?.timezone ?? 'UTC'), subject_code: input.subjectCode, type_code: input.typeCode, practice_source_code: input.practiceSourceCode, frequency: input.frequency, weekdays: input.weekdays, material_asset_ids: input.materialAssetIds });
+  };
+  return <main className="h-full min-h-0 overflow-y-auto bg-canvas lg:overflow-hidden" data-testid="education-page" style={{ backgroundColor: 'var(--color-bg-canvas)' }}>
+    <div className="flex w-full flex-col gap-5 px-3 py-5 pb-24 sm:px-6 md:pb-8 lg:h-full lg:px-6 lg:py-5">
       <p role="status" className="sr-only">{completionMessage}</p>
       {dictionaries.isError ? <p role="alert">作业设置加载失败，请刷新重试。</p> : !dictionaries.data ? <p role="status" className="p-6 text-sm text-muted-foreground">正在加载作业…</p> : <EducationNotebook
         key={`${member?.user_id}:${dictionaries.data.timezone}`}
         role={role} dictionaries={dictionaries.data} members={members.data ?? []}
-        actions={role === 'parent' ? <><Link to="/textbooks"><Button variant="outline">教材加工</Button></Link><Link to="/education/tasks/new"><Button><ClipboardPlus className="mr-2 size-4" aria-hidden="true" />创建作业</Button></Link></> : null}
+        onCreateTask={role === 'parent' ? date => { setCreateDate(date); setCreateOpen(true); } : undefined}
         renderTasks={tasks => <TaskRows tasks={tasks} role={role} timezone={dictionaries.data!.timezone} members={members.data ?? []} onCompleted={() => setCompletionMessage('打卡成功，获得 1 积分。')} />}
-      />}
-      {role === 'student' && <section aria-label="已分配教材" className="rounded-xl border bg-card px-4 py-5 sm:px-6">
+      >
+      {role === 'student' && <section aria-label="已分配教材" className="rounded-lg border bg-card px-4 py-5 sm:px-6">
         <h2 className="text-base font-semibold">我的教材</h2>
         {assignments.isLoading ? <p className="py-4 text-sm text-muted-foreground">正在加载学习材料…</p> : assignments.isError ? <p role="alert" className="py-4 text-sm text-muted-foreground">学习材料加载失败，请刷新重试。</p> : !(assignments.data ?? []).length ? <p className="py-4 text-sm text-muted-foreground">暂未分配教材。</p> : assignments.data?.map(assignment => <article key={assignment.assignment_id} className="flex flex-wrap items-center justify-between gap-3 border-b py-4 last:border-0">
           <div><h3 className="text-sm font-semibold">{assignment.textbook_title}</h3><p className="mt-1 text-sm text-muted-foreground">{assignment.completed_knowledge_point_count}/{assignment.knowledge_point_count} 个知识点已学习</p></div>
           <Link to={`/education/learn/${assignment.assignment_id}`}><Button size="sm" className="min-h-11">继续学习</Button></Link>
         </article>)}
       </section>}
+      </EducationNotebook>}
     </div>
+    {role === 'parent' && <ParentCreateDialog students={(members.data ?? []).filter(item => item.role === 'student')} dictionaries={dictionaries.data} onSubmit={create} isPending={mutations.create.isPending} open={createOpen} onOpenChange={setCreateOpen} initialDate={createDate} />}
   </main>;
 }

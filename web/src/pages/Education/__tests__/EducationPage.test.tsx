@@ -146,6 +146,20 @@ beforeEach(() => {
 });
 
 describe('EducationPage', () => {
+  it('prefills the drawer from any double-clicked date and creates in the household timezone', async () => {
+    state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
+    state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    fireEvent.doubleClick(screen.getByRole('button', { name: /2026-08-23/ }));
+    const drawer = screen.getByRole('dialog');
+    expect(within(drawer).getByLabelText('截止时间')).toHaveValue('2026-08-23T20:00');
+    fireEvent.click(within(drawer).getByRole('button', { name: '创建作业' }));
+    await waitFor(() => expect(state.create).toHaveBeenCalledWith(expect.objectContaining({ due_at: '2026-08-23T11:00:00.000Z', frequency: 'once' })));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /2026-08-01/ }));
+    fireEvent.click(screen.getByRole('button', { name: '创建作业' }));
+    expect(screen.getByLabelText('截止时间')).toHaveValue('2026-08-01T20:00');
+  });
   it('creates a classified practice task with its required source', async () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];
@@ -155,7 +169,8 @@ describe('EducationPage', () => {
 
     expect(screen.getByRole('heading', { name: '家庭作业' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '反馈' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '创建作业' })).toHaveAttribute('href', '/education/tasks/new');
+    expect(screen.getByRole('button', { name: '创建作业' })).toBeVisible();
+    expect(screen.queryByRole('link', { name: '教材加工' })).not.toBeInTheDocument();
     educationPage.unmount();
 
     renderCreateHomeworkPage();
