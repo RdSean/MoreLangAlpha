@@ -1,21 +1,16 @@
 import { useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ChevronLeft, ChevronRight, ImageOff, RotateCw } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { pokemonCardImageUrl, type PokemonCard } from './pokemonApi';
 import { usePokemonCatalog } from './pokemonQueries';
+import PokemonCardImage from '@/components/education/PokemonCardImage';
 import './PokemonCardsPage.css';
 
 function CardImage({ card, eager = false }: { card: PokemonCard; eager?: boolean }) {
-  const [failed, setFailed] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const url = pokemonCardImageUrl(card.card_id);
-  return <div className="pokemon-card-image" style={{ aspectRatio: `${card.image_width} / ${card.image_height}` }}>
-    {failed ? <div className="pokemon-image-error"><ImageOff size={24} aria-hidden="true" /><span>卡图暂不可用</span><Button variant="ghost" size="icon" title="重新加载" aria-label={`重新加载${card.name}卡图`} onClick={() => { setAttempt(value => value + 1); setFailed(false); }}><RotateCw size={16} aria-hidden="true" /></Button></div>
-      : <img src={attempt ? `${url}?retry=${attempt}` : url} alt={`${card.name} · ${card.card_number}`} width={card.image_width} height={card.image_height} loading={eager ? 'eager' : 'lazy'} decoding="async" onError={() => setFailed(true)} />}
-  </div>;
+  return <PokemonCardImage card={card} url={pokemonCardImageUrl(card.card_id)} eager={eager} />;
 }
 
 export default function PokemonCardsPage() {

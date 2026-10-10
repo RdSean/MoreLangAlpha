@@ -1,0 +1,74 @@
+.rewards-page { height: 100%; overflow-y: auto; background: var(--color-bg-page); color: var(--color-text-primary); padding: 20px 28px 48px; }
+.rewards-shell { max-width: 1400px; margin: auto; }
+.rewards-back { display: inline-flex; gap: 8px; align-items: center; min-height: 44px; font-size: 13px; color: var(--color-text-secondary); }
+.rewards-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 0 24px; gap: 20px; border-bottom: 1px solid var(--color-border-muted); }
+.rewards-header h1 { font-size: 24px; font-weight: 600; }
+.rewards-page label, .reward-settings label { display: flex; align-items: center; gap: 12px; font-size: 13px; }
+.rewards-page select { min-height: 44px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--color-border-muted); border-radius: 6px; background: var(--color-bg-input); color: var(--color-text-primary); }
+.rewards-summary { display: grid; grid-template-columns: 1.2fr 1fr 1.5fr 1.2fr 44px; align-items: start; gap: 24px; padding: 24px 0; border-bottom: 1px solid var(--color-border-muted); }
+.rewards-summary > div:not(.reward-balance) { display: grid; gap: 8px; }
+.rewards-summary span { font-size: 12px; color: var(--color-text-secondary); }
+.rewards-summary strong { display: block; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rewards-summary small { font-size: 12px; font-weight: 400; color: var(--color-text-secondary); }
+.reward-balance { display: flex; align-items: center; gap: 14px; }
+.reward-streak progress { appearance: none; border: 0; width: 100%; height: 5px; background: var(--color-bg-input); }
+.reward-streak progress::-webkit-progress-bar { background: var(--color-bg-input); }
+.reward-streak progress::-webkit-progress-value { background: var(--color-text-secondary); }
+.reward-streak progress::-moz-progress-bar { background: var(--color-text-secondary); }
+.rewards-navigation { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid var(--color-border-muted); margin-bottom: 24px; }
+.rewards-navigation nav { display: flex; gap: 24px; min-width: 0; }
+.rewards-navigation nav button { min-height: 52px; font-size: 14px; color: var(--color-text-secondary); border-bottom: 2px solid transparent; white-space: nowrap; }
+.rewards-navigation nav button.active { color: var(--color-text-primary); border-color: var(--color-text-primary); }
+.rewards-navigation > button { gap: 6px; min-height: 44px; }
+.rewards-pack-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.reward-pack { min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 24px; border: 1px solid var(--color-border-muted); border-radius: 8px; background: var(--color-bg-card); }
+.reward-pack-art { height: 88px; display: flex; justify-content: center; align-items: center; gap: 12px; color: var(--color-text-secondary); }
+.reward-pack h2 { font-size: 16px; font-weight: 600; }
+.reward-pack p, .reward-pack time { font-size: 13px; color: var(--color-text-secondary); }
+.reward-pack time { font-family: var(--font-label); }
+.reward-pack > button { min-height: 44px; margin-top: auto; gap: 8px; }
+.reward-price { display: flex; gap: 8px; align-items: center; }
+.reward-probabilities { font-size: 12px; display: grid; gap: 8px; padding: 12px 0; }
+.reward-probabilities > div { display: flex; justify-content: space-between; gap: 12px; }
+.reward-probabilities dt { color: var(--color-text-secondary); }
+.reward-probabilities dd { font-family: var(--font-label); }
+.rewards-empty { display: grid; justify-items: center; gap: 16px; padding: 64px 12px; color: var(--color-text-secondary); font-size: 14px; }
+.reward-notice { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 12px 0; margin-bottom: 16px; font-size: 13px; border-bottom: 1px solid var(--color-border-muted); }
+.reward-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; padding-bottom: 20px; }
+.reward-filters > span { font-size: 12px; color: var(--color-text-secondary); margin-left: auto; }
+.reward-record-heading { font-size: 18px; font-weight: 600; padding-bottom: 16px; }
+.reward-transactions li { display: flex; justify-content: space-between; gap: 20px; align-items: center; border-bottom: 1px solid var(--color-border-muted); padding: 16px 0; }
+.reward-transactions li > div { display: grid; gap: 8px; min-width: 0; }
+.reward-transactions strong { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.reward-transactions time { font-size: 12px; color: var(--color-text-secondary); }
+.reward-transactions li > span { flex-shrink: 0; font-family: var(--font-label); font-size: 13px; }
+.reward-purchase-dialog { width: calc(100% - 32px); max-width: 440px; }
+.reward-purchase-dialog p { font-size: 13px; }
+.reward-purchase-dialog button, .reward-detail-dialog > button { min-height: 44px; }
+.reward-result { font-size: 13px; margin-top: 20px; color: var(--color-text-secondary); }
+.reward-detail-dialog h2 { font-size: 18px; font-weight: 600; }
+.reward-detail-dialog .pokemon-card-image { animation: reward-arrive 250ms ease-out; }
+.reward-settings-shell { max-width: 760px; margin: auto; }
+.reward-price-setting { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; padding: 24px 0; border-bottom: 1px solid var(--color-border-muted); }
+.reward-price-setting h2 { font-size: 16px; font-weight: 600; }
+.reward-price-setting label { align-items: flex-start; flex-direction: column; }
+.reward-price-input { display: flex; align-items: center; gap: 12px; }
+.reward-price-input input { width: 120px; min-height: 44px; }
+.reward-settings footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 24px 0; font-size: 13px; }
+.reward-settings footer button { min-height: 44px; gap: 8px; }
+@keyframes reward-arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .reward-detail-dialog .pokemon-card-image { animation: none; } }
+@media (max-width: 900px) { .rewards-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 16px; } .rewards-summary > button { grid-column: 2; justify-self: end; } }
+@media (max-width: 639px) {
+  .rewards-page { padding: 12px 16px 32px; }
+  .rewards-header h1 { font-size: 20px; }
+  .rewards-header { flex-wrap: wrap; gap: 12px; }
+  .rewards-navigation { flex-wrap: wrap; gap: 0; }
+  .rewards-navigation nav { flex: 1; gap: 20px; }
+  .rewards-navigation > button { font-size: 12px; padding: 0 8px; }
+  .rewards-pack-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .reward-pack { padding: 20px; }
+  .reward-pack-art { height: 64px; }
+  .reward-filters { align-items: stretch; }
+  .reward-filters label { flex: 1; flex-direction: column; align-items: stretch; min-width: 110px; }
+}

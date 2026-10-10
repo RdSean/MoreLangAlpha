@@ -18,6 +18,8 @@ export const routeChunks = {
   personalizedSummary: () => import('../../pages/Education/PersonalizedSummaryPage'),
   settings: () => import('../../pages/Settings/Settings'),
   pokemonCards: () => import('../../pages/Settings/PokemonCardsPage'),
+  educationRewards: () => import('../../pages/Education/RewardsPage'),
+  rewardSettings: () => import('../../pages/Settings/RewardSettingsPage'),
 };
 
 /** Warm a route chunk while the authenticated-user gate is resolving. */
@@ -27,6 +29,14 @@ export function preloadRouteChunk(pathname: string): void {
   const segment = segments[0] || 'dashboard';
   if (segment === 'settings' && segments[1] === 'pokemon-cards') {
     void routeChunks.pokemonCards().catch(() => {});
+    return;
+  }
+  if (segment === 'education' && segments[1] === 'rewards') {
+    void routeChunks.educationRewards().catch(() => {});
+    return;
+  }
+  if (segment === 'settings' && segments[1] === 'reward-settings') {
+    void routeChunks.rewardSettings().catch(() => {});
     return;
   }
   if (segment === 'documents' && segments[1]) {

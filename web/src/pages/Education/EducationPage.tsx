@@ -14,9 +14,10 @@ import { createRequestKeyTracker } from '@/pages/ChatAgent/hooks/utils/requestKe
 import { deleteEducationAsset, uploadEducationAsset } from './api';
 import { useEducationHomeworkDictionaries, useEducationMembers, useEducationTaskMutations, useLearningAssignments } from './queries';
 import EducationNotebook from './EducationNotebook';
+import EducationRewardBadge from './EducationRewardBadge';
 import HomeworkTaskDetail from './HomeworkTaskDetail';
 import { createCompletionSound } from './completionSound';
-import type { CreateEducationTaskInput, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskStatus } from './types';
+import type { CreateEducationTaskInput, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskStatus, EducationTaskSubmission } from './types';
 
 const statusLabels: Record<EducationTaskStatus, string> = {
   open: '待完成',
@@ -347,7 +348,7 @@ export function ParentCreateDialog({ students, dictionaries, onSubmit, isPending
   </Dialog>;
 }
 
-function TaskActions({ task, role, onCompleted }: { task: EducationTask; role: 'parent' | 'student'; onCompleted?: () => void }) {
+function TaskActions({ task, role, onCompleted }: { task: EducationTask; role: 'parent' | 'student'; onCompleted?: (submission?: EducationTaskSubmission) => void }) {
   const mutations = useEducationTaskMutations();
   const [text, setText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
@@ -425,12 +426,13 @@ function TaskActions({ task, role, onCompleted }: { task: EducationTask; role: '
   const checkIn = () => {
     const sound = createCompletionSound();
     return runAction(async () => {
+    let checked: EducationTaskSubmission | undefined;
     await submitWithAttachments('check-in', async (idempotencyKey, assetIds) => {
-      await mutations.checkIn.mutateAsync({ taskId: task.task_id, submission_text: text, idempotency_key: idempotencyKey, asset_ids: assetIds });
+      checked = await mutations.checkIn.mutateAsync({ taskId: task.task_id, submission_text: text, idempotency_key: idempotencyKey, asset_ids: assetIds });
     });
     resetSubmission();
     sound.play();
-    onCompleted?.();
+    onCompleted?.(checked);
     setCheckInOpen(false);
     }).finally(() => sound.close());
   };
@@ -485,7 +487,7 @@ function TaskRecordDialog({ task }: { task: EducationTask }) {
 
 function TaskRows({ tasks, role, timezone, onCompleted, members }: {
   tasks: EducationTask[]; role: 'parent' | 'student'; timezone: string;
-  onCompleted?: () => void; members: EducationMember[];
+  onCompleted?: (submission?: EducationTaskSubmission) => void; members: EducationMember[];
 }) {
   useTranslation();
   const formatDue = useMemo(() => createDateFormatter({ timeZone: timezone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }), [timezone]);
@@ -535,12 +537,13 @@ export default function EducationPage() {
   };
   return <main className="h-full min-h-0 overflow-y-auto bg-canvas lg:overflow-hidden" data-testid="education-page" style={{ backgroundColor: 'var(--color-bg-canvas)' }}>
     <div className="flex w-full flex-col gap-5 px-3 py-5 pb-24 sm:px-6 md:pb-8 lg:h-full lg:px-6 lg:py-5">
-      <p role="status" className="sr-only">{completionMessage}</p>
+      {completionMessage && <div role="status" className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b pb-3 text-sm"><p>{completionMessage}</p><Link className="inline-flex min-h-11 items-center gap-2" to="/education/rewards">查看学习奖励</Link></div>}
       {dictionaries.isError ? <p role="alert">作业设置加载失败，请刷新重试。</p> : !dictionaries.data ? <p role="status" className="p-6 text-sm text-muted-foreground">正在加载作业…</p> : <EducationNotebook
         key={`${member?.user_id}:${dictionaries.data.timezone}`}
         role={role} dictionaries={dictionaries.data} members={members.data ?? []}
+        renderRewards={(studentId, today) => <EducationRewardBadge selectedStudentId={studentId} today={today} />}
         onCreateTask={role === 'parent' ? date => { setCreateDate(date); setCreateOpen(true); } : undefined}
-        renderTasks={tasks => <TaskRows tasks={tasks} role={role} timezone={dictionaries.data!.timezone} members={members.data ?? []} onCompleted={() => setCompletionMessage('打卡成功，获得 1 积分。')} />}
+        renderTasks={tasks => <TaskRows tasks={tasks} role={role} timezone={dictionaries.data!.timezone} members={members.data ?? []} onCompleted={submission => setCompletionMessage(submission?.reward_status === 'pending' ? '打卡成功，奖励稍后到账。' : submission?.reward_summary?.today_rewarded ? '打卡成功，今日补给包已到账。' : '打卡成功。')} />}
       >
       {role === 'student' && <section aria-label="已分配教材" className="rounded-lg border bg-card px-4 py-5 sm:px-6">
         <h2 className="text-base font-semibold">我的教材</h2>

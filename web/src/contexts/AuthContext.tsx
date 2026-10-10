@@ -7,6 +7,7 @@ import { resetNavPanelExpansion } from '@/pages/ChatAgent/components/navExpansio
 import { resetStableNavOrder } from '@/pages/ChatAgent/hooks/useNavigationData';
 import { resetSharedWorkspaceThreads } from '@/lib/navThreadsStore';
 import { runAuthResets } from '@/lib/authResets';
+import '@/pages/Education/rewardPurchaseStorage';
 
 export interface AuthMember {
   user_id: string;

@@ -101,4 +101,17 @@ describe('AuthContext', () => {
       timezone: 'Asia/Tokyo',
     });
   });
+
+  it('clears persisted reward requests on logout without opening the rewards page', async () => {
+    apiGet.mockResolvedValue({ data: member }); apiPost.mockResolvedValue({ data: {} });
+    localStorage.setItem('education-reward-purchase:household-1/student', '{}');
+    localStorage.setItem('theme', 'nasa');
+    let auth: ReturnType<typeof useAuth> | undefined;
+    function Capture() { auth = useAuth(); return null; }
+    renderWithQueryClient(<AuthProvider><Capture /></AuthProvider>);
+    await waitFor(() => expect(auth?.isInitialized).toBe(true));
+    await act(async () => { await auth!.logout(); });
+    expect(localStorage.getItem('education-reward-purchase:household-1/student')).toBeNull();
+    expect(localStorage.getItem('theme')).toBe('nasa');
+  });
 });

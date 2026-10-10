@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { ArrowRight, GalleryVerticalEnd, MessageSquarePlus, Plus, UserRound } from 'lucide-react';
+import { ArrowRight, Coins, GalleryVerticalEnd, MessageSquarePlus, Plus, UserRound } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -117,6 +117,9 @@ export function FamilyAccountsTab({ onOpenChild }: FamilyAccountsTabProps) {
     <Link to="/settings/pokemon-cards" className="flex min-h-16 items-center justify-between gap-4 border-t py-4" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-primary)' }}>
       <span className="flex items-center gap-3"><GalleryVerticalEnd className="size-5" aria-hidden="true" /><span className="text-sm font-medium">宝可梦卡牌</span></span>
       <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
+    </Link>
+    <Link to="/settings/reward-settings" className="flex min-h-16 items-center justify-between gap-4 border-t py-4" style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-primary)' }}>
+      <span className="flex items-center gap-3"><Coins className="size-5" aria-hidden="true" /><span className="text-sm font-medium">奖励设置</span></span><ArrowRight className="size-4 shrink-0" aria-hidden="true" />
     </Link>
   </section>;
 }

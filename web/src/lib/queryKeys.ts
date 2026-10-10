@@ -154,6 +154,10 @@ export const queryKeys = {
   education: {
     all: ['education'],
     pokemonCatalog: (userId: string, params: object) => [...queryKeys.education.all, 'pokemon-catalog', userId, params],
+    rewards: (scope: { viewer: string; student: string }) => [...queryKeys.education.all, 'rewards', scope],
+    rewardSummary: (scope: { viewer: string; student: string }, today: string) => [...queryKeys.education.rewards(scope), 'summary', today],
+    rewardRecords: (scope: { viewer: string; student: string }, kind: string, params?: object) => [...queryKeys.education.rewards(scope), kind, ...(params ? [params] : [])],
+    rewardSettings: (viewer: string) => [...queryKeys.education.all, 'reward-settings', viewer],
     dictionaries: () => [...queryKeys.education.all, 'dictionaries'],
     members: () => [...queryKeys.education.all, 'members'],
     tasks: () => [...queryKeys.education.all, 'tasks'],

@@ -29,6 +29,8 @@ const PersonalizedSummary = React.lazy(routeChunks.personalizedSummary);
 const Plugins = React.lazy(routeChunks.plugins);
 const Settings = React.lazy(routeChunks.settings);
 const PokemonCards = React.lazy(routeChunks.pokemonCards);
+const Rewards = React.lazy(routeChunks.educationRewards);
+const RewardSettings = React.lazy(routeChunks.rewardSettings);
 
 function Main() {
   const location = useLocation();
@@ -51,6 +53,8 @@ function Main() {
         <Route path="/plugins" element={<Plugins />} />
         <Route path="/connectors" element={<LegacyConnectorsRedirect />} />
         <Route path="/education" element={<Education />} />
+        <Route path="/education/rewards" element={<Rewards />} />
+        <Route path="/settings/reward-settings" element={<RewardSettings />} />
         <Route path="/education/tasks/new" element={<CreateHomework />} />
         <Route path="/textbooks" element={<TextbookLibrary />} />
         <Route path="/textbooks/:textbookId" element={<TextbookWorkbench />} />

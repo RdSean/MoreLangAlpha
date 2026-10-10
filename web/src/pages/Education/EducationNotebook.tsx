@@ -45,9 +45,10 @@ interface Props {
   onCreateTask?: (date: string) => void;
   children?: ReactNode;
   renderTasks: (tasks: EducationTask[]) => ReactNode;
+  renderRewards?: (studentId: string, today: string) => ReactNode;
 }
 
-export default function EducationNotebook({ role, dictionaries, members, actions, onCreateTask, children, renderTasks }: Props) {
+export default function EducationNotebook({ role, dictionaries, members, actions, onCreateTask, children, renderTasks, renderRewards }: Props) {
   useTranslation();
   const [today, setToday] = useState(() => householdToday(dictionaries.timezone));
   const [selectedDate, setSelectedDate] = useState(today);
@@ -89,11 +90,12 @@ export default function EducationNotebook({ role, dictionaries, members, actions
 
   return <>
     <header className="flex shrink-0 flex-wrap items-center justify-between gap-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="flex size-12 items-center justify-center rounded-full border bg-card"><img src={pokemonball} className="size-8" alt="" aria-hidden="true" /></div>
         <div><p className="text-xs text-muted-foreground">{role === 'parent' && !studentId ? '孩子们的累计积分' : '累计积分'}</p>
           <p aria-label="累计积分" aria-live="polite" className="text-xl font-semibold tabular-nums">{hasData ? calendar.data?.stats.total_points ?? '—' : '—'} <span className="text-xs font-normal text-muted-foreground">分</span></p>
         </div>
+        {renderRewards?.(studentId, today)}
       </div>
       <div className="flex flex-wrap gap-2">{actions}{role === 'parent' && onCreateTask && <Button onClick={() => onCreateTask(selectedDate)}><ClipboardPlus className="mr-2 size-4" aria-hidden="true" />创建作业</Button>}</div>
     </header>

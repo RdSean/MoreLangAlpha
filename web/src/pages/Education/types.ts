@@ -89,6 +89,8 @@ export interface EducationTaskSubmission {
   idempotency_key?: string | null;
   submission_kind?: 'check_in' | 'revision' | null;
   created_at?: string | null;
+  reward_status?: 'ready' | 'pending' | null;
+  reward_summary?: import('./rewardsApi').RewardSummary | null;
 }
 
 export interface EducationTaskReview {
