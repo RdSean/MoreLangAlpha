@@ -153,6 +153,7 @@ export const queryKeys = {
   },
   education: {
     all: ['education'],
+    pokemonCatalog: (userId: string, params: object) => [...queryKeys.education.all, 'pokemon-catalog', userId, params],
     dictionaries: () => [...queryKeys.education.all, 'dictionaries'],
     members: () => [...queryKeys.education.all, 'members'],
     tasks: () => [...queryKeys.education.all, 'tasks'],

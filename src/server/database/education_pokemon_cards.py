@@ -32,6 +32,51 @@ CARD_COLUMNS = (
 )
 
 
+async def list_pokemon_cards(
+    *, page: int, page_size: int, set_code: str | None
+) -> dict:
+    """Return a bounded page in numeric card order, with all available series."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                "SELECT set_code, series_name, count(*) AS total "
+                "FROM education_pokemon_cards GROUP BY set_code, series_name "
+                "ORDER BY set_code, series_name"
+            )
+            series = await cur.fetchall()
+            total = sum(
+                row["total"]
+                for row in series
+                if set_code is None or row["set_code"] == set_code
+            )
+            page = min(page, max(1, (total + page_size - 1) // page_size))
+            await cur.execute(
+                """SELECT * FROM education_pokemon_cards
+                   WHERE (%s::text IS NULL OR set_code = %s)
+                   ORDER BY set_code,
+                            substring(source_card_id FROM '-([0-9]+)')::numeric NULLS LAST,
+                            source_card_id
+                   LIMIT %s OFFSET %s""",
+                (set_code, set_code, page_size, (page - 1) * page_size),
+            )
+            return {
+                "items": await cur.fetchall(),
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "series": series,
+            }
+
+
+async def get_pokemon_card(card_id: str) -> dict | None:
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                "SELECT * FROM education_pokemon_cards WHERE card_id = %s", (card_id,)
+            )
+            return await cur.fetchone()
+
+
 async def check_catalog_schema() -> None:
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:

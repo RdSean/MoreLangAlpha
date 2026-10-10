@@ -17,6 +17,7 @@ export const routeChunks = {
   studentTextbookLearning: () => import('../../pages/Education/StudentTextbookLearningPage'),
   personalizedSummary: () => import('../../pages/Education/PersonalizedSummaryPage'),
   settings: () => import('../../pages/Settings/Settings'),
+  pokemonCards: () => import('../../pages/Settings/PokemonCardsPage'),
 };
 
 /** Warm a route chunk while the authenticated-user gate is resolving. */
@@ -24,6 +25,10 @@ export function preloadRouteChunk(pathname: string): void {
   const chunkFor: Record<string, () => Promise<unknown>> = routeChunks;
   const segments = pathname.split('/').filter(Boolean);
   const segment = segments[0] || 'dashboard';
+  if (segment === 'settings' && segments[1] === 'pokemon-cards') {
+    void routeChunks.pokemonCards().catch(() => {});
+    return;
+  }
   if (segment === 'documents' && segments[1]) {
     void routeChunks.documentDetail().catch(() => {});
     return;

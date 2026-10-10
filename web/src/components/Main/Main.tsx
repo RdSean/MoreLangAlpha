@@ -28,6 +28,7 @@ const StudentTextbookLearning = React.lazy(routeChunks.studentTextbookLearning);
 const PersonalizedSummary = React.lazy(routeChunks.personalizedSummary);
 const Plugins = React.lazy(routeChunks.plugins);
 const Settings = React.lazy(routeChunks.settings);
+const PokemonCards = React.lazy(routeChunks.pokemonCards);
 
 function Main() {
   const location = useLocation();
@@ -60,6 +61,7 @@ function Main() {
         <Route path="/education/learn/:assignmentId" element={<StudentTextbookLearning />} />
         <Route path="/education/learn/:assignmentId/summary" element={<PersonalizedSummary />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/settings/pokemon-cards" element={<PokemonCards />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Suspense>

@@ -6,6 +6,8 @@ from psycopg.errors import CheckViolation
 
 from src.server.database.education_pokemon_cards import (
     check_catalog_schema,
+    get_pokemon_card,
+    list_pokemon_cards,
     upsert_pokemon_cards,
 )
 
@@ -82,6 +84,30 @@ async def test_catalog_batch_rolls_back_and_rejects_non_catalog_objects(
         )
     ).fetchone()
     assert count["n"] == 0
+
+
+async def test_catalog_pages_in_numeric_order_and_filters_sets(
+    db_conn, patched_get_db_connection
+):
+    await db_conn.execute("TRUNCATE education_pokemon_cards")
+    await upsert_pokemon_cards(
+        [record(f"test-{n}") for n in (10, 1, 2)]
+        + [{**record("other-1"), "set_code": "other", "series_name": "Other"}]
+    )
+    first = await list_pokemon_cards(page=1, page_size=2, set_code="test")
+    assert [item["source_card_id"] for item in first["items"]] == ["test-1", "test-2"]
+    assert first["total"] == 3
+    assert len(first["series"]) == 2
+    last = await list_pokemon_cards(page=999, page_size=2, set_code="test")
+    assert last["page"] == 2
+    assert [item["source_card_id"] for item in last["items"]] == ["test-10"]
+    assert (await get_pokemon_card(str(first["items"][0]["card_id"])))[
+        "image_key"
+    ] == first["items"][0]["image_key"]
+    assert await get_pokemon_card(str(uuid4())) is None
+    empty = await list_pokemon_cards(page=999, page_size=20, set_code="missing")
+    assert empty["items"] == [] and empty["total"] == 0 and empty["page"] == 1
+    assert (await list_pokemon_cards(page=1, page_size=20, set_code=None))["total"] == 4
 
 
 async def test_migration_roundtrip_preserves_existing_family_calendar(

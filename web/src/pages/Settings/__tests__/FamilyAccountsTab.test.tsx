@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FamilyAccountsTab } from '../panels/FamilyAccountsTab';
@@ -39,7 +40,7 @@ vi.mock('../queries', () => ({
 
 function renderTab() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={queryClient}><FamilyAccountsTab onOpenChild={vi.fn()} /></QueryClientProvider>);
+  return render(<MemoryRouter><QueryClientProvider client={queryClient}><FamilyAccountsTab onOpenChild={vi.fn()} /></QueryClientProvider></MemoryRouter>);
 }
 
 beforeEach(() => {
@@ -73,6 +74,7 @@ describe('FamilyAccountsTab', () => {
     renderTab();
 
     expect(screen.getByRole('heading', { name: '家庭账户' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '宝可梦卡牌' })).toHaveAttribute('href', '/settings/pokemon-cards');
     expect(screen.getByText('小明')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '查看对话' })).toBeInTheDocument();
 

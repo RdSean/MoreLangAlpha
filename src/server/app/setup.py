@@ -1075,6 +1075,7 @@ from src.server.app.user_events import router as user_events_router
 from src.server.app.auth import router as auth_router
 from src.server.app.education.assets import router as education_assets_router
 from src.server.app.education.calendar import router as education_calendar_router
+from src.server.app.education.pokemon_cards import router as education_pokemon_cards_router
 from src.server.app.education.router import router as education_tasks_router
 from src.server.app.education.textbooks import router as education_textbooks_router
 from src.server.app.users import router as users_router
@@ -1144,6 +1145,7 @@ app.include_router(
 )  # /api/v1/auth/* - Local accounts and household membership
 app.include_router(family_llm_router)  # /api/v1/family/* - Shared household models
 app.include_router(education_calendar_router)
+app.include_router(education_pokemon_cards_router)
 app.include_router(
     education_assets_router
 )  # /api/v1/education/assets/* - Private attachments
