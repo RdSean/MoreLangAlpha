@@ -4,7 +4,7 @@ const parent = { user_id: 'parent-1', name: '家长', role: 'parent', household_
 const student = { ...parent, user_id: 'student-1', name: '小林', role: 'student', grade_code: 'g4' };
 const dictionaries = {
   timezone: 'Asia/Tokyo',
-  subjects: ['chinese', 'math', 'english', 'science'].map((code, index) => ({ code, name: ['语文', '数学', '英语', '科学'][index], sort_order: index, color: '', homework_types: [] })),
+  subjects: ['chinese', 'math', 'english', 'science'].map((code, index) => ({ code, name: ['语文', '数学', '英语', '科学'][index], sort_order: index, color: ['#D95D39', '#277DA1', '#43AA8B', '#F9C74F'][index], homework_types: [] })),
   grade_levels: [], practice_sources: [],
 };
 const homework = {
@@ -44,7 +44,7 @@ for (const role of ['parent', 'student']) for (const width of [375, 1440]) {
           stats: { today_count: 1, week_count: 0, overdue_count: 0, completed_count: completed ? 1 : 0, total_points: completed ? 13 : 12 },
           days: [
             { date: '2026-10-11', task_count: 1, completed_count: completed ? 1 : 0, overdue_count: 0, tasks: [task()] },
-            { date: '2026-10-12', task_count: 1, completed_count: 0, overdue_count: 0, tasks: [{ ...task(), task_id: 'task-2', title: '观察植物', subject_code: 'science', status: 'open' }] },
+            { date: '2026-10-12', task_count: 5, completed_count: 0, overdue_count: 0, tasks: Array.from({ length: 5 }, (_, index) => ({ ...task(), task_id: `extra-${index}`, title: `观察植物 ${index + 1}`, subject_code: index === 1 ? 'math' : 'science', status: 'open' })) },
           ],
         } });
       },
@@ -67,6 +67,7 @@ for (const role of ['parent', 'student']) for (const width of [375, 1440]) {
     for (const subject of ['语文', '数学', '英语']) await expect(page.getByRole('heading', { name: subject, exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: '科学', exact: true })).toHaveCount(0);
     await expect(page.getByText('今日未布置')).toHaveCount(2);
+    await expect(page.getByRole('button', { name: /2026-10-12/ }).getByText('+3', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: /2026-10-12/ }).click();
     await expect(page.getByRole('heading', { name: '科学', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: homework.title })).toHaveCount(0);

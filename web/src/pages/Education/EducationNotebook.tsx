@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, Star } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import pokemonball from '@/assets/img/pokemonball.svg';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { createDateFormatter } from '@/lib/format';
 import { calendarMonth, householdToday, parseDate, dateString } from './calendarDates';
 import { useEducationTaskCalendar } from './queries';
-import type { EducationHomeworkDictionaries, EducationMember, EducationTask } from './types';
+import type { EducationCalendarTask, EducationHomeworkDictionaries, EducationMember, EducationTask } from './types';
 
 const coreSubjects = [
   { code: 'chinese', name: '语文' },
@@ -14,6 +15,26 @@ const coreSubjects = [
   { code: 'english', name: '英语' },
 ];
 const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+function HomeworkDots({ tasks, dictionaries }: { tasks: EducationCalendarTask[]; dictionaries: EducationHomeworkDictionaries }) {
+  // One circle per homework item; compact overflow keeps seven columns usable on phones.
+  const visible = tasks.length > 3 ? tasks.slice(0, 2) : tasks;
+  return <span aria-hidden="true" className="isolate flex items-center justify-center -space-x-2 sm:-space-x-2.5">
+    {visible.map(task => {
+      const subject = dictionaries.subjects.find(item => item.code === task.subject_code);
+      const color = subject?.color || task.subject_color || 'var(--color-text-secondary)';
+      const hex = /^#([0-9a-f]{6})$/i.exec(color)?.[1];
+      const channels = hex ? [0, 2, 4].map(offset => {
+        const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      }) : null;
+      const light = channels && channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722 > 0.179;
+      return <span key={task.task_id} title={`${subject?.name ?? '作业'}：${task.title}`} className="relative flex size-[18px] shrink-0 items-center justify-center rounded-full border border-card text-[9px] font-semibold sm:size-7 sm:border-2 sm:text-xs"
+        style={{ backgroundColor: color, color: light ? 'var(--color-text-primary)' : 'var(--color-bg-card)' }}>{(subject?.name ?? '作业').slice(0, 1)}</span>;
+    })}
+    {tasks.length > 3 && <span className="relative flex size-[18px] shrink-0 items-center justify-center rounded-full border border-card bg-[var(--color-text-primary)] text-[8px] font-semibold text-[var(--color-bg-card)] sm:size-7 sm:border-2 sm:text-[11px]">+{tasks.length - 2}</span>}
+  </span>;
+}
+
 interface Props {
   role: 'parent' | 'student';
   dictionaries: EducationHomeworkDictionaries;
@@ -56,7 +77,7 @@ export default function EducationNotebook({ role, dictionaries, members, actions
   return <>
     <header className="flex flex-wrap items-center justify-between gap-4">
       <div className="flex items-center gap-3">
-        <div className="flex size-12 items-center justify-center rounded-full border bg-card"><Star className="size-6" aria-hidden="true" /></div>
+        <div className="flex size-12 items-center justify-center rounded-full border bg-card"><img src={pokemonball} className="size-8" alt="" aria-hidden="true" /></div>
         <div><p className="text-xs text-muted-foreground">{role === 'parent' && !studentId ? '孩子们的累计积分' : '累计积分'}</p>
           <p aria-label="累计积分" aria-live="polite" className="text-xl font-semibold tabular-nums">{hasData ? calendar.data?.stats.total_points ?? '—' : '—'} <span className="text-xs font-normal text-muted-foreground">分</span></p>
         </div>
@@ -86,11 +107,10 @@ export default function EducationNotebook({ role, dictionaries, members, actions
           if (!date) return <div key={`empty-${index}`} className="border-t bg-[var(--color-bg-subtle)]" />;
           const day = days.get(date);
           const count = hasData ? day?.task_count ?? 0 : 0;
-          const complete = count > 0 && day?.completed_count === count;
           return <button key={date} type="button" aria-label={`${date}${count ? `，${count}项作业，已完成${day?.completed_count ?? 0}项` : ''}`} aria-pressed={date === selectedDate} aria-current={date === today ? 'date' : undefined}
             onClick={() => setSelectedDate(date)} className={cn('relative flex min-h-[60px] min-w-0 flex-col items-center justify-start gap-1 border-t py-2 transition-colors focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring sm:min-h-[72px]', date === selectedDate ? 'bg-[var(--color-bg-tool-card)]' : 'hover:bg-[var(--color-bg-hover)]')}>
             <span className={cn('flex size-7 items-center justify-center rounded-full text-sm tabular-nums', date === selectedDate && 'bg-[var(--color-btn-primary-bg)] text-[var(--color-btn-primary-text)]', date === today && date !== selectedDate && 'font-bold ring-1 ring-border')}>{Number(date.slice(-2))}</span>
-            {count > 0 && <span className="text-[10px] tabular-nums sm:text-xs">{complete ? '✓ ' : ''}{day?.completed_count ?? 0}/{count}<span className="hidden sm:inline"> 完成</span></span>}
+            {count > 0 && <HomeworkDots tasks={day?.tasks ?? []} dictionaries={dictionaries} />}
           </button>;
         })}
       </div>
