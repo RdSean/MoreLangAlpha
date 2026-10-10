@@ -185,6 +185,32 @@ def test_conflicting_object_is_never_overwritten(catalog):
     assert client.uploads == 1
 
 
+def test_existing_metadata_header_names_are_case_insensitive(catalog):
+    root, _, write = catalog
+    (card,) = prepare_catalog(write(), root, "cards")
+    client = ObjectStore()
+    store_card_image(client, card)
+    client.objects["cards", card.metadata["image_key"]]["Metadata"] = {
+        "Sha256": card.metadata["image_sha256"]
+    }
+    assert store_card_image(client, card, verify_download=True) is False
+    assert client.uploads == 1
+
+
+def test_conflicting_metadata_header_casing_is_rejected(catalog):
+    root, _, write = catalog
+    (card,) = prepare_catalog(write(), root, "cards")
+    client = ObjectStore()
+    store_card_image(client, card)
+    client.objects["cards", card.metadata["image_key"]]["Metadata"] = {
+        "Sha256": card.metadata["image_sha256"],
+        "sha256": "incorrect",
+    }
+    with pytest.raises(ValueError, match="conflicts"):
+        store_card_image(client, card)
+    assert client.uploads == 1
+
+
 def test_changed_local_image_and_unsafe_object_key_never_upload(catalog):
     root, _, write = catalog
     (card,) = prepare_catalog(write(), root, "cards")

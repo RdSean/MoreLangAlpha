@@ -23,15 +23,18 @@
 4. 升级开发数据库至 091，执行已授权实际导入；下载核验全部卡图并再次导入确认无重复。
 5. 更新中文 CHANGELOG，独立提交代码与迁移，不提交原始图片、CSV、凭据或生成文件。
 
-MinIO 凭据仅由本地密码文件读取到运行进程，导入工具使用现有 STORAGE_* 配置，不记录凭据。
+按用户确认，本机 Docker MinIO 使用当前 worktree `.env` 中后端已在使用的 STORAGE_* 配置；不输出、复制或提交凭据。
 
 ## 当前执行状态
 
-- 23 项卡牌单元测试、3 项分层检查和 5 项 PostgreSQL 集成测试通过；Ruff 通过。
-- 实际 CSV dry-run 验证 191 张卡图，总计 174,926,986 字节。
+- 25 项卡牌单元测试、3 项分层检查通过；此前 5 项 PostgreSQL 集成测试与迁移往返检查通过，Ruff 通过。
+- 本机 Docker MinIO S3 地址为 `http://127.0.0.1:9000`，桶为 `onemore-education`，使用后端现有 `.env` 配置。
+- 已完成实际导入：191 张卡图，总计 174,926,986 字节；逐张下载校验全部通过，191 条卡牌元数据与 CSV 全字段一致。
 - 开发数据库升级至 091；原有作业 204、规则 13、家庭日历 1，升级前后数量一致。
-- 实际上传被环境连接信息阻塞：指定 LAN 9000 返回 ZLMediaKit，本机 MinIO 对密码文件中的访问 ID 返回 InvalidAccessKeyId。没有写入卡牌元数据或上传图片。
-- 获取正确 MinIO S3 地址后，从本地密码文件将凭据读入进程环境，运行下列命令，接着重复运行检查 uploaded_images/changed_records 均为 0：
+- 修复本机 MinIO 将校验值元数据名称返回为 `Sha256` 时的兼容问题，按大小写无关的名称核验，并拒绝冲突的重复字段；已有完整对象直接复用。
+- 再次执行导入：uploaded_images = 0、existing_images = 191、changed_records = 0；卡牌 ID 和更新时间指纹保持一致。
+
+后续重新导入可运行以下命令：
 
 ```bash
 uv run python scripts/ops/import_pokemon_cards.py \

@@ -120,10 +120,16 @@ def prepare_catalog(
 
 
 def _verify_head(head: dict, metadata: dict) -> None:
+    # S3-compatible servers can preserve or canonicalize metadata header casing.
+    checksums = {
+        value
+        for name, value in head.get("Metadata", {}).items()
+        if name.lower() == "sha256"
+    }
     if (
         head.get("ContentLength") != metadata["image_byte_size"]
         or head.get("ContentType") != "image/png"
-        or head.get("Metadata", {}).get("sha256") != metadata["image_sha256"]
+        or checksums != {metadata["image_sha256"]}
     ):
         raise ValueError(
             f"Existing image conflicts with catalog: {metadata['source_card_id']}"
