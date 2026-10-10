@@ -51,6 +51,55 @@ async function openLesson(page) {
 
 test.beforeEach(async () => resetMockServer());
 
+for (const width of [375, 1440]) {
+  for (const theme of ['quiet', 'nasa']) {
+    test(`selection context sends the full passage at ${width}px in ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await setup(page, { markdown: '# 学习讲义\n\n这是原始讲义。\n\n选中的这段话会和问题一起发送。' });
+      await openLesson(page);
+      await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);
+      const paragraph = page.getByText('选中的这段话会和问题一起发送。', { exact: true });
+      await paragraph.evaluate((node) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+      node.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+      });
+      const add = page.getByRole('button', { name: /添加 \d+ 行到上下文/ });
+      await expect(add).toBeVisible();
+      const rect = await add.boundingBox();
+      expect(rect.x).toBeGreaterThanOrEqual(0);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(width);
+      expect(rect.height).toBeGreaterThanOrEqual(44);
+      await add.click();
+      await expect(page.getByRole('list', { name: '提问上下文' })).toContainText('讲义选段 · 1 行');
+      await expect(page.getByRole('listitem', { name: /讲义选段 · 1 行/ })).toBeVisible();
+      const input = page.getByRole('textbox', { name: '讲义问题' });
+      await expect(input).toBeFocused();
+      await input.fill('请解释这段话。');
+      await configureSSE({ method: 'POST', path: `/api/v1/threads/${thread}/messages`, delay: 10, events: [
+        { event: 'metadata', data: { thread_id: thread, run_id: 'selection-run' } },
+        { event: 'message_chunk', data: { role: 'assistant', content_type: 'text', content: '这是对选段的解释。' } },
+      ] });
+      await page.getByRole('button', { name: '发送问题' }).click();
+      await expect(page.getByText('这是对选段的解释。')).toBeVisible();
+      const requests = (await getCapturedRequests()).filter((request) => request.method === 'POST' && request.url === `/api/v1/threads/${thread}/messages`);
+      expect(requests).toHaveLength(1);
+      const content = requests[0].body.messages.at(-1).content;
+      expect(content).toContain('请解释这段话。');
+      expect(content).toContain('<summary>[讲义选段 · 1 行]</summary>');
+      expect(content).toContain('选中的这段话会和问题一起发送。');
+      expect(requests[0].body.education_textbook_id).toBe(book);
+      expect(requests[0].body.education_knowledge_point_id).toBe(kp);
+      await expect(page.getByRole('list', { name: '提问上下文' })).toHaveCount(0);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    });
+  }
+}
+
 test('restores HTML and pending HITL, submits a scoped rejection once, and keeps the lesson', async ({ page }) => {
   const state = await setup(page, { replay: [userEvent, textEvent, widgetEvent, interruptEvent], status: { ...baseStatus, status: 'interrupted', run_id: 'paused-run' } });
   await openLesson(page);

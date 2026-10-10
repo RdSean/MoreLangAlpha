@@ -15,6 +15,7 @@ import { useAllModels } from '@/hooks/useAllModels';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { deriveQuickAccessModels } from './chat-input.models';
 import { ChatInputRegistry, ContextBus } from '@/lib/contextBus';
+import { formatContextBlock } from '@/lib/quotedContext';
 import type { WidgetContextSnapshot } from '@/types/widgetContext';
 import './chat-input.css';
 import type { FamilyModelOption, ModelOptions, ReadyAttachment, SlashCommand, Workspace } from './chat-input.types';
@@ -497,15 +498,15 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     if (snippetMentions.length > 0) {
       const blocks = snippetMentions.map((f) => {
         if (f.source === 'chat') {
-          return `\n<details>\n<summary>[${t('context.fromAgentResponse')}]</summary>\n\n\`\`\`\n${f.snippet}\n\`\`\`\n</details>`;
+          return formatContextBlock(`[${t('context.fromAgentResponse')}]`, f.snippet!);
         }
         if (f.source === 'paste') {
-          return `\n<details>\n<summary>[${t('context.pastedText')}]</summary>\n\n\`\`\`\n${f.snippet}\n\`\`\`\n</details>`;
+          return formatContextBlock(`[${t('context.pastedText')}]`, f.snippet!);
         }
         const lineInfo = f.lineStart != null
           ? ` (lines ${f.lineStart}-${f.lineEnd}, ${f.lineCount} line${f.lineCount !== 1 ? 's' : ''})`
           : '';
-        return `\n<details>\n<summary>@${f.path}${lineInfo}</summary>\n\n\`\`\`\n${f.snippet}\n\`\`\`\n</details>`;
+        return formatContextBlock(`@${f.path}${lineInfo}`, f.snippet!);
       });
       finalMessage = finalMessage.trimEnd() + '\n' + blocks.join('\n');
     }

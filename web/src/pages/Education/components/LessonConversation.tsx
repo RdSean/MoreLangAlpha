@@ -1,10 +1,15 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type ComponentProps } from 'react';
-import { FileText, Globe, Keyboard, Mic, Send, Square } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { createPortal } from 'react-dom';
+import { FileText, Globe, Keyboard, Mic, Send, Square, TextSelect, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Loader } from '@/components/ui/loader';
 import { speechSupported, useVoiceInput } from '@/components/ui/chat-input.useVoiceInput';
 import { useBookReadingMutation, useLessonChatSpace } from '../queries';
 import { useLessonConversationSession } from '../hooks/useLessonConversationSession';
+import { useLessonSelectionContext } from '../hooks/useLessonSelectionContext';
+import { formatQuotedContextBlocks } from '@/lib/quotedContext';
 import type { LearningChatSpace } from '../types';
 import type { ChatMessage, AssistantMessage } from '@/types/chat';
 import { MessageBubble } from '@/pages/ChatAgent/components/messageList/MessageBubble';
@@ -21,6 +26,7 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { useScrollMemory } from '@/lib/scrollMemory';
 import EducationMarkdown from './EducationMarkdown';
 import './LessonConversation.css';
+import '@/components/ui/chat-input.css';
 
 const FilePanel = lazy(() => import('@/pages/ChatAgent/components/FilePanel'));
 const PreviewViewer = lazy(() => import('@/pages/ChatAgent/components/viewers/PreviewViewer'));
@@ -55,6 +61,7 @@ export default function LessonConversation({ textbookId, knowledgePointId, assig
 function LessonSession({ textbookId, knowledgePointId, assignmentId, readingPositionKey, children, space }: {
   textbookId: string; knowledgePointId: string; assignmentId?: string; readingPositionKey?: string; children: LessonContent; space: LearningChatSpace;
 }) {
+  const { t } = useTranslation();
   const session = useLessonConversationSession(space, textbookId, knowledgePointId, assignmentId);
   const isMobile = useIsMobile();
   const [file, setFile] = useState<{ path: string; workspaceId: string } | null>(null);
@@ -112,12 +119,22 @@ function LessonSession({ textbookId, knowledgePointId, assignmentId, readingPosi
   const awaitingAnswer = useRef(false);
   const voiceHeld = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const focusAfterSelection = useRef(false);
+  const context = useLessonSelectionContext(scrollRef, blocked);
   const turnRefs = useRef<Array<HTMLElement | null>>([]);
   const pendingScroll = useRef<number | null>(null);
   useScrollMemory(scrollRef, readingPositionKey ?? `lesson:${textbookId}:${assignmentId ?? ''}:${knowledgePointId}`, { persist: true, ready: historyReady });
   const { isListening, toggleListening, stopListening } = useVoiceInput({ message, setMessage, isLoading: sending });
   const markRef = useRef(reading.mutate);
   markRef.current = reading.mutate;
+
+  useEffect(() => {
+    if (!voiceMode && focusAfterSelection.current) {
+      focusAfterSelection.current = false;
+      textareaRef.current?.focus();
+    }
+  });
 
   useEffect(() => {
     if (!awaitingAnswer.current || session.isLoading || session.isLoadingHistory || session.pendingInterrupt || session.isReconnecting) return;
@@ -154,12 +171,19 @@ function LessonSession({ textbookId, knowledgePointId, assignmentId, readingPosi
   }, [turns.length]);
 
   const submit = async (prompt?: string) => {
-    const question = (prompt ?? message).trim();
+    const draft = (prompt ?? message).trim();
+    const question = prompt === undefined && context.quotes.length
+      ? `${draft}\n${formatQuotedContextBlocks(context.quotes)}`.trim()
+      : draft;
     if (!question || submitGuard.current || blocked) return;
     submitGuard.current = true;
     awaitingAnswer.current = true;
     stopListening();
-    setMessage('');
+    if (prompt === undefined) {
+      setMessage('');
+      context.clearQuotes();
+    }
+    context.dismiss();
     const index = turns.length;
     pendingScroll.current = index;
     try {
@@ -202,6 +226,21 @@ function LessonSession({ textbookId, knowledgePointId, assignmentId, readingPosi
         </section>)}
       </div>
       <footer className="lesson-composer">
+        {context.quotes.length > 0 && <div className="lesson-context-pills mention-pills" role="list" aria-label="提问上下文">
+          {context.quotes.map((quote, index) => <HoverCard key={`${quote.source}:${quote.text}`} openDelay={220} closeDelay={100}>
+            <HoverCardTrigger asChild>
+              <div className="mention-pill mention-pill-snippet lesson-context-pill" role="listitem" tabIndex={0} aria-label={`${quote.label}，悬停预览完整选段`}>
+                <TextSelect className="h-3 w-3 flex-shrink-0" style={{ color: 'var(--color-accent-primary)' }} aria-hidden="true" />
+                <span>{quote.label}</span>
+                <button type="button" className="mention-pill-remove" aria-label={`移除选段 ${index + 1}`} title="移除选段" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); context.removeQuote(index); }}><X className="h-2.5 w-2.5" aria-hidden="true" /></button>
+              </div>
+            </HoverCardTrigger>
+            <HoverCardContent side="top" align="start" sideOffset={8} className="lesson-context-preview" role="tooltip">
+              <div className="lesson-context-preview-label">{quote.label}</div>
+              <p>{quote.text}</p>
+            </HoverCardContent>
+          </HoverCard>)}
+        </div>}
         {session.pendingInterrupt && <p className="mb-2 text-xs text-muted-foreground" role="status">等待确认，请处理上方卡片</p>}
         {session.lessonBlocked && <p className="mb-2 text-xs text-muted-foreground" role="status">另一知识点的问答尚未结束，请先返回处理</p>}
         {session.awaitingReportBack && <p className="mb-2 text-xs text-muted-foreground" role="status">后台任务进行中</p>}
@@ -225,13 +264,23 @@ function LessonSession({ textbookId, knowledgePointId, assignmentId, readingPosi
               {isListening ? <><Square className="size-3" />松开结束录音</> : <><Mic className="size-4" />按住说话</>}
             </button>
             {message && <p className="mt-2 break-words text-sm" aria-live="polite">{message}</p>}
-          </div> : <textarea aria-label="讲义问题" placeholder="这份讲义输入追问... Enter 发送，Shift+Enter 换行" value={message} disabled={blocked}
+          </div> : <textarea ref={textareaRef} aria-label="讲义问题" placeholder="这份讲义输入追问... Enter 发送，Shift+Enter 换行" value={message} disabled={blocked}
             onChange={(event) => setMessage(event.target.value)} rows={2}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} />}
-          <Button variant="ghost" size="icon" className="size-11 shrink-0" aria-label="发送问题" title="发送问题" disabled={!message.trim() || blocked || isListening} onClick={() => void submit()}><Send className="size-4" /></Button>
+          <Button variant="ghost" size="icon" className="size-11 shrink-0" aria-label="发送问题" title="发送问题" disabled={(!message.trim() && !context.quotes.length) || blocked || isListening} onClick={() => void submit()}><Send className="size-4" /></Button>
         </div>
         {reading.isError && <p className="mt-1 text-xs text-destructive" role="status">学习状态保存失败</p>}
       </footer>
+      {context.selection && !blocked && createPortal(
+        <button type="button" className="lesson-selection-action" data-lesson-selection-action
+          style={{ left: context.selection.left, top: context.selection.top }}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            focusAfterSelection.current = true;
+            context.addSelection();
+            stopListening();
+            setVoiceMode(false);
+          }}><TextSelect className="size-4" aria-hidden="true" />{t('context.addNLinesToContext', { count: context.selection.lineCount })}</button>, document.body)}
       <Dialog open={Boolean(file)} onOpenChange={(open) => { if (!open) setFile(null); }}>
         <DialogContent className="max-w-5xl h-[85dvh] p-0"><DialogTitle className="sr-only">文件预览</DialogTitle>
           {file && <Suspense fallback={<Loader />}><FilePanel workspaceId={file.workspaceId} targetFile={file.path} onClose={() => setFile(null)} singleFileMode readOnly /></Suspense>}
