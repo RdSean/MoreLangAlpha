@@ -2,6 +2,13 @@
 
 ## 2026-10-11
 
+### 旧浏览器启动兼容修复
+
+- 模拟缺少 `Array.prototype.at` 后，复现 Markdown 依赖初始化报错、加载结束后整页白屏；启动入口按需加载 core-js 的数组 `at` 标准补丁，覆盖业务代码与第三方依赖。
+- 模拟只支持旧版 `MediaQueryList.addListener` 的浏览器，复现布局监听及 Motion 动画报错；启动入口统一桥接现代监听接口，支持监听去重、移除、对象监听器与一次性订阅，现代浏览器保留原生实现。
+- 验证：6 项单元检查、16 项 Chromium 启动与教育日历回归通过，覆盖 Quiet / NASA、缺失 API、平板宽度切换、手机/桌面日历及真实触摸翻月。生产构建、类型检查、修改文件 ESLint 与首屏预算通过（428.4 kB gz / 450 kB）。打包页面和 LAN `192.168.3.240:5177` 在同时缺失两项 API 时正常显示工作区，无运行错误。
+- 本次验证使用缺失 API 模拟，尚未在用户的 Android 平板上确认白屏原因；未调整 Docker、业务接口或主题样式。
+
 ### NASA 浅色内容区材质完善
 
 - 创建本地 annotated tag `v2026.10.11-homework-rewards`，固定奖励功能完成后的 `1f5d654ab` 基线，继续在 `feature/more-to-skills-textbook-refactor` 开发。
