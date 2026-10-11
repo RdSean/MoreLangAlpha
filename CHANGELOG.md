@@ -2,6 +2,12 @@
 
 ## 2026-10-11
 
+### Chrome 90 聊天与讲义正文兼容
+
+- 根据 Android 11 / Chrome `90.0.4430.210` 的反馈，进一步复现 Markdown 正文渲染时的 `Object.hasOwn is not a function`，补齐标准 `Object.hasOwn` 启动兼容；此前工作区列表可以打开，并不代表聊天或教材正文渲染已兼容。
+- 增加聊天历史正文及两套主题的教材阅读/笔记回归，模拟 Chrome 90 缺失的数组、对象、克隆、UUID 和 Promise API；Playwright 支持通过 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 指定真实旧版 Chromium。
+- 验证：真实 Chromium `90.0.4430.0` 与当前 Chromium 分别通过 16 项回归；19 项单元检查、修改文件 ESLint、类型检查与生产构建通过，首屏 428.5 kB gz。打包页面在真实 Chromium 90 下正常显示聊天历史、讲义正文、公式及代码块，无运行错误；LAN 5177 可访问。旧内核验证运行在 macOS，用户 Android 平板仍需刷新复核。
+
 ### 旧浏览器启动兼容修复
 
 - 模拟缺少 `Array.prototype.at` 后，复现 Markdown 依赖初始化报错、加载结束后整页白屏；启动入口按需加载 core-js 的数组 `at` 标准补丁，覆盖业务代码与第三方依赖。

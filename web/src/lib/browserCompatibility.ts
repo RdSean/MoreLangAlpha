@@ -1,5 +1,6 @@
-// Markdown dependencies use Array.at during module initialization.
+// Markdown dependencies require newer APIs during initialization and rendering.
 import 'core-js/actual/array/at';
+import 'core-js/actual/object/has-own';
 
 type MediaListener = ((this: MediaQueryList, event: MediaQueryListEvent) => unknown) | EventListenerOrEventListenerObject;
 

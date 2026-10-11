@@ -34,7 +34,17 @@ test('legacy textbook structure routes explain the one-workbench reset', async (
 
 for (const theme of ['quiet', 'nasa']) {
 for (const width of [375, 768, 1024, 1440]) {
-test(`student ${theme} ${width}px opens lesson and notebook`, async ({ page }, testInfo) => {
+for (const browserMode of width === 768 ? ['native', 'chrome90'] : ['native']) {
+test(`student ${theme} ${width}px ${browserMode} opens lesson and notebook`, async ({ page }, testInfo) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  if (browserMode === 'chrome90') await page.addInitScript(() => {
+    delete Array.prototype.at;
+    delete Object.hasOwn;
+    delete window.structuredClone;
+    delete crypto.randomUUID;
+    delete Promise.withResolvers;
+  });
   await page.setViewportSize({ width, height: 900 });
   await page.addInitScript((value) => localStorage.setItem('theme', value), theme);
   await mockAPI(page, {
@@ -123,7 +133,9 @@ test(`student ${theme} ${width}px opens lesson and notebook`, async ({ page }, t
   await page.screenshot({ path: testInfo.outputPath(`student-${theme}-${width}.png`) });
   await page.getByRole('button', { name: '打开学习笔记' }).click();
   await expect(page.getByRole('heading', { name: '学习笔记' })).toBeVisible();
+  expect(errors).toEqual([]);
 });
 
+}
 }
 }
