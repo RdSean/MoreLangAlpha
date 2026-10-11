@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import StudentTextbookLearningPage from '../StudentTextbookLearningPage';
@@ -97,6 +97,18 @@ function renderAt(path: string) {
 }
 
 describe('StudentTextbookLearningPage', () => {
+  it('collapses and restores the directory without remounting the lesson', () => {
+    renderAt('/education/learn/assignment-1?kp=world-game&view=material');
+    const lesson = screen.getByTestId('student-markdown');
+    expect(screen.getByRole('link', { name: '返回我的教材' })).toHaveAttribute('href', '/education/learn');
+    fireEvent.click(screen.getByRole('button', { name: '收起教材目录' }));
+    expect(screen.queryByRole('button', { name: '收起教材目录' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('student-markdown')).toBe(lesson);
+    fireEvent.click(screen.getByRole('button', { name: '展开教材目录' }));
+    expect(screen.getByRole('button', { name: '收起教材目录' })).toBeInTheDocument();
+    expect(screen.getByTestId('student-markdown')).toBe(lesson);
+  });
+
   it('reads a source node by its Skill node ID', () => {
     renderAt('/education/learn/assignment-1?node=unit-1&view=source');
 

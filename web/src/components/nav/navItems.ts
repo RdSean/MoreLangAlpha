@@ -9,6 +9,7 @@ export interface NavItem {
   labelKey: string;
   /** Active-state strategy: 'prefix' = pathname.startsWith(key); 'exact-or-sub' = exact match or key + '/' sub-path. */
   match: 'prefix' | 'exact-or-sub';
+  excludePaths?: string[];
 }
 
 // Single source of truth for primary navigation (rail + mobile tab bar).
@@ -35,7 +36,9 @@ export function getVisibleNavItems(
   options: { includeSettings?: boolean } = {},
 ): NavItem[] {
   const items = role === 'student'
-    ? NAV_ITEMS.filter((item) => item.key !== '/automations' && item.key !== '/documents' && item.key !== '/textbooks')
+    ? NAV_ITEMS.filter((item) => item.key !== '/automations' && item.key !== '/documents' && item.key !== '/textbooks').flatMap(item => item.key === '/education'
+      ? [{ ...item, excludePaths: ['/education/learn'] }, { key: '/education/learn', icon: BookMarked, labelKey: 'sidebar.myTextbooks', match: 'exact-or-sub' as const }]
+      : [item])
     : NAV_ITEMS;
   return options.includeSettings && role !== 'student' ? [...items, SETTINGS_ITEM] : items;
 }

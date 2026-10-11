@@ -147,6 +147,14 @@ beforeEach(() => {
 });
 
 describe('EducationPage', () => {
+  it('omits the student homework title and links to the independent textbook list', () => {
+    state.member = { user_id: 'student-1', name: '小明', role: 'student' };
+    render(<MemoryRouter><EducationPage /></MemoryRouter>);
+    expect(screen.queryByRole('heading', { name: '我的作业' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '我的教材' })).toHaveAttribute('href', '/education/learn');
+    expect(screen.queryByLabelText('已分配教材')).not.toBeInTheDocument();
+  });
+
   it('prefills the drawer from any double-clicked date and creates in the household timezone', async () => {
     state.member = { user_id: 'parent-1', name: '家长', role: 'parent' };
     state.members = [{ user_id: 'student-1', name: '学生', role: 'student', grade_code: 'g4' }];

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ChevronLeft, ListTree, NotebookPen } from 'lucide-react';
+import { ChevronLeft, ListTree, NotebookPen, PanelLeftOpen } from 'lucide-react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -31,6 +31,7 @@ export default function StudentTextbookLearningPage() {
   const { assignmentId } = useParams<{ assignmentId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [navigatorOpen, setNavigatorOpen] = useState(false);
+  const [navigatorCollapsed, setNavigatorCollapsed] = useState(false);
   const structure = useStudentTextbookStructure(assignmentId);
   const learningAssets = useLearningAssetMutations();
   const data = structure.data;
@@ -159,7 +160,7 @@ export default function StudentTextbookLearningPage() {
       knowledgePointId={selectedKnowledgePoint?.knowledge_point_id}
     />
   );
-  const navigator = (
+  const navigator = (onCollapse?: () => void) => (
     <BookNavigator
       structure={data}
       learningStates={readingState.data}
@@ -167,26 +168,28 @@ export default function StudentTextbookLearningPage() {
       selectedNodeId={selectedNode?.id}
       onSelectKnowledgePoint={selectKnowledgePoint}
       onSelectNode={selectNode}
+      onCollapse={onCollapse}
     />
   );
 
   return (
     <main className="student-learning-shell h-full min-h-0 overflow-hidden bg-canvas" data-testid="student-textbook-learning">
-      <div className="grid h-full min-h-0 w-full lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="hidden min-h-0 border-r lg:flex lg:flex-col" style={{ borderColor: 'var(--color-border-muted)' }}>
+      <div className={`grid h-full min-h-0 w-full ${navigatorCollapsed ? 'grid-cols-1' : 'lg:grid-cols-[280px_minmax(0,1fr)]'}`}>
+        <aside hidden={navigatorCollapsed} className={`${navigatorCollapsed ? '!hidden' : 'hidden lg:flex'} min-h-0 border-r lg:flex-col`} style={{ borderColor: 'var(--color-border-muted)' }}>
           <div className="student-learning-rail-header flex h-[52px] shrink-0 items-center gap-2 border-b px-3" style={{ borderColor: 'var(--color-border-muted)' }}>
-            <Link to="/education" aria-label="返回我的学习" className="inline-flex size-8 shrink-0 items-center justify-center text-muted-foreground"><ChevronLeft className="size-4" /></Link>
+            <Link to="/education/learn" aria-label="返回我的教材" className="inline-flex size-11 shrink-0 items-center justify-center text-muted-foreground"><ChevronLeft className="size-4" /></Link>
             <div className="min-w-0">
               <span className="mission-label">TEXTBOOK / {data.textbook_id.slice(0, 6).toUpperCase()}</span>
               <h2 className="min-w-0 truncate text-xs font-semibold" title={data.textbook_title}>{data.textbook_title}</h2>
             </div>
           </div>
-          <div className="min-h-0 flex-1">{navigator}</div>
+          <div className="min-h-0 flex-1">{navigator(() => setNavigatorCollapsed(true))}</div>
         </aside>
 
         <section className="flex min-h-0 min-w-0 flex-col">
           <div className="student-learning-toolbar flex min-h-11 shrink-0 items-center justify-end gap-3 border-b px-3" style={{ borderColor: 'var(--color-border-muted)' }}>
-            <Link to="/education" className="mr-auto inline-flex min-h-11 shrink-0 whitespace-nowrap items-center gap-2 text-xs text-muted-foreground lg:hidden"><ChevronLeft className="size-4" />我的学习</Link>
+            {navigatorCollapsed && <Button size="icon" variant="ghost" className="mr-auto hidden min-h-11 min-w-11 lg:inline-flex" aria-label="展开教材目录" title="展开教材目录" onClick={() => setNavigatorCollapsed(false)}><PanelLeftOpen className="size-4" /></Button>}
+            <Link to="/education/learn" className="mr-auto inline-flex min-h-11 shrink-0 whitespace-nowrap items-center gap-2 text-xs text-muted-foreground lg:hidden"><ChevronLeft className="size-4" />我的教材</Link>
             <div className="student-learning-mission" aria-label={`${missionCode} ${title}`}>
               <span className="mission-badge" aria-hidden="true">{missionNumber || '—'}</span>
               <span className="mission-label">{missionCode} / {readerView === 'material' ? 'LESSON' : 'SOURCE'}</span>
@@ -194,7 +197,7 @@ export default function StudentTextbookLearningPage() {
             <div className="student-learning-actions flex shrink-0 gap-1">
               <Dialog open={navigatorOpen} onOpenChange={setNavigatorOpen}>
                 <DialogTrigger asChild><Button size="icon" variant="ghost" className="min-h-11 min-w-11 lg:hidden" aria-label="打开教材目录"><ListTree className="size-4" /></Button></DialogTrigger>
-                <DialogContent className="h-[80vh] overflow-hidden p-0"><DialogHeader className="sr-only"><DialogTitle>教材目录</DialogTitle></DialogHeader>{navigator}</DialogContent>
+                <DialogContent className="h-[80vh] overflow-hidden p-0"><DialogHeader className="sr-only"><DialogTitle>教材目录</DialogTitle></DialogHeader>{navigator()}</DialogContent>
               </Dialog>
               <Dialog>
                 <DialogTrigger asChild><Button size="icon" variant="ghost" className="min-h-11 min-w-11" aria-label="打开学习笔记"><NotebookPen className="size-4" /></Button></DialogTrigger>

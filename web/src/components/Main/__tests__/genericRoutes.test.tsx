@@ -36,6 +36,9 @@ vi.mock('@/pages/Education/EducationPage', () => ({
 vi.mock('@/pages/Education/TextbooksPage', () => ({
   default: () => <div data-testid="textbook-library-page" />,
 }));
+vi.mock('@/pages/Education/StudentTextbooksPage', () => ({
+  default: () => <div data-testid="student-textbooks-page" />,
+}));
 vi.mock('@/pages/Education/TextbookWorkbenchPage', () => ({
   default: () => <div data-testid="textbook-workbench-page" />,
 }));
@@ -85,6 +88,7 @@ describe('generic application routes', () => {
     ['/textbooks', 'textbook-library-page'],
     ['/automations', 'automations-page'],
     ['/education', 'education-page'],
+    ['/education/learn', 'student-textbooks-page'],
     ['/settings', 'settings-page'],
   ])('preserves the %s route', async (pathname, pageTestId) => {
     renderAt(pathname);
@@ -114,6 +118,15 @@ describe('generic application routes', () => {
 
     preloadRouteChunk('/documents');
 
+    expect(load).toHaveBeenCalledOnce();
+  });
+  it.each([
+    ['/education/learn', 'studentTextbooks'],
+    ['/education/learn/assignment-1', 'studentTextbookLearning'],
+    ['/education/learn/assignment-1/summary', 'personalizedSummary'],
+  ] as const)('preloads the learning chunk at %s', (path, key) => {
+    const load = vi.spyOn(routeChunks, key).mockResolvedValue({ default: () => <div /> });
+    preloadRouteChunk(path);
     expect(load).toHaveBeenCalledOnce();
   });
 

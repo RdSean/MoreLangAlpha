@@ -15,6 +15,7 @@ export const routeChunks = {
   textbookWorkbench: () => import('../../pages/Education/TextbookWorkbenchPage'),
   legacyTextbookReset: () => import('../../pages/Education/LegacyTextbookRouteReset'),
   studentTextbookLearning: () => import('../../pages/Education/StudentTextbookLearningPage'),
+  studentTextbooks: () => import('../../pages/Education/StudentTextbooksPage'),
   personalizedSummary: () => import('../../pages/Education/PersonalizedSummaryPage'),
   settings: () => import('../../pages/Settings/Settings'),
   pokemonCards: () => import('../../pages/Settings/PokemonCardsPage'),
@@ -27,6 +28,11 @@ export function preloadRouteChunk(pathname: string): void {
   const chunkFor: Record<string, () => Promise<unknown>> = routeChunks;
   const segments = pathname.split('/').filter(Boolean);
   const segment = segments[0] || 'dashboard';
+  if (segment === 'education' && segments[1] === 'learn') {
+    const chunk = !segments[2] ? routeChunks.studentTextbooks : segments[3] === 'summary' ? routeChunks.personalizedSummary : routeChunks.studentTextbookLearning;
+    void chunk().catch(() => {});
+    return;
+  }
   if (segment === 'settings' && segments[1] === 'pokemon-cards') {
     void routeChunks.pokemonCards().catch(() => {});
     return;

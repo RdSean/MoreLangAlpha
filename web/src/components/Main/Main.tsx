@@ -25,6 +25,7 @@ const TextbookLibrary = React.lazy(routeChunks.textbookLibrary);
 const TextbookWorkbench = React.lazy(routeChunks.textbookWorkbench);
 const LegacyTextbookReset = React.lazy(routeChunks.legacyTextbookReset);
 const StudentTextbookLearning = React.lazy(routeChunks.studentTextbookLearning);
+const StudentTextbooks = React.lazy(routeChunks.studentTextbooks);
 const PersonalizedSummary = React.lazy(routeChunks.personalizedSummary);
 const Plugins = React.lazy(routeChunks.plugins);
 const Settings = React.lazy(routeChunks.settings);
@@ -62,6 +63,7 @@ function Main() {
         <Route path="/textbooks/:textbookId/versions/:versionId/structure" element={<LegacyTextbookReset />} />
         <Route path="/textbooks/:textbookId/versions/:versionId/candidates" element={<LegacyTextbookReset />} />
         <Route path="/textbooks/:textbookId/versions/:versionId/knowledge/:knowledgePointId" element={<LegacyTextbookReset />} />
+        <Route path="/education/learn" element={<StudentTextbooks />} />
         <Route path="/education/learn/:assignmentId" element={<StudentTextbookLearning />} />
         <Route path="/education/learn/:assignmentId/summary" element={<PersonalizedSummary />} />
         <Route path="/settings" element={<Settings />} />

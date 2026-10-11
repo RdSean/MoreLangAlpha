@@ -1,4 +1,5 @@
 import { test, expect, mockAPI, resetMockServer } from './fixtures.js';
+import { Buffer } from 'node:buffer';
 
 const parent = { user_id: 'parent-1', name: '家长', role: 'parent', household_id: 'family-1', onboarding_completed: true, has_api_key: true };
 const student = { ...parent, user_id: 'student-1', name: '小明', role: 'student' };
@@ -12,6 +13,15 @@ const file = { name: 'classes.ics', mimeType: 'text/calendar', buffer: Buffer.fr
 async function setup(page, role, state) {
   await resetMockServer();
   await page.clock.setFixedTime(new Date('2026-10-10T06:00:00Z'));
+  await page.addInitScript(() => {
+    const send = window.XMLHttpRequest.prototype.send;
+    window.XMLHttpRequest.prototype.send = function (body) {
+      if (body instanceof FormData && body.get('file') instanceof File) {
+        window.__educationCalendarUpload = Object.fromEntries([...body.entries()].map(([key, value]) => [key, value instanceof File ? value.name : value]));
+      }
+      return send.call(this, body);
+    };
+  });
   await mockAPI(page, {
     'GET /auth/me': role === 'parent' ? parent : student,
     'GET /auth/members': [parent, student],
@@ -21,8 +31,15 @@ async function setup(page, role, state) {
     'GET /education/tasks/calendar': { days: [], stats: { total_points: 4 } },
     'GET /education/calendar/sources': route => route.fulfill({ json: state.imported ? [source] : [] }),
     'POST /education/calendar/sources': async route => {
-      expect(route.request().postData()).toContain('classes.ics');
-      if (state.imported) expect(route.request().postData()).toContain(source.source_id);
+      // Chromium 90 omits multipart file bodies from the intercepted request.
+      const upload = await page.evaluate(() => window.__educationCalendarUpload);
+      expect(upload.file).toBe('classes.ics');
+      if (state.imported) expect(upload.source_id).toBe(source.source_id);
+      const body = route.request().postData();
+      if (body !== null) {
+        expect(body).toContain('classes.ics');
+        if (state.imported) expect(body).toContain(source.source_id);
+      }
       state.imported = true;
       await route.fulfill({ json: source });
     },
@@ -100,12 +117,21 @@ for (const theme of ['light', 'nasa']) for (const width of [375, 1440]) {
     await page.addInitScript(value => localStorage.setItem('theme', value), theme);
     await setup(page, 'student', { imported: true });
     await page.goto('/education', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: '我的作业' })).toHaveCount(0);
+    const calendar = page.getByRole('region', { name: '作业日历', exact: true });
+    await expect(calendar).toBeVisible();
+    const calendarBounds = await calendar.boundingBox();
+    expect(calendarBounds.y + calendarBounds.height).toBeGreaterThan(1000);
+    const calendarScroll = await page.getByTestId('education-page').evaluate(element => ({ scroll: element.scrollHeight, visible: element.clientHeight }));
+    expect(calendarScroll.scroll).toBeGreaterThan(calendarScroll.visible);
+    await page.screenshot({ path: testInfo.outputPath(`student-calendar-top-${width}.png`), animations: 'disabled' });
     const summary = page.locator('summary').filter({ hasText: events[0].title });
     await expect(summary).toBeVisible();
     await summary.focus();
     await page.keyboard.press('Enter');
     await expect(page.getByText(events[0].location)).toBeVisible();
     await expect(page.getByLabel('选择孩子')).toHaveCount(0);
+    await expect(page.locator('a[href="/education/learn"]').last()).toBeVisible();
     expect(await page.getByTestId('education-page').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`student-calendar-${width}.png`), animations: 'disabled' });
   });
@@ -148,10 +174,38 @@ for (const theme of ['light', 'nasa']) test.describe(`${theme} tablet gestures a
     await cdp.detach();
   });
 
-  test('scrolls long homework independently and keeps a six-week calendar bounded', async ({ page }, testInfo) => {
+  test('student tablet scrolls the calendar and swipes months', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 820, height: 1180 });
+    await page.addInitScript(value => localStorage.setItem('theme', value), theme);
+    await setup(page, 'student', { imported: true });
+    await page.goto('/education');
+    const calendar = page.getByRole('region', { name: '作业日历', exact: true });
+    await expect(page.getByRole('button', { name: /2026-10-10/ })).toBeVisible();
+    const box = await calendar.boundingBox();
+    expect(box.y + box.height).toBeGreaterThan(1180);
+    await page.screenshot({ path: testInfo.outputPath('student-tablet-calendar.png'), animations: 'disabled' });
+    const cdp = await page.context().newCDPSession(page);
+    const x = box.x + box.width / 2, y = box.y + 160;
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    for (let step = 1; step <= 5; step++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x - 180 * step / 5, y }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect(page.getByRole('button', { name: '2026-11-01' })).toHaveAttribute('aria-pressed', 'true');
+    const sixWeekBox = await calendar.boundingBox();
+    const rows = page.getByLabel('选择作业日期').locator('button');
+    const heights = await rows.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().height));
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(1);
+    expect(sixWeekBox.y + sixWeekBox.height).toBeGreaterThan(1180);
+    const shell = page.getByTestId('education-page');
+    await shell.evaluate(element => { element.scrollTop = 300; });
+    await expect.poll(() => shell.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    await expect(page.getByRole('button', { name: '2026-11-01' })).toHaveAttribute('aria-pressed', 'true');
+    await cdp.detach();
+  });
+
+  for (const role of ['parent', 'student']) test(`${role} scrolls long homework independently and keeps a six-week calendar bounded`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.addInitScript(value => localStorage.setItem('theme', value), theme);
-    await setup(page, 'parent', { imported: true });
+    await setup(page, role, { imported: true });
     const tasks = Array.from({ length: 24 }, (_, i) => ({ task_id: `long-${i}`, assigned_student_id: 'student-1', title: `数学练习 ${i + 1}`, description: '家庭作业内容。'.repeat(30), subject_code: 'math', status: 'open', due_at: '2026-11-01T11:00:00Z', occurrence_date: '2026-11-01' }));
     await mockAPI(page, { 'GET /education/tasks/calendar': { days: [{ date: '2026-11-01', tasks, task_count: 24, completed_count: 0 }], stats: { total_points: 4 } } });
     await page.goto('/education', { waitUntil: 'domcontentloaded' });
@@ -165,7 +219,8 @@ for (const theme of ['light', 'nasa']) test.describe(`${theme} tablet gestures a
     await page.mouse.wheel(0, 900);
     await expect.poll(() => pane.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
     expect(await calendar.boundingBox()).toEqual(before);
-    expect(before.y + before.height).toBeLessThanOrEqual(800);
+    if (role === 'parent') expect(before.y + before.height).toBeLessThanOrEqual(800);
+    else expect(before.y + before.height).toBeGreaterThan(800);
     expect(await page.getByTestId('education-page').evaluate(element => element.scrollWidth <= element.clientWidth && element.scrollTop === 0)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('six-week-calendar.png'), animations: 'disabled' });
   });

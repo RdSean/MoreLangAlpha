@@ -1,0 +1,27 @@
+.student-homework-calendar {
+  /* Extend beyond the first screen while keeping busy days from stretching rows. */
+  height: max(calc(100vh - 40px), calc(var(--education-week-count) * 128px + 90px));
+}
+
+.student-homework-calendar [aria-label="选择作业日期"] {
+  flex: 1;
+}
+
+.student-homework-calendar [aria-label="选择作业日期"] > button {
+  height: auto;
+}
+
+@media (min-width: 640px) {
+  .student-homework-calendar {
+    height: max(calc(100vh - 40px), calc(var(--education-week-count) * 144px + 90px));
+  }
+}
+
+@media (min-width: 1024px) {
+  .student-homework-tasks {
+    position: sticky;
+    top: 20px;
+    align-self: start;
+    max-height: calc(100vh - 108px);
+  }
+}

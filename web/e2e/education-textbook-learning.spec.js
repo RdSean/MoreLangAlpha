@@ -50,6 +50,7 @@ test(`student ${theme} ${width}px ${browserMode} opens lesson and notebook`, asy
   await mockAPI(page, {
     'GET /auth/me': student,
     'GET /users/me': { ...student, onboarding_completed: true, has_api_key: true },
+    'GET /education/learning': [{ assignment_id: 'assignment-1', textbook_id: 'textbook-1', textbook_title: 'Reading Explorer 3', structure_id: 'structure-1', knowledge_point_count: 10, completed_knowledge_point_count: 3 }],
     'GET /education/learning/assignment-1/reading-state': [],
     'POST /education/learning/assignment-1/knowledge-points/kp-1/reading-state': {},
     'GET /education/textbooks/textbook-1/reading-state': [],
@@ -115,7 +116,26 @@ test(`student ${theme} ${width}px ${browserMode} opens lesson and notebook`, asy
     'GET /education/textbooks/textbook-1/knowledge-points/kp-1/conversation/status': { status: 'completed', can_reconnect: false, lesson_active: true },
   });
 
-  await page.goto('/education/learn/assignment-1?kp=world-game&view=material');
+  await page.goto('/education/learn');
+  await expect(page.getByRole('heading', { name: '我的教材', exact: true })).toBeVisible();
+  await expect(page.getByText('3/10 个知识点已学习')).toBeVisible();
+  const activeNav = page.locator('[aria-current="page"]').filter({ hasText: /My Textbooks|我的教材/ });
+  await expect(activeNav).toHaveCount(1);
+  if (theme === 'nasa') {
+    const progress = page.getByRole('progressbar').locator('div');
+    expect(await progress.evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgb(214, 58, 44)');
+  }
+  if (width === 375 && theme === 'nasa') {
+    const labelBounds = await page.locator('.bottom-tab-item-label').evaluateAll(labels => labels.map(label => {
+      const item = label.parentElement.getBoundingClientRect();
+      const rect = label.getBoundingClientRect();
+      return rect.height < 16 && rect.bottom < item.bottom - 9;
+    }));
+    expect(labelBounds.every(Boolean)).toBe(true);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath(`textbooks-${theme}-${width}.png`) });
+  await page.getByRole('link', { name: '继续学习 Reading Explorer 3' }).click();
 
   await expect(page.getByRole('heading', { name: '世界运动' }).first()).toBeVisible();
   await expect(page.getByText('足球是一项简单的运动。')).toBeVisible();
@@ -131,6 +151,28 @@ test(`student ${theme} ${width}px ${browserMode} opens lesson and notebook`, asy
   expect(bounds.every((item) => item.fits && item.height >= 44)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath(`student-${theme}-${width}.png`) });
+  const question = page.getByRole('textbox', { name: '讲义问题' });
+  await expect(question).toBeEnabled();
+  if (width >= 1024) {
+    await question.fill('这段话怎么理解？');
+    const before = await page.getByRole('region', { name: '讲义与问答' }).boundingBox();
+    const collapse = page.getByRole('button', { name: '收起教材目录', exact: true });
+    expect((await collapse.boundingBox()).height).toBeGreaterThanOrEqual(44);
+    await collapse.click();
+    await expect(collapse).toBeHidden();
+    const after = await page.getByRole('region', { name: '讲义与问答' }).boundingBox();
+    expect(after.width).toBeGreaterThan(before.width + 200);
+    await expect(question).toHaveValue('这段话怎么理解？');
+    await page.screenshot({ path: testInfo.outputPath(`collapsed-${theme}-${width}.png`) });
+    await page.getByRole('button', { name: '展开教材目录' }).click();
+    await expect(page.getByRole('link', { name: '返回我的教材' })).toHaveAttribute('href', '/education/learn');
+    await expect(question).toHaveValue('这段话怎么理解？');
+  } else {
+    await page.getByRole('button', { name: '打开教材目录' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: /世界运动/ }).click();
+    await expect(page.getByRole('dialog')).toBeHidden();
+    await expect(page.getByRole('link', { name: '我的教材', exact: true })).toHaveAttribute('href', '/education/learn');
+  }
   await page.getByRole('button', { name: '打开学习笔记' }).click();
   await expect(page.getByRole('heading', { name: '学习笔记' })).toBeVisible();
   expect(errors).toEqual([]);

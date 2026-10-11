@@ -9,7 +9,7 @@ import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { NAV_ITEMS, SETTINGS_ITEM } from '../navItems';
+import { getVisibleNavItems, NAV_ITEMS, SETTINGS_ITEM } from '../navItems';
 import { useNavActive } from '../useNavActive';
 
 const ALL_ITEMS = [...NAV_ITEMS, SETTINGS_ITEM];
@@ -23,6 +23,11 @@ function matcherAt(pathname: string) {
 }
 
 describe('useNavActive', () => {
+  it.each(['/education/learn', '/education/learn/book-1', '/education/learn/book-1/summary'])('highlights only the student textbook entry at %s', (path) => {
+    const items = getVisibleNavItems('student');
+    expect(items.filter(matcherAt(path)).map(item => item.key)).toEqual(['/education/learn']);
+  });
+
   it.each(ALL_ITEMS.map((item) => [item.key, item] as const))(
     'marks %s active at its exact path',
     (_key, item) => {

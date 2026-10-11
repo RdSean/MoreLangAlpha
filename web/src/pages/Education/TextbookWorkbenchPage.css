@@ -49,6 +49,7 @@
   font-variant-numeric: tabular-nums;
 }
 .student-learning-mission { display: none; align-items: center; gap: 7px; margin-right: auto; min-width: 0; }
+.student-learning-shell .book-tree-toggle { width: 44px; height: 44px; }
 .student-learning-toolbar .student-learning-mission + div { margin-left: auto; }
 .textbook-mobile-header { display: none; }
 .textbook-workbench:has(> .textbook-workbench-header) { grid-template-rows: auto minmax(0, 1fr); }

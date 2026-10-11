@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, ClipboardPlus, RotateCcw, Send, XCircle } from 'lucide-react';
+import { ArrowRight, BookMarked, CheckCircle2, ClipboardPlus, RotateCcw, Send, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { createDateFormatter } from '@/lib/format';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
@@ -12,12 +12,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { SubjectIcon } from '@/components/icons/SubjectIcon';
 import { createRequestKeyTracker } from '@/pages/ChatAgent/hooks/utils/requestKey';
 import { deleteEducationAsset, uploadEducationAsset } from './api';
-import { useEducationHomeworkDictionaries, useEducationMembers, useEducationTaskMutations, useLearningAssignments } from './queries';
+import { useEducationHomeworkDictionaries, useEducationMembers, useEducationTaskMutations } from './queries';
 import EducationNotebook from './EducationNotebook';
 import EducationRewardBadge from './EducationRewardBadge';
 import HomeworkTaskDetail from './HomeworkTaskDetail';
 import { createCompletionSound } from './completionSound';
 import type { CreateEducationTaskInput, EducationHomeworkDictionaries, EducationMember, EducationTask, EducationTaskStatus, EducationTaskSubmission } from './types';
+import './EducationNotebook.css';
 
 const statusLabels: Record<EducationTaskStatus, string> = {
   open: '待完成',
@@ -527,7 +528,6 @@ export default function EducationPage() {
   const dictionaries = useEducationHomeworkDictionaries();
   const role = member?.role ?? 'student';
   const members = useEducationMembers(role === 'parent');
-  const assignments = useLearningAssignments(role === 'student');
   const mutations = useEducationTaskMutations();
   const [createOpen, setCreateOpen] = useState(false);
   const [createDate, setCreateDate] = useState('');
@@ -535,8 +535,8 @@ export default function EducationPage() {
   const create = async (input: ParentCreateInput) => {
     await mutations.create.mutateAsync({ idempotency_key: input.idempotencyKey, assigned_student_id: input.assignedStudentId, title: input.title, description: input.description, due_at: householdWallClockToIso(input.dueAt, dictionaries.data?.timezone ?? 'UTC'), subject_code: input.subjectCode, type_code: input.typeCode, practice_source_code: input.practiceSourceCode, frequency: input.frequency, weekdays: input.weekdays, material_asset_ids: input.materialAssetIds });
   };
-  return <main className="h-full min-h-0 overflow-y-auto bg-canvas lg:overflow-hidden" data-testid="education-page" style={{ backgroundColor: 'var(--color-bg-canvas)' }}>
-    <div className="flex w-full flex-col gap-5 px-3 py-5 pb-24 sm:px-6 md:pb-8 lg:h-full lg:px-6 lg:py-5">
+  return <main className={`h-full min-h-0 overflow-y-auto bg-canvas ${role === 'parent' ? 'lg:overflow-hidden' : 'student-homework-page'}`} data-testid="education-page" style={{ backgroundColor: 'var(--color-bg-canvas)' }}>
+    <div className={`flex w-full flex-col gap-5 px-3 py-5 pb-24 sm:px-6 md:pb-8 lg:px-6 lg:py-5 ${role === 'parent' ? 'lg:h-full' : ''}`}>
       {completionMessage && <div role="status" className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b pb-3 text-sm"><p>{completionMessage}</p><Link className="inline-flex min-h-11 items-center gap-2" to="/education/rewards">查看学习奖励</Link></div>}
       {dictionaries.isError ? <p role="alert">作业设置加载失败，请刷新重试。</p> : !dictionaries.data ? <p role="status" className="p-6 text-sm text-muted-foreground">正在加载作业…</p> : <EducationNotebook
         key={`${member?.user_id}:${dictionaries.data.timezone}`}
@@ -545,13 +545,7 @@ export default function EducationPage() {
         onCreateTask={role === 'parent' ? date => { setCreateDate(date); setCreateOpen(true); } : undefined}
         renderTasks={tasks => <TaskRows tasks={tasks} role={role} timezone={dictionaries.data!.timezone} members={members.data ?? []} onCompleted={submission => setCompletionMessage(submission?.reward_status === 'pending' ? '打卡成功，奖励稍后到账。' : submission?.reward_summary?.today_rewarded ? '打卡成功，今日补给包已到账。' : '打卡成功。')} />}
       >
-      {role === 'student' && <section aria-label="已分配教材" className="rounded-lg border bg-card px-4 py-5 sm:px-6">
-        <h2 className="text-base font-semibold">我的教材</h2>
-        {assignments.isLoading ? <p className="py-4 text-sm text-muted-foreground">正在加载学习材料…</p> : assignments.isError ? <p role="alert" className="py-4 text-sm text-muted-foreground">学习材料加载失败，请刷新重试。</p> : !(assignments.data ?? []).length ? <p className="py-4 text-sm text-muted-foreground">暂未分配教材。</p> : assignments.data?.map(assignment => <article key={assignment.assignment_id} className="flex flex-wrap items-center justify-between gap-3 border-b py-4 last:border-0">
-          <div><h3 className="text-sm font-semibold">{assignment.textbook_title}</h3><p className="mt-1 text-sm text-muted-foreground">{assignment.completed_knowledge_point_count}/{assignment.knowledge_point_count} 个知识点已学习</p></div>
-          <Link to={`/education/learn/${assignment.assignment_id}`}><Button size="sm" className="min-h-11">继续学习</Button></Link>
-        </article>)}
-      </section>}
+      {role === 'student' && <Link to="/education/learn" className="flex min-h-11 items-center gap-2 border-t py-3 text-sm"><BookMarked className="size-4" aria-hidden="true" />我的教材<ArrowRight className="ml-auto size-4" aria-hidden="true" /></Link>}
       </EducationNotebook>}
     </div>
     {role === 'parent' && <ParentCreateDialog students={(members.data ?? []).filter(item => item.role === 'student')} dictionaries={dictionaries.data} onSubmit={create} isPending={mutations.create.isPending} open={createOpen} onOpenChange={setCreateOpen} initialDate={createDate} />}

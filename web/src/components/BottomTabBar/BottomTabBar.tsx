@@ -18,7 +18,7 @@ export default function BottomTabBar() {
   };
 
   return (
-    <div className="bottom-tab-bar">
+    <div className={`bottom-tab-bar ${member?.role === 'student' ? 'bottom-tab-bar--student' : ''}`}>
       <div className="bottom-tab-bar-pill">
         {menuItems.map((item) => {
           const Icon = item.icon;
@@ -30,6 +30,7 @@ export default function BottomTabBar() {
               className={`bottom-tab-item ${active ? 'active' : ''}`}
               onClick={() => handleItemClick(item.key)}
               aria-label={t(item.labelKey)}
+              title={t(item.labelKey)}
               aria-current={active ? 'page' : undefined}
             >
               <Icon className="bottom-tab-item-icon" />

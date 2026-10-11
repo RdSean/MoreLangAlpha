@@ -12,6 +12,8 @@
 
 ### Task 1: 学生教材列表与入口
 
+**状态：已完成。** 导航、独立列表、路由预加载与作业快捷入口已通过聚焦单元及浏览器检查。
+
 **Files:** `web/src/pages/Education/StudentTextbooksPage.tsx`、`web/src/components/nav/navItems.ts`、`useNavActive.ts`、`web/src/components/Main/Main.tsx`、`routeChunks.ts`、两个 locale 文件、`EducationPage.tsx`。
 
 1. 添加导航可见性/高亮、教材列表状态测试，先运行确认失败。
@@ -22,6 +24,8 @@
 
 ### Task 2: 阅读目录收起
 
+**状态：已完成。** 宽屏收放保持正文组件与提问草稿，窄屏选中目录条目后关闭弹层。
+
 **Files:** `StudentTextbookLearningPage.tsx`、现有阅读 CSS、对应单元测试和 `education-textbook-learning.spec.js`。
 
 1. 添加收起/展开和返回教材列表的失败测试。
@@ -31,6 +35,8 @@
 
 ### Task 3: 学生作业页空间
 
+**状态：已完成。** 学生标题区移除，首屏略溢出与六周等高日期格、长作业独立滚动已验证；家长保留布局。
+
 **Files:** `EducationNotebook.tsx`、`EducationPage.tsx`、教育布局 CSS、`EducationPage.test.tsx`、`education-calendar.spec.js`。
 
 1. 添加学生无标题和日历底部超出首屏、可滚动的失败断言。
@@ -39,6 +45,8 @@
 4. 复核六周月份、横向翻月及纵向滚动。
 
 ### Task 4: 验证与提交
+
+**状态：已完成。** 聚焦 103 项单元检查、当前 Chromium 和实际 Chromium 90 各 27 项浏览器回归、生产构建、修改文件 ESLint 与 LAN 5177 检查通过；已更新中文变更日志，保留当前开发分支与用户已有文件。
 
 1. `pnpm test` 运行导航/学生教材/作业聚焦单元测试。
 2. 当前 Chromium 和实际 Chromium 90 运行教材、入口、日历 E2E；检查 375/820/1440px 的两个主题截图。

@@ -5,6 +5,7 @@ import type { NavItem } from './navItems';
 export function useNavActive() {
   const { pathname } = useLocation();
   return (item: NavItem): boolean => {
+    if (item.excludePaths?.some(path => pathname === path || pathname.startsWith(path + '/'))) return false;
     if (item.match === 'prefix') return pathname.startsWith(item.key);
     return pathname === item.key || pathname.startsWith(item.key + '/');
   };

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, ClipboardPlus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import pokemonball from '@/assets/img/pokemonball.svg';
@@ -100,16 +100,16 @@ export default function EducationNotebook({ role, dictionaries, members, actions
       <div className="flex flex-wrap gap-2">{actions}{role === 'parent' && onCreateTask && <Button onClick={() => onCreateTask(selectedDate)}><ClipboardPlus className="mr-2 size-4" aria-hidden="true" />创建作业</Button>}</div>
     </header>
     <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1.6fr)_minmax(360px,1fr)]">
-    <section aria-label="作业日历" className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card">
-      <div className="flex shrink-0 flex-wrap items-start justify-between gap-4 px-4 py-4 sm:px-6">
-        <h1 className="text-xl font-semibold">{role === 'parent' ? '家庭作业' : '我的作业'}</h1>
-        {role === 'parent' && <label className="flex items-center gap-2 text-sm text-muted-foreground">孩子
+    <section aria-label="作业日历" className={cn('flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card', role === 'student' && 'student-homework-calendar')} style={role === 'student' ? { '--education-week-count': range.cells.length / 7 } as CSSProperties : undefined}>
+      {role === 'parent' && <div className="flex shrink-0 flex-wrap items-start justify-between gap-4 px-4 py-4 sm:px-6">
+        <h1 className="text-xl font-semibold">家庭作业</h1>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">孩子
           <select aria-label="选择孩子" className="min-h-11 max-w-44 rounded-md border bg-input px-3 text-foreground" value={studentId} onChange={event => setStudentId(event.target.value)}>
             <option value="">全部孩子</option>{members.filter(member => member.role === 'student').map(member => <option key={member.user_id} value={member.user_id}>{member.name}</option>)}
           </select>
-        </label>}
-      </div>
-      <div className="flex shrink-0 items-center justify-between gap-2 border-t px-3 py-2 sm:px-6">
+        </label>
+      </div>}
+      <div className={cn('flex shrink-0 items-center justify-between gap-2 px-3 py-2 sm:px-6', role === 'parent' && 'border-t')}>
         <h2 className="flex items-center gap-2 text-sm font-semibold sm:text-base"><CalendarDays className="size-4" aria-hidden="true" />{monthLabel(parseDate(`${month}-01`))}</h2>
         <div className="flex items-center gap-1">
           <Button className="min-h-11 min-w-11" size="icon" variant="ghost" aria-label="上个月" onClick={() => changeMonth(-1)}><ChevronLeft className="size-4" /></Button>
@@ -160,7 +160,7 @@ export default function EducationNotebook({ role, dictionaries, members, actions
         })}
       </div>
     </section>
-    <div aria-label="作业与教材" className="min-h-0 space-y-5 lg:overflow-y-auto lg:overscroll-contain" tabIndex={0}>
+    <div aria-label="作业与教材" className={cn('min-h-0 space-y-5 lg:overflow-y-auto lg:overscroll-contain', role === 'student' && 'student-homework-tasks')} tabIndex={0}>
     <section aria-label="当天作业本" aria-busy={calendar.isLoading} className="overflow-hidden rounded-lg border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-5 sm:px-6">
         <div><p className="text-xs text-muted-foreground">作业记录 · {selectedDate}</p><h2 className="mt-1 text-lg font-semibold">{dateLabel(parseDate(selectedDate))}</h2></div>

@@ -23,6 +23,13 @@ describe('getNewChatNavigation', () => {
 });
 
 describe('library navigation visibility', () => {
+  it('exposes assigned textbooks on both student navigation surfaces', () => {
+    for (const includeSettings of [false, true]) {
+      expect(getVisibleNavItems('student', { includeSettings }).find(item => item.key === '/education/learn')).toMatchObject({ labelKey: 'sidebar.myTextbooks' });
+    }
+    expect(getVisibleNavItems('parent').map(item => item.key)).not.toContain('/education/learn');
+  });
+
   it('shows documents in both desktop and mobile navigation for a parent', () => {
     expect(getVisibleNavItems('parent').map((item) => item.key)).toContain('/documents');
     expect(getVisibleNavItems('parent', { includeSettings: true }).map((item) => item.key)).toContain('/documents');

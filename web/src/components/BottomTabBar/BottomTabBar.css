@@ -92,3 +92,12 @@
   display: block;
 }
 
+.bottom-tab-bar--student .bottom-tab-item { min-width: 0; }
+.bottom-tab-bar--student .bottom-tab-item-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0;
+}
+
