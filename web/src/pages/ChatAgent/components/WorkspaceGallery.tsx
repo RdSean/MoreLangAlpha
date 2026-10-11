@@ -833,7 +833,7 @@ function WorkspaceGallery({ onWorkspaceSelect, prefetchThreads }: WorkspaceGalle
 
   return (
     <div
-      className="h-full flex flex-col overflow-hidden"
+      className="workspace-gallery h-full flex flex-col overflow-hidden"
       style={{ backgroundColor: 'var(--color-bg-page)' }}
     >
       {/* Header (desktop only) */}

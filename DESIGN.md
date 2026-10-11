@@ -58,6 +58,13 @@ No neon, glow, holography, large decorative gradients or glass blur. Hard-edged
 stripe patterns and tiny rivet shapes are not surface washes. Quiet appearance
 remains independent of these NASA overrides.
 
+NASA content grounds use local, static SVG paint grain and a faint registration
+rail in desktop margins. At tablet/mobile widths only grain remains. Calendar
+data and reward-pack art can use a low-contrast drafting grid; prose, card images,
+and input surfaces stay clean. Reward pack edge colors identify the actual pack
+type using existing muted identity inks. Reward and collection frames use the
+NASA panel radius; all material styling remains under `data-theme="nasa"`.
+
 ## Interaction and motion
 
 - Preserve navigation, workspace, Skills, MCP, SSE, checkpoint and education
