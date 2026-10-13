@@ -35,12 +35,35 @@ export default defineConfig(({ mode }) => {
   return {
     base: env.VITE_CDN_BASE || '/',
     plugins: [react()],
+    // The legacy PDF build supplies API polyfills but still has static blocks.
+    // Compile its worker in dev as well as in the production worker bundle.
+    esbuild: {
+      target: 'chrome90',
+      include: /\.(m?ts|[jt]sx)$|pdfjs-dist\/legacy\/build\/pdf(?:\.worker)?(?:\.min)?\.mjs(?:\?|$)/,
+    },
+    optimizeDeps: { esbuildOptions: { target: 'chrome90' } },
+    worker: {
+      format: 'es',
+      plugins: () => [{
+        name: 'pdf-worker-fallback-export',
+        options(options) {
+          // PDF.js imports this URL on the main thread if Worker is unavailable.
+          if (typeof options.input === 'string' && options.input.endsWith('/src/pdfjsWorker.ts')) {
+            return { ...options, preserveEntrySignatures: 'strict' }
+          }
+        },
+      }],
+    },
     resolve: {
-      alias: {
-        '@': path.resolve(__dirname, './src'),
-      },
+      alias: [
+        { find: '@', replacement: path.resolve(__dirname, './src') },
+        // react-pdf imports the package root; keep its API and worker on the
+        // same legacy build, including polyfills inside each execution realm.
+        { find: /^pdfjs-dist$/, replacement: 'pdfjs-dist/legacy/build/pdf.mjs' },
+      ],
     },
     build: {
+      target: 'chrome90',
       rollupOptions: {
         // Explicit single entry: dev-only harness pages (e.g. intro-preview.html)
         // must never ship in the production build, even if a future Vite version

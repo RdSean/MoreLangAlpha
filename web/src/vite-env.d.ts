@@ -1,5 +1,9 @@
 /// <reference types="vite/client" />
 
+declare module 'pdfjs-dist/legacy/build/pdf.worker.mjs' {
+  export const WorkerMessageHandler: unknown;
+}
+
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string;
   readonly VITE_HOST_MODE?: 'oss' | 'platform';

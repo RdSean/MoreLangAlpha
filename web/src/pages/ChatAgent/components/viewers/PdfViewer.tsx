@@ -1,14 +1,18 @@
+import '@/lib/pdfCompatibility';
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Document, Page, pdfjs } from 'react-pdf';
+// Load after PDF.js: its ArrayBuffer transfer shim must detect the native
+// structuredClone capability, otherwise the two transfer polyfills recurse.
+import 'core-js/actual/structured-clone';
 import type { PDFPageProxy } from 'pdfjs-dist';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import './PdfViewer.css';
 
-// Vite-native ?url import resolves correctly in both dev and build
-import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+// Bundle the worker too: ?url alone serves unsupported syntax unchanged.
+import pdfjsWorkerUrl from '@/pdfjsWorker.ts?worker&url';
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 
 const ZOOM_STEPS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
@@ -182,16 +186,17 @@ export default function PdfViewer({ data, viewMode = 'single', pageNumber: contr
         <Document
           file={fileData}
           onLoadSuccess={onDocumentLoadSuccess}
+          onSourceError={(err: Error) => setError(err)}
           onLoadError={(err: Error) => setError(err)}
           loading={
               <div className="pdf-loading">{t('common.loading')}</div>
           }
         >
-          {viewMode === 'continuous' && numPages
+          {numPages && (viewMode === 'continuous'
             ? Array.from({ length: numPages }, (_, index) => (
-              <Page key={index + 1} pageNumber={index + 1} width={renderWidth} scale={scale} loading={<div className="pdf-loading">{t('common.loading')}</div>} />
+              <Page key={index + 1} pageNumber={index + 1} width={renderWidth} scale={scale} onLoadError={(err: Error) => setError(err)} onRenderError={(err: Error) => setError(err)} loading={<div className="pdf-loading">{t('common.loading')}</div>} />
             ))
-            : <Page pageNumber={currentPage} width={renderWidth} scale={scale} onLoadSuccess={fitPage ? onPageLoadSuccess : undefined} loading={<div className="pdf-loading">{t('common.loading')}</div>} />}
+            : <Page pageNumber={currentPage > numPages ? 1 : currentPage} width={renderWidth} scale={scale} onLoadSuccess={fitPage ? onPageLoadSuccess : undefined} onLoadError={(err: Error) => setError(err)} onRenderError={(err: Error) => setError(err)} loading={<div className="pdf-loading">{t('common.loading')}</div>} />)}
         </Document>
       </div>
     </div>

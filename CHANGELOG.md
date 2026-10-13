@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-10-14
+
+### Android Chrome 90 原始教材 PDF 兼容修复
+
+- 修复 Android 11 / Chrome 90 普通模式与请求桌面版模式下原书 PDF 无页面的问题；用户已在真机确认两种模式均能阅读，学生讲义 Chat 也均正常。
+- 页面与 worker 分别加载旧版 Chromium 所需 API，PDF.js legacy 页面与 worker 通过 Vite 转译为 Chrome 90 可运行语法；保留 Web Worker 和 Worker 不可用时的主线程回退。
+- 等文档页数可用后再挂载页面，避免切换文档时短暂请求越界页；原文件、页面加载及绘制错误沿用现有重试反馈。
+- 验证：实际 Chromium 90 下 38 项原书及兼容回归、8 项生产包专项检查，以及当前 Chromium 的 41 项回归通过；覆盖扫描版、图片版、混排 PDF 的非空像素。33 项聚焦单元检查、类型检查、修改文件 ESLint 和生产构建通过，首屏 432.7 kB gz / 450 kB；LAN `192.168.3.240:5177` 可访问。
+- 用户反馈当前 PDF 可显示但加载偏慢；尚未测量下载、解析和绘制各阶段耗时，本次不改加载策略。详见 `docs/debugging/2026-10-13-original-pdf-chrome90.md`。回滚基线 tag：`v2026.10.13-before-pdf-chrome90-fix`。
+
 ## 2026-10-13
 
 ### Android 平板阅读排查补充

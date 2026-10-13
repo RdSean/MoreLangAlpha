@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, mockAPI, resetMockServer, test } from './fixtures.js';
 import { installProcessingMocks, json, processingJob } from './helpers/textbookProcessingFixtures.js';
@@ -18,8 +19,18 @@ sys.stdout.buffer.write(output.getvalue())
 `], { cwd: fileURLToPath(new URL('../../', import.meta.url)) });
 
 test.use({ locale: 'zh-CN', screenshot: 'only-on-failure' });
-test.beforeEach(async () => resetMockServer());
-test.afterEach(async ({ page }) => { await page.close(); await resetMockServer(); });
+const diagnostics = new WeakMap();
+test.beforeEach(async ({ page }) => {
+  await resetMockServer();
+  const messages = [];
+  diagnostics.set(page, messages);
+  page.on('pageerror', error => messages.push(error.stack ?? error.message));
+  page.on('console', message => { if (message.type() === 'error' || message.type() === 'warning' || /Warning:/.test(message.text())) messages.push(message.text()); });
+});
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus) await testInfo.attach('pdf-diagnostics', { body: JSON.stringify(diagnostics.get(page)), contentType: 'application/json' });
+  await page.close(); await resetMockServer();
+});
 
 async function installOriginal(page, { marker = null, jsonPage = null, missing = false, student = false, longLesson = false } = {}) {
   const job = { ...processingJob(), status: 'succeeded' };
@@ -80,10 +91,10 @@ async function installOriginal(page, { marker = null, jsonPage = null, missing =
   return { downloads: () => downloads };
 }
 
-async function expectPdf(page, number) {
+async function expectPdf(page, number, total = 20) {
   const pdfPage = page.locator(`.react-pdf__Page[data-page-number="${number}"] canvas`);
   await expect(pdfPage).toBeVisible();
-  await expect(page.locator('.pdf-page-info')).toHaveText(`${number} / 20`);
+  await expect(page.locator('.pdf-page-info')).toHaveText(`${number} / ${total}`);
   await expect.poll(() => pdfPage.evaluate((canvas) => {
     const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
     let ink = 0;
@@ -98,6 +109,82 @@ async function selectDirectoryTab(page, name) {
   await page.getByRole('tab', { name, exact: true }).click();
   const closeDirectory = page.getByRole('button', { name: '关闭教材目录', exact: true });
   if (await closeDirectory.isVisible()) await closeDirectory.click();
+}
+
+for (const mobile of [true, false]) {
+  test.describe(`${mobile ? 'Android request' : 'desktop request'} PDF compatibility`, () => {
+    test.use({
+      viewport: { width: mobile ? 768 : 1280, height: 900 },
+      isMobile: mobile,
+      hasTouch: true,
+      userAgent: mobile
+        ? 'Mozilla/5.0 (Linux; Android 11; Tablet) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.210 Safari/537.36'
+        : 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.210 Safari/537.36',
+    });
+    for (const student of [false, true]) {
+      test(`${student ? 'student' : 'parent'} renders real worker pixels without modern APIs`, async ({ page }, testInfo) => {
+        await page.addInitScript(() => {
+          delete Array.prototype.at;
+          delete Object.hasOwn;
+          delete window.structuredClone;
+          delete Promise.withResolvers;
+          localStorage.setItem('theme', 'nasa');
+        });
+        const workers = [];
+        page.on('worker', worker => workers.push(worker));
+        await installOriginal(page, { marker: 12, student });
+        const path = student ? '/education/learn/assignment-1' : '/textbooks/book-1';
+        const origin = process.env.PDF_TEST_ORIGIN ?? '';
+        await page.goto(`${origin}${path}?kp=reading&view=original&nav=source`);
+        await expectPdf(page, 12);
+        expect(workers.some(worker => /pdfjsWorker/.test(worker.url()))).toBe(true);
+        expect(diagnostics.get(page).filter(message => /fake worker|GetOperatorList|DocumentErrorBoundary|SyntaxError/.test(message))).toEqual([]);
+        await page.locator('.pdf-nav button').last().click();
+        await expectPdf(page, 13);
+        await page.reload();
+        await expectPdf(page, 13);
+        await page.screenshot({ path: testInfo.outputPath(`pdf-${mobile ? 'mobile' : 'desktop'}-${student ? 'student' : 'parent'}.png`) });
+      });
+    }
+  });
+}
+
+test('invalid PDF shows retry feedback and recovers with a valid original', async ({ page }) => {
+  await installOriginal(page, { marker: 12, student: true });
+  let failed = false;
+  await page.route('**/api/v1/education/textbooks/book-1/original', route => {
+    if (!failed) { failed = true; return route.fulfill({ contentType: 'application/pdf', body: '%PDF-1.7\ninvalid document' }); }
+    return route.fulfill({ contentType: 'application/pdf', body: originalPdf });
+  });
+  await page.goto('/education/learn/assignment-1?kp=reading&view=original&nav=source');
+  await expect(page.getByRole('alert')).toContainText('原文件暂不可读');
+  await page.getByRole('button', { name: '重试', exact: true }).click();
+  await expectPdf(page, 12);
+});
+
+test('PDF retains its main-thread fallback when Worker construction fails', async ({ page }) => {
+  await page.addInitScript(() => {
+    delete window.structuredClone;
+    window.Worker = class { constructor() { throw new Error('Worker unavailable in fixture'); } };
+  });
+  await installOriginal(page, { marker: 12, student: true });
+  await page.goto(`${process.env.PDF_TEST_ORIGIN ?? ''}/education/learn/assignment-1?kp=reading&view=original&nav=source`);
+  await expectPdf(page, 12);
+});
+
+for (const [filename, total] of [['scanned.pdf', 1], ['image-based.pdf', 1], ['mixed.pdf', 2]]) {
+  test(`PDF compatibility renders repository ${filename} pixels`, async ({ page }, testInfo) => {
+    await installOriginal(page, { marker: 1, student: true });
+    const bytes = readFileSync(new URL(`../../tests/fixtures/documents/${filename}`, import.meta.url));
+    await page.route('**/api/v1/education/textbooks/book-1/original', route => route.fulfill({ contentType: 'application/pdf', body: bytes }));
+    await page.goto(`${process.env.PDF_TEST_ORIGIN ?? ''}/education/learn/assignment-1?kp=reading&view=original&nav=source`);
+    await expectPdf(page, 1, total);
+    if (total > 1) {
+      await page.locator('.pdf-nav button').last().click();
+      await expectPdf(page, 2, total);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`fixture-${filename}.png`) });
+  });
 }
 
 for (const theme of ['quiet', 'nasa']) {

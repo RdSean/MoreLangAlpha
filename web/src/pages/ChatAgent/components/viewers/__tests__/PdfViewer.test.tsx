@@ -30,7 +30,7 @@ vi.mock('react-pdf', () => ({
   Page: () => <div data-testid="pdf-page" />,
 }));
 
-vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'worker.js' }));
+vi.mock('@/pdfjsWorker.ts?worker&url', () => ({ default: 'worker.js' }));
 
 import PdfViewer from '../PdfViewer';
 

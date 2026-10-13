@@ -18,7 +18,7 @@ vi.mock('react-pdf', () => ({
     return <div data-testid="pdf-page" data-width={width} data-scale={scale}>Page {pageNumber}</div>;
   },
 }));
-vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'worker.js' }));
+vi.mock('@/pdfjsWorker.ts?worker&url', () => ({ default: 'worker.js' }));
 
 const bytes = new Uint8Array([1, 2, 3]);
 function Reader({ keyboardScope = 'document' }: { keyboardScope?: 'document' | 'viewer' }) {
