@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState, type RefObject } from 'react';
 import type { QuotedContext } from '@/lib/quotedContext';
+import { captureLessonAnchor, type LessonAnchor } from '../components/lessonAnnotationAnchors';
 
 interface LessonSelection extends QuotedContext {
   lineCount: number;
   left: number;
   top: number;
+  anchor?: LessonAnchor | null;
 }
 
 function elementFor(node: Node | null): Element | null {
@@ -52,6 +54,7 @@ export function useLessonSelectionContext(containerRef: RefObject<HTMLDivElement
       const lines = text.split('\n').length;
       const preferBelow = window.matchMedia('(pointer: coarse)').matches;
       setSelection({
+        anchor: source === 'lesson' ? captureLessonAnchor(markdown, range) : null,
         text, source, label: `${source === 'lesson' ? '讲义选段' : '回答选段'} · ${lines} 行`, lineCount: lines,
         left: Math.max(leftEdge, Math.min(rect.left + rect.width / 2 - 80, rightEdge - 160)),
         top: Math.max(topEdge, Math.min(!preferBelow && rect.top - 52 >= topEdge ? rect.top - 52 : rect.bottom + 8, bottomEdge - 44)),

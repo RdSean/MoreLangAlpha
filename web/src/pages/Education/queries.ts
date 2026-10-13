@@ -649,6 +649,7 @@ export function useStudentLearningItems(
 export function useLearningAssetMutations() {
   const queryClient = useQueryClient();
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.education.all });
+  const invalidateItems = (_: unknown, variables: { assignmentId: string }) => queryClient.invalidateQueries({ queryKey: queryKeys.education.assignmentLearningItemsRoot(variables.assignmentId) });
   return {
     add: useMutation({
       mutationFn: ({
@@ -663,22 +664,22 @@ export function useLearningAssetMutations() {
         content: string;
         sourceAnchor?: Record<string, unknown> | null;
       }) => educationApi.createStudentLearningItem(assignmentId, knowledgePointId, input),
-      onSuccess: invalidate,
+      onSuccess: invalidateItems,
     }),
     update: useMutation({
       mutationFn: ({ assignmentId, itemId, content, sourceAnchor }: { assignmentId: string; itemId: string; content: string; sourceAnchor?: Record<string, unknown> | null }) =>
         educationApi.updateStudentLearningItem(assignmentId, itemId, { content, sourceAnchor }),
-      onSuccess: invalidate,
+      onSuccess: invalidateItems,
     }),
     remove: useMutation({
       mutationFn: ({ assignmentId, itemId }: { assignmentId: string; itemId: string }) =>
         educationApi.deleteStudentLearningItem(assignmentId, itemId),
-      onSuccess: invalidate,
+      onSuccess: invalidateItems,
     }),
     summarize: useMutation({
       mutationFn: ({ assignmentId, skillNodeId }: { assignmentId: string; skillNodeId: string }) =>
         educationApi.generateStudentNodeSummary(assignmentId, skillNodeId),
-      onSuccess: invalidate,
+      onSuccess: invalidateItems,
     }),
     progress: useMutation({
       mutationFn: ({ assignmentId, knowledgePointId, status }: { assignmentId: string; knowledgePointId: string; status: 'learning' | 'read' | 'review_recommended' }) =>

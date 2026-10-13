@@ -1,0 +1,41 @@
+.lesson-annotation-container { container-type: inline-size; min-width: 0; }
+.book-reader-prose.book-reader-annotated { padding: 24px; }
+.lesson-annotation-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+.lesson-annotation-prose { min-width: 0; width: 100%; max-width: 800px; margin-inline: auto; }
+.lesson-annotation-margin { display: none; position: relative; min-width: 0; }
+.lesson-margin-note { position: absolute; width: 100%; padding: 12px; border: 1px solid var(--color-border-muted); border-radius: var(--radius-panel); background: var(--color-bg-card); font-family: var(--font-ui); font-size: 13px; line-height: 1.6; }
+.lesson-margin-quote { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 44px; text-align: left; border-bottom: 1px solid var(--color-border-muted); color: var(--color-text-secondary); }
+.lesson-margin-quote > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lesson-note-number { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 18px; height: 18px; border: 1px solid var(--color-border-muted); border-radius: 50%; font-family: var(--font-label); font-size: 11px; }
+.lesson-margin-note p { margin: 10px 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow-y: auto; }
+.lesson-margin-note button { min-height: 44px; }
+.lesson-text-mark { background: var(--annotation-fill); color: inherit; cursor: pointer; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.lesson-text-mark.has-note { border-bottom: 1px dotted var(--annotation-ink); }
+.lesson-text-mark[data-note-number]::after { content: attr(data-note-number); display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 3px; vertical-align: super; border: 1px solid var(--annotation-ink); border-radius: 50%; font: 10px var(--font-label); color: var(--annotation-ink); background: var(--annotation-fill); }
+.lesson-text-mark:focus-visible { outline: 2px solid var(--annotation-ink); }
+[data-annotation-color='olive'] { --annotation-fill: var(--color-identity-1-bg); --annotation-ink: var(--color-identity-1-fg); }
+[data-annotation-color='ochre'] { --annotation-fill: var(--color-identity-2-bg); --annotation-ink: var(--color-identity-2-fg); }
+[data-annotation-color='slate'] { --annotation-fill: var(--color-identity-0-bg); --annotation-ink: var(--color-identity-0-fg); }
+[data-annotation-color='brick'] { --annotation-fill: var(--color-identity-3-bg); --annotation-ink: var(--color-identity-3-fg); }
+.lesson-annotation-colors { display: flex; gap: 4px; }
+.lesson-annotation-colors button { display: grid; place-items: center; width: 44px; height: 44px; }
+.lesson-annotation-colors button span { width: 22px; height: 22px; border-radius: 50%; background: var(--annotation-ink); }
+.lesson-annotation-colors button[aria-pressed='true'] span { outline: 1px solid var(--color-text-primary); outline-offset: 3px; }
+.lesson-annotation-dialog { max-width: 480px; max-height: 85vh; overflow-y: auto; }
+.lesson-annotation-quote { max-height: 180px; overflow-y: auto; border-left: 2px solid var(--color-border-muted); padding-left: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.lesson-annotation-dialog textarea { width: 100%; min-height: 120px; border: 1px solid var(--color-border-muted); border-radius: var(--radius-panel); padding: 12px; color: var(--color-text-primary); background: var(--color-bg-input); font-size: 14px; }
+.lesson-annotation-dialog-actions { display: flex; gap: 8px; }
+.lesson-annotation-dialog-actions button { min-height: 44px; }
+.lesson-annotation-status { font-size: 13px; color: var(--color-text-secondary); }
+.lesson-selection-toolbar { display: flex; align-items: center; position: fixed; z-index: 60; max-width: calc(100vw - 16px); border: 1px solid var(--color-border-muted); border-radius: var(--radius-panel); background: var(--color-bg-elevated); color: var(--color-text-primary); box-shadow: var(--shadow-card); }
+.lesson-selection-toolbar button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 12px; font-size: 13px; white-space: nowrap; }
+.lesson-selection-toolbar button + button { border-left: 1px solid var(--color-border-muted); }
+.lesson-selection-toolbar button:hover { background: var(--color-bg-card); }
+@container (min-width: 920px) {
+  .lesson-annotation-layout { grid-template-columns: minmax(0, 1fr) 220px; }
+  .lesson-annotation-margin { display: block; }
+}
+@media (max-width: 480px) {
+  .book-reader-prose.book-reader-annotated { padding: 20px 18px; }
+  .lesson-selection-toolbar button { padding: 0 8px; font-size: 12px; }
+}

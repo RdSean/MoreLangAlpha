@@ -7,6 +7,7 @@ import { BookReader } from './BookReader';
 import LessonConversation from './LessonConversation';
 import { BookLessonExport } from './BookLessonExport';
 import './BookLessonReader.css';
+import { LessonAnnotationsProvider } from './LessonAnnotations';
 
 interface ComparisonProps {
   comparisonEnabled?: boolean;
@@ -14,7 +15,7 @@ interface ComparisonProps {
   comparisonContent?: ReactNode;
 }
 
-export function BookLessonReader({ textbookId, assignmentId, comparisonEnabled = false, onComparisonChange, comparisonContent, ...props }: ComponentProps<typeof BookReader> & { textbookId?: string; assignmentId?: string } & ComparisonProps) {
+export function BookLessonReader({ textbookId, assignmentId, annotationNodeId, comparisonEnabled = false, onComparisonChange, comparisonContent, ...props }: ComponentProps<typeof BookReader> & { textbookId?: string; assignmentId?: string; annotationNodeId?: string } & ComparisonProps) {
   const { t } = useTranslation();
   const reader = <BookReader {...props} />;
   if (!textbookId || props.view !== 'material' || !props.material?.material_available || !props.material.markdown) return reader;
@@ -25,7 +26,7 @@ export function BookLessonReader({ textbookId, assignmentId, comparisonEnabled =
       <Columns2 className="size-4" aria-hidden="true" />
     </Button>
   </TooltipTrigger><TooltipContent>{toggleLabel}</TooltipContent></Tooltip></TooltipProvider> : null;
-  return <div className="book-lesson-container"><div className={`book-lesson-layout${comparisonEnabled ? ' is-comparing' : ''}`}>
+  const layout = <div className="book-lesson-container"><div className={`book-lesson-layout${comparisonEnabled ? ' is-comparing' : ''}`}>
     <div className="book-lesson-primary">
       <LessonConversation key={`${textbookId}:${assignmentId ?? ''}:${material.knowledge_point_id}`} textbookId={textbookId} assignmentId={assignmentId} knowledgePointId={material.knowledge_point_id} readingPositionKey={props.readingPositionKey}>
         {({ questionsBusy }) => <BookReader {...props} continuous headerActions={<>
@@ -42,4 +43,5 @@ export function BookLessonReader({ textbookId, assignmentId, comparisonEnabled =
       <div className="book-lesson-original-content">{comparisonContent}</div>
     </aside>}
   </div></div>;
+  return assignmentId ? <LessonAnnotationsProvider key={`${assignmentId}:${material.knowledge_point_id}`} assignmentId={assignmentId} knowledgePointId={material.knowledge_point_id} skillNodeId={annotationNodeId}>{layout}</LessonAnnotationsProvider> : layout;
 }

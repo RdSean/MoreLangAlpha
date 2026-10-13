@@ -6,6 +6,8 @@ import { cn } from '@/lib/utils';
 import { useScrollMemory } from '@/lib/scrollMemory';
 import type { BookSourceSlice, KnowledgePointMaterial } from '../types';
 import EducationMarkdown from './EducationMarkdown';
+import { AnnotatedLesson } from './LessonAnnotations';
+import { useLessonAnnotations } from './lessonAnnotationContext';
 import { BookLearningStart } from './BookLearningStart';
 import {
   BookGenerationForm,
@@ -56,6 +58,7 @@ export function BookReader({
   const submissionRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasMaterial = Boolean(material?.material_available && material.markdown);
+  const annotations = useLessonAnnotations();
   const showLearningStart = learningView && !hasMaterial;
   const canGenerate = Boolean(canManageMaterials && material && onGenerate);
   const pending = generationPending || submitting;
@@ -141,12 +144,12 @@ export function BookReader({
       <div
         ref={scrollRef}
         data-testid="book-reader-scroll"
-        className={cn('book-reader-scroll min-h-0', !continuous && 'flex-1', view === 'original' ? 'overflow-hidden' : !continuous && 'overflow-y-auto', view !== 'original' && !showLearningStart && 'book-reader-prose')}
+        className={cn('book-reader-scroll min-h-0', !continuous && 'flex-1', view === 'original' ? 'overflow-hidden' : !continuous && 'overflow-y-auto', view !== 'original' && !showLearningStart && 'book-reader-prose', annotations && view === 'material' && 'book-reader-annotated')}
       >
         {view === 'original' ? originalContent : loading ? (
           <p className="text-sm text-muted-foreground">正在加载正文…</p>
         ) : view === 'material' && hasMaterial ? (
-          <EducationMarkdown
+          <AnnotatedLesson
             content={material?.markdown ?? ''}
             onOpenFile={onOpenMaterialLink}
           />

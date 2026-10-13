@@ -3,6 +3,10 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
 import { BookLessonReader } from '../components/BookLessonReader';
+vi.mock('../queries', () => ({
+  useStudentLearningItems: () => ({ data: [] }),
+  useLearningAssetMutations: () => ({}),
+}));
 
 vi.mock('../components/EducationMarkdown', () => ({ default: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock('../components/BookLessonExport', () => ({ BookLessonExport: () => <button>Export PDF</button> }));

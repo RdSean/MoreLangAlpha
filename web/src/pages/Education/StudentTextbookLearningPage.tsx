@@ -239,7 +239,7 @@ export default function StudentTextbookLearningPage() {
               </Dialog>
               <Dialog>
                 <DialogTrigger asChild><Button size="icon" variant="ghost" className="min-h-11 min-w-11" aria-label="打开学习笔记"><NotebookPen className="size-4" /></Button></DialogTrigger>
-                <DialogContent><DialogHeader><DialogTitle>学习笔记</DialogTitle></DialogHeader>{notebook}</DialogContent>
+                <DialogContent className="max-h-[85vh] overflow-y-auto"><DialogHeader><DialogTitle>学习笔记</DialogTitle></DialogHeader>{notebook}</DialogContent>
               </Dialog>
               {selectedKnowledgePoint && <Button variant="ghost" size="sm" className="min-h-11 whitespace-nowrap" disabled={learningAssets.progress.isPending} onClick={() => void learningAssets.progress.mutateAsync({ assignmentId, knowledgePointId: selectedKnowledgePoint.knowledge_point_id, status: 'read' })}>标记已学</Button>}
             </div>
@@ -255,6 +255,7 @@ export default function StudentTextbookLearningPage() {
               material={selectedKnowledgePoint ? material.data : undefined}
               source={source.data}
               comparisonEnabled={comparisonEnabled}
+              annotationNodeId={selectedKnowledgePoint?.unit_skill_node_id ?? undefined}
               onComparisonChange={(enabled) => updateSearch((next) => {
                 if (enabled) next.set('compare', '1');
                 else next.delete('compare');

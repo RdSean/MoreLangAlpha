@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type ComponentProps } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ComponentProps } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { FileText, Globe, Keyboard, Mic, Send, Square, TextSelect, X } from 'lucide-react';
@@ -26,6 +26,8 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { useScrollMemory } from '@/lib/scrollMemory';
 import EducationMarkdown from './EducationMarkdown';
 import './LessonConversation.css';
+import { AnnotationSelectionActions } from './LessonAnnotations';
+import { useLessonAnnotations } from './lessonAnnotationContext';
 import '@/components/ui/chat-input.css';
 
 const FilePanel = lazy(() => import('@/pages/ChatAgent/components/FilePanel'));
@@ -122,6 +124,16 @@ function LessonSession({ textbookId, knowledgePointId, assignmentId, readingPosi
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const focusAfterSelection = useRef(false);
   const context = useLessonSelectionContext(scrollRef, blocked);
+  const annotations = useLessonAnnotations();
+  const selectionToolbarRef = useRef<HTMLDivElement>(null);
+  const [toolbarLeft, setToolbarLeft] = useState(0);
+  useLayoutEffect(() => {
+    if (!context.selection?.anchor || !annotations) return;
+    const width = selectionToolbarRef.current?.getBoundingClientRect().width ?? 320;
+    const bounds = scrollRef.current?.getBoundingClientRect();
+    const right = Math.min(bounds?.right ?? window.innerWidth, window.innerWidth) - 8;
+    setToolbarLeft(Math.max(Math.max(bounds?.left ?? 0, 0) + 8, Math.min(context.selection.left, right - width)));
+  }, [context.selection, annotations]);
   const turnRefs = useRef<Array<HTMLElement | null>>([]);
   const pendingScroll = useRef<number | null>(null);
   useScrollMemory(scrollRef, readingPositionKey ?? `lesson:${textbookId}:${assignmentId ?? ''}:${knowledgePointId}`, { persist: true, ready: historyReady });
@@ -272,15 +284,20 @@ function LessonSession({ textbookId, knowledgePointId, assignmentId, readingPosi
         {reading.isError && <p className="mt-1 text-xs text-destructive" role="status">学习状态保存失败</p>}
       </footer>
       {context.selection && !blocked && createPortal(
-        <button type="button" className="lesson-selection-action" data-lesson-selection-action
-          style={{ left: context.selection.left, top: context.selection.top }}
+        <div ref={selectionToolbarRef} className={annotations && context.selection.anchor ? 'lesson-selection-toolbar' : undefined}
+          style={annotations && context.selection.anchor ? { left: toolbarLeft, top: context.selection.top } : undefined}
+          onPointerUp={(event) => event.stopPropagation()} onMouseDown={(event) => event.preventDefault()}>
+        <button type="button" className={annotations && context.selection.anchor ? undefined : 'lesson-selection-action'} data-lesson-selection-action
+          style={annotations && context.selection.anchor ? undefined : { left: context.selection.left, top: context.selection.top }}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
             focusAfterSelection.current = true;
             context.addSelection();
             stopListening();
             setVoiceMode(false);
-          }}><TextSelect className="size-4" aria-hidden="true" />{t('context.addNLinesToContext', { count: context.selection.lineCount })}</button>, document.body)}
+          }}><TextSelect className="size-4" aria-hidden="true" />{annotations && context.selection.anchor ? '提问' : t('context.addNLinesToContext', { count: context.selection.lineCount })}</button>
+        <AnnotationSelectionActions anchor={context.selection.anchor} onDone={context.dismiss} />
+        </div>, document.body)}
       <Dialog open={Boolean(file)} onOpenChange={(open) => { if (!open) setFile(null); }}>
         <DialogContent className="max-w-5xl h-[85dvh] p-0"><DialogTitle className="sr-only">文件预览</DialogTitle>
           {file && <Suspense fallback={<Loader />}><FilePanel workspaceId={file.workspaceId} targetFile={file.path} onClose={() => setFile(null)} singleFileMode readOnly /></Suspense>}

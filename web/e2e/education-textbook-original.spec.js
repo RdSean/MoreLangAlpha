@@ -163,7 +163,7 @@ for (const student of [false, true]) {
     await page.locator('.pdf-zoom button').first().click();
     await expect(page.locator('.pdf-zoom-info')).toHaveText('100%');
     await page.setViewportSize({ width: 1440, height: 600 });
-    await expect.poll(() => viewport.locator('canvas').evaluate(canvas => canvas.getBoundingClientRect().height)).toBeLessThan(450);
+    await expect.poll(() => viewport.evaluate((element) => element.querySelector('canvas').getBoundingClientRect().height <= element.clientHeight - 22)).toBe(true);
     const canvas = await viewport.locator('canvas').boundingBox();
     const resized = await viewport.boundingBox();
     expect(canvas.height).toBeLessThanOrEqual(resized.height - 22);

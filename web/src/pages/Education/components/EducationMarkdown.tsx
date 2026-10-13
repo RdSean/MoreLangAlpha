@@ -1,5 +1,7 @@
 import Markdown from '@/pages/ChatAgent/components/Markdown';
 import './EducationMarkdown.css';
+import { annotationPlugin, type AnnotationItem } from './lessonAnnotationAnchors';
+import type { ComponentProps } from 'react';
 
 interface PositionedNode {
   type?: string;
@@ -66,26 +68,39 @@ export default function EducationMarkdown({
   className = '',
   onOpenFile,
   sourceLineOffset,
+  annotationOptions,
 }: {
   content: string;
   variant?: 'lesson' | 'summary' | 'compact';
   className?: string;
   onOpenFile?: (path: string) => void;
   sourceLineOffset?: number;
+  annotationOptions?: { items: readonly AnnotationItem[]; onOpen?: (itemId: string) => void };
 }) {
   const lineOffset = sourceLineOffset === undefined
     ? undefined
     : sourceLineOffset + hiddenFrontMatterLines(content);
+  const plugins: NonNullable<ComponentProps<typeof Markdown>['rehypePlugins']> = [];
+  if (lineOffset !== undefined) plugins.push([sourceLinePlugin, { lineOffset }]);
+  if (annotationOptions) plugins.push([annotationPlugin, { items: annotationOptions.items }]);
   return (
-    <div data-education-markdown={variant}>
+    <div data-education-markdown={variant}
+      onClick={annotationOptions ? (event) => {
+        if (window.getSelection()?.toString()) return;
+        const mark = (event.target as Element).closest('[data-annotation-ids]');
+        if (mark) { event.preventDefault(); annotationOptions.onOpen?.(mark.getAttribute('data-annotation-ids')!.split(' ')[0]); }
+      } : undefined}
+      onKeyDown={annotationOptions ? (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const mark = (event.target as Element).closest('[data-annotation-ids]');
+        if (mark) { event.preventDefault(); annotationOptions.onOpen?.(mark.getAttribute('data-annotation-ids')!.split(' ')[0]); }
+      } : undefined}>
       <Markdown
         variant="panel"
         content={content}
         className={className}
         onOpenFile={onOpenFile}
-        rehypePlugins={lineOffset === undefined
-          ? []
-          : [[sourceLinePlugin, { lineOffset }]]}
+        rehypePlugins={plugins}
       />
     </div>
   );

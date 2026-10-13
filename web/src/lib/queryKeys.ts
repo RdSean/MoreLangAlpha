@@ -197,7 +197,8 @@ export const queryKeys = {
     assignment: (id: string) => [...queryKeys.education.learning(), id],
     assignmentStructure: (id: string) => [...queryKeys.education.assignment(id), 'structure'],
     assignmentKnowledgePoint: (assignmentId: string, knowledgePointId: string) => [...queryKeys.education.assignment(assignmentId), 'knowledge-points', knowledgePointId],
-    assignmentLearningItems: (assignmentId: string, filters: object = {}) => [...queryKeys.education.assignment(assignmentId), 'items', filters],
+    assignmentLearningItemsRoot: (assignmentId: string) => [...queryKeys.education.assignment(assignmentId), 'items'],
+    assignmentLearningItems: (assignmentId: string, filters: object = {}) => [...queryKeys.education.assignmentLearningItemsRoot(assignmentId), filters],
   },
   documents: {
     all: ['documents'],
