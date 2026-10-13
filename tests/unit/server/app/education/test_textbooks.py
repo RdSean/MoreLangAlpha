@@ -109,8 +109,9 @@ async def test_lesson_chat_space_rejects_inaccessible_lesson(client, monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('member', ['parent-1', 'student-1'])
 async def test_original_stream_closes_download_and_has_private_cache_headers(
-    client, monkeypatch
+    client, monkeypatch, member
 ):
     from types import SimpleNamespace
 
@@ -125,7 +126,7 @@ async def test_original_stream_closes_download_and_has_private_cache_headers(
     )
     opener = AsyncMock(return_value=download)
     monkeypatch.setattr(textbook_routes, "open_book_original", opener, raising=False)
-    client._transport.app.dependency_overrides[get_current_user_id] = lambda: "parent-1"
+    client._transport.app.dependency_overrides[get_current_user_id] = lambda: member
     response = await client.get(
         f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/original"
     )
@@ -134,7 +135,7 @@ async def test_original_stream_closes_download_and_has_private_cache_headers(
     assert response.headers["cache-control"] == "private, no-store"
     close.assert_awaited_once()
     opener.assert_awaited_once_with(
-        parent_user_id="parent-1", textbook_id=str(TEXTBOOK["textbook_id"])
+        user_id=member, textbook_id=str(TEXTBOOK["textbook_id"])
     )
 
 
@@ -153,10 +154,21 @@ async def test_original_location_can_be_unknown_without_blocking_reading(
     )
     assert response.status_code == 200
     assert response.json() == {"page": page}
+    locate.assert_awaited_once_with(user_id='parent-1', textbook_id=TEXTBOOK['textbook_id'], start_line=300)
     invalid = await client.get(
         f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/original-location?start_line=0"
     )
     assert invalid.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('endpoint', ['original', 'original-location?start_line=1'])
+async def test_original_routes_hide_inaccessible_books(client, monkeypatch, endpoint):
+    client._transport.app.dependency_overrides[get_current_user_id] = lambda: 'unassigned-student'
+    service = 'get_book_original_location' if 'location' in endpoint else 'open_book_original'
+    monkeypatch.setattr(textbook_routes, service, AsyncMock(side_effect=TextbookNotFoundError('not found')))
+    response = await client.get(f"/api/v1/education/textbooks/{TEXTBOOK['textbook_id']}/{endpoint}")
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio

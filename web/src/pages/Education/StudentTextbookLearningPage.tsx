@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { BookNavigator } from './components/BookNavigator';
 import { BookLessonReader as BookReader } from './components/BookLessonReader';
+import { BookOriginalReader } from './components/BookOriginalReader';
+import { firstJsonPage } from './components/bookOriginalLocation';
 import PersonalNotebook from './components/PersonalNotebook';
 import {
   useLearningAssetMutations,
@@ -45,11 +47,25 @@ export default function StudentTextbookLearningPage() {
     ? findNode(data.structure.nodes, selectedNodeId)
     : undefined;
   const requestedView = searchParams.get('view');
-  const readerView: 'material' | 'source' = selectedNode
+  const readerView: 'material' | 'source' | 'original' = requestedView === 'original'
+    ? 'original'
+    : selectedNode
     ? 'source'
     : requestedView === 'material' && selectedKnowledgePoint?.material_available
       ? 'material'
       : 'source';
+  const navParam = searchParams.get('nav');
+  const navigatorView = navParam === 'source' || navParam === 'text' || navParam === 'knowledge'
+    ? navParam
+    : readerView === 'original' ? 'source' : selectedNode ? 'text' : 'knowledge';
+  const pageParam = Number(searchParams.get('pdfPage'));
+  const restoredPdfPage = Number.isSafeInteger(pageParam) && pageParam > 0 ? pageParam : undefined;
+  const jsonPage = firstJsonPage(selectedNode ? [selectedNode] : selectedKnowledgePoint && data
+    ? selectedKnowledgePoint.node_skill_ids.flatMap((id) => {
+        const node = findNode(data.structure.nodes, id);
+        return node ? [node] : [];
+      })
+    : []);
 
   useEffect(() => {
     if (!data) return;
@@ -67,18 +83,18 @@ export default function StudentTextbookLearningPage() {
       if (firstKnowledgePoint) {
         next.set('kp', firstKnowledgePoint.skill_kp_id);
         next.delete('node');
-        next.set('view', firstKnowledgePoint.material_available ? 'material' : 'source');
+        next.set('view', requestedView === 'original' ? 'original' : firstKnowledgePoint.material_available ? 'material' : 'source');
         changed = true;
       } else if (firstNode) {
         next.set('node', firstNode.id);
         next.delete('kp');
-        next.set('view', 'source');
+        next.set('view', requestedView === 'original' ? 'original' : 'source');
         changed = true;
       }
-    } else if (validNode && requestedView !== 'source') {
+    } else if (validNode && requestedView !== 'source' && requestedView !== 'original') {
       next.set('view', 'source');
       changed = true;
-    } else if (validKp && requestedView !== 'source' && requestedView !== 'material') {
+    } else if (validKp && requestedView !== 'source' && requestedView !== 'material' && requestedView !== 'original') {
       next.set('view', validKp.material_available ? 'material' : 'source');
       changed = true;
     } else if (validKp && requestedView === 'material' && !validKp.material_available) {
@@ -110,35 +126,40 @@ export default function StudentTextbookLearningPage() {
     assignmentId,
     selectedKnowledgePoint?.knowledge_point_id,
   );
-  const learningView = Boolean(selectedKnowledgePoint) && !selectedNode;
+  const learningView = Boolean(selectedKnowledgePoint) && !selectedNode &&
+    readerView !== 'original' && navigatorView !== 'source' && navigatorView !== 'text';
   const emptyLearningView = learningView && !material.data?.material_available;
   const source = useManagedBookSourceSlice(
     data?.textbook_id,
     sourceRequestRange?.start,
     sourceRequestRange?.end,
-    Boolean(sourceRequestRange) && !emptyLearningView,
+    Boolean(sourceRequestRange) && readerView !== 'original' && !emptyLearningView,
   );
 
-  const updateSearch = (update: (next: URLSearchParams) => void) => {
+  const updateSearch = (update: (next: URLSearchParams) => void, replace = false) => {
     const next = new URLSearchParams(searchParams);
     update(next);
-    setSearchParams(next);
+    setSearchParams(next, { replace });
   };
   const selectKnowledgePoint = (skillKpId: string) => {
     const target = data?.knowledge_points.find((entry) => entry.skill_kp_id === skillKpId);
     if (!target) return;
     updateSearch((next) => {
       next.set('kp', skillKpId);
+      next.set('nav', 'knowledge');
+      next.delete('pdfPage');
       next.delete('node');
       next.set('view', target.material_available ? 'material' : 'source');
     });
     setNavigatorOpen(false);
   };
-  const selectNode = (nodeId: string) => {
+  const selectNode = (nodeId: string, view: 'source' | 'original' = 'source') => {
     updateSearch((next) => {
       next.set('node', nodeId);
       next.delete('kp');
-      next.set('view', 'source');
+      next.set('view', view);
+      next.set('nav', view === 'original' ? 'source' : 'text');
+      next.delete('pdfPage');
     });
     setNavigatorOpen(false);
   };
@@ -168,6 +189,18 @@ export default function StudentTextbookLearningPage() {
       selectedNodeId={selectedNode?.id}
       onSelectKnowledgePoint={selectKnowledgePoint}
       onSelectNode={selectNode}
+      onSelectOriginalNode={(nodeId) => selectNode(nodeId, 'original')}
+      activeView={navigatorView}
+      onNavigationChange={(view) => {
+        if (view === 'knowledge') {
+          const target = selectedKnowledgePoint ?? data.knowledge_points[0];
+          if (target) { selectKnowledgePoint(target.skill_kp_id); return; }
+        }
+        updateSearch((next) => {
+          next.set('nav', view);
+          next.set('view', view === 'source' ? 'original' : 'source');
+        });
+      }}
       onCollapse={onCollapse}
     />
   );
@@ -192,7 +225,7 @@ export default function StudentTextbookLearningPage() {
             <Link to="/education/learn" className="mr-auto inline-flex min-h-11 shrink-0 whitespace-nowrap items-center gap-2 text-xs text-muted-foreground lg:hidden"><ChevronLeft className="size-4" />我的教材</Link>
             <div className="student-learning-mission" aria-label={`${missionCode} ${title}`}>
               <span className="mission-badge" aria-hidden="true">{missionNumber || '—'}</span>
-              <span className="mission-label">{missionCode} / {readerView === 'material' ? 'LESSON' : 'SOURCE'}</span>
+              <span className="mission-label">{missionCode} / {readerView === 'material' ? 'LESSON' : readerView === 'original' ? 'ORIGINAL' : 'SOURCE'}</span>
             </div>
             <div className="student-learning-actions flex shrink-0 gap-1">
               <Dialog open={navigatorOpen} onOpenChange={setNavigatorOpen}>
@@ -216,6 +249,13 @@ export default function StudentTextbookLearningPage() {
               learningView={learningView}
               material={selectedKnowledgePoint ? material.data : undefined}
               source={source.data}
+              originalContent={readerView === 'original' ? <BookOriginalReader
+                textbookId={data.textbook_id}
+                startLine={sourceRange?.start}
+                jsonPage={jsonPage}
+                restoredPage={restoredPdfPage}
+                onPageChange={(page) => updateSearch((next) => next.set('pdfPage', String(page)), true)}
+              /> : undefined}
               loading={(!emptyLearningView && source.isLoading) || material.isLoading}
               readingPositionKey={`student-textbook:${assignmentId}:${selectedKnowledgePoint?.skill_kp_id ?? `node:${selectedNode?.id}`}:${readerView}`}
               sourceRange={sourceRange}

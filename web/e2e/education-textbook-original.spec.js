@@ -21,7 +21,7 @@ test.use({ locale: 'zh-CN', screenshot: 'only-on-failure' });
 test.beforeEach(async () => resetMockServer());
 test.afterEach(async ({ page }) => { await page.close(); await resetMockServer(); });
 
-async function installOriginal(page, { marker = null, jsonPage = null, missing = false } = {}) {
+async function installOriginal(page, { marker = null, jsonPage = null, missing = false, student = false } = {}) {
   const job = { ...processingJob(), status: 'succeeded' };
   await installProcessingMocks(page, { getJob: () => job, ready: true, withCurrentJob: false, title: '原书阅读与知识点定位测试教材 · A Book With a Longer Title' });
   let downloads = 0;
@@ -41,6 +41,30 @@ async function installOriginal(page, { marker = null, jsonPage = null, missing =
       return json(route, { page: marker });
     },
   });
+  if (student) {
+    const member = { user_id: 'student-1', email: null, name: 'Student', role: 'student', household_id: 'household-1' };
+    await mockAPI(page, {
+      'GET /auth/me': member,
+      'GET /users/me': { ...member, onboarding_completed: true, has_api_key: true },
+      'GET /education/learning/assignment-1/structure': {
+        assignment_id: 'assignment-1', textbook_id: 'book-1', textbook_title: '原书阅读测试教材',
+        structure_id: 'structure-1', schema_version: '2.1.0', warnings: [],
+        structure: { schema_version: '2.1.0', book: { title: '原书' }, source: { path: 'source.md', total_lines: 500 }, coverage: {},
+          nodes: [{ id: 'unit-1', title: '章节一', anchor: { start_line: 300, end_line: 350 }, page_range: { start: 15, end: 20, source: 'derived', label: 'PDF pages' }, children: [] }] },
+        knowledge_points: [{ knowledge_point_id: 'kp-1', skill_kp_id: 'reading', position: 1, title: '原文阅读', unit_skill_node_id: 'unit-1', node_skill_ids: ['unit-1'], start_line: 300, end_line: 350, content_file: 'materials/kp-1.md', material_available: true }],
+      },
+      'GET /education/learning/assignment-1/knowledge-points/kp-1': {
+        assignment_id: 'assignment-1', textbook_id: 'book-1', knowledge_point_id: 'kp-1', skill_kp_id: 'reading', material_available: true,
+        markdown: '# 已提交的讲义\n\n这份讲义已经可以阅读。', generated_at: '2026-10-01T00:00:00Z', depth: 'lesson', requirements: null, content_sha256: 'b'.repeat(64),
+      },
+      'GET /education/learning/assignment-1/chat-space': { assignment_id: 'assignment-1', workspace_id: 'workspace-1', conversation_thread_id: 'thread-1' },
+      'GET /education/learning/assignment-1/items': [],
+      'GET /education/textbooks/book-1/reading-state': [],
+      'POST /education/learning/assignment-1/knowledge-points/kp-1/reading-state': {},
+      'GET /education/textbooks/book-1/knowledge-points/kp-1/conversation/replay': [],
+      'GET /education/textbooks/book-1/knowledge-points/kp-1/conversation/status': { status: 'completed', can_reconnect: false, lesson_active: true },
+    });
+  }
   return { downloads: () => downloads };
 }
 
@@ -121,3 +145,37 @@ test('original unavailable has a retry and text reading remains available', asyn
   await selectDirectoryTab(page, '文字目录');
   await expect(page.getByText('Paragraph 1:', { exact: false })).toBeVisible();
 });
+
+for (const theme of ['quiet', 'nasa']) {
+  for (const width of [375, 768, 1440]) {
+    test(`student ${theme} ${width}px reads original PDF and returns to the lecture`, async ({ page }, testInfo) => {
+      const errors = [];
+      page.on('pageerror', error => errors.push(error.message));
+      await page.setViewportSize({ width, height: 900 });
+      await page.addInitScript((value) => localStorage.setItem('theme', value), theme);
+      await installOriginal(page, { marker: 12, student: true });
+      await page.goto('/education/learn/assignment-1?kp=reading&view=original&nav=source');
+      await expectPdf(page, 12);
+      await page.locator('.pdf-nav button').last().click();
+      await expectPdf(page, 13);
+      await page.reload();
+      await expectPdf(page, 13);
+      const selectTab = async (name) => {
+        if (width < 1024) await page.getByRole('button', { name: '打开教材目录', exact: true }).click();
+        await page.getByRole('tab', { name, exact: true }).click();
+        const dialog = page.getByRole('dialog');
+        if (width < 1024 && await dialog.isVisible()) await page.keyboard.press('Escape');
+      };
+      await selectTab('文字目录');
+      await expect(page.getByText('Paragraph 1:', { exact: false })).toBeVisible();
+      await selectTab('原始教材');
+      await expectPdf(page, 13);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+      await page.screenshot({ path: testInfo.outputPath(`student-original-${theme}-${width}.png`) });
+      await selectTab('知识点');
+      await expect(page.getByRole('textbox', { name: '讲义问题' })).toBeEnabled();
+      await expect(page).not.toHaveURL(/pdfPage=/);
+      expect(errors).toEqual([]);
+    });
+  }
+}

@@ -1197,6 +1197,12 @@ async def get_managed_source_for_user(
             await cur.execute(
                 """
                 SELECT textbooks.textbook_id, textbooks.source_status, textbooks.source_snapshot_prefix,
+                       textbooks.source_document_id AS document_id,
+                       (SELECT owner_user_id FROM documents
+                        WHERE documents.document_id = textbooks.source_document_id)
+                       AS source_owner_user_id,
+                       textbooks.source_parser_id AS parser_id,
+                       textbooks.selected_source->'page_count' AS page_count,
                        textbooks.source_markdown_key,
                        textbooks.source_content_sha256,
                        textbooks.source_size_bytes,

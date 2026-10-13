@@ -356,7 +356,7 @@ async def get_managed_source(
 async def get_original_file(textbook_id: UUID, user_id: CurrentUserId):
     try:
         download = await open_book_original(
-            parent_user_id=user_id, textbook_id=str(textbook_id)
+            user_id=user_id, textbook_id=str(textbook_id)
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
@@ -384,7 +384,7 @@ async def get_original_location(
 ):
     try:
         return await get_book_original_location(
-            parent_user_id=user_id, textbook_id=str(textbook_id), start_line=start_line
+            user_id=user_id, textbook_id=str(textbook_id), start_line=start_line
         )
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc

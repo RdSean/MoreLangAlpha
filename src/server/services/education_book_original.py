@@ -1,11 +1,8 @@
-"""Read original library files through the parent textbook ownership boundary."""
+"""Read original files for household parents and assigned textbook students."""
 
 import re
 
-from src.server.database.education_books import (
-    get_managed_source_for_user,
-    get_managed_textbook_for_parent,
-)
+from src.server.database.education_books import get_managed_source_for_user
 from src.server.documents.contracts import DocumentDomainError
 from src.server.documents.library import DocumentLibraryService, SourceDownload
 from src.server.documents.storage import S3CompatibleDocumentStore
@@ -59,13 +56,11 @@ def pdf_page_for_line(text: str, *, parser_id: str, start_line: int) -> int | No
 
 async def open_book_original(
     *,
-    parent_user_id: str,
+    user_id: str,
     textbook_id: str,
     library: DocumentLibraryService | None = None,
 ) -> SourceDownload:
-    row = await get_managed_textbook_for_parent(
-        parent_user_id=parent_user_id, textbook_id=textbook_id
-    )
+    row = await get_managed_source_for_user(user_id=user_id, textbook_id=textbook_id)
     if row is None:
         raise TextbookNotFoundError("Textbook not found")
     if not row.get("document_id") or not row.get("source_owner_user_id"):
@@ -86,17 +81,12 @@ async def open_book_original(
 
 
 async def get_book_original_location(
-    *, parent_user_id: str, textbook_id: str, start_line: int
+    *, user_id: str, textbook_id: str, start_line: int
 ) -> dict[str, int | None]:
-    row = await get_managed_textbook_for_parent(
-        parent_user_id=parent_user_id, textbook_id=textbook_id
-    )
-    if row is None:
+    source = await get_managed_source_for_user(user_id=user_id, textbook_id=textbook_id)
+    if source is None:
         raise TextbookNotFoundError("Textbook not found")
-    source = await get_managed_source_for_user(
-        user_id=parent_user_id, textbook_id=textbook_id
-    )
-    if source is None or source.get("source_status", "ready") != "ready":
+    if source.get("source_status", "ready") != "ready":
         return {"page": None}
     prefix = str(source["source_snapshot_prefix"])
     key = str(source["source_markdown_key"])
@@ -111,12 +101,12 @@ async def get_book_original_location(
         )
         page = pdf_page_for_line(
             content.decode("utf-8"),
-            parser_id=str(row.get("parser_id") or ""),
+            parser_id=str(source.get("parser_id") or ""),
             start_line=start_line,
         )
     except (TextbookSnapshotReadError, UnicodeDecodeError):
         return {"page": None}
-    page_count = row.get("page_count")
+    page_count = source.get("page_count")
     if isinstance(page_count, int) and page is not None and page > page_count:
         page = None
     return {"page": page}

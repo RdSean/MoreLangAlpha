@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-10-13
+
+### 学生原始教材 PDF 阅读
+
+- 学生讲义目录与家长端统一为「知识点」「原始教材」「文字目录」：原始教材复用 PDF 阅读器，Markdown 保留在文字目录，知识点仍展示讲义与问答。
+- PDF 支持章节定位、翻页及 URL 页码恢复；直接打开原书链接、尚未生成讲义的知识点也可阅读 PDF，原有 `view=source` 章节链接继续打开 Markdown。PDF 阅读时不请求原文切片。
+- 原文件和页码定位接口复用家庭家长 / 已分配学生的教材权限校验，以原上传者及文档 ID 读取指定教材，不开放文档库管理权限；无需数据库迁移或 Docker 配置变更。
+- 已应用至 `feature/more-to-skills-textbook-refactor`。目标 worktree 的 73 项后端、69 项前端聚焦测试、1 项隔离 PostgreSQL 分配 / 撤销原文件权限检查、TypeScript、修改文件 ESLint、Ruff、生产构建和首屏预算通过（428.8 kB gz / 450 kB）。当前 Chromium 的 13 项 Quiet / NASA 手机、平板、桌面 PDF canvas、翻页、刷新、Markdown / PDF / 讲义切换及问答恢复回归通过；现有 `0.0.0.0:5177` 服务来自目标 worktree，LAN `192.168.3.240:5177` 返回 200。
+- 实际 Chromium `90.0.4430.0` 仍不能渲染原书 PDF：现有 PDF.js 调用缺失的 `Promise.withResolvers()`，阅读器捕获后显示原文件不可读；家长端同样受影响。本次保留共享 PDF 引擎，记录为独立兼容问题，未将旧浏览器 PDF 检查计为通过，未实测 Android 设备。详见 `docs/debugging/2026-10-13-original-pdf-chrome90.md`。
+
 ## 2026-10-11
 
 ### 学生教材入口与阅读、作业布局

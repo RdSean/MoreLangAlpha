@@ -1445,6 +1445,11 @@ async def test_assignment_grants_and_revokes_current_book_reads_atomically(
         list_student_textbook_assignments,
         revoke_textbook_students,
     )
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from src.server.services.education_book_original import open_book_original
+    from src.server.services.education_textbooks import TextbookNotFoundError
 
     student_id = f"student-{uuid4().hex}"
     outsider_id = f"student-{uuid4().hex}"
@@ -1470,11 +1475,31 @@ async def test_assignment_grants_and_revokes_current_book_reads_atomically(
     )
     textbook_id = created["textbook_id"]
     knowledge_point_id = snapshot["knowledge_points"][0]["knowledge_point_id"]
+    async with patched_get_db_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO documents (
+                document_id, owner_user_id, original_filename, media_type,
+                document_format, source_storage_key, source_size_bytes, source_sha256
+            )
+            SELECT source_document_id, %s, source_filename, source_media_type,
+                   source_format, 'documents/' || %s || '/' || source_document_id || '/source',
+                   source_size_bytes, source_content_sha256
+            FROM education_textbooks WHERE textbook_id = %s
+            """,
+            (parent_user_id, parent_user_id, textbook_id),
+        )
+    library = SimpleNamespace(open_source_download=AsyncMock(return_value=object()))
 
     assert (
         await get_managed_source_for_user(user_id=student_id, textbook_id=textbook_id)
         is None
     )
+    with pytest.raises(TextbookNotFoundError):
+        await open_book_original(
+            user_id=student_id, textbook_id=str(textbook_id), library=library
+        )
+    library.open_source_download.assert_not_awaited()
     with pytest.raises(PermissionError, match="Every assigned student"):
         await assign_textbook_students(
             textbook_id=textbook_id,
@@ -1522,9 +1547,18 @@ async def test_assignment_grants_and_revokes_current_book_reads_atomically(
         )
         is not None
     )
-    assert (
-        await get_managed_source_for_user(user_id=student_id, textbook_id=textbook_id)
-        is not None
+    source = await get_managed_source_for_user(
+        user_id=student_id, textbook_id=textbook_id
+    )
+    assert source is not None
+    assert source["source_owner_user_id"] == parent_user_id
+    assert source["parser_id"] == "datalab"
+    assert source["document_id"].startswith("doc-")
+    await open_book_original(
+        user_id=student_id, textbook_id=str(textbook_id), library=library
+    )
+    library.open_source_download.assert_awaited_once_with(
+        owner_user_id=parent_user_id, document_id=source["document_id"]
     )
     material = await get_managed_material_for_user(
         user_id=student_id,
@@ -1552,6 +1586,12 @@ async def test_assignment_grants_and_revokes_current_book_reads_atomically(
         await get_managed_source_for_user(user_id=student_id, textbook_id=textbook_id)
         is None
     )
+    library.open_source_download.reset_mock()
+    with pytest.raises(TextbookNotFoundError):
+        await open_book_original(
+            user_id=student_id, textbook_id=str(textbook_id), library=library
+        )
+    library.open_source_download.assert_not_awaited()
 
 
 async def test_learning_space_uses_current_assignment_and_retains_thread_protection(

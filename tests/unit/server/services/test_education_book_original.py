@@ -30,25 +30,27 @@ def test_pdf_page_uses_parser_coordinates_and_start_line(parser, text, line, pag
 
 
 @pytest.mark.asyncio
-async def test_original_checks_textbook_parent_before_opening_library(monkeypatch):
+async def test_original_checks_member_access_before_opening_library(monkeypatch):
     monkeypatch.setattr(
-        original, "get_managed_textbook_for_parent", AsyncMock(return_value=None)
+        original, "get_managed_source_for_user", AsyncMock(return_value=None)
     )
     library = SimpleNamespace(open_source_download=AsyncMock())
     with pytest.raises(TextbookNotFoundError):
         await original.open_book_original(
-            parent_user_id="student", textbook_id="book", library=library
+            user_id="unassigned-student", textbook_id="book", library=library
         )
     library.open_source_download.assert_not_awaited()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("member", ["other-parent", "assigned-student"])
 async def test_original_reuses_exact_document_and_uploader_after_household_gate(
     monkeypatch,
+    member,
 ):
     monkeypatch.setattr(
         original,
-        "get_managed_textbook_for_parent",
+        "get_managed_source_for_user",
         AsyncMock(
             return_value={
                 "document_id": "doc-book",
@@ -60,12 +62,15 @@ async def test_original_reuses_exact_document_and_uploader_after_household_gate(
     library = SimpleNamespace(open_source_download=AsyncMock(return_value=download))
     assert (
         await original.open_book_original(
-            parent_user_id="other-parent", textbook_id="book", library=library
+            user_id=member, textbook_id="book", library=library
         )
         is download
     )
     library.open_source_download.assert_awaited_once_with(
         owner_user_id="uploading-parent", document_id="doc-book"
+    )
+    original.get_managed_source_for_user.assert_awaited_once_with(
+        user_id=member, textbook_id="book"
     )
 
 
@@ -73,7 +78,7 @@ async def test_original_reuses_exact_document_and_uploader_after_household_gate(
 async def test_original_missing_document_has_clear_not_found(monkeypatch):
     monkeypatch.setattr(
         original,
-        "get_managed_textbook_for_parent",
+        "get_managed_source_for_user",
         AsyncMock(
             return_value={
                 "document_id": "doc-book",
@@ -83,7 +88,7 @@ async def test_original_missing_document_has_clear_not_found(monkeypatch):
     )
     with pytest.raises(TextbookNotFoundError):
         await original.open_book_original(
-            parent_user_id="parent",
+            user_id="parent",
             textbook_id="book",
             library=SimpleNamespace(open_source_download=AsyncMock(return_value=None)),
         )
@@ -96,14 +101,10 @@ async def test_location_uses_frozen_text_and_unknown_does_not_block_original(
 ):
     monkeypatch.setattr(
         original,
-        "get_managed_textbook_for_parent",
-        AsyncMock(return_value={"parser_id": "datalab-online"}),
-    )
-    monkeypatch.setattr(
-        original,
         "get_managed_source_for_user",
         AsyncMock(
             return_value={
+                "parser_id": "datalab-online",
                 "source_status": "ready",
                 "source_snapshot_prefix": "education/book/source/",
                 "source_markdown_key": "education/book/source/artifacts/book.md",
@@ -118,6 +119,20 @@ async def test_location_uses_frozen_text_and_unknown_does_not_block_original(
     )
     monkeypatch.setattr(original, "read_snapshot_artifact_bytes", read)
     assert await original.get_book_original_location(
-        parent_user_id="parent", textbook_id="book", start_line=4
+        user_id="assigned-student", textbook_id="book", start_line=4
     ) == {"page": None if missing else 12}
     assert read.await_args.kwargs["expected_sha256"] == "a" * 64
+
+
+@pytest.mark.asyncio
+async def test_inaccessible_original_location_never_reads_storage(monkeypatch):
+    monkeypatch.setattr(
+        original, "get_managed_source_for_user", AsyncMock(return_value=None)
+    )
+    read = AsyncMock()
+    monkeypatch.setattr(original, "read_snapshot_artifact_bytes", read)
+    with pytest.raises(TextbookNotFoundError):
+        await original.get_book_original_location(
+            user_id="unassigned-student", textbook_id="book", start_line=1
+        )
+    read.assert_not_awaited()
