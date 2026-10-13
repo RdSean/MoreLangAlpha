@@ -2,6 +2,8 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -62,7 +64,10 @@
   justify-content: center;
   padding: 12px;
   background: var(--color-bg-page);
+  overscroll-behavior: contain;
 }
+
+.pdf-document-wrapper:focus-visible { outline: 2px solid var(--color-text-tertiary); outline-offset: -2px; }
 
 .pdf-document-wrapper .react-pdf__Document {
   display: flex;

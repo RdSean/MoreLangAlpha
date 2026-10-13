@@ -21,11 +21,18 @@ test.use({ locale: 'zh-CN', screenshot: 'only-on-failure' });
 test.beforeEach(async () => resetMockServer());
 test.afterEach(async ({ page }) => { await page.close(); await resetMockServer(); });
 
-async function installOriginal(page, { marker = null, jsonPage = null, missing = false, student = false } = {}) {
+async function installOriginal(page, { marker = null, jsonPage = null, missing = false, student = false, longLesson = false } = {}) {
   const job = { ...processingJob(), status: 'succeeded' };
   await installProcessingMocks(page, { getJob: () => job, ready: true, withCurrentJob: false, title: '原书阅读与知识点定位测试教材 · A Book With a Longer Title' });
   let downloads = 0;
+  const lessonMarkdown = '# 已提交的讲义\n\n这份讲义已经可以阅读。' + (longLesson
+    ? Array.from({ length: 40 }, (_, index) => `\n\n### 足球与世界 ${index + 1}\n\nFootball is played around the world. 足球的规则帮助来自不同国家的球员共同比赛，团队合作是理解这项运动的重要部分。`).join('')
+    : '');
   await mockAPI(page, {
+    'GET /education/textbooks/book-1/knowledge-points/kp-1/material': {
+      textbook_id: 'book-1', knowledge_point_id: 'kp-1', skill_kp_id: 'reading', material_available: true,
+      markdown: lessonMarkdown, generated_at: '2026-10-01T00:00:00Z', depth: 'lesson', requirements: null, content_sha256: 'b'.repeat(64),
+    },
     'GET /education/textbooks/book-1/structure': {
       textbook_id: 'book-1', structure_id: 'structure-1', schema_version: '2.1.0', warnings: [],
       structure: { schema_version: '2.1.0', book: { title: '原书' }, source: { path: 'source.md', total_lines: 500 }, coverage: {},
@@ -40,6 +47,11 @@ async function installOriginal(page, { marker = null, jsonPage = null, missing =
       expect(new URL(route.request().url()).searchParams.get('start_line')).toBe('300');
       return json(route, { page: marker });
     },
+    'GET /education/textbooks/book-1/reading-state': [],
+    'POST /education/textbooks/book-1/knowledge-points/kp-1/chat-space': { workspace_id: 'workspace-1', conversation_thread_id: 'thread-1' },
+    'POST /education/textbooks/book-1/knowledge-points/kp-1/reading-state': {},
+    'GET /education/textbooks/book-1/knowledge-points/kp-1/conversation/replay': [],
+    'GET /education/textbooks/book-1/knowledge-points/kp-1/conversation/status': { status: 'completed', can_reconnect: false, lesson_active: true },
   });
   if (student) {
     const member = { user_id: 'student-1', email: null, name: 'Student', role: 'student', household_id: 'household-1' };
@@ -55,7 +67,7 @@ async function installOriginal(page, { marker = null, jsonPage = null, missing =
       },
       'GET /education/learning/assignment-1/knowledge-points/kp-1': {
         assignment_id: 'assignment-1', textbook_id: 'book-1', knowledge_point_id: 'kp-1', skill_kp_id: 'reading', material_available: true,
-        markdown: '# 已提交的讲义\n\n这份讲义已经可以阅读。', generated_at: '2026-10-01T00:00:00Z', depth: 'lesson', requirements: null, content_sha256: 'b'.repeat(64),
+        markdown: lessonMarkdown, generated_at: '2026-10-01T00:00:00Z', depth: 'lesson', requirements: null, content_sha256: 'b'.repeat(64),
       },
       'GET /education/learning/assignment-1/chat-space': { assignment_id: 'assignment-1', workspace_id: 'workspace-1', conversation_thread_id: 'thread-1' },
       'GET /education/learning/assignment-1/items': [],
@@ -100,6 +112,8 @@ for (const theme of ['quiet', 'nasa']) {
       const viewport = await page.locator('.pdf-document-wrapper').boundingBox();
       expect(canvas.x).toBeGreaterThanOrEqual(viewport.x);
       expect(canvas.width).toBeLessThanOrEqual(viewport.width);
+      expect(canvas.height).toBeLessThanOrEqual(viewport.height - 22);
+      expect(canvas.y + canvas.height).toBeLessThanOrEqual(viewport.y + viewport.height);
       await page.locator('.pdf-nav button').last().click();
       await expectPdf(page, 13);
       await expect(page).toHaveURL(/pdfPage=13/);
@@ -113,6 +127,115 @@ for (const theme of ['quiet', 'nasa']) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
       await page.screenshot({ path: testInfo.outputPath(`original-${theme}-${width}.png`) });
     });
+  }
+}
+
+for (const student of [false, true]) {
+  test(`${student ? 'student' : 'parent'} original fits height and supports scoped keyboard and wheel navigation`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installOriginal(page, { marker: 12, student });
+    const path = student ? '/education/learn/assignment-1' : '/textbooks/book-1';
+    await page.goto(`${path}?kp=reading&view=original&nav=source`);
+    await expectPdf(page, 12);
+    await page.keyboard.press('PageDown');
+    await expectPdf(page, 13);
+    await page.keyboard.press('PageUp');
+    await expectPdf(page, 12);
+    const viewport = page.locator('.pdf-document-wrapper');
+    await viewport.evaluate(element => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }));
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }));
+    });
+    await expectPdf(page, 13);
+    await page.waitForTimeout(250);
+    const bounds = await viewport.boundingBox();
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -100);
+    await page.keyboard.up('Control');
+    await expect(page.locator('.pdf-zoom-info')).toHaveText('125%');
+    await expect(page.locator('.pdf-page-info')).toHaveText('13 / 20');
+    await expect.poll(() => viewport.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+    await page.waitForTimeout(250);
+    await page.mouse.wheel(0, 100);
+    await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    await expect(page.locator('.pdf-page-info')).toHaveText('13 / 20');
+    await page.locator('.pdf-zoom button').first().click();
+    await expect(page.locator('.pdf-zoom-info')).toHaveText('100%');
+    await page.setViewportSize({ width: 1440, height: 600 });
+    await expect.poll(() => viewport.locator('canvas').evaluate(canvas => canvas.getBoundingClientRect().height)).toBeLessThan(450);
+    const canvas = await viewport.locator('canvas').boundingBox();
+    const resized = await viewport.boundingBox();
+    expect(canvas.height).toBeLessThanOrEqual(resized.height - 22);
+    await page.goto(`${path}?kp=reading&view=original&nav=source&pdfPage=20`);
+    await expectPdf(page, 20);
+    await page.keyboard.press('PageDown');
+    await expect(page.locator('.pdf-page-info')).toHaveText('20 / 20');
+  });
+}
+
+for (const student of [false, true]) {
+  for (const theme of ['quiet', 'nasa']) {
+    for (const width of [375, 768, 1440]) {
+      test(`${student ? 'student' : 'parent'} ${theme} ${width}px compares lecture and original without losing Chat`, async ({ page }, testInfo) => {
+        const errors = [];
+        page.on('pageerror', error => errors.push(error.message));
+        await page.setViewportSize({ width, height: 900 });
+        await page.addInitScript(value => localStorage.setItem('theme', value), theme);
+        const requests = await installOriginal(page, { marker: 12, student, longLesson: true });
+        const path = student ? '/education/learn/assignment-1' : '/textbooks/book-1';
+        await page.goto(`${path}?kp=reading&view=material&nav=knowledge`);
+        const question = page.getByRole('textbox', { name: '讲义问题' });
+        await expect(question).toBeEnabled();
+        await question.fill('对照原书之后继续提问');
+        await question.evaluate(element => { element.dataset.draftIdentity = 'keep'; });
+        await page.getByRole('button', { name: '对照原书', exact: true }).click();
+        await expectPdf(page, 12);
+        await expect(question).toHaveValue('对照原书之后继续提问');
+        await expect(question).toHaveAttribute('data-draft-identity', 'keep');
+        await question.press('PageDown');
+        await expect(page.locator('.pdf-page-info')).toHaveText('12 / 20');
+        const pdf = page.getByRole('region', { name: 'PDF', exact: true });
+        await pdf.focus();
+        await pdf.press('PageDown');
+        await expectPdf(page, 13);
+        await expect(page).toHaveURL(/comparePage=13/);
+        const left = await page.locator('.book-lesson-primary').boundingBox();
+        const right = await page.getByRole('complementary', { name: '原书对照' }).boundingBox();
+        if (width >= 1440) {
+          expect(right.x).toBeGreaterThanOrEqual(left.x + left.width - 1);
+          expect(Math.abs(right.y - left.y)).toBeLessThan(2);
+        } else {
+          expect(right.y).toBeGreaterThanOrEqual(left.y + left.height - 1);
+        }
+        const canvas = await pdf.locator('canvas').boundingBox();
+        const viewport = await pdf.boundingBox();
+        expect(canvas.height).toBeLessThanOrEqual(viewport.height - 22);
+        expect(canvas.width).toBeLessThanOrEqual(viewport.width);
+        const lecture = page.getByRole('region', { name: '讲义与问答' });
+        await expect.poll(() => lecture.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+        await lecture.evaluate(element => { element.scrollTop = 250; });
+        expect(await lecture.evaluate(element => element.scrollTop)).toBe(250);
+        expect(await pdf.evaluate(element => element.scrollTop)).toBe(0);
+        await pdf.evaluate(element => element.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true })));
+        await expectPdf(page, 14);
+        expect(await lecture.evaluate(element => element.scrollTop)).toBe(250);
+        await lecture.evaluate(element => { element.scrollTop = 0; });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+        await page.screenshot({ path: testInfo.outputPath(`comparison-${student ? 'student' : 'parent'}-${theme}-${width}.png`) });
+        await page.getByRole('complementary', { name: '原书对照' }).getByRole('button', { name: '关闭', exact: true }).click();
+        await expect(page.locator('.react-pdf__Page canvas')).toHaveCount(0);
+        await expect(question).toHaveValue('对照原书之后继续提问');
+        await expect(question).toHaveAttribute('data-draft-identity', 'keep');
+        await page.getByRole('button', { name: '对照原书', exact: true }).click();
+        await expectPdf(page, 14);
+        expect(requests.downloads()).toBe(1);
+        await page.reload();
+        await expectPdf(page, 14);
+        await expect(question).toBeEnabled();
+        expect(errors).toEqual([]);
+      });
+    }
   }
 }
 

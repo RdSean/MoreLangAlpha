@@ -107,6 +107,8 @@
   letter-spacing: 0.16em;
 }
 
+[data-theme='nasa'] .book-reader-original .book-reader-scroll::before { display: none; }
+
 .textbook-workbench-grid {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);

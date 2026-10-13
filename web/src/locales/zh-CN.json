@@ -1,5 +1,6 @@
 {
   "bookProcessing": {
+    "compareOriginal": "对照原书", "closeComparison": "关闭原书对照", "comparisonOriginal": "原书对照",
     "milestones": "服务里程碑", "timing": "处理计时",
     "timeline": "教材处理时间线", "structure": "教材结构", "materials": "讲义加工",
     "reading": "返回阅读", "learning": "进入学习空间", "ready": "书籍已梳理完成，可以进入学习空间。",

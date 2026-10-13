@@ -521,6 +521,21 @@ function renderAssignmentDialog() {
 }
 
 describe('TextbookWorkbenchPage', () => {
+  it('restores original comparison for the current lecture and clears its page on knowledge-point change', async () => {
+    void i18n.changeLanguage('zh-CN');
+    renderWorkbench('/textbooks/book-1?kp=sports-training&view=material&compare=1&comparePage=12');
+    expect(await screen.findByTestId('original-file')).toHaveTextContent('page 12');
+    expect(screen.getByText('已有冠军训练讲义')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '关闭原书对照' }));
+    expect(screen.queryByTestId('original-file')).not.toBeInTheDocument();
+    expect(screen.getByText('已有冠军训练讲义')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '对照原书' }));
+    expect(screen.getByTestId('original-file')).toHaveTextContent('page 12');
+    fireEvent.click(screen.getByText('足球如何成为全球运动'));
+    await waitFor(() => expect(screen.getByTestId('location')).not.toHaveTextContent('comparePage'));
+    expect(screen.queryByTestId('original-file')).not.toBeInTheDocument();
+  });
+
   it('opens the learning prompt without fetching source Markdown for an ungenerated knowledge point', () => {
     pageState.sourceSlice.mockReturnValue({ ...source, start_line: 1, end_line: 34, markdown: '\n'.repeat(9) + 'Target source paragraph.' });
     const { container } = renderWorkbench('/textbooks/book-1?kp=sports-global-game&view=source&nav=knowledge');

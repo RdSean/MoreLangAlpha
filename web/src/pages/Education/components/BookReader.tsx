@@ -81,7 +81,7 @@ export function BookReader({
   });
 
   return (
-    <article className={cn('book-reader flex min-h-0 flex-col bg-background', continuous ? 'book-reader-continuous' : 'h-full')} aria-label={`阅读 ${title}`}>
+    <article className={cn('book-reader flex min-h-0 flex-col bg-background', view === 'original' && 'book-reader-original', continuous ? 'book-reader-continuous' : 'h-full')} aria-label={`阅读 ${title}`}>
       <header className={cn('book-reader-header border-b px-4 py-2 sm:px-6', headerActions && 'has-actions')}>
         <div className="flex min-h-9 flex-wrap items-center justify-between gap-3">
           <div className={cn('min-w-0', headerActions && 'basis-full sm:basis-0 sm:flex-1')}>
@@ -141,7 +141,7 @@ export function BookReader({
       <div
         ref={scrollRef}
         data-testid="book-reader-scroll"
-        className={cn('book-reader-scroll min-h-0', !continuous && 'flex-1 overflow-y-auto', view !== 'original' && !showLearningStart && 'book-reader-prose')}
+        className={cn('book-reader-scroll min-h-0', !continuous && 'flex-1', view === 'original' ? 'overflow-hidden' : !continuous && 'overflow-y-auto', view !== 'original' && !showLearningStart && 'book-reader-prose')}
       >
         {view === 'original' ? originalContent : loading ? (
           <p className="text-sm text-muted-foreground">正在加载正文…</p>

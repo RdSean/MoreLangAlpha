@@ -212,4 +212,21 @@ describe('StudentTextbookLearningPage', () => {
     expect(screen.getByTestId('student-original')).toHaveTextContent('PDF page 7');
     expect(state.sourceRequest.mock.lastCall?.[3]).toBe(false);
   });
+
+  it('compares the current lecture with its original page and restores comparison from the URL', () => {
+    const { unmount } = renderAt('/education/learn/assignment-1?kp=world-game&view=material');
+    fireEvent.click(screen.getByRole('button', { name: '对照原书' }));
+    expect(screen.getByTestId('student-original')).toHaveAttribute('data-start-line', '10');
+    expect(screen.getByText('追问组件')).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('compare=1');
+    fireEvent.click(screen.getByRole('button', { name: '下一 PDF 页' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('comparePage=9');
+    fireEvent.click(screen.getByRole('button', { name: '关闭原书对照' }));
+    expect(screen.queryByTestId('student-original')).not.toBeInTheDocument();
+    expect(screen.getByText('追问组件')).toBeInTheDocument();
+    unmount();
+    renderAt('/education/learn/assignment-1?kp=world-game&view=material&compare=1&comparePage=8');
+    expect(screen.getByTestId('student-original')).toHaveTextContent('PDF page 8');
+    expect(screen.getByText('追问组件')).toBeInTheDocument();
+  });
 });

@@ -13,9 +13,10 @@ interface Props {
   jsonPage?: number;
   restoredPage?: number;
   onPageChange?: (page: number) => void;
+  keyboardScope?: 'document' | 'viewer';
 }
 
-export function BookOriginalReader({ textbookId, startLine, jsonPage, restoredPage, onPageChange }: Props) {
+export function BookOriginalReader({ textbookId, startLine, jsonPage, restoredPage, onPageChange, keyboardScope = 'document' }: Props) {
   const { t } = useTranslation();
   const original = useManagedBookOriginal(textbookId);
   const location = useManagedBookOriginalLocation(textbookId, startLine);
@@ -44,7 +45,7 @@ export function BookOriginalReader({ textbookId, startLine, jsonPage, restoredPa
     <div className="book-original-reader h-full min-h-0" aria-label={t('bookProcessing.originalFile')}>
       <DocumentErrorBoundary key={`${textbookId}:${reload}`} fallback={error}>
         <Suspense fallback={<p role="status" className="p-6 text-sm text-muted-foreground">{t('bookProcessing.originalLoading')}</p>}>
-          <PdfViewer data={original.data.bytes} viewMode="single" pageNumber={page} onPageChange={handlePageChange} onNumPagesChange={handlePageCount} fitWidth />
+          <PdfViewer data={original.data.bytes} viewMode="single" pageNumber={page} onPageChange={handlePageChange} onNumPagesChange={handlePageCount} fitPage pageNavigation keyboardScope={keyboardScope} />
         </Suspense>
       </DocumentErrorBoundary>
     </div>

@@ -60,6 +60,9 @@ export default function StudentTextbookLearningPage() {
     : readerView === 'original' ? 'source' : selectedNode ? 'text' : 'knowledge';
   const pageParam = Number(searchParams.get('pdfPage'));
   const restoredPdfPage = Number.isSafeInteger(pageParam) && pageParam > 0 ? pageParam : undefined;
+  const comparisonEnabled = searchParams.get('compare') === '1';
+  const comparisonPageParam = Number(searchParams.get('comparePage'));
+  const restoredComparisonPage = Number.isSafeInteger(comparisonPageParam) && comparisonPageParam > 0 ? comparisonPageParam : undefined;
   const jsonPage = firstJsonPage(selectedNode ? [selectedNode] : selectedKnowledgePoint && data
     ? selectedKnowledgePoint.node_skill_ids.flatMap((id) => {
         const node = findNode(data.structure.nodes, id);
@@ -148,6 +151,7 @@ export default function StudentTextbookLearningPage() {
       next.set('kp', skillKpId);
       next.set('nav', 'knowledge');
       next.delete('pdfPage');
+      next.delete('comparePage');
       next.delete('node');
       next.set('view', target.material_available ? 'material' : 'source');
     });
@@ -160,6 +164,7 @@ export default function StudentTextbookLearningPage() {
       next.set('view', view);
       next.set('nav', view === 'original' ? 'source' : 'text');
       next.delete('pdfPage');
+      next.delete('comparePage');
     });
     setNavigatorOpen(false);
   };
@@ -249,6 +254,20 @@ export default function StudentTextbookLearningPage() {
               learningView={learningView}
               material={selectedKnowledgePoint ? material.data : undefined}
               source={source.data}
+              comparisonEnabled={comparisonEnabled}
+              onComparisonChange={(enabled) => updateSearch((next) => {
+                if (enabled) next.set('compare', '1');
+                else next.delete('compare');
+              }, true)}
+              comparisonContent={comparisonEnabled && readerView === 'material' ? <BookOriginalReader
+                key={`${data.textbook_id}:${selectedKnowledgePoint?.skill_kp_id}`}
+                textbookId={data.textbook_id}
+                startLine={sourceRange?.start}
+                jsonPage={jsonPage}
+                restoredPage={restoredComparisonPage}
+                keyboardScope="viewer"
+                onPageChange={(page) => updateSearch((next) => next.set('comparePage', String(page)), true)}
+              /> : undefined}
               originalContent={readerView === 'original' ? <BookOriginalReader
                 textbookId={data.textbook_id}
                 startLine={sourceRange?.start}

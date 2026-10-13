@@ -1,5 +1,6 @@
 {
   "bookProcessing": {
+    "compareOriginal": "Compare with original", "closeComparison": "Close original comparison", "comparisonOriginal": "Original comparison",
     "milestones": "Service milestones", "timing": "Processing timing",
     "timeline": "Textbook processing timeline", "structure": "Textbook structure", "materials": "Lesson preparation",
     "reading": "Back to reading", "learning": "Enter learning space", "ready": "Your book is ready to explore in the learning space.",

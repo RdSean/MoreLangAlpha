@@ -310,6 +310,9 @@ export default function TextbookWorkbenchPage() {
   }) : []);
   const pageParam = Number(searchParams.get('pdfPage'));
   const restoredPdfPage = Number.isSafeInteger(pageParam) && pageParam > 0 ? pageParam : undefined;
+  const comparisonEnabled = searchParams.get('compare') === '1';
+  const comparisonPageParam = Number(searchParams.get('comparePage'));
+  const restoredComparisonPage = Number.isSafeInteger(comparisonPageParam) && comparisonPageParam > 0 ? comparisonPageParam : undefined;
   const navParam = searchParams.get('nav');
   const navigatorView = navParam === 'source' || navParam === 'text' || navParam === 'knowledge' ? navParam : selectedNode ? requestedView === 'original' ? 'source' : 'text' : 'knowledge';
   const selectedTargets = useMemo(
@@ -341,6 +344,7 @@ export default function TextbookWorkbenchPage() {
       next.set('kp', skillKpId);
       next.set('nav', 'knowledge');
       next.delete('pdfPage');
+      next.delete('comparePage');
       next.delete('node');
       next.set(
         'view',
@@ -360,6 +364,7 @@ export default function TextbookWorkbenchPage() {
       next.set('view', view);
       next.set('nav', view === 'original' ? 'source' : 'text');
       next.delete('pdfPage');
+      next.delete('comparePage');
       next.delete('panel');
     });
     setNavigatorOpen(false);
@@ -668,6 +673,20 @@ export default function TextbookWorkbenchPage() {
                     }
                     source={source.data}
                     originalAvailable
+                    comparisonEnabled={comparisonEnabled}
+                    onComparisonChange={(enabled) => updateSearch((next) => {
+                      if (enabled) next.set('compare', '1');
+                      else next.delete('compare');
+                    }, true)}
+                    comparisonContent={textbookId && comparisonEnabled && readerView === 'material' ? <BookOriginalReader
+                      key={`${textbookId}:${selectedKnowledgePoint?.skill_kp_id}`}
+                      textbookId={textbookId}
+                      startLine={sourceRange?.start}
+                      jsonPage={jsonPage}
+                      restoredPage={restoredComparisonPage}
+                      keyboardScope="viewer"
+                      onPageChange={(page) => updateSearch((next) => next.set('comparePage', String(page)), true)}
+                    /> : undefined}
                     originalContent={textbookId && readerView === 'original' ? <BookOriginalReader key={`${textbookId}:${selectedKnowledgePoint?.skill_kp_id ?? selectedNode?.id}`} textbookId={textbookId} startLine={sourceRange?.start} jsonPage={jsonPage} restoredPage={restoredPdfPage} onPageChange={(page) => updateSearch((next) => next.set('pdfPage', String(page)), true)} /> : undefined}
                     loading={(!emptyLearningView && source.isLoading) || material.isLoading}
                     learningView={learningView}
