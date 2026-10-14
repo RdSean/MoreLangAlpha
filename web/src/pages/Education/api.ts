@@ -273,6 +273,13 @@ export async function getManagedBookOriginal(textbookId: string, signal?: AbortS
   return { bytes: response.data, mediaType: String(response.headers['content-type'] ?? '') };
 }
 
+export function getManagedBookOriginalSource(textbookId: string) {
+  return {
+    url: api.getUri({ url: `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/original` }),
+    withCredentials: true as const,
+  };
+}
+
 export async function getManagedBookOriginalLocation(textbookId: string, startLine: number, signal?: AbortSignal) {
   const { data } = await api.get<{ page: number | null }>(
     `/api/v1/education/textbooks/${encodeURIComponent(textbookId)}/original-location`,

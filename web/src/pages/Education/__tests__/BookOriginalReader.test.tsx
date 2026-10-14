@@ -9,16 +9,20 @@ const state = vi.hoisted(() => ({
   error: false,
   refetch: vi.fn(),
   data: new ArrayBuffer(8),
+  sources: [] as unknown[],
+  download: vi.fn(),
 }));
 vi.mock('../queries', () => ({
-  useManagedBookOriginal: () => ({ data: { bytes: state.data, mediaType: 'application/pdf' }, isLoading: false, isError: state.error, refetch: state.refetch }),
+  useManagedBookOriginal: () => { state.download(); return { data: { bytes: state.data, mediaType: 'application/pdf' }, isLoading: false, isError: false, refetch: state.refetch }; },
   useManagedBookOriginalLocation: () => ({ data: { page: state.page }, isError: false }),
 }));
-vi.mock('@/pages/ChatAgent/components/viewers/PdfViewer', () => ({ default: ({ pageNumber, onPageChange, onNumPagesChange }: { pageNumber: number; onPageChange: (page: number) => void; onNumPagesChange: (count: number) => void }) => (
-  <div><p>PDF page {pageNumber}</p><button onClick={() => onPageChange(pageNumber + 1)}>next PDF page</button><button onClick={() => onNumPagesChange(20)}>loaded PDF</button></div>
-) }));
+vi.mock('@/pages/ChatAgent/components/viewers/PdfViewer', () => ({ default: ({ source, pageNumber, onPageChange, onNumPagesChange }: { source: unknown; pageNumber: number; onPageChange: (page: number) => void; onNumPagesChange: (count: number) => void }) => {
+  state.sources.push(source);
+  if (state.error) throw new Error('original unavailable');
+  return <div><p>PDF page {pageNumber}</p><button onClick={() => onPageChange(pageNumber + 1)}>next PDF page</button><button onClick={() => onNumPagesChange(20)}>loaded PDF</button></div>;
+} }));
 
-beforeEach(() => { state.page = null; state.error = false; state.refetch.mockClear(); void i18n.changeLanguage('zh-CN'); });
+beforeEach(() => { state.page = null; state.error = false; state.sources.length = 0; state.download.mockClear(); state.refetch.mockClear(); void i18n.changeLanguage('zh-CN'); });
 
 describe('BookOriginalReader', () => {
   it('uses the earliest valid JSON start page across associated nodes', () => {
@@ -29,6 +33,8 @@ describe('BookOriginalReader', () => {
   it('opens the file at its first page without location data', async () => {
     render(<BookOriginalReader textbookId="book" startLine={300} />);
     expect(await screen.findByText('PDF page 1')).toBeInTheDocument();
+    expect(state.download).not.toHaveBeenCalled();
+    expect(state.sources.at(-1)).toMatchObject({ url: expect.stringContaining('/textbooks/book/original'), withCredentials: true });
   });
   it('prefers parser location to JSON and permits manual page navigation', async () => {
     state.page = 12;
@@ -50,11 +56,13 @@ describe('BookOriginalReader', () => {
     render(<BookOriginalReader textbookId="book" startLine={300} restoredPage={17} />);
     expect(await screen.findByText('PDF page 17')).toBeInTheDocument();
   });
-  it('shows a retry when the original file is unavailable', () => {
+  it('shows a retry when the original file is unavailable', async () => {
     state.error = true;
     render(<BookOriginalReader textbookId="book" />);
-    expect(screen.getByRole('alert')).toHaveTextContent('原文件暂不可读');
+    expect(await screen.findByRole('alert')).toHaveTextContent('原文件暂不可读');
+    state.error = false;
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
-    expect(state.refetch).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('PDF page 1')).toBeInTheDocument();
+    expect(state.refetch).not.toHaveBeenCalled();
   });
 });

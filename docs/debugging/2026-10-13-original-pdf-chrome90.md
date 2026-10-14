@@ -4,6 +4,8 @@
 
 ## 修复与真机复测（2026-10-14）
 
+后续已实施教材 URL/Range 渐进加载，首屏测量与相关回归见[渐进加载记录](2026-10-14-textbook-pdf-progressive-loading.md)。下文保留引擎兼容修复时的历史验证结果。
+
 状态：已修复；用户确认 Android 11 / Chrome `90.0.4430.210` 在普通模式和「请求桌面版网站」下均能显示原始教材 PDF。学生讲义 Chat 在两种模式也均正常。此结果为用户真机复测，不是本机 UA 模拟。
 
 修复在共享 `PdfViewer` 中同时处理页面和 worker 两个 JavaScript realm：页面先补 `Array.prototype.at` 与 `Promise.withResolvers`；PDF.js 加载后再补 `structuredClone`，避免 PDF.js 的 `ArrayBuffer.transfer` 回退与 structured-clone 补丁递归。PDF.js 切换到 legacy API，worker 自带 realm 内补丁并经 Vite 转译到 Chrome 90 可解析的语法。保留 worker 正常导出，保证浏览器禁用 Worker 时 PDF.js 的主线程回退可用。

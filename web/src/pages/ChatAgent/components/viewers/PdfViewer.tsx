@@ -18,8 +18,11 @@ pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 const ZOOM_STEPS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 const DEFAULT_ZOOM_INDEX = 2; // 1.0
 
-interface PdfViewerProps {
-  data: ArrayBuffer | Uint8Array;
+type PdfInput =
+  | { data: ArrayBuffer | Uint8Array; source?: never }
+  | { source: { url: string; withCredentials: true }; data?: never };
+
+type PdfViewerProps = PdfInput & {
   viewMode?: 'continuous' | 'single';
   pageNumber?: number;
   onPageChange?: (page: number) => void;
@@ -30,7 +33,7 @@ interface PdfViewerProps {
   keyboardScope?: 'document' | 'viewer';
 }
 
-export default function PdfViewer({ data, viewMode = 'single', pageNumber: controlledPageNumber, onPageChange, onNumPagesChange, fitWidth = false, fitPage = false, pageNavigation = false, keyboardScope = 'document' }: PdfViewerProps) {
+export default function PdfViewer({ data, source, viewMode = 'single', pageNumber: controlledPageNumber, onPageChange, onNumPagesChange, fitWidth = false, fitPage = false, pageNavigation = false, keyboardScope = 'document' }: PdfViewerProps) {
   const { t } = useTranslation();
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
@@ -144,13 +147,16 @@ export default function PdfViewer({ data, viewMode = 'single', pageNumber: contr
   // component with the same buffer), so pdf.js gets a COPY and theirs survives.
   // A view — `new Uint8Array(data)` — would be detached along with it, and the
   // next mount would fail to load a zero-byte buffer.
+  const sourceUrl = source?.url;
+  const sourceCredentials = source?.withCredentials;
   const fileData = useMemo(() => {
+    if (sourceUrl) return { url: sourceUrl, withCredentials: sourceCredentials };
     if (!data) return null;
     // Both branches copy: ArrayBuffer.prototype.slice makes a new buffer, and
     // the Uint8Array constructor copies when handed another typed array.
     const bytes = data instanceof ArrayBuffer ? new Uint8Array(data.slice(0)) : new Uint8Array(data);
     return { data: bytes };
-  }, [data]);
+  }, [data, sourceUrl, sourceCredentials]);
 
   // Bubble errors to the error boundary via render-phase throw
   if (error) throw error;

@@ -135,13 +135,13 @@ for (const mobile of [true, false]) {
         await installOriginal(page, { marker: 12, student });
         const path = student ? '/education/learn/assignment-1' : '/textbooks/book-1';
         const origin = process.env.PDF_TEST_ORIGIN ?? '';
-        await page.goto(`${origin}${path}?kp=reading&view=original&nav=source`);
+        await page.goto(`${origin}${path}?kp=reading&view=original&nav=source`, { waitUntil: 'domcontentloaded' });
         await expectPdf(page, 12);
         expect(workers.some(worker => /pdfjsWorker/.test(worker.url()))).toBe(true);
         expect(diagnostics.get(page).filter(message => /fake worker|GetOperatorList|DocumentErrorBoundary|SyntaxError/.test(message))).toEqual([]);
         await page.locator('.pdf-nav button').last().click();
         await expectPdf(page, 13);
-        await page.reload();
+        await page.reload({ waitUntil: 'domcontentloaded' });
         await expectPdf(page, 13);
         await page.screenshot({ path: testInfo.outputPath(`pdf-${mobile ? 'mobile' : 'desktop'}-${student ? 'student' : 'parent'}.png`) });
       });
@@ -156,7 +156,7 @@ test('invalid PDF shows retry feedback and recovers with a valid original', asyn
     if (!failed) { failed = true; return route.fulfill({ contentType: 'application/pdf', body: '%PDF-1.7\ninvalid document' }); }
     return route.fulfill({ contentType: 'application/pdf', body: originalPdf });
   });
-  await page.goto('/education/learn/assignment-1?kp=reading&view=original&nav=source');
+  await page.goto('/education/learn/assignment-1?kp=reading&view=original&nav=source', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('alert')).toContainText('原文件暂不可读');
   await page.getByRole('button', { name: '重试', exact: true }).click();
   await expectPdf(page, 12);
@@ -168,7 +168,7 @@ test('PDF retains its main-thread fallback when Worker construction fails', asyn
     window.Worker = class { constructor() { throw new Error('Worker unavailable in fixture'); } };
   });
   await installOriginal(page, { marker: 12, student: true });
-  await page.goto(`${process.env.PDF_TEST_ORIGIN ?? ''}/education/learn/assignment-1?kp=reading&view=original&nav=source`);
+  await page.goto(`${process.env.PDF_TEST_ORIGIN ?? ''}/education/learn/assignment-1?kp=reading&view=original&nav=source`, { waitUntil: 'domcontentloaded' });
   await expectPdf(page, 12);
 });
 
@@ -177,7 +177,7 @@ for (const [filename, total] of [['scanned.pdf', 1], ['image-based.pdf', 1], ['m
     await installOriginal(page, { marker: 1, student: true });
     const bytes = readFileSync(new URL(`../../tests/fixtures/documents/${filename}`, import.meta.url));
     await page.route('**/api/v1/education/textbooks/book-1/original', route => route.fulfill({ contentType: 'application/pdf', body: bytes }));
-    await page.goto(`${process.env.PDF_TEST_ORIGIN ?? ''}/education/learn/assignment-1?kp=reading&view=original&nav=source`);
+    await page.goto(`${process.env.PDF_TEST_ORIGIN ?? ''}/education/learn/assignment-1?kp=reading&view=original&nav=source`, { waitUntil: 'domcontentloaded' });
     await expectPdf(page, 1, total);
     if (total > 1) {
       await page.locator('.pdf-nav button').last().click();
@@ -193,7 +193,7 @@ for (const theme of ['quiet', 'nasa']) {
       await page.setViewportSize({ width, height: 900 });
       await page.addInitScript((value) => localStorage.setItem('theme', value), theme);
       const requests = await installOriginal(page, { marker: 12, jsonPage: 15 });
-      await page.goto('/textbooks/book-1?kp=reading&view=original&nav=source');
+      await page.goto('/textbooks/book-1?kp=reading&view=original&nav=source', { waitUntil: 'domcontentloaded' });
       await expectPdf(page, 12);
       const canvas = await page.locator('.react-pdf__Page canvas').boundingBox();
       const viewport = await page.locator('.pdf-document-wrapper').boundingBox();
@@ -204,13 +204,13 @@ for (const theme of ['quiet', 'nasa']) {
       await page.locator('.pdf-nav button').last().click();
       await expectPdf(page, 13);
       await expect(page).toHaveURL(/pdfPage=13/);
-      await page.reload();
+      await page.reload({ waitUntil: 'domcontentloaded' });
       await expectPdf(page, 13);
       await selectDirectoryTab(page, '文字目录');
       await expect(page.getByText('Paragraph 1:', { exact: false })).toBeVisible();
       await selectDirectoryTab(page, '原始教材');
       await expectPdf(page, 13);
-      expect(requests.downloads()).toBe(2); // one load per page lifetime, not per selection/tab
+      expect(requests.downloads()).toBe(3); // one load per viewer mount, never per page selection
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
       await page.screenshot({ path: testInfo.outputPath(`original-${theme}-${width}.png`) });
     });
@@ -222,7 +222,7 @@ for (const student of [false, true]) {
     await page.setViewportSize({ width: 1440, height: 900 });
     await installOriginal(page, { marker: 12, student });
     const path = student ? '/education/learn/assignment-1' : '/textbooks/book-1';
-    await page.goto(`${path}?kp=reading&view=original&nav=source`);
+    await page.goto(`${path}?kp=reading&view=original&nav=source`, { waitUntil: 'domcontentloaded' });
     await expectPdf(page, 12);
     await page.keyboard.press('PageDown');
     await expectPdf(page, 13);
@@ -254,7 +254,7 @@ for (const student of [false, true]) {
     const canvas = await viewport.locator('canvas').boundingBox();
     const resized = await viewport.boundingBox();
     expect(canvas.height).toBeLessThanOrEqual(resized.height - 22);
-    await page.goto(`${path}?kp=reading&view=original&nav=source&pdfPage=20`);
+    await page.goto(`${path}?kp=reading&view=original&nav=source&pdfPage=20`, { waitUntil: 'domcontentloaded' });
     await expectPdf(page, 20);
     await page.keyboard.press('PageDown');
     await expect(page.locator('.pdf-page-info')).toHaveText('20 / 20');
@@ -271,7 +271,7 @@ for (const student of [false, true]) {
         await page.addInitScript(value => localStorage.setItem('theme', value), theme);
         const requests = await installOriginal(page, { marker: 12, student, longLesson: true });
         const path = student ? '/education/learn/assignment-1' : '/textbooks/book-1';
-        await page.goto(`${path}?kp=reading&view=material&nav=knowledge`);
+        await page.goto(`${path}?kp=reading&view=material&nav=knowledge`, { waitUntil: 'domcontentloaded' });
         const question = page.getByRole('textbox', { name: '讲义问题' });
         await expect(question).toBeEnabled();
         await question.fill('对照原书之后继续提问');
@@ -316,8 +316,8 @@ for (const student of [false, true]) {
         await expect(question).toHaveAttribute('data-draft-identity', 'keep');
         await page.getByRole('button', { name: '对照原书', exact: true }).click();
         await expectPdf(page, 14);
-        expect(requests.downloads()).toBe(1);
-        await page.reload();
+        expect(requests.downloads()).toBe(2); // closing the reader releases its PDF.js document
+        await page.reload({ waitUntil: 'domcontentloaded' });
         await expectPdf(page, 14);
         await expect(question).toBeEnabled();
         expect(errors).toEqual([]);
@@ -337,7 +337,7 @@ test('no location opens original at page one; JSON alone opens its start page', 
 
 test('directory tabs select PDF and Markdown separately and an out-of-range page stays readable', async ({ page }) => {
   await installOriginal(page, { jsonPage: 300 });
-  await page.goto('/textbooks/book-1?kp=reading&view=material');
+  await page.goto('/textbooks/book-1?kp=reading&view=material', { waitUntil: 'domcontentloaded' });
   await page.getByRole('tab', { name: '原始教材', exact: true }).click();
   await page.getByRole('button', { name: '打开 章节一' }).click();
   await expectPdf(page, 1);
@@ -349,7 +349,7 @@ test('directory tabs select PDF and Markdown separately and an out-of-range page
 
 test('original unavailable has a retry and text reading remains available', async ({ page }) => {
   await installOriginal(page, { missing: true });
-  await page.goto('/textbooks/book-1?kp=reading&view=original');
+  await page.goto('/textbooks/book-1?kp=reading&view=original', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('alert')).toHaveText('原文件暂不可读，请重试或切换文字目录。');
   await expect(page.getByRole('button', { name: '重试', exact: true })).toBeVisible();
   await selectDirectoryTab(page, '文字目录');
@@ -364,11 +364,11 @@ for (const theme of ['quiet', 'nasa']) {
       await page.setViewportSize({ width, height: 900 });
       await page.addInitScript((value) => localStorage.setItem('theme', value), theme);
       await installOriginal(page, { marker: 12, student: true });
-      await page.goto('/education/learn/assignment-1?kp=reading&view=original&nav=source');
+      await page.goto('/education/learn/assignment-1?kp=reading&view=original&nav=source', { waitUntil: 'domcontentloaded' });
       await expectPdf(page, 12);
       await page.locator('.pdf-nav button').last().click();
       await expectPdf(page, 13);
-      await page.reload();
+      await page.reload({ waitUntil: 'domcontentloaded' });
       await expectPdf(page, 13);
       const selectTab = async (name) => {
         if (width < 1024) await page.getByRole('button', { name: '打开教材目录', exact: true }).click();

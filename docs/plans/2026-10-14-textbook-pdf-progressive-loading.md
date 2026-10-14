@@ -10,6 +10,17 @@
 
 ---
 
+## 执行进度（2026-10-14）
+
+- [x] Task 1：建立检查点，旧实现的全量等待红测成立，真实教材只读基线与三次性能对照已记录。
+- [x] Task 2：单段 Range 与 MinIO 范围读取、版本校验已实现。
+- [x] Task 3：认证接口、identity 传输与 CORS 响应头已接入，后端已提交 `020811953`。
+- [x] Task 4：教材 URL 加载已接入，37 项聚焦单元检查和类型检查通过。
+- [x] Task 5：真实 MinIO、连接取消、当前 Chromium 与真实 Chromium 90 各 45 项回归、旧浏览器生产包 12 项专项检查通过；Android 真机仍待用户复测。
+- [x] Task 6：三次性能对照、开发记录与中文变更日志已完成，前端改动独立提交；LAN 服务可访问。实际账户登录后的 LAN 阅读与 Android 真机时间未纳入本轮取证。
+
+详细取证：[渐进加载调试记录](../debugging/2026-10-14-textbook-pdf-progressive-loading.md)。
+
 ## 开发边界与基线
 
 - 工作目录：`/Users/seanlee/.config/superpowers/worktrees/langalpha/more-to-skills-textbook-refactor`。
