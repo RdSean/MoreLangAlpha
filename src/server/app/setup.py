@@ -1014,6 +1014,10 @@ app.add_middleware(
         "OPTIONS",
     ],  # Use the configured list of methods
     allow_headers=["*"],  # Now allow all headers, but can be restricted further
+    expose_headers=[
+        'Accept-Ranges', 'Content-Range', 'Content-Length', 'Content-Encoding',
+        'ETag', 'Last-Modified',
+    ],
 )
 
 

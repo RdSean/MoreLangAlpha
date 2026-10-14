@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import logging
 import os
 import tempfile
@@ -15,9 +16,12 @@ from src.config.settings import get_document_parsing_config
 from src.server.database import documents as document_repository
 from src.server.database.documents import DocumentListFilter
 from src.server.documents.contracts import (
+    DocumentSourceChangedError,
+    DocumentStorageError,
     FileTooLargeError,
     UnsupportedMediaTypeError,
 )
+from src.server.documents.http_range import ByteRange, if_range_matches, parse_byte_range
 from src.server.documents.ids import new_public_id
 from src.server.documents.storage import DocumentObjectStore, OpenedDocumentObject
 
@@ -30,6 +34,8 @@ class SourceDownload:
     filename: str
     media_type: str
     object_download: OpenedDocumentObject
+    byte_range: ByteRange | None = None
+    total_length: int | None = None
 
 
 class DocumentRepository(Protocol):
@@ -169,20 +175,39 @@ class DocumentLibraryService:
         )
 
     async def open_source_download(
-        self, *, owner_user_id: str, document_id: str
+        self, *, owner_user_id: str, document_id: str,
+        range_header: str | None = None, if_range: str | None = None,
     ) -> SourceDownload | None:
         document = await self._repository.get_document(
             owner_user_id=owner_user_id, document_id=document_id
         )
         if document is None:
             return None
-        opened = await self._object_store.open_download(
-            str(document["source_storage_key"])
-        )
+        key = str(document['source_storage_key'])
+        byte_range = None
+        total_length = None
+        if range_header:
+            metadata = await self._object_store.get_metadata(key)
+            if if_range_matches(if_range, metadata.etag, metadata.last_modified):
+                byte_range = parse_byte_range(range_header, metadata.content_length)
+            if byte_range is not None:
+                if not metadata.etag or metadata.etag.startswith('W/'):
+                    raise DocumentStorageError('Document range requires a strong validator')
+                total_length = metadata.content_length
+                opened = await self._object_store.open_range(key, byte_range, if_match=metadata.etag)
+                expected_range = f'bytes {byte_range.start}-{byte_range.end}/{total_length}'
+                if (opened.etag != metadata.etag or opened.content_range != expected_range
+                        or opened.content_length != byte_range.length):
+                    await asyncio.to_thread(opened.close)
+                    raise DocumentSourceChangedError('Document range changed; retry')
+        if byte_range is None:
+            opened = await self._object_store.open_download(key)
         return SourceDownload(
             filename=str(document["original_filename"]),
             media_type=str(document.get("media_type") or "application/pdf"),
             object_download=opened,
+            byte_range=byte_range,
+            total_length=total_length,
         )
 
     async def create_tag(

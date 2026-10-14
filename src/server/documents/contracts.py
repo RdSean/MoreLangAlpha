@@ -162,6 +162,10 @@ class DocumentStorageError(DocumentDomainError):
     default_code = "storage_failed"
 
 
+class DocumentSourceChangedError(DocumentStorageError):
+    default_code = "source_changed"
+
+
 _STAGE_ORDER: dict[JobStage, int] = {
     "queued": 0,
     "preparing": 1,

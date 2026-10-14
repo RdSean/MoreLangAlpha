@@ -3,7 +3,7 @@
 import re
 
 from src.server.database.education_books import get_managed_source_for_user
-from src.server.documents.contracts import DocumentDomainError
+from src.server.documents.contracts import DocumentDomainError, DocumentSourceChangedError
 from src.server.documents.library import DocumentLibraryService, SourceDownload
 from src.server.documents.storage import S3CompatibleDocumentStore
 from src.server.services.education_textbook_snapshot_reads import (
@@ -13,6 +13,7 @@ from src.server.services.education_textbook_snapshot_reads import (
 from src.server.services.education_textbooks import (
     TextbookNotFoundError,
     TextbookProcessingError,
+    TextbookTransitionError,
 )
 
 
@@ -59,6 +60,8 @@ async def open_book_original(
     user_id: str,
     textbook_id: str,
     library: DocumentLibraryService | None = None,
+    range_header: str | None = None,
+    if_range: str | None = None,
 ) -> SourceDownload:
     row = await get_managed_source_for_user(user_id=user_id, textbook_id=textbook_id)
     if row is None:
@@ -69,10 +72,14 @@ async def open_book_original(
         object_store=S3CompatibleDocumentStore()
     )
     try:
+        range_options = {'range_header': range_header, 'if_range': if_range} if range_header else {}
         download = await library.open_source_download(
             owner_user_id=str(row["source_owner_user_id"]),
             document_id=str(row["document_id"]),
+            **range_options,
         )
+    except DocumentSourceChangedError as exc:
+        raise TextbookTransitionError('Original file changed; retry') from exc
     except DocumentDomainError as exc:
         raise TextbookProcessingError("Original file is unavailable") from exc
     if download is None:

@@ -66,6 +66,24 @@ class ObjectDownloadStream:
     chunks: Iterator[bytes]
     content_length: int | None
     close: Callable[[], None]
+    content_range: str | None = None
+    etag: str | None = None
+    last_modified: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectMetadata:
+    content_length: int
+    etag: str | None
+    last_modified: datetime | None
+
+
+def get_object_metadata(key: str) -> ObjectMetadata:
+    response = _get_client().head_object(Bucket=StorageConfig.BUCKET_NAME, Key=key)
+    length = response.get('ContentLength')
+    if not isinstance(length, int) or isinstance(length, bool) or length < 0:
+        raise RuntimeError('storage response did not include a valid length')
+    return ObjectMetadata(length, response.get('ETag'), response.get('LastModified'))
 
 
 def _resolve_addressing_style() -> str:
@@ -395,12 +413,22 @@ def download_to_file(key: str, destination: Path, *, max_bytes: int) -> int:
             close()
 
 
-def open_download_stream(key: str) -> ObjectDownloadStream:
+def open_download_stream(
+    key: str,
+    *,
+    byte_range: tuple[int, int] | None = None,
+    if_match: str | None = None,
+) -> ObjectDownloadStream:
     """Open an object and expose fixed-size chunks with deterministic cleanup."""
-    response = _get_client().get_object(
-        Bucket=StorageConfig.BUCKET_NAME,
-        Key=key,
-    )
+    params: dict[str, Any] = {'Bucket': StorageConfig.BUCKET_NAME, 'Key': key}
+    if byte_range is not None:
+        start, end = byte_range
+        if start < 0 or end < start:
+            raise ValueError('invalid storage byte range')
+        params['Range'] = f'bytes={start}-{end}'
+    if if_match is not None:
+        params['IfMatch'] = if_match
+    response = _get_client().get_object(**params)
     body = response.get("Body")
     if body is None:
         raise RuntimeError("storage response did not include a body")
@@ -435,6 +463,9 @@ def open_download_stream(key: str) -> ObjectDownloadStream:
         chunks=chunks(),
         content_length=content_length,
         close=close,
+        content_range=response.get('ContentRange'),
+        etag=response.get('ETag'),
+        last_modified=response.get('LastModified'),
     )
 
 

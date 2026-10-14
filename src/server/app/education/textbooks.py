@@ -1,14 +1,16 @@
 """Parent textbook management and student deterministic-learning routes."""
 
 from contextlib import aclosing
+from email.utils import format_datetime
 import asyncio
 from uuid import UUID
 from typing import Literal
 from pydantic import BaseModel
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 from starlette.background import BackgroundTask
+from src.server.documents.http_range import RangeNotSatisfiable
 
 from src.server.app.education.book_models import (
     BookActivityPageResponse,
@@ -353,22 +355,43 @@ async def get_managed_source(
 
 
 @router.get("/textbooks/{textbook_id}/original")
-async def get_original_file(textbook_id: UUID, user_id: CurrentUserId):
+async def get_original_file(textbook_id: UUID, user_id: CurrentUserId, request: Request):
     try:
+        range_header = request.headers.get('range')
+        range_options = {'range_header': range_header, 'if_range': request.headers.get('if-range')} if range_header else {}
         download = await open_book_original(
-            user_id=user_id, textbook_id=str(textbook_id)
+            user_id=user_id, textbook_id=str(textbook_id), **range_options
         )
+    except RangeNotSatisfiable as exc:
+        return Response(status_code=416, headers={
+            'Content-Range': f'bytes */{exc.total_length}', 'Cache-Control': 'private, no-store',
+            'Content-Encoding': 'identity', 'Accept-Ranges': 'bytes',
+        })
     except TextbookError as exc:
         raise _textbook_http_error(exc) from exc
     headers = {
         "Content-Disposition": content_disposition(download.filename),
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
+        'Accept-Ranges': 'bytes',
+        # Range offsets must describe the original PDF, not gzip-compressed bytes.
+        'Content-Encoding': 'identity',
     }
+    opened = download.object_download
+    etag = getattr(opened, 'etag', None)
+    modified = getattr(opened, 'last_modified', None)
+    if etag:
+        headers['ETag'] = etag
+    if modified:
+        headers['Last-Modified'] = format_datetime(modified, usegmt=True)
+    byte_range = getattr(download, 'byte_range', None)
+    if byte_range:
+        headers['Content-Range'] = f'bytes {byte_range.start}-{byte_range.end}/{download.total_length}'
     if download.object_download.content_length is not None:
         headers["Content-Length"] = str(download.object_download.content_length)
     return StreamingResponse(
         download.object_download.chunks,
+        status_code=206 if byte_range else 200,
         media_type=download.media_type,
         headers=headers,
         background=BackgroundTask(download.object_download.close),

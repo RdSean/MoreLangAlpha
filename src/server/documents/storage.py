@@ -7,9 +7,11 @@ import re
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Protocol
+from botocore.exceptions import ClientError
 
 from src.config.settings import get_document_parsing_config
-from src.server.documents.contracts import DocumentStorageError
+from src.server.documents.contracts import DocumentSourceChangedError, DocumentStorageError
+from src.server.documents.http_range import ByteRange
 from src.utils.storage import s3_compatible
 
 
@@ -25,9 +27,11 @@ class OpenedDocumentObject(Protocol):
     chunks: Iterator[bytes]
     content_length: int | None
     close: Callable[[], None]
+    content_range: str | None
+    etag: str | None
 
 
-OpenDownloadStream = Callable[[str], OpenedDocumentObject]
+OpenDownloadStream = Callable[..., OpenedDocumentObject]
 
 
 class DocumentObjectStore(Protocol):
@@ -53,6 +57,10 @@ class DocumentObjectStore(Protocol):
 
     async def open_download(self, key: str) -> OpenedDocumentObject: ...
 
+    async def get_metadata(self, key: str) -> s3_compatible.ObjectMetadata: ...
+
+    async def open_range(self, key: str, byte_range: ByteRange, *, if_match: str) -> OpenedDocumentObject: ...
+
 
 class S3CompatibleDocumentStore:
     """Async document adapter over the repository's synchronous boto3 helpers."""
@@ -64,6 +72,7 @@ class S3CompatibleDocumentStore:
         download_to_file: DownloadToFile | None = None,
         delete_object: DeleteObject | None = None,
         open_download_stream: OpenDownloadStream | None = None,
+        get_object_metadata: Callable[[str], s3_compatible.ObjectMetadata] | None = None,
         max_upload_bytes: int | None = None,
     ) -> None:
         self._put_file = put_file or s3_compatible.upload_file
@@ -74,6 +83,7 @@ class S3CompatibleDocumentStore:
         self._open_download_stream = (
             open_download_stream or s3_compatible.open_download_stream
         )
+        self._get_object_metadata = get_object_metadata or s3_compatible.get_object_metadata
         self._max_upload_bytes = (
             get_document_parsing_config().max_upload_bytes
             if max_upload_bytes is None
@@ -134,6 +144,25 @@ class S3CompatibleDocumentStore:
             return await asyncio.to_thread(self._open_download_stream, key)
         except Exception as exc:
             raise DocumentStorageError("Document download failed") from exc
+
+    async def get_metadata(self, key: str) -> s3_compatible.ObjectMetadata:
+        _validate_document_key(key)
+        try:
+            return await asyncio.to_thread(self._get_object_metadata, key)
+        except Exception as exc:
+            raise DocumentStorageError('Document metadata unavailable') from exc
+
+    async def open_range(self, key: str, byte_range: ByteRange, *, if_match: str) -> OpenedDocumentObject:
+        _validate_document_key(key)
+        try:
+            return await asyncio.to_thread(self._open_download_stream, key,
+                byte_range=(byte_range.start, byte_range.end), if_match=if_match)
+        except ClientError as exc:
+            if exc.response.get('Error', {}).get('Code') in {'PreconditionFailed', '412'}:
+                raise DocumentSourceChangedError('Document source changed; retry') from exc
+            raise DocumentStorageError('Document range download failed') from exc
+        except Exception as exc:
+            raise DocumentStorageError('Document range download failed') from exc
 
 
 def _validate_document_key(key: str) -> None:
