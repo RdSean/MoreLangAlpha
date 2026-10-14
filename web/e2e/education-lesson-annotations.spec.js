@@ -93,17 +93,42 @@ for (const theme of ['quiet', 'nasa']) {
       await expect(page.getByRole('dialog')).toHaveCount(0);
       await expect(input).toHaveValue('我的问题草稿');
       await expect(page.locator('.lesson-text-mark.has-note')).toHaveCount(3);
-      if (width === 1600) await expect(page.getByRole('complementary', { name: '正文批注' })).toBeVisible();
-      else await expect(page.getByRole('complementary', { name: '正文批注' })).toBeHidden();
+      if (width === 1600) {
+        const note = page.getByRole('article', { name: '批注 1', exact: true });
+        await expect(page.getByRole('complementary', { name: '正文批注' })).toBeVisible();
+        await page.getByRole('button', { name: '查看批注', exact: true }).first().hover();
+        await expect(note).toHaveAttribute('data-active', 'true');
+        await note.hover();
+        await expect(page.locator('.lesson-text-mark.has-note').first()).toHaveAttribute('data-active', 'true');
+        await expect(page.locator('.lesson-text-mark.has-note').first()).toHaveCSS('text-decoration-style', 'dashed');
+        await page.getByRole('button', { name: '定位批注 1 原文', exact: true }).click();
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+        await expect(page.locator('.lesson-text-mark.has-note').first()).toBeFocused();
+        await expect(page.getByRole('button', { name: '编辑批注 1', exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: '删除批注 1', exact: true })).toBeVisible();
+      } else await expect(page.getByRole('complementary', { name: '正文批注' })).toBeHidden();
       await page.screenshot({ path: testInfo.outputPath(`annotations-${theme}-${width}.png`) });
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.locator('.lesson-text-mark.has-note')).toHaveCount(3);
       await page.getByRole('button', { name: '查看批注', exact: true }).first().click();
       await expect(page.getByRole('textbox', { name: '批注内容' })).toHaveValue('这个句子写得好。');
+      if (width === 375) {
+        const dialog = await page.getByRole('dialog', { name: '批注', exact: true }).boundingBox();
+        expect(dialog.x).toBeGreaterThanOrEqual(0);
+        expect(dialog.x + dialog.width).toBeLessThanOrEqual(width);
+        await page.screenshot({ path: testInfo.outputPath(`annotation-popup-${theme}.png`) });
+      }
       await page.getByRole('textbox', { name: '批注内容' }).fill('重新理解这段话。');
       await page.getByRole('button', { name: '蓝灰色', exact: true }).click();
       await page.getByRole('button', { name: '保存批注', exact: true }).click();
       await expect(page.getByRole('dialog')).toHaveCount(0);
+      if (width === 1600) {
+        await expect(page.getByRole('article', { name: '批注 1', exact: true })).toHaveAttribute('data-annotation-color', 'slate');
+        await page.getByRole('button', { name: '删除批注 1', exact: true }).click();
+        await expect(page.getByRole('dialog', { name: '删除批注', exact: true })).toContainText('重新理解这段话。');
+        await page.getByRole('button', { name: '取消', exact: true }).click();
+        await expect(page.getByRole('article', { name: '批注 1', exact: true })).toBeVisible();
+      }
       await page.getByRole('button', { name: '打开学习笔记', exact: true }).click();
       const notebook = page.getByRole('dialog', { name: '学习笔记', exact: true });
       await expect(notebook).toContainText('重新理解这段话。');
@@ -139,11 +164,16 @@ test('mouse dragging waits for release and cancelled annotation keeps the Chat d
     const range = document.createRange(); range.setStart(node.firstChild, 0); range.setEnd(node.firstChild, 5);
     const rect = range.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
   });
-  await page.mouse.move(bounds.x + 1, bounds.y + bounds.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(bounds.x + bounds.width - 1, bounds.y + bounds.height / 2, { steps: 5 });
+  // Dispatch real mouse input without Playwright's newer drag-interception CDP API.
+  const inputSession = await page.context().newCDPSession(page);
+  const y = bounds.y + bounds.height / 2;
+  await inputSession.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: bounds.x + 1, y, button: 'left', buttons: 1, clickCount: 1 });
+  for (let step = 1; step <= 5; step++) {
+    await inputSession.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: bounds.x + 1 + (bounds.width - 2) * step / 5, y, button: 'left', buttons: 1 });
+  }
   await expect(page.getByRole('button', { name: '批注选段' })).toHaveCount(0);
-  await page.mouse.up();
+  await inputSession.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: bounds.x + bounds.width - 1, y, button: 'left', buttons: 0, clickCount: 1 });
+  await inputSession.detach();
   await page.getByRole('button', { name: '批注选段' }).click();
   await page.getByRole('textbox', { name: '批注内容' }).fill('未保存的批注');
   await page.getByRole('button', { name: '取消', exact: true }).click();
@@ -152,6 +182,10 @@ test('mouse dragging waits for release and cancelled annotation keeps the Chat d
   await expect(page.locator('.lesson-text-mark')).toHaveCount(0);
   const last = page.locator('.lesson-annotation-prose p').last();
   await last.scrollIntoViewIfNeeded();
+  await last.evaluate((node) => {
+    node.scrollIntoView({ block: 'center', behavior: 'instant' });
+    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
   await last.evaluate((node) => {
     const range = document.createRange(); range.selectNodeContents(node);
     const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
@@ -166,3 +200,53 @@ test('mouse dragging waits for release and cancelled annotation keeps the Chat d
     return Boolean(note) && note.getBoundingClientRect().bottom <= layout.getBoundingClientRect().bottom;
   })).toBe(true);
 });
+
+for (const theme of ['quiet', 'nasa']) {
+  test(`${theme} margin notes follow their source, avoid collisions and confirm deletion`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.addInitScript((value) => localStorage.setItem('theme', value), theme);
+    const state = await setup(page);
+    await page.goto('/education/learn/assignment?kp=reading&view=material', { waitUntil: 'domcontentloaded' });
+    await selectQuote(page);
+    await page.getByRole('button', { name: '批注选段' }).click();
+    await page.getByRole('textbox', { name: '批注内容' }).fill(Array.from({ length: 16 }, () => '长批注保留完整内容，并在框内滚动。').join('\n'));
+    await page.getByRole('button', { name: '保存批注', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const paragraph = page.locator('.lesson-annotation-prose').getByText('人类历史上一直在玩某种踢球游戏。', { exact: true });
+    await paragraph.evaluate((node) => {
+      const range = document.createRange(); range.selectNodeContents(node);
+      const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+      node.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    });
+    await page.getByRole('button', { name: '批注选段' }).click();
+    await page.getByRole('textbox', { name: '批注内容' }).fill('第二条批注自动避让。');
+    await page.getByRole('button', { name: '保存批注', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.locator('.lesson-margin-note')).toHaveCount(2);
+    await expect.poll(() => page.locator('.lesson-margin-note').evaluateAll((notes) => notes[1].getBoundingClientRect().top - notes[0].getBoundingClientRect().bottom)).toBeGreaterThanOrEqual(11);
+    const source = page.locator('.lesson-text-mark').first();
+    const note = page.getByRole('article', { name: '批注 1', exact: true });
+    const sourceTop = (await source.boundingBox()).y;
+    const offsetBefore = (await note.boundingBox()).y - (await source.boundingBox()).y;
+    await page.locator('.lesson-annotation-prose').evaluate((node) => {
+      let scroll = node.parentElement;
+      while (scroll && (scroll.scrollHeight <= scroll.clientHeight || !/auto|scroll/.test(getComputedStyle(scroll).overflowY))) scroll = scroll.parentElement;
+      if (scroll) scroll.scrollTop += 100;
+    });
+    await expect.poll(async () => Math.abs((await source.boundingBox()).y - sourceTop)).toBeGreaterThan(50);
+    await expect.poll(async () => Math.abs((await note.boundingBox()).y - (await source.boundingBox()).y - offsetBefore)).toBeLessThan(2);
+    await page.getByRole('button', { name: '定位批注 1 原文', exact: true }).click();
+    await expect(source).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath(`margin-notes-${theme}.png`) });
+    await page.getByRole('button', { name: '删除批注 2', exact: true }).click();
+    expect(state.items).toHaveLength(2);
+    state.failDelete = true;
+    await page.getByRole('button', { name: '删除批注', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('删除失败');
+    expect(state.items).toHaveLength(2);
+    await page.getByRole('button', { name: '删除批注', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.locator('.lesson-margin-note')).toHaveCount(1);
+    expect(state.items[0].content).toContain('长批注');
+  });
+}

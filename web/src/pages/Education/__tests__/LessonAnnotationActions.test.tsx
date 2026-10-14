@@ -67,4 +67,43 @@ describe('student lesson annotations', () => {
     fireEvent.click(screen.getByRole('button', { name: '重试加载笔记' }));
     expect(state.refetch).toHaveBeenCalled();
   });
+  it('links hover and keyboard focus between the note and its source', () => {
+    state.items = [item()];
+    render(<Reader />);
+    const mark = screen.getByRole('button', { name: '查看批注' });
+    const note = screen.getByRole('article', { name: '批注 1' });
+    fireEvent.pointerOver(mark);
+    expect(note).toHaveAttribute('data-active', 'true');
+    expect(mark).toHaveAttribute('data-active', 'true');
+    fireEvent.pointerOut(mark);
+    expect(note).not.toHaveAttribute('data-active');
+    fireEvent.focus(screen.getByRole('button', { name: '定位批注 1 原文' }));
+    expect(mark).toHaveAttribute('data-active', 'true');
+  });
+  it('locates the source from a margin quote without opening the editor', () => {
+    state.items = [item()];
+    render(<Reader />);
+    const mark = screen.getByRole('button', { name: '查看批注' });
+    const scroll = vi.fn();
+    mark.scrollIntoView = scroll;
+    fireEvent.click(screen.getByRole('button', { name: '定位批注 1 原文' }));
+    expect(scroll).toHaveBeenCalledWith(expect.objectContaining({ block: 'center' }));
+    expect(mark).toHaveFocus();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+  it('confirms margin deletion and retains the note on failure', async () => {
+    state.items = [item()];
+    state.remove.mockRejectedValueOnce(new Error('offline'));
+    render(<Reader />);
+    const note = screen.getByRole('article', { name: '批注 1' });
+    fireEvent.click(screen.getByRole('button', { name: '删除批注 1' }));
+    expect(state.remove).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: '删除批注' })).toHaveTextContent('Good phrase');
+    fireEvent.click(screen.getByRole('button', { name: '删除批注' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('删除失败');
+    expect(note).toHaveTextContent('Good phrase');
+    fireEvent.click(screen.getByRole('button', { name: '删除批注' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(state.remove).toHaveBeenLastCalledWith({ assignmentId: 'assignment', itemId: 'item-1' });
+  });
 });

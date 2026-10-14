@@ -4,7 +4,7 @@ import type { LessonAnchor } from './lessonAnnotationAnchors';
 
 export interface LessonAnnotationContext {
   items: LearningItem[];
-  open: (itemId: string) => void;
+  open: (itemId: string, action?: 'delete') => void;
   create: (kind: 'highlight' | 'note', anchor: LessonAnchor) => void;
   error: boolean;
   loading: boolean;

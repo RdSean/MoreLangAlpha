@@ -9,7 +9,7 @@ import EducationMarkdown from './EducationMarkdown';
 import './LessonAnnotations.css';
 import { AnnotationContext, useLessonAnnotations } from './lessonAnnotationContext';
 
-interface Draft { item?: LearningItem; kind: 'highlight' | 'note'; anchor: LessonAnchor | null; content: string }
+interface Draft { item?: LearningItem; kind: 'highlight' | 'note'; anchor: LessonAnchor | null; content: string; deleting?: boolean }
 function ColorSwatches({ value, onChange, disabled }: { value: LessonAnchor['color']; onChange: (color: LessonAnchor['color']) => void; disabled: boolean }) {
   return <div className="lesson-annotation-colors" role="group" aria-label="标记颜色">
     {ANNOTATION_COLORS.map((color) => <button key={color} type="button" aria-label={annotationColorLabels[color]} title={annotationColorLabels[color]} aria-pressed={color === value} disabled={disabled}
@@ -26,12 +26,12 @@ export function LessonAnnotationsProvider({ assignmentId, knowledgePointId, skil
   const [pending, setPending] = useState(false);
   const operationGuard = useRef(false);
   const [error, setError] = useState('');
-  const open = useCallback((itemId: string) => {
+  const open = useCallback((itemId: string, action?: 'delete') => {
     const item = items.find((entry) => entry.item_id === itemId);
     if (!item) return;
     window.getSelection()?.removeAllRanges();
     setError('');
-    setDraft({ item, kind: item.kind === 'note' ? 'note' : 'highlight', anchor: parseLessonAnchor(item.source_anchor), content: item.content });
+    setDraft({ item, kind: item.kind === 'note' ? 'note' : 'highlight', anchor: parseLessonAnchor(item.source_anchor), content: item.content, deleting: action === 'delete' });
   }, [items]);
   const create = useCallback((kind: 'highlight' | 'note', anchor: LessonAnchor) => {
     window.getSelection()?.removeAllRanges();
@@ -53,17 +53,19 @@ export function LessonAnnotationsProvider({ assignmentId, knowledgePointId, skil
   return <AnnotationContext.Provider value={value}>
     {children}
     <Dialog open={Boolean(draft)} onOpenChange={(value) => { if (!value && !pending) setDraft(null); }}>
-      <DialogContent className="lesson-annotation-dialog" onEscapeKeyDown={(event) => { if (pending) event.preventDefault(); }} onPointerDownOutside={(event) => event.preventDefault()}>
-        <DialogHeader><DialogTitle>{draft?.kind === 'note' ? '批注' : '标记'}</DialogTitle></DialogHeader>
+      <DialogContent variant="centered" className="lesson-annotation-dialog" onEscapeKeyDown={(event) => { if (pending) event.preventDefault(); }} onPointerDownOutside={(event) => event.preventDefault()}>
+        <DialogHeader><DialogTitle>{draft?.deleting ? '删除批注' : draft?.kind === 'note' ? '批注' : '标记'}</DialogTitle></DialogHeader>
         {draft && <>
           {draft.anchor && <blockquote className="lesson-annotation-quote">{draft.anchor.exact}</blockquote>}
-          {draft.anchor && <ColorSwatches value={draft.anchor.color} disabled={pending} onChange={(color) => setDraft({ ...draft, anchor: { ...draft.anchor!, color } })} />}
-          {draft.kind === 'note' && <textarea autoFocus aria-label="批注内容" placeholder="写下你的理解" value={draft.content} disabled={pending} maxLength={20_000} onChange={(event) => setDraft({ ...draft, content: event.target.value })} />}
+          {draft.deleting ? <p className="lesson-annotation-delete-preview">{draft.content}</p> : <>
+            {draft.anchor && <ColorSwatches value={draft.anchor.color} disabled={pending} onChange={(color) => setDraft({ ...draft, anchor: { ...draft.anchor!, color } })} />}
+            {draft.kind === 'note' && <textarea autoFocus aria-label="批注内容" placeholder="写下你的理解" value={draft.content} disabled={pending} maxLength={20_000} onChange={(event) => setDraft({ ...draft, content: event.target.value })} />}
+          </>}
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div className="lesson-annotation-dialog-actions">
             <Button variant="ghost" disabled={pending} onClick={() => setDraft(null)}>取消</Button>
-            {draft.item && <Button variant="ghost" disabled={pending} onClick={() => void save(true)}><Trash2 className="size-4" />{draft.kind === 'note' ? '删除批注' : '删除标记'}</Button>}
-            <Button className="ml-auto" disabled={pending || !draft.content.trim()} onClick={() => void save()}>{pending ? '正在保存' : draft.kind === 'note' ? '保存批注' : '保存标记'}</Button>
+            {draft.item && <Button variant="ghost" className="lesson-annotation-delete" disabled={pending} onClick={() => void save(true)}><Trash2 className="size-4" />{draft.kind === 'note' ? '删除批注' : '删除标记'}</Button>}
+            {!draft.deleting && <Button className="ml-auto" disabled={pending || !draft.content.trim()} onClick={() => void save()}>{pending ? '正在保存' : draft.kind === 'note' ? '保存批注' : '保存标记'}</Button>}
           </div>
         </>}
       </DialogContent>
@@ -84,12 +86,33 @@ export function AnnotatedLesson({ content, onOpenFile }: { content: string; onOp
   const annotations = useLessonAnnotations();
   const rootRef = useRef<HTMLDivElement>(null);
   const notesRef = useRef<HTMLElement>(null);
+  const layoutRef = useRef<HTMLDivElement>(null);
   const [positions, setPositions] = useState<Array<{ item: LearningItem; top: number }>>([]);
   const [marginHeight, setMarginHeight] = useState(0);
+  const activate = (target: EventTarget | null) => {
+    const element = target instanceof Element ? target : null;
+    const id = element?.closest<HTMLElement>('[data-note-id]')?.dataset.noteId
+      ?? element?.closest<HTMLElement>('[data-annotation-ids]')?.dataset.annotationIds?.split(' ')[0];
+    // Hover/focus updates only the linked DOM decoration, not Markdown rendering.
+    layoutRef.current?.querySelectorAll<HTMLElement>('[data-annotation-ids], [data-note-id]').forEach((node) => {
+      if (id && (node.dataset.noteId === id || node.dataset.annotationIds?.split(' ').includes(id))) node.dataset.active = 'true';
+      else delete node.dataset.active;
+    });
+  };
+  const locate = (itemId: string) => {
+    const mark = Array.from(rootRef.current?.querySelectorAll<HTMLElement>('[data-annotation-ids]') ?? [])
+      .find((node) => node.dataset.annotationIds?.split(' ').includes(itemId));
+    if (!mark) return;
+    mark.focus({ preventScroll: true });
+    mark.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    activate(mark);
+  };
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || !annotations) return;
     const measure = () => {
+      const layout = layoutRef.current;
+      if (layout) layout.dataset.wide = String(layout.clientWidth >= 920);
       const notes = annotations.items.filter((item) => item.kind === 'note' && parseLessonAnchor(item.source_anchor));
       const marks = Array.from(root.querySelectorAll<HTMLElement>('[data-annotation-ids]'));
       const ordered = notes.flatMap((item) => {
@@ -104,11 +127,12 @@ export function AnnotatedLesson({ content, onOpenFile }: { content: string; onOp
         return { item, top: offset };
       });
       setMarginHeight(bottom);
-      setPositions((previous) => JSON.stringify(previous.map((value) => [value.item.item_id, value.top, value.item.content])) === JSON.stringify(next.map((value) => [value.item.item_id, value.top, value.item.content])) ? previous : next);
+      setPositions((previous) => previous.length === next.length && previous.every((value, index) => value.item === next[index].item && value.top === next[index].top) ? previous : next);
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(root);
+    if (layoutRef.current) observer.observe(layoutRef.current);
     if (notesRef.current) observer.observe(notesRef.current);
     Array.from(notesRef.current?.children ?? []).forEach((card) => observer.observe(card));
     return () => observer.disconnect();
@@ -116,13 +140,18 @@ export function AnnotatedLesson({ content, onOpenFile }: { content: string; onOp
   if (!annotations) return <EducationMarkdown content={content} onOpenFile={onOpenFile} />;
   return <div className="lesson-annotation-container">
     {annotations.error && <p role="alert" className="lesson-annotation-status">标记与批注加载失败 <Button variant="ghost" size="sm" onClick={annotations.retry}>重试加载笔记</Button></p>}
-    <div className="lesson-annotation-layout">
+    <div ref={layoutRef} className="lesson-annotation-layout"
+      onPointerOver={(event) => activate(event.target)} onPointerOut={(event) => activate(event.relatedTarget)}
+      onFocusCapture={(event) => activate(event.target)} onBlurCapture={(event) => activate(event.relatedTarget)}>
       <div ref={rootRef} className="lesson-annotation-prose"><EducationMarkdown content={content} onOpenFile={onOpenFile} annotationOptions={{ items: annotations.items, onOpen: annotations.open }} /></div>
       <aside ref={notesRef} className="lesson-annotation-margin" aria-label="正文批注" style={{ minHeight: marginHeight || undefined }}>
-        {positions.map(({ item, top }, index) => <article key={item.item_id} data-note-id={item.item_id} className="lesson-margin-note" style={{ top }}>
-          <button type="button" className="lesson-margin-quote" onClick={() => annotations.open(item.item_id)}><span className="lesson-note-number">{index + 1}</span><span>{parseLessonAnchor(item.source_anchor)?.exact}</span></button>
+        {positions.map(({ item, top }, index) => <article key={item.item_id} aria-label={`批注 ${index + 1}`} data-note-id={item.item_id} data-annotation-color={parseLessonAnchor(item.source_anchor)?.color} className="lesson-margin-note" style={{ top }}>
+          <button type="button" className="lesson-margin-quote" aria-label={`定位批注 ${index + 1} 原文`} title={parseLessonAnchor(item.source_anchor)?.exact} onClick={() => locate(item.item_id)}><span className="lesson-note-number">{index + 1}</span><span>{parseLessonAnchor(item.source_anchor)?.exact}</span></button>
           <p>{item.content}</p>
-          <Button variant="ghost" size="sm" aria-label={`编辑批注 ${index + 1}`} onClick={() => annotations.open(item.item_id)}><Pencil className="size-3" />编辑</Button>
+          <div className="lesson-margin-actions">
+            <Button variant="ghost" size="sm" aria-label={`编辑批注 ${index + 1}`} onClick={() => annotations.open(item.item_id)}><Pencil className="size-3" />编辑</Button>
+            <Button variant="ghost" size="sm" className="lesson-annotation-delete" aria-label={`删除批注 ${index + 1}`} onClick={() => annotations.open(item.item_id, 'delete')}><Trash2 className="size-3" />删除</Button>
+          </div>
         </article>)}
       </aside>
     </div>
