@@ -76,6 +76,14 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/tmp/langalpha-chromium90/chrome-mac/Chromiu
 
 ## 后续与回退
 
+### 实际服务 500 回归修复
+
+首次交付后用户反馈 LAN 与回环地址都显示「原文件暂不可读」。使用真实教材和数据库只读权限链路复现：`get_original_file` 在生成 Last-Modified 时抛出 `ValueError: usegmt option requires a UTC datetime`。boto3 返回的日期携带 dateutil 时区对象，即使零偏移也不等于标准库 UTC；此前路由测试只使用标准库 UTC，服务层 MinIO 检查没有走到 HTTP 日期序列化，隔离浏览器服务也绕过该路由。
+
+修复为先 `modified.astimezone(UTC)` 再生成 GMT 响应头。增加 dateutil 本地时区及非零偏移的完整/范围响应检查，修复前 4 项失败，修复后 73 项相关检查通过，Ruff 通过。实际教材路由完整读取返回 200 / 33,027,005 字节，范围读取返回 206 / 65,536 字节，正文均为 PDF。
+
+补验当前运行服务：临时短期登录会话经既有 Cookie 认证进入教材页面，分别访问 `127.0.0.1:5177` 与 `192.168.3.240:5177`，当前 Chromium 与真实 macOS Chromium 90 的实际 200/206 请求和非空 PDF canvas 均通过。诊断会话按唯一 digest 删除，不改用户密码、教材或其他会话。Android 真机仍需用户复测。诊断脚本直接打开无有效节点的链接时未挂载阅读器，改为等待目录并选择真实原书节点后验收，前者不计为 PDF 渲染失败。
+
 Android 11 / Chrome 90.0.4430.210 需刷新后分别检查普通/桌面模式，确认原书、对照、翻页和 Chat 仍正常。只有用户实际反馈才计为新功能真机验收。
 
 前端切换提交可独立 revert，恢复原有完整 bytes 读取；后端仍接受完整请求，Chrome 90 引擎修复不受影响。可根据真机的首屏时间和请求次数再调整 chunk 大小或预取策略；本轮不进行 PDF 重压缩、线性化加工或预览图生成。

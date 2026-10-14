@@ -1,6 +1,7 @@
 """Parent textbook management and student deterministic-learning routes."""
 
 from contextlib import aclosing
+from datetime import UTC
 from email.utils import format_datetime
 import asyncio
 from uuid import UUID
@@ -383,7 +384,7 @@ async def get_original_file(textbook_id: UUID, user_id: CurrentUserId, request: 
     if etag:
         headers['ETag'] = etag
     if modified:
-        headers['Last-Modified'] = format_datetime(modified, usegmt=True)
+        headers['Last-Modified'] = format_datetime(modified.astimezone(UTC), usegmt=True)
     byte_range = getattr(download, 'byte_range', None)
     if byte_range:
         headers['Content-Range'] = f'bytes {byte_range.start}-{byte_range.end}/{download.total_length}'

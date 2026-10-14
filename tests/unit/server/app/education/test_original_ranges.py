@@ -6,6 +6,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from starlette.middleware.gzip import GZipMiddleware
+from dateutil.tz import tzlocal, tzoffset
 
 from src.server.app.education import textbooks
 from src.server.utils.api import get_current_user_id
@@ -15,12 +16,17 @@ BOOK = 'bc5734a8-8a30-459f-a1f3-8551feb4c169'
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('partial', [False, True])
-async def test_pdf_stream_is_identity_with_correct_range_headers(monkeypatch, partial):
+@pytest.mark.parametrize('modified', [
+    datetime(2026, 10, 14, tzinfo=UTC),
+    datetime(2026, 10, 14, tzinfo=UTC).astimezone(tzlocal()),
+    datetime(2026, 10, 14, 9, tzinfo=tzoffset('storage', 9 * 3600)),
+])
+async def test_pdf_stream_is_identity_with_correct_range_headers(monkeypatch, partial, modified):
     from src.server.documents.http_range import ByteRange
     body = b'%PDF-' * 400
     close = Mock()
     opened = SimpleNamespace(chunks=iter([body]), content_length=len(body), close=close,
-        etag='"v1"', last_modified=datetime(2026, 10, 14, tzinfo=UTC))
+        etag='"v1"', last_modified=modified)
     download = SimpleNamespace(filename='book.pdf', media_type='application/pdf', object_download=opened,
         byte_range=ByteRange(0, len(body) - 1) if partial else None, total_length=10000 if partial else None)
     opener = AsyncMock(return_value=download)
@@ -40,6 +46,7 @@ async def test_pdf_stream_is_identity_with_correct_range_headers(monkeypatch, pa
     assert response.headers['accept-ranges'] == 'bytes'
     assert response.headers['content-length'] == str(len(body))
     assert response.headers['etag'] == '"v1"'
+    assert response.headers['last-modified'] == 'Wed, 14 Oct 2026 00:00:00 GMT'
     assert response.headers['cache-control'] == 'private, no-store'
     if partial:
         assert response.headers['content-range'] == f'bytes 0-{len(body)-1}/10000'
