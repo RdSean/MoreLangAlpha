@@ -2,6 +2,12 @@
 
 ## 2026-10-14
 
+### 教材 PDF 渐进加载开发计划
+
+- 确认采用教材认证接口代理 MinIO 单段 Range，前端让 PDF.js 直接加载 URL；保留完整下载入口、现有家庭权限与 Chrome 90 修复。
+- 计划覆盖 GZip 的 identity 传输、跨域响应头、Cookie 认证、流释放，以及大 PDF 在全量下载完成前可读的验收和性能基线对照；本次仅新增开发计划，尚未实现渐进加载。
+- 计划文件：`docs/plans/2026-10-14-textbook-pdf-progressive-loading.md`。
+
 ### Android Chrome 90 原始教材 PDF 兼容修复
 
 - 修复 Android 11 / Chrome 90 普通模式与请求桌面版模式下原书 PDF 无页面的问题；用户已在真机确认两种模式均能阅读，学生讲义 Chat 也均正常。
