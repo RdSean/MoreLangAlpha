@@ -15,7 +15,7 @@ import { formatApiErrorDetail } from '@/pages/ChatAgent/utils/api';
 // Courtesy pre-flight so an oversized file is not uploaded just to be
 // rejected. The server's MAX_SKILL_ARCHIVE_BYTES is authoritative; if the two
 // ever disagree the upload simply fails a step later with the server's reason.
-const MAX_ZIP_BYTES = 2 * 1024 * 1024;
+const MAX_ZIP_BYTES = 10 * 1024 * 1024;
 
 export function SkillUploadModal({
   onClose,

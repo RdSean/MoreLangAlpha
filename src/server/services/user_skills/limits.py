@@ -7,13 +7,13 @@ SKILL.md body is injected verbatim into the model's context.
 """
 
 # Compressed archive accepted over the wire.
-MAX_SKILL_ARCHIVE_BYTES = 2 * 1024 * 1024
+MAX_SKILL_ARCHIVE_BYTES = 10 * 1024 * 1024
 
 # Total uncompressed size across all entries — the zip-bomb ceiling.
-MAX_SKILL_UNCOMPRESSED_BYTES = 8 * 1024 * 1024
+MAX_SKILL_UNCOMPRESSED_BYTES = 40 * 1024 * 1024
 
 # Any single file inside the archive.
-MAX_SKILL_SINGLE_FILE_BYTES = 1 * 1024 * 1024
+MAX_SKILL_SINGLE_FILE_BYTES = 10 * 1024 * 1024
 
 # SKILL.md specifically: ~16k tokens, already generous for a skill body.
 MAX_SKILL_MD_BYTES = 64 * 1024
@@ -29,7 +29,7 @@ MAX_SKILL_DESCRIPTION_CHARS = 1024
 # database/user_skills.py, because the database layer must not import services.
 
 # Inline-blob ceiling for deployments with no object storage configured. Well
-# under MAX_SKILL_ARCHIVE_BYTES on purpose — a 2 MB blob per row would make
+# under MAX_SKILL_ARCHIVE_BYTES on purpose — a 10 MB blob per row would make
 # every metadata read expensive if it ever leaked into the default column set.
 MAX_SKILL_INLINE_BLOB_BYTES = 512 * 1024
 

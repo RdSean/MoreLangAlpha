@@ -458,7 +458,7 @@ async def _upload_skill_archive(
     """
     raw = await read_capped(file, MAX_SKILL_ARCHIVE_BYTES)
     try:
-        # Unzip + re-zip + hash over as much as 8 MB: off the event loop.
+        # Unzip + re-zip + hash over as much as 40 MB: off the event loop.
         validated = await asyncio.to_thread(validate_skill_archive, raw)
     except SkillValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
