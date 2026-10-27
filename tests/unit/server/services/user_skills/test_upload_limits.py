@@ -5,7 +5,10 @@ import pytest
 from fastapi import HTTPException, UploadFile
 
 from src.server.services.user_skills.limits import MAX_SKILL_ARCHIVE_BYTES
-from src.server.services.user_skills.validate import validate_skill_archive
+from src.server.services.user_skills.validate import (
+    SkillValidationError,
+    validate_skill_archive,
+)
 from src.server.utils.uploads import read_capped
 
 
@@ -36,3 +39,20 @@ def test_skill_archive_accepts_assets_above_previous_limits():
             zf.writestr(f"assets/{index}.bin", b"x" * (3 * 1024 * 1024))
     validated = validate_skill_archive(archive.getvalue())
     assert validated.file_count == 4
+
+
+@pytest.mark.parametrize("file_count", [1024, 1025])
+def test_skill_archive_file_count_boundary(file_count):
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr(
+            "SKILL.md",
+            "---\nname: upload-limit-probe\ndescription: Upload test\n---\nTest\n",
+        )
+        for index in range(file_count - 1):
+            zf.writestr(f"references/{index}.txt", "Reference")
+    if file_count == 1024:
+        assert validate_skill_archive(archive.getvalue()).file_count == 1024
+    else:
+        with pytest.raises(SkillValidationError, match="max is 1024"):
+            validate_skill_archive(archive.getvalue())

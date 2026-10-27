@@ -19,7 +19,7 @@ MAX_SKILL_SINGLE_FILE_BYTES = 10 * 1024 * 1024
 MAX_SKILL_MD_BYTES = 64 * 1024
 
 # Entries in one archive (after dropping ignored paths).
-MAX_SKILL_FILES = 64
+MAX_SKILL_FILES = 1024
 
 # One skill's description. Every enabled skill's description is listed in the
 # manifest on every model call, so this is a per-turn cost, not a per-use one.
